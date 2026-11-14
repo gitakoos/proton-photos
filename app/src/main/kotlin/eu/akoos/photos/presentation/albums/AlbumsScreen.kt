@@ -1110,7 +1110,7 @@ fun AlbumsScreen(
             sheetState = cloudAlbumSheetState,
             sortMode = state.viewChoices.sortOfAlbum(album.linkId),
             grouping = state.viewChoices.groupingOfAlbum(album.linkId),
-            isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
+            isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId, state.timelineHideAll),
             isExcludedFromGrid = excludedFromGrid,
             onDismiss = { cloudAlbumSheetFor = null },
             onShare = { onAlbumShareClick(album) },

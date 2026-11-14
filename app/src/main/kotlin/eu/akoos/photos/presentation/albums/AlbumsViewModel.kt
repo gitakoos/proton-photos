@@ -111,6 +111,8 @@ data class AlbumsUiState(
      *  flag, for the same reason [folderPrefs] is: the grid shows every album at once and the drawer
      *  asks about whichever card was held. */
     val timelineExcludedAlbumIds: Set<String> = emptySet(),
+    /** The hide-all switch: every album kept out of the main feed. */
+    val timelineHideAll: Boolean = false,
     /** The albums and folders taken off the grid, as stored entries. Read through
      *  [AlbumsGridExclusion], which also decides what each view filter lays out. */
     val excludedFromGrid: Set<String> = emptySet(),
@@ -344,14 +346,21 @@ class AlbumsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.data
                 .map { prefs ->
-                    (prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()) to
-                        (prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet())
+                    Triple(
+                        prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet(),
+                        prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet(),
+                        prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true,
+                    )
                 }
                 .distinctUntilChanged()
-                .catch { emit(emptySet<String>() to emptySet()) }
-                .collect { (hidden, timelineExcluded) ->
+                .catch { emit(Triple(emptySet(), emptySet(), false)) }
+                .collect { (hidden, timelineExcluded, hideAll) ->
                     _uiState.update {
-                        it.copy(hiddenAlbumIds = hidden, timelineExcludedAlbumIds = timelineExcluded)
+                        it.copy(
+                            hiddenAlbumIds = hidden,
+                            timelineExcludedAlbumIds = timelineExcluded,
+                            timelineHideAll = hideAll,
+                        )
                     }
                 }
         }
@@ -675,11 +684,16 @@ class AlbumsViewModel @Inject constructor(
      * the same edit keeps the flip atomic.
      */
     fun toggleAlbumHiddenFromTimeline(albumLinkId: String) {
+        val allAlbumIds = _uiState.value.albums.mapTo(HashSet()) { it.linkId }
         viewModelScope.launch {
             context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-                prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] =
-                    AlbumTimelineHide.toggled(current, albumLinkId)
+                val stored = AlbumTimelineHide.Stored(
+                    prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet(),
+                    prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true,
+                )
+                val next = AlbumTimelineHide.toggled(stored, albumLinkId, allAlbumIds)
+                prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = next.excludedAlbumIds
+                if (stored.hideAll && !next.hideAll) prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
             }
         }
     }

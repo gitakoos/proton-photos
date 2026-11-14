@@ -129,15 +129,15 @@ class TimelineFilterViewModel @Inject constructor(
                 }
                 .sortedBy { it.name.lowercase() }
 
-            // Migrate the legacy "hide all album photos" master flag onto the per-album exclude set,
-            // so the album filter works like the device-folder one: excluding everything no longer
-            // hides the list, and individual albums can be re-included afterwards.
+            // Spread the hide-all switch onto the per-album exclude set, so the album filter works
+            // like the device-folder one: excluding everything no longer hides the list, and single
+            // albums can be re-included afterwards. The switch itself stays on, since it means every
+            // album excluded and is what the shared backup carries to the user's other devices.
             if (hideAlbumPhotos && albumRows.isNotEmpty()) {
-                excludedAlbumIds = albumRows.map { it.linkId }.toSet()
-                hideAlbumPhotos = false
-                context.settingsDataStore.edit {
-                    it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = excludedAlbumIds
-                    it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
+                val all = albumRows.map { it.linkId }.toSet()
+                if (excludedAlbumIds != all) {
+                    excludedAlbumIds = all
+                    context.settingsDataStore.edit { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = all }
                 }
             }
 
@@ -177,25 +177,40 @@ class TimelineFilterViewModel @Inject constructor(
         }
     }
 
-    /** Master switch — exclude / include EVERY album at once. Drives the per-album exclude set
-     *  (not the legacy hide-all flag) so the list stays visible and individual albums can be
-     *  re-included afterwards, matching the device-folder filter. */
+    /** Master switch: exclude / include EVERY album at once. Drives the per-album exclude set so the
+     *  list stays visible and individual albums can be re-included afterwards, matching the
+     *  device-folder filter, and the hide-all switch beside it. */
     fun excludeAllAlbums() = setAlbumExcludes(_uiState.value.albums.map { it.linkId }.toSet())
     fun includeAllAlbums() = setAlbumExcludes(emptySet())
 
     private fun setAlbumExcludes(newSet: Set<String>) {
         excludedAlbumIds = newSet
-        hideAlbumPhotos = false
+        val hideAll = coversEveryAlbum(newSet)
         _uiState.update { s ->
             s.copy(
                 albums = s.albums.map { a -> a.copy(isExcluded = a.linkId in newSet) },
-                hideAlbumPhotos = false,
+                hideAlbumPhotos = hideAll,
             )
         }
+        writeAlbumExcludes(newSet, hideAll)
+    }
+
+    /** The hide-all switch is on exactly while every album is excluded. */
+    private fun coversEveryAlbum(set: Set<String>): Boolean {
+        val albums = _uiState.value.albums
+        return albums.isNotEmpty() && albums.all { it.linkId in set }
+    }
+
+    /**
+     * Stores the set and the hide-all switch in one edit. The switch is written only when it changes,
+     * so a never-touched switch stays unset and no change is reported to the user's other devices.
+     */
+    private fun writeAlbumExcludes(newSet: Set<String>, hideAll: Boolean) {
+        hideAlbumPhotos = hideAll
         viewModelScope.launch {
             context.settingsDataStore.edit {
                 it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = newSet
-                it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
+                if ((it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true) != hideAll) it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = hideAll
             }
         }
     }
@@ -210,12 +225,11 @@ class TimelineFilterViewModel @Inject constructor(
         else
             excludedAlbumIds + albumLinkId
         excludedAlbumIds = newSet
+        val hideAll = coversEveryAlbum(newSet)
         _uiState.update { s ->
-            s.copy(albums = s.albums.map { a -> a.copy(isExcluded = a.linkId in newSet) })
+            s.copy(albums = s.albums.map { a -> a.copy(isExcluded = a.linkId in newSet) }, hideAlbumPhotos = hideAll)
         }
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = newSet }
-        }
+        writeAlbumExcludes(newSet, hideAll)
     }
 
     fun toggle(folderName: String) {

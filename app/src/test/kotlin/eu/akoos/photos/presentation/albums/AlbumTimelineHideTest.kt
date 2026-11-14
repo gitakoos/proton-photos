@@ -103,4 +103,24 @@ class AlbumTimelineHideTest {
             }
         }
     }
+
+    @Test
+    fun `with hide-all on every album reads as excluded`() {
+        assertTrue(AlbumTimelineHide.isExcluded(emptySet(), trip, hideAll = true))
+        assertFalse(AlbumTimelineHide.isExcluded(emptySet(), "", hideAll = true))
+    }
+
+    @Test
+    fun `taking one album out of hide-all turns it off and keeps the rest excluded one by one`() {
+        val all = setOf(trip, pets, "album-work")
+        val next = AlbumTimelineHide.toggled(AlbumTimelineHide.Stored(emptySet(), hideAll = true), trip, all)
+        assertEquals(AlbumTimelineHide.Stored(setOf(pets, "album-work"), hideAll = false), next)
+    }
+
+    @Test
+    fun `without hide-all the flip is the plain one`() {
+        val stored = AlbumTimelineHide.Stored(setOf(pets), hideAll = false)
+        assertEquals(AlbumTimelineHide.Stored(setOf(pets, trip), hideAll = false), AlbumTimelineHide.toggled(stored, trip, emptySet()))
+        assertSame(stored, AlbumTimelineHide.toggled(stored, "", setOf(trip)))
+    }
 }

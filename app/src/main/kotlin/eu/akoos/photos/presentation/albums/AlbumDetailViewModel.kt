@@ -463,9 +463,14 @@ class AlbumDetailViewModel @Inject constructor(
             combine(
                 _uiState.map { it.albumLinkId }.distinctUntilChanged(),
                 context.settingsDataStore.data
-                    .map { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet() }
+                    .map {
+                        AlbumTimelineHide.Stored(
+                            it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet(),
+                            it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true,
+                        )
+                    }
                     .distinctUntilChanged(),
-            ) { linkId, excluded -> AlbumTimelineHide.isExcluded(excluded, linkId) }
+            ) { linkId, stored -> AlbumTimelineHide.isExcluded(stored.excludedAlbumIds, linkId, stored.hideAll) }
                 .distinctUntilChanged()
                 .catch { emit(false) }
                 .collect { excluded -> _uiState.update { it.copy(isHiddenFromTimeline = excluded) } }
@@ -2100,10 +2105,18 @@ class AlbumDetailViewModel @Inject constructor(
         if (albumLinkId.isBlank()) return
         viewModelScope.launch {
             runCatching {
+                // Only the hide-all switch needs the other albums, to keep them excluded one by one.
+                val allAlbumIds = if (context.settingsDataStore.data.first()[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true) {
+                    driveRepo.loadAlbumsCached().mapTo(HashSet()) { it.linkId }
+                } else emptySet()
                 context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-                    prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] =
-                        AlbumTimelineHide.toggled(current, albumLinkId)
+                    val stored = AlbumTimelineHide.Stored(
+                        prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet(),
+                        prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true,
+                    )
+                    val next = AlbumTimelineHide.toggled(stored, albumLinkId, allAlbumIds)
+                    prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = next.excludedAlbumIds
+                    if (stored.hideAll && !next.hideAll) prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
                 }
             }.onFailure { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e

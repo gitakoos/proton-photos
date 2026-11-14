@@ -205,4 +205,26 @@ class SettingsSyncTimesTest {
         assertNull(data.current[SettingsKeys.DARK_MODE])
         assertEquals("light", data.current[SettingsKeys.THEME_MODE])
     }
+
+    @Test
+    fun `hide-all turned off on another device brings every album back`() = runBlocking {
+        data.edit {
+            it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = true
+            it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = setOf("a1", "a2")
+        }
+        store.stampChanges(1_000L)
+        store.apply(SettingsCopyMerge.Changes(scalars = mapOf("albums.hidePhotosInAlbums" to SettingsScalarState(7_000L, JsonPrimitive(false)))))
+        assertNull(data.current[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS])
+    }
+
+    @Test
+    fun `hide-all arriving, or an off that was already off, leaves the albums excluded one by one`() = runBlocking {
+        data.edit { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = setOf("a1") }
+        store.stampChanges(1_000L)
+        store.apply(SettingsCopyMerge.Changes(scalars = mapOf("albums.hidePhotosInAlbums" to SettingsScalarState(7_000L, JsonPrimitive(false)))))
+        assertEquals(setOf("a1"), data.current[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS])
+        store.apply(SettingsCopyMerge.Changes(scalars = mapOf("albums.hidePhotosInAlbums" to SettingsScalarState(8_000L, JsonPrimitive(true)))))
+        assertEquals(setOf("a1"), data.current[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS])
+        assertEquals(true, data.current[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS])
+    }
 }

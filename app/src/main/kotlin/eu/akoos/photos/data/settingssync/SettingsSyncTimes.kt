@@ -50,6 +50,7 @@ internal object SettingsSyncTimes {
     private const val IN = "1"
     private const val OUT = "0"
     private const val MEMBER_SEPARATOR = '#'
+    private const val HIDE_ALL = "albums.hidePhotosInAlbums"
 
     /** The `"key|millis|fingerprint"` entries of [entries] as a map; an entry that does not parse is skipped. */
     fun parse(entries: Set<String>?): Map<String, SettingsStamp> {
@@ -140,6 +141,7 @@ internal object SettingsSyncTimes {
     fun applyChanges(prefs: MutablePreferences, changes: SettingsCopyMerge.Changes): Set<String> {
         val stamps = parse(prefs[SettingsKeys.SETTINGS_SYNC_TIMES]).toMutableMap()
         val applied = HashSet<String>()
+        val hideAllBefore = prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true
         for ((id, taken) in changes.scalars) {
             val setting = SettingsSyncRegistry.scalar(id) ?: continue
             setting.write(prefs, taken.value)
@@ -160,6 +162,11 @@ internal object SettingsSyncTimes {
         }
         // The legacy dark flag only matters while no theme word exists.
         if ("appearance.theme" in applied) prefs.remove(SettingsKeys.DARK_MODE)
+        // Hide-all means every album excluded, spread here onto the per-album set; another device
+        // turning it off brings every album back, as the switch does here.
+        if (HIDE_ALL in applied && hideAllBefore && prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] != true) {
+            prefs.remove(SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS)
+        }
         if (applied.isNotEmpty()) prefs[SettingsKeys.SETTINGS_SYNC_TIMES] = format(stamps)
         return applied
     }
