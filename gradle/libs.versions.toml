@@ -1,6 +1,6 @@
 [versions]
 guava = "33.8.0-android"
-agp = "9.4.1"
+agp = "9.5.1"
 kotlin = "2.4.21"
 ksp = "2.3.14"
 hilt = "2.60.1"
