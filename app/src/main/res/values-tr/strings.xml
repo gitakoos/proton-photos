@@ -1168,7 +1168,7 @@
     <string name="faq_q_where_lock">Uygulama kilidi ve gizli fotoğraflar nerede?</string>
     <string name="faq_a_where_lock">\"%1$s\" > \"%2$s\" içinde \"%3$s\" ve \"%4$s\" bulunur. Fotoğrafları gizlemek için onları seç ve \"%5$s\" seçeneğini seç.</string>
     <string name="faq_q_where_drive">Yüzler, etiketler ve gizli öğeler diğer cihazlarıma nasıl ulaşır?</string>
-    <string name="faq_a_where_drive">\"%1$s\" içinde, \"%2$s\" altında \"%3$s\" seçeneğini aç. Yüzler ve adlar, arama dizini, etiketler ve gizli öğeler Proton Drive\'a kaydedilir ve masaüstü uygulaması dahil diğer cihazlarında aynı kalır.</string>
+    <string name="faq_a_where_drive">\"%1$s\" içinde, \"%2$s\" altında \"%3$s\" seçeneğini aç. Yüzler ve adlar, arama dizini, etiketler ve gizli öğeler Proton Drive\'a kaydedilir ve masaüstü uygulaması dahil diğer cihazlarında aynı kalır. Tema ve renkler hepsinde aynıdır, diğer ayarlar telefonların arasında paylaşılır ve yeniden kurulumdan sonra geri gelir.</string>
     <string name="faq_q_where_trash">Silinen fotoğraflar nereye gider?</string>
     <string name="faq_a_where_trash">\"%1$s\" bölümüne. \"%2$s\" sekmesinin sağ üstündeki yuvarlak düğmeyle açabilirsin. Telefondan ve Proton Drive\'dan silinen fotoğraflar orada bekler ve geri yüklenebilir.</string>
     <string name="faq_q_no_account">Uygulamayı Proton hesabı olmadan kullanabilir miyim?</string>
@@ -1872,7 +1872,7 @@
     <string name="people_follow_albums_desc">Kişileri Albümler sekmesinin görünümü ve kapak boyutuyla gösterir</string>
     <string name="drive_backup_section">Proton Drive\'a yedekle</string>
     <string name="drive_backup_switch_title">Proton Drive\'a yedekle</string>
-    <string name="drive_backup_switch_desc">Yüzleri, aramayı, etiketleri ve gizli öğeleri Drive\'a kaydeder ve bilgisayarının veya diğer telefonlarının kaydettiklerini getirir, böylece başka bir cihazda yapılan yüz tanıma veya arama burada da görünür. Kendiliğinden çalışır.</string>
+    <string name="drive_backup_switch_desc">Yüzleri, aramayı, etiketleri, gizli öğeleri ve ayarları Drive\'a kaydeder ve bilgisayarının veya diğer telefonlarının kaydettiklerini getirir, böylece başka bir cihazda yapılan yüz tanıma veya arama burada da görünür. Kendiliğinden çalışır.</string>
     <string name="drive_backup_sync_now">Şimdi eşitle</string>
     <string name="drive_backup_turn_on_title">Proton Drive\'a yedekleme açılsın mı?</string>
     <string name="drive_backup_turn_on_msg">Başka bir telefonda bunun için Photos for Proton 2.6.0 veya daha yenisi, bir bilgisayarda ise Photos for Proton desktop 1.3.0 veya daha yenisi gerekir. Eski bir sürüm bu telefonun kaydettiklerine dokunmaz ve kendi verilerini olduğu gibi tutar.</string>

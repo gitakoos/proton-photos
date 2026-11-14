@@ -41,6 +41,8 @@ import eu.akoos.photos.data.mlsync.MlSyncWorkData
 import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.settingssync.SettingsSyncRegistry
+import eu.akoos.photos.data.settingssync.SettingsSyncStore
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.util.SyncDiagnostics
 import eu.akoos.photos.worker.MlSyncWorker
@@ -49,6 +51,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -86,6 +89,7 @@ class SharedBackupScheduler @Inject constructor(
     private val database: AppDatabase,
     private val autoSave: AutoSaveCoordinator,
     private val autoSaveStore: AutoSaveStore,
+    private val settingsSync: SettingsSyncStore,
     @AppScope private val appScope: CoroutineScope,
 ) {
     private val workManager: WorkManager
@@ -125,6 +129,23 @@ class SharedBackupScheduler @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "hidden watch stopped: ${e.javaClass.simpleName}")
+            }
+        }
+        appScope.launch {
+            try {
+                // Only while an account is signed in: a guest has no backup, so nothing is stamped for one. The
+                // first pass also stamps the settings already chosen, and one after a sign-out wipe finds none.
+                accountManager.getPrimaryUserId().distinctUntilChanged().collectLatest { userId ->
+                    if (userId == null) return@collectLatest
+                    context.settingsDataStore.data
+                        .map { prefs -> SettingsSyncRegistry.watchedKeys.map { prefs[it] } }
+                        .distinctUntilChanged()
+                        .collect { if (settingsSync.stampChanges()) changed(listOf(SharedBackupKind.SETTINGS), byUser = true) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "settings watch stopped: ${e.javaClass.simpleName}")
             }
         }
         appScope.launch { runCatching { syncNow() } }

@@ -839,7 +839,7 @@ object SettingsKeys {
     val HIDDEN_REMOTE_HIDE_QUEUE = stringSetPreferencesKey("hidden_remote_hide_queue")
 
     /** Whether the shared backup on Proton Drive is on: each round reads the other devices' copies of the faces,
-     *  the search index, the labels and the hidden items, merges them, and saves this device's own. Absent = off. */
+     *  the search index, the labels, the hidden items and the settings, merges them, and saves this device's own. Absent = off. */
     val SHARED_BACKUP_ENABLED = booleanPreferencesKey("shared_backup_enabled")
 
     /** When the last shared-backup round finished, epoch millis, and whether it failed. */
@@ -849,6 +849,11 @@ object SettingsKeys {
     /** What each kind's own copy on Drive held when this device last wrote it, as `"kind|sha256"` over the copy with
      *  its time left out, so an unchanged copy is not written again. */
     val SHARED_BACKUP_SAVED = stringSetPreferencesKey("shared_backup_saved")
+
+    /** When each synced setting and set member last changed here, as `"id|millis|fingerprint"`, so the shared backup
+     *  can put this device's settings together with another's, the later change winning. Wiped at sign-out together
+     *  with the account-tied settings, in the same edit. */
+    val SETTINGS_SYNC_TIMES = stringSetPreferencesKey("settings_sync_times")
 
     /** When the data behind the shared backup last changed here, epoch millis, so a round runs a few minutes after. */
     val SHARED_BACKUP_CHANGED_AT = longPreferencesKey("shared_backup_changed_at")

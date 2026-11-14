@@ -1227,7 +1227,7 @@
     <string name="people_follow_albums_desc">Toont personen met de weergave en omslaggrootte van het tabblad Albums</string>
     <string name="drive_backup_section">Back-up naar Proton Drive</string>
     <string name="drive_backup_switch_title">Back-up naar Proton Drive</string>
-    <string name="drive_backup_switch_desc">Slaat gezichten, zoeken, labels en verborgen items op in Drive en haalt binnen wat je computer of andere telefoons hebben opgeslagen, zodat gezichtsherkenning of zoeken op een ander apparaat ook hier verschijnt. Draait vanzelf.</string>
+    <string name="drive_backup_switch_desc">Slaat gezichten, zoeken, labels, verborgen items en instellingen op in Drive en haalt binnen wat je computer of andere telefoons hebben opgeslagen, zodat gezichtsherkenning of zoeken op een ander apparaat ook hier verschijnt. Draait vanzelf.</string>
     <string name="drive_backup_sync_now">Nu synchroniseren</string>
     <string name="drive_backup_turn_on_title">Back-up naar Proton Drive aanzetten?</string>
     <string name="drive_backup_turn_on_msg">Op een andere telefoon is hiervoor Photos for Proton 2.6.0 of nieuwer nodig, en op een computer Photos for Proton desktop 1.3.0 of nieuwer. Een oudere versie laat met rust wat deze telefoon opslaat en houdt zijn eigen gegevens zoals ze zijn.</string>
@@ -1603,7 +1603,7 @@
     <string name="faq_q_where_lock">Waar vind ik de app-vergrendeling en verborgen foto\'s?</string>
     <string name="faq_a_where_lock">Onder \"%1$s\" > \"%2$s\" vind je \"%3$s\" en \"%4$s\". Om foto\'s te verbergen selecteer je ze en kies je \"%5$s\".</string>
     <string name="faq_q_where_drive">Hoe komen gezichten, labels en verborgen items op mijn andere apparaten?</string>
-    <string name="faq_a_where_drive">Zet \"%3$s\" aan in \"%1$s\", onder \"%2$s\". Gezichten en namen, de zoekindex, labels en verborgen items worden dan op Proton Drive bewaard en blijven gelijk op je andere apparaten, ook in de desktop-app.</string>
+    <string name="faq_a_where_drive">Zet \"%3$s\" aan in \"%1$s\", onder \"%2$s\". Gezichten en namen, de zoekindex, labels en verborgen items worden dan op Proton Drive bewaard en blijven gelijk op je andere apparaten, ook in de desktop-app. Thema en kleuren zijn overal gelijk, en de overige instellingen worden tussen je telefoons gedeeld en komen terug na een herinstallatie.</string>
     <string name="faq_q_where_trash">Waar gaan verwijderde foto\'s heen?</string>
     <string name="faq_a_where_trash">Naar \"%1$s\". Je opent het met de ronde knop rechtsboven op het tabblad \"%2$s\". Foto\'s die van deze telefoon en van Proton Drive zijn verwijderd, wachten daar en kunnen worden teruggezet.</string>
     <string name="faq_q_no_account">Kan ik de app zonder Proton-account gebruiken?</string>

@@ -147,6 +147,7 @@ class SharedBackupRulesTest {
             envelopeCrypto = mockk(relaxed = true),
             labels = mockk(relaxed = true),
             hidden = mockk(relaxed = true),
+            settings = mockk(relaxed = true),
             appliedDao = appliedDao,
             store = mockk(relaxed = true),
             faceScanDao = faceScanDao,

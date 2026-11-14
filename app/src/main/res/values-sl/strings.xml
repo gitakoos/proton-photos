@@ -1453,7 +1453,7 @@
     <string name="people_follow_albums_desc">Prikaže osebe s pogledom in velikostjo naslovnic zavihka Albumi</string>
     <string name="drive_backup_section">Varnostna kopija na Proton Drive</string>
     <string name="drive_backup_switch_title">Varnostno kopiranje v Proton Drive</string>
-    <string name="drive_backup_switch_desc">Shrani obraze, iskanje, oznake in skrite elemente v Drive ter prevzema, kar sta shranila računalnik ali drugi telefoni, tako da se prepoznavanje obrazov ali iskanje, opravljeno na drugi napravi, prikaže tudi tukaj. Deluje samodejno.</string>
+    <string name="drive_backup_switch_desc">Shrani obraze, iskanje, oznake, skrite elemente in nastavitve v Drive ter prevzema, kar sta shranila računalnik ali drugi telefoni, tako da se prepoznavanje obrazov ali iskanje, opravljeno na drugi napravi, prikaže tudi tukaj. Deluje samodejno.</string>
     <string name="drive_backup_sync_now">Sinhroniziraj zdaj</string>
     <string name="drive_backup_turn_on_title">Vklopim varnostno kopiranje v Proton Drive?</string>
     <string name="drive_backup_turn_on_msg">Na drugem telefonu je za to potreben Photos for Proton 2.6.0 ali novejši, na računalniku pa Photos for Proton desktop 1.3.0 ali novejši. Starejša različica pusti pri miru, kar shrani ta telefon, in svoje podatke obdrži takšne, kot so.</string>
@@ -1679,7 +1679,7 @@
     <string name="faq_q_where_lock">Kje sta zaklep aplikacije in skrite fotografije?</string>
     <string name="faq_a_where_lock">V „%1$s“ > „%2$s“ najdete „%3$s“ in „%4$s“. Fotografije skrijete tako, da jih izberete in izberete „%5$s“.</string>
     <string name="faq_q_where_drive">Kako obrazi, oznake in skriti elementi pridejo na moje druge naprave?</string>
-    <string name="faq_a_where_drive">Vklopite „%3$s“ v „%1$s“, pod „%2$s“. Obrazi in imena, iskalni indeks, oznake in skriti elementi se nato shranijo na Proton Drive in ostanejo enaki na vaših drugih napravah, tudi v namizni aplikaciji.</string>
+    <string name="faq_a_where_drive">Vklopite „%3$s“ v „%1$s“, pod „%2$s“. Obrazi in imena, iskalni indeks, oznake in skriti elementi se nato shranijo na Proton Drive in ostanejo enaki na vaših drugih napravah, tudi v namizni aplikaciji. Tema in barve so povsod enake, ostale nastavitve pa se delijo med vašimi telefoni in se vrnejo po ponovni namestitvi.</string>
     <string name="faq_q_where_trash">Kam gredo izbrisane fotografije?</string>
     <string name="faq_a_where_trash">V „%1$s“. Odprete ga z okroglim gumbom zgoraj desno na zavihku „%2$s“. Fotografije, izbrisane s telefona in s Proton Drive, čakajo tam in jih je mogoče obnoviti.</string>
     <string name="faq_q_no_account">Ali lahko aplikacijo uporabljam brez računa Proton?</string>

@@ -53,6 +53,13 @@ import eu.akoos.photos.data.mlsync.MlDriveResult
 import eu.akoos.photos.data.mlsync.MlDriveStore
 import eu.akoos.photos.data.mlsync.MlRestoreFile
 import eu.akoos.photos.data.mlsync.MlSyncScratch
+import eu.akoos.photos.data.mlsync.SettingsDriveNaming
+import eu.akoos.photos.data.settingssync.SettingsCopyMerge
+import eu.akoos.photos.data.settingssync.SettingsSnapshot
+import eu.akoos.photos.data.settingssync.SettingsSnapshotCodec
+import eu.akoos.photos.data.settingssync.SettingsSnapshotOpened
+import eu.akoos.photos.data.settingssync.SettingsSnapshotSealing
+import eu.akoos.photos.data.settingssync.SettingsSyncStore
 import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -66,24 +73,26 @@ import java.io.FileOutputStream
 import java.io.IOException
 import javax.inject.Inject
 
-/** The three Drive folders of the shared backup as one round lists them. */
+/** The four Drive folders of the shared backup as one round lists them. */
 data class SharedBackupListing(
     val ml: List<MlDriveFile>,
     val labels: List<MlDriveFile>,
     val hidden: List<MlDriveFile>,
+    val settings: List<MlDriveFile> = emptyList(),
 )
 
 /** One install's copies on Drive, as the list of the backups shows them: when it saved last, and its files. */
 data class DriveDeviceCopies(val deviceId: String, val name: String?, val lastSavedMs: Long, val nodeUids: List<String>)
 
 /**
- * The copies in [listing], by the install that wrote them: every file of the three folders whose name carries an
+ * The copies in [listing], by the install that wrote them: every file of the four folders whose name carries an
  * install id, newest install first. Pure, so it is unit-tested directly.
  */
 internal fun copiesByDevice(listing: SharedBackupListing, names: Map<String, String>): List<DriveDeviceCopies> {
     val files = listing.ml.mapNotNull { f -> MlDriveNaming.parse(f.name)?.let { SharedBackupCopy(it.deviceId, f) } } +
         listing.labels.mapNotNull { f -> LabelDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } } +
-        listing.hidden.mapNotNull { f -> HiddenDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } }
+        listing.hidden.mapNotNull { f -> HiddenDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } } +
+        listing.settings.mapNotNull { f -> SettingsDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } }
     return files.groupBy { it.deviceId }
         .map { (id, copies) ->
             DriveDeviceCopies(id, names[id], copies.maxOf { it.madeAtMs }, copies.map { it.file.nodeUid })
@@ -115,9 +124,9 @@ internal fun newerCopies(
         .filter { (applied[it.deviceId] ?: -1L) < it.madeAtMs }
 
 /**
- * The parts of a shared-backup round that are not the machine-learning import: listing the three Drive folders,
- * keeping which copy of each other install was taken in last, and taking in and writing the labels and the hidden
- * list. The machine-learning files go through the same download and import a restore uses, run by the ML sync
+ * The parts of a shared-backup round that are not the machine-learning import: listing the four Drive folders,
+ * keeping which copy of each other install was taken in last, and taking in and writing the labels, the hidden
+ * list and the settings. The machine-learning files go through the same download and import a restore uses, run by the ML sync
  * worker, which drives the whole round.
  */
 class SharedBackupRunner @Inject constructor(
@@ -126,6 +135,7 @@ class SharedBackupRunner @Inject constructor(
     private val envelopeCrypto: AddressKeyEnvelopeCrypto,
     private val labels: PhotoLabelRepository,
     private val hidden: HiddenSyncStore,
+    private val settings: SettingsSyncStore,
     private val appliedDao: DriveCopyAppliedDao,
     private val store: SharedBackupStore,
     private val faceScanDao: FaceScanDao,
@@ -133,17 +143,19 @@ class SharedBackupRunner @Inject constructor(
 ) {
 
     /**
-     * The three folders' files, read side by side, or null when any listing failed: a round that cannot read
+     * The four folders' files, read side by side, or null when any listing failed: a round that cannot read
      * writes nothing.
      */
     suspend fun list(userId: UserId): SharedBackupListing? = coroutineScope {
         val ml = async { listed(userId, DriveDataFolder.ML) }
         val labels = async { listed(userId, DriveDataFolder.LABELS) }
         val hidden = async { listed(userId, DriveDataFolder.HIDDEN) }
+        val settings = async { listed(userId, DriveDataFolder.SETTINGS) }
         SharedBackupListing(
             ml.await() ?: return@coroutineScope null,
             labels.await() ?: return@coroutineScope null,
             hidden.await() ?: return@coroutineScope null,
+            settings.await() ?: return@coroutineScope null,
         )
     }
 
@@ -256,6 +268,41 @@ class SharedBackupRunner @Inject constructor(
         return true
     }
 
+    /**
+     * Takes the other installs' settings copies newer than the ones taken in last into this device's settings, the
+     * later change to each setting winning. False when a copy could not be read, so the round does not write this
+     * device's settings over an unread copy. [retake] takes every other install's newest copy in again.
+     */
+    suspend fun takeInSettings(
+        userId: UserId,
+        listing: SharedBackupListing,
+        readsAs: String,
+        ownDeviceId: String,
+        retake: Boolean = false,
+    ): Boolean {
+        val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.SETTINGS)
+        val copies = newerCopies(listing.settings, SettingsDriveNaming::parse, readsAs, applied)
+        if (copies.isEmpty()) return true
+        val read = ArrayList<Pair<SharedBackupCopy, SettingsSnapshot>>()
+        for (copy in copies) {
+            when (val got = readSettings(userId, copy)) {
+                is CopyRead.Read -> read += copy to got.value
+                CopyRead.PassOver -> markApplied(userId, SharedBackupKind.SETTINGS, copy.deviceId, copy.madeAtMs)
+                CopyRead.Retry -> return false
+            }
+        }
+        store.rememberDeviceNames(read.associate { (copy, snapshot) -> copy.deviceId to snapshot.deviceLabel }.filterValues { it.isNotBlank() })
+        val state = settings.load()
+        var changes = SettingsCopyMerge.Changes()
+        for ((_, snapshot) in read) changes += SettingsCopyMerge.takeIn(state, snapshot, readsAs, ownDeviceId)
+        val changed = settings.apply(changes)
+        for ((copy, snapshot) in read) {
+            markApplied(userId, SharedBackupKind.SETTINGS, copy.deviceId, maxOf(copy.madeAtMs, snapshot.createdAtMillis))
+        }
+        if (changed > 0) Log.i(TAG, "settings taken in: $changed setting(s) changed")
+        return true
+    }
+
     /** Writes this device's labels to Drive unless the copy there already holds them. Null when the write failed. */
     suspend fun saveLabels(userId: UserId, ownDeviceId: String, nowMs: Long): Boolean? {
         val copy = LabelCopyMerge.forDrive(labels.loadSyncState(userId), ownDeviceId, driveStore.deviceLabel, nowMs)
@@ -281,9 +328,25 @@ class SharedBackupRunner @Inject constructor(
     }
 
     /**
+     * Writes this device's settings to Drive unless the copy there already holds them. Nothing is written while no
+     * setting carries a time. Null when the write failed.
+     */
+    suspend fun saveSettings(userId: UserId, ownDeviceId: String, nowMs: Long): Boolean? {
+        val state = settings.load(nowMs)
+        if (state.isEmpty) return false
+        val copy = SettingsCopyMerge.forDrive(state, ownDeviceId, driveStore.deviceLabel, nowMs)
+        val same = SettingsSnapshotCodec.encode(copy.copy(createdAtMillis = 0L))
+        if (store.unchanged(SharedBackupKind.SETTINGS, same)) return false
+        val sealed = seal(userId, nowMs) { keys, out -> SettingsSnapshotSealing.seal(copy, envelopeCrypto, keys, out) }
+            ?: return null
+        return upload(userId, SettingsDriveNaming.fileName(ownDeviceId), sealed, SettingsDriveNaming.MEDIA_TYPE, DriveDataFolder.SETTINGS)
+            ?.also { store.recordSaved(SharedBackupKind.SETTINGS, same) }
+    }
+
+    /**
      * The backups on Drive, one entry per install, for the list on the Drive card. A device whose name was never
-     * read gets it from its label or hidden-list copy, the small ones, when it has one. Null when the folders could
-     * not be listed.
+     * read gets it from its label, hidden-list or settings copy, the small ones, when it has one. Null when the
+     * folders could not be listed.
      */
     suspend fun devices(userId: UserId): List<DriveDeviceCopies>? {
         val listing = list(userId) ?: return null
@@ -295,7 +358,9 @@ class SharedBackupRunner @Inject constructor(
                 ?.let { (readLabels(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
             val name = label ?: listing.hidden.firstOrNull { HiddenDriveNaming.parse(it.name) == entry.deviceId }
                 ?.let { (readHidden(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
-            if (!name.isNullOrBlank()) learned[entry.deviceId] = name
+            val named = name ?: listing.settings.firstOrNull { SettingsDriveNaming.parse(it.name) == entry.deviceId }
+                ?.let { (readSettings(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
+            if (!named.isNullOrBlank()) learned[entry.deviceId] = named
         }
         store.rememberDeviceNames(learned)
         return copiesByDevice(listing, known + learned)
@@ -345,6 +410,19 @@ class SharedBackupRunner @Inject constructor(
                 when (val opened = HiddenSnapshotSealing.open(input, envelopeCrypto, keys)) {
                     is HiddenSnapshotOpened.Snapshot -> Opened.Value(opened.value)
                     HiddenSnapshotOpened.WrongKey -> Opened.WrongKey
+                    else -> Opened.Unreadable
+                }
+            }
+        }
+        return snapshot.ownedBy(copy.deviceId) { it.deviceId }
+    }
+
+    private suspend fun readSettings(userId: UserId, copy: SharedBackupCopy): CopyRead<SettingsSnapshot> {
+        val snapshot = readOpened(userId, copy) { input, refresh ->
+            envelopeCrypto.openKeys(userId, refresh).use { keys ->
+                when (val opened = SettingsSnapshotSealing.open(input, envelopeCrypto, keys)) {
+                    is SettingsSnapshotOpened.Snapshot -> Opened.Value(opened.value)
+                    SettingsSnapshotOpened.WrongKey -> Opened.WrongKey
                     else -> Opened.Unreadable
                 }
             }
@@ -463,7 +541,7 @@ class SharedBackupRunner @Inject constructor(
         const val SCRATCH_DIRECTORY = "shared"
         const val MAX_UPLOAD_ATTEMPTS = 2
 
-        /** A label or hidden-list copy larger than this is not read: far beyond any real list. */
+        /** A label, hidden-list or settings copy larger than this is not read: far beyond any real list. */
         const val MAX_COPY_BYTES = 64L * 1024 * 1024
     }
 }

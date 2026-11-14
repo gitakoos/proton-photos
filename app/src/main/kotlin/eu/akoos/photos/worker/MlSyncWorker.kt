@@ -636,10 +636,10 @@ class MlSyncWorker @AssistedInject constructor(
     // ---- Shared backup round -------------------------------------------------------------------------
 
     /**
-     * One round of the shared backup. Reads first: the three Drive folders are listed (a listing that fails ends the
+     * One round of the shared backup. Reads first: the four Drive folders are listed (a listing that fails ends the
      * round with nothing written), the other installs' face and search files newer than the copy taken in last are
      * imported filling gaps only, the way a Merge restore does (a face file's scan markers mark its photos as
-     * scanned here, so each photo is scanned once), and their label copies and hidden lists are merged. Then this
+     * scanned here, so each photo is scanned once), and their label copies, hidden lists and settings are merged. Then this
      * install's own copy of each kind is written when its read went through and something in it changed. Ends with
      * the round's outcome recorded for the settings row.
      */
@@ -697,11 +697,13 @@ class MlSyncWorker @AssistedInject constructor(
         }
         val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake)
         val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake)
-        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead) sharedBackupStore.markOwnCopyTaken()
+        val settingsRead = sharedBackupRunner.takeInSettings(userId, listing, readsAs, ownDeviceId, retake)
+        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead && settingsRead) sharedBackupStore.markOwnCopyTaken()
         val failedParts = ArrayList<String>()
         unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
         if (!labelsRead) failedParts += "read labels"
         if (!hiddenRead) failedParts += "read hidden"
+        if (!settingsRead) failedParts += "read settings"
 
         val writes = mode == RoundMode.SAVE_NOW || (mode == RoundMode.AUTO && sharedBackupStore.isEnabled())
         if (writes) {
@@ -735,6 +737,7 @@ class MlSyncWorker @AssistedInject constructor(
             val now = System.currentTimeMillis()
             if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failedParts += "save labels"
             if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failedParts += "save hidden"
+            if (settingsRead && sharedBackupRunner.saveSettings(userId, ownDeviceId, now) == null) failedParts += "save settings"
         }
         val failed = failedParts.isNotEmpty()
         return endRound(

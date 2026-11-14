@@ -1452,7 +1452,7 @@
     <string name="people_follow_albums_desc">Zobrazuje ľudí so zobrazením a veľkosťou obálok karty Albumy</string>
     <string name="drive_backup_section">Záloha na Proton Drive</string>
     <string name="drive_backup_switch_title">Zálohovať na Proton Drive</string>
-    <string name="drive_backup_switch_desc">Ukladá tváre, vyhľadávanie, štítky a skryté položky na Drive a preberá to, čo uložil tvoj počítač alebo iné telefóny, takže rozpoznávanie tvárí alebo vyhľadávanie vykonané na inom zariadení sa zobrazí aj tu. Beží samo.</string>
+    <string name="drive_backup_switch_desc">Ukladá tváre, vyhľadávanie, štítky, skryté položky a nastavenia na Drive a preberá to, čo uložil tvoj počítač alebo iné telefóny, takže rozpoznávanie tvárí alebo vyhľadávanie vykonané na inom zariadení sa zobrazí aj tu. Beží samo.</string>
     <string name="drive_backup_sync_now">Synchronizovať teraz</string>
     <string name="drive_backup_turn_on_title">Zapnúť zálohu na Proton Drive?</string>
     <string name="drive_backup_turn_on_msg">Na inom telefóne to potrebuje Photos for Proton 2.6.0 alebo novší a na počítači Photos for Proton desktop 1.3.0 alebo novší. Staršia verzia nechá tak, čo ukladá tento telefón, a svoje údaje ponechá, ako sú.</string>
@@ -1678,7 +1678,7 @@
     <string name="faq_q_where_lock">Kde je zámok aplikácie a skryté fotky?</string>
     <string name="faq_a_where_lock">V „%1$s“ > „%2$s“ nájdete „%3$s“ a „%4$s“. Fotky skryjete tak, že ich vyberiete a zvolíte „%5$s“.</string>
     <string name="faq_q_where_drive">Ako sa tváre, štítky a skryté položky dostanú na moje ďalšie zariadenia?</string>
-    <string name="faq_a_where_drive">Zapnite „%3$s“ v „%1$s“, v časti „%2$s“. Tváre a mená, index vyhľadávania, štítky a skryté položky sa potom ukladajú na Proton Drive a zostávajú rovnaké na vašich ďalších zariadeniach, vrátane aplikácie pre počítač.</string>
+    <string name="faq_a_where_drive">Zapnite „%3$s“ v „%1$s“, v časti „%2$s“. Tváre a mená, index vyhľadávania, štítky a skryté položky sa potom ukladajú na Proton Drive a zostávajú rovnaké na vašich ďalších zariadeniach, vrátane aplikácie pre počítač. Motív a farby sú všade rovnaké a ostatné nastavenia sa zdieľajú medzi vašimi telefónmi a po preinštalovaní sa vrátia.</string>
     <string name="faq_q_where_trash">Kam sa dostanú odstránené fotky?</string>
     <string name="faq_a_where_trash">Do „%1$s“. Otvoríte ho okrúhlym tlačidlom vpravo hore na karte „%2$s“. Fotky odstránené z telefónu aj z Proton Drive tam čakajú a dajú sa obnoviť.</string>
     <string name="faq_q_no_account">Môžem aplikáciu používať bez účtu Proton?</string>

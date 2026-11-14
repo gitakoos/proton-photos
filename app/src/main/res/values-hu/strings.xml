@@ -1237,7 +1237,7 @@
     <string name="people_follow_albums_desc">Az embereket az Albumok lap nézetével és borítóméretével mutatja</string>
     <string name="drive_backup_section">Mentés a Proton Drive-ra</string>
     <string name="drive_backup_switch_title">Mentés a Proton Drive-ra</string>
-    <string name="drive_backup_switch_desc">Az arcokat, a keresést, a címkéket és a rejtett elemeket a Drive-ra menti, és betölti, amit a géped vagy más telefonod mentett, így a másik eszközön végzett arcfelismerés vagy keresés itt is megjelenik. Magától fut.</string>
+    <string name="drive_backup_switch_desc">Az arcokat, a keresést, a címkéket, a rejtett elemeket és a beállításokat a Drive-ra menti, és betölti, amit a géped vagy más telefonod mentett, így a másik eszközön végzett arcfelismerés vagy keresés itt is megjelenik. Magától fut.</string>
     <string name="drive_backup_sync_now">Szinkronizálás most</string>
     <string name="drive_backup_turn_on_title">Bekapcsolod a mentést a Proton Drive-ra?</string>
     <string name="drive_backup_turn_on_msg">Egy másik telefonon ehhez Photos for Proton 2.6.0 vagy újabb kell, a gépen pedig Photos for Proton desktop 1.3.0 vagy újabb. Egy régebbi verzió békén hagyja, amit ez a telefon ment, és a saját adatait úgy tartja meg, ahogy vannak.</string>
@@ -1614,7 +1614,7 @@
     <string name="faq_q_where_lock">Hol van az alkalmazászár és a rejtett fotók?</string>
     <string name="faq_a_where_lock">Itt: „%1$s”, majd „%2$s”, megtalálod ezeket: „%3$s” és „%4$s”. Fotót úgy rejthetsz el, hogy kijelölöd, és ezt választod: „%5$s”.</string>
     <string name="faq_q_where_drive">Hogyan jutnak el az arcok, a címkék és a rejtett elemek a többi eszközömre?</string>
-    <string name="faq_a_where_drive">Kapcsold be ezt: „%3$s”, itt: „%1$s”, a „%2$s” részben. Ekkor az arcok és a nevek, a keresési index, a címkék és a rejtett elemek a Proton Drive-ra mentődnek, és a többi eszközödön, a gépes appban is ugyanazok maradnak.</string>
+    <string name="faq_a_where_drive">Kapcsold be ezt: „%3$s”, itt: „%1$s”, a „%2$s” részben. Ekkor az arcok és a nevek, a keresési index, a címkék és a rejtett elemek a Proton Drive-ra mentődnek, és a többi eszközödön, a gépes appban is ugyanazok maradnak. A téma és a színek mindenhol egyeznek, a többi beállítás a telefonjaid között közös, és újratelepítés után visszajön.</string>
     <string name="faq_q_where_trash">Hová kerülnek a törölt fotók?</string>
     <string name="faq_a_where_trash">Ide: „%1$s”. A „%2$s” lap jobb felső sarkában lévő kerek gombbal éred el. A telefonról és a Proton Drive-ról törölt fotók itt várnak, és visszaállíthatók.</string>
     <string name="faq_q_no_account">Használhatom az appot Proton-fiók nélkül?</string>

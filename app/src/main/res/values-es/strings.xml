@@ -1229,7 +1229,7 @@
     <string name="people_follow_albums_desc">Muestra a las personas con la vista y el tamaño de portada de la pestaña Álbumes</string>
     <string name="drive_backup_section">Copia en Proton Drive</string>
     <string name="drive_backup_switch_title">Copia de seguridad en Proton Drive</string>
-    <string name="drive_backup_switch_desc">Guarda los rostros, la búsqueda, las etiquetas y los elementos ocultos en Drive e incorpora lo que guardaron tu ordenador u otros teléfonos, así el reconocimiento facial o la búsqueda hechos en otro dispositivo aparecen también aquí. Funciona solo.</string>
+    <string name="drive_backup_switch_desc">Guarda los rostros, la búsqueda, las etiquetas, los elementos ocultos y los ajustes en Drive e incorpora lo que guardaron tu ordenador u otros teléfonos, así el reconocimiento facial o la búsqueda hechos en otro dispositivo aparecen también aquí. Funciona solo.</string>
     <string name="drive_backup_sync_now">Sincronizar ahora</string>
     <string name="drive_backup_turn_on_title">¿Activar la copia de seguridad en Proton Drive?</string>
     <string name="drive_backup_turn_on_msg">En otro teléfono necesita Photos for Proton 2.6.0 o posterior, y en un ordenador Photos for Proton desktop 1.3.0 o posterior. Una versión anterior deja en paz lo que guarda este teléfono y mantiene sus propios datos como están.</string>
@@ -1614,7 +1614,7 @@
     <string name="faq_q_where_lock">¿Dónde están el bloqueo de la app y las fotos ocultas?</string>
     <string name="faq_a_where_lock">En \"%1$s\" > \"%2$s\" encontrarás \"%3$s\" y \"%4$s\". Para ocultar fotos, selecciónalas y elige \"%5$s\".</string>
     <string name="faq_q_where_drive">¿Cómo llegan las caras, las etiquetas y los elementos ocultos a mis otros dispositivos?</string>
-    <string name="faq_a_where_drive">Activa \"%3$s\" en \"%1$s\", dentro de \"%2$s\". Las caras y los nombres, el índice de búsqueda, las etiquetas y los elementos ocultos se guardan en Proton Drive y se mantienen iguales en tus otros dispositivos, también en la app de escritorio.</string>
+    <string name="faq_a_where_drive">Activa \"%3$s\" en \"%1$s\", dentro de \"%2$s\". Las caras y los nombres, el índice de búsqueda, las etiquetas y los elementos ocultos se guardan en Proton Drive y se mantienen iguales en tus otros dispositivos, también en la app de escritorio. El tema y los colores son iguales en todos, y los demás ajustes se comparten entre tus teléfonos y vuelven tras una reinstalación.</string>
     <string name="faq_q_where_trash">¿Adónde van las fotos eliminadas?</string>
     <string name="faq_a_where_trash">A \"%1$s\". Ábrelo con el botón redondo arriba a la derecha de la pestaña \"%2$s\". Las fotos eliminadas del teléfono y de Proton Drive esperan allí y se pueden restaurar.</string>
     <string name="faq_q_no_account">¿Puedo usar la app sin una cuenta de Proton?</string>

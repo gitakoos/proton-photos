@@ -1216,7 +1216,7 @@
     <string name="people_follow_albums_desc">Affiche les personnes avec la vue et la taille de couverture de l\'onglet Albums</string>
     <string name="drive_backup_section">Sauvegarde sur Proton Drive</string>
     <string name="drive_backup_switch_title">Sauvegarder sur Proton Drive</string>
-    <string name="drive_backup_switch_desc">Enregistre les visages, la recherche, les libellés et les éléments masqués sur Drive et récupère ce que votre ordinateur ou vos autres téléphones ont enregistré, pour que la reconnaissance des visages ou la recherche faite sur un autre appareil apparaisse aussi ici. Fonctionne tout seul.</string>
+    <string name="drive_backup_switch_desc">Enregistre les visages, la recherche, les libellés, les éléments masqués et les réglages sur Drive et récupère ce que votre ordinateur ou vos autres téléphones ont enregistré, pour que la reconnaissance des visages ou la recherche faite sur un autre appareil apparaisse aussi ici. Fonctionne tout seul.</string>
     <string name="drive_backup_sync_now">Synchroniser maintenant</string>
     <string name="drive_backup_turn_on_title">Activer la sauvegarde sur Proton Drive ?</string>
     <string name="drive_backup_turn_on_msg">Sur un autre téléphone, il faut Photos for Proton 2.6.0 ou ultérieur, et sur un ordinateur Photos for Proton desktop 1.3.0 ou ultérieur. Une version plus ancienne laisse de côté ce que ce téléphone sauvegarde et garde ses propres données telles quelles.</string>
@@ -1593,7 +1593,7 @@
     <string name="faq_q_where_lock">Où sont le verrouillage de l\'app et les photos masquées ?</string>
     <string name="faq_a_where_lock">Dans « %1$s » > « %2$s », vous trouverez « %3$s » et « %4$s ». Pour masquer des photos, sélectionnez-les et choisissez « %5$s ».</string>
     <string name="faq_q_where_drive">Comment les visages, les étiquettes et les éléments masqués arrivent-ils sur mes autres appareils ?</string>
-    <string name="faq_a_where_drive">Activez « %3$s » dans « %1$s », sous « %2$s ». Les visages et les noms, l\'index de recherche, les étiquettes et les éléments masqués sont alors sauvegardés sur Proton Drive et restent identiques sur vos autres appareils, application de bureau comprise.</string>
+    <string name="faq_a_where_drive">Activez « %3$s » dans « %1$s », sous « %2$s ». Les visages et les noms, l\'index de recherche, les étiquettes et les éléments masqués sont alors sauvegardés sur Proton Drive et restent identiques sur vos autres appareils, application de bureau comprise. Le thème et les couleurs sont les mêmes partout, et les autres réglages sont partagés entre vos téléphones et reviennent après une réinstallation.</string>
     <string name="faq_q_where_trash">Où vont les photos supprimées ?</string>
     <string name="faq_a_where_trash">Dans « %1$s ». Ouvrez-le avec le bouton rond en haut à droite de l\'onglet « %2$s ». Les photos supprimées de ce téléphone et de Proton Drive y attendent et peuvent être restaurées.</string>
     <string name="faq_q_no_account">Puis-je utiliser l\'app sans compte Proton ?</string>
