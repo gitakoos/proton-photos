@@ -127,8 +127,8 @@ class SettingsSyncState(
 /**
  * The settings' merge rule, the same the desktop client keeps: per setting and per set member the later change wins,
  * here or there; an equal time goes to the larger device id; an entry without a time (0) only fills a gap, as a
- * setting this device never changed reads as -1. A setting scoped to a platform is taken only from copies of this
- * platform. Taking the same copy twice changes nothing. Pure, so it runs in a plain JVM test.
+ * setting this device never changed reads as -1. A setting scoped to a platform is taken only from this install's
+ * own earlier copy. Taking the same copy twice changes nothing. Pure, so it runs in a plain JVM test.
  */
 internal object SettingsCopyMerge {
 
@@ -149,8 +149,8 @@ internal object SettingsCopyMerge {
     /**
      * Takes another install's [copy] into [state]; returns what changed. A copy whose device id is [readsAs] is this
      * install's own and is passed over, except while the round reads its own earlier copy (then [readsAs] is blank
-     * and the copy counts as another device's). [ownDeviceId] settles a tie; [ownPlatform] says which scoped
-     * settings the copy may bring.
+     * and the copy counts as another device's). [ownDeviceId] settles a tie and names the one copy a
+     * platform-scoped setting may come from, when it is also on [ownPlatform].
      */
     fun takeIn(
         state: SettingsSyncState,
@@ -166,7 +166,7 @@ internal object SettingsCopyMerge {
         val scalars = HashMap<String, SettingsScalarState>()
         for (entry in copy.scalars) {
             val setting = SettingsSyncRegistry.scalar(entry.key) ?: continue
-            if (!SettingsSyncRegistry.takes(setting.scope, copy.platform, ownPlatform)) continue
+            if (!SettingsSyncRegistry.takes(setting.scope, copy.deviceId, copy.platform, ownDeviceId, ownPlatform)) continue
             if (entry.value != null && !setting.accepts(entry.value)) continue
             val held = state.scalars[entry.key]
             if (!wins(entry.changedAtMillis, held?.at ?: -1L, held?.value != entry.value)) continue
@@ -177,7 +177,7 @@ internal object SettingsCopyMerge {
         val members = HashMap<String, HashMap<String, SettingsMemberState>>()
         for (entry in copy.members) {
             val setting = SettingsSyncRegistry.set(entry.key) ?: continue
-            if (!SettingsSyncRegistry.takes(setting.scope, copy.platform, ownPlatform)) continue
+            if (!SettingsSyncRegistry.takes(setting.scope, copy.deviceId, copy.platform, ownDeviceId, ownPlatform)) continue
             if (!setting.accepts(entry.element)) continue
             val present = entry.present ?: continue
             val held = state.members[entry.key]?.get(entry.element)

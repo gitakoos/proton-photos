@@ -149,7 +149,7 @@ class SettingsCopyMergeTest {
     }
 
     @Test
-    fun `set members added on two devices merge, and a later removal beats an earlier add`() {
+    fun `set members of this install's own earlier copy merge, and a later removal beats an earlier add`() {
         val s = SettingsSyncState()
         s.members["timeline.excludedAlbums"] = hashMapOf("mine" to SettingsMemberState(100L, true), "gone" to SettingsMemberState(100L, true))
         val members = listOf(
@@ -157,7 +157,7 @@ class SettingsCopyMergeTest {
             SettingsMemberEntry("timeline.excludedAlbums", "gone", false, 200L),
             SettingsMemberEntry("timeline.excludedAlbums", "mine", false, 50L),
         )
-        val changes = takeIn(s, copy(phone2, "android", members = members), own = phone)
+        val changes = takeIn(s, copy(phone, "android", members = members), own = phone, readsAs = "")
         val held = s.members.getValue("timeline.excludedAlbums")
         assertEquals(SettingsMemberState(150L, true), held["theirs"])
         assertEquals(SettingsMemberState(100L, true), held["mine"])
@@ -181,10 +181,32 @@ class SettingsCopyMergeTest {
     }
 
     @Test
-    fun `a platform setting from a copy of this platform is taken`() {
+    fun `a platform setting from another android device is ignored, a shared one is taken`() {
         val s = SettingsSyncState()
-        val changes = takeIn(s, copy(phone2, "android", listOf(scalar("appearance.language", 10L, "de"), scalar("upload.compressCodec", 10L, "av1"))))
+        val changes = takeIn(
+            s,
+            copy(
+                phone2, "android",
+                listOf(scalar("appearance.language", 10L, "de"), scalar("upload.compressCodec", 10L, "av1"), scalar("appearance.theme", 10L, "light")),
+            ),
+        )
+        assertEquals(setOf("appearance.theme"), changes.scalars.keys)
+        assertNull(s.scalars["appearance.language"])
+    }
+
+    @Test
+    fun `a platform setting from this install's own earlier copy is taken`() {
+        val s = SettingsSyncState()
+        val own = copy(phone, "android", listOf(scalar("appearance.language", 10L, "de"), scalar("upload.compressCodec", 10L, "av1")))
+        val changes = takeIn(s, own, own = phone, readsAs = "")
         assertEquals(setOf("appearance.language", "upload.compressCodec"), changes.scalars.keys)
+    }
+
+    @Test
+    fun `a platform setting from a desktop copy with this device's id is still ignored`() {
+        val s = SettingsSyncState()
+        val changes = takeIn(s, copy(phone, "desktop", listOf(scalar("appearance.language", 10L, "de"))), own = phone, readsAs = "")
+        assertTrue(changes.isEmpty)
     }
 
     @Test

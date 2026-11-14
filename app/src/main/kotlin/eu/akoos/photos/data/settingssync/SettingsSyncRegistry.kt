@@ -36,7 +36,7 @@ enum class SettingsScope {
     /** Taken from any device's copy, whatever its platform. */
     SHARED,
 
-    /** Taken only from copies written on this platform, this install's own earlier copy included. */
+    /** Restored only from this install's own earlier copy, never from another device's, on any platform. */
     PLATFORM,
 }
 
@@ -202,7 +202,7 @@ internal object SettingsSyncRegistry {
         bool("appearance.amoled", SettingsScope.SHARED, SettingsKeys.AMOLED_BLACK),
         bool("albums.hidePhotosInAlbums", SettingsScope.SHARED, SettingsKeys.HIDE_PHOTOS_IN_ALBUMS),
 
-        // Restored on the same platform only.
+        // Restored from this install's own earlier copy only.
         text("appearance.language", SettingsScope.PLATFORM, SettingsKeys.LANGUAGE) { it == "system" || LANGUAGE_TAG.matches(it) },
         bool("upload.compressPhotos", SettingsScope.PLATFORM, SettingsKeys.COMPRESS_ON_UPLOAD),
         bool("upload.compressHdr", SettingsScope.PLATFORM, SettingsKeys.COMPRESS_HDR_PHOTOS),
@@ -274,9 +274,19 @@ internal object SettingsSyncRegistry {
 
     fun set(id: String): SyncSet? = setById[id]
 
-    /** Whether a setting of [scope] is taken from a copy written on [copyPlatform], by a device on [ownPlatform]. */
-    fun takes(scope: SettingsScope, copyPlatform: String, ownPlatform: String): Boolean =
-        scope == SettingsScope.SHARED || copyPlatform == ownPlatform
+    /**
+     * Whether a setting of [scope] is taken from a copy written by device [copyDeviceId] on [copyPlatform], by the
+     * install [ownDeviceId] on [ownPlatform]. A shared setting comes from any copy; a platform setting only from this
+     * install's own earlier copy.
+     */
+    fun takes(
+        scope: SettingsScope,
+        copyDeviceId: String,
+        copyPlatform: String,
+        ownDeviceId: String,
+        ownPlatform: String,
+    ): Boolean =
+        scope == SettingsScope.SHARED || (copyPlatform == ownPlatform && copyDeviceId == ownDeviceId)
 
     /** Every preference key a registry setting lives in, for the change watch. */
     val watchedKeys: List<Preferences.Key<*>> = scalars.map { it.key } + sets.map { it.key }
