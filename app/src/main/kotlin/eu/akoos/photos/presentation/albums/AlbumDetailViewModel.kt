@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -1648,7 +1649,7 @@ class AlbumDetailViewModel @Inject constructor(
                         // and Coil paints the new image without a cache bust.
                         val resolvedCover = _uiState.value.photos
                             .firstOrNull { it.linkId == coverLinkId }?.thumbnailUrl
-                            ?: java.io.File(java.io.File(context.cacheDir, "thumbnails"), "thumb_$coverLinkId.jpg")
+                            ?: java.io.File(java.io.File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(coverLinkId)}.jpg")
                                 .takeIf { it.exists() && it.length() > 0 }
                                 ?.let { "file://${it.absolutePath}" }
                         _uiState.update {

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -427,7 +428,7 @@ class AlbumService @Inject constructor(
             .filter { linkId ->
                 val cached = photoListingDao.getByLinkId(linkId)?.thumbnailUrl
                 if (cached != null && thumbnailHelpers.isCachedValid(cached)) return@filter false
-                val onDisk = File(thumbnailCacheDir, "thumb_$linkId.jpg")
+                val onDisk = File(thumbnailCacheDir, "thumb_${safeFileId(linkId)}.jpg")
                 !(onDisk.exists() && onDisk.length() > 0)
             }
         if (missingCoverIds.isNotEmpty()) {
@@ -707,7 +708,7 @@ class AlbumService @Inject constructor(
     /** Local thumbnail for a photo link: the DB row's URL (synced) or the on-disk cache (cloud-only). */
     private suspend fun thumbnailUrlForLink(linkId: String, thumbnailCacheDir: File): String? =
         photoListingDao.getByLinkId(linkId)?.thumbnailUrl
-            ?: File(thumbnailCacheDir, "thumb_$linkId.jpg")
+            ?: File(thumbnailCacheDir, "thumb_${safeFileId(linkId)}.jpg")
                 .takeIf { it.exists() && it.length() > 0 }
                 ?.let { "file://${it.absolutePath}" }
 
@@ -1069,7 +1070,7 @@ class AlbumService @Inject constructor(
             //   2. DB column file:// whose backing file is gone -> null it so the
             //      decrypt scheduler picks the row up on the next online refresh.
             //   3. DB column is a CDN URL with a valid disk file too -> prefer disk.
-            val cachedJpg = File(thumbnailCacheDir, "thumb_${photo.linkId}.jpg")
+            val cachedJpg = File(thumbnailCacheDir, "thumb_${safeFileId(photo.linkId)}.jpg")
             val diskHit = cachedJpg.exists() && cachedJpg.length() > 0L
             val currentUrl = photo.thumbnailUrl
             val resolvedUrl = when {

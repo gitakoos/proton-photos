@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -218,8 +219,8 @@ class PhotoDownloadService @Inject constructor(
         // Single-source-of-truth MIME→extension mapping (see util/MimeExtensions.kt for
         // the rationale — ExoPlayer / Coil rely on the suffix to infer container/codec).
         val ext = eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)
-        val outputFile = File(cacheDir, "${photo.linkId}.$ext")
-        val tempFile = File(cacheDir, "${photo.linkId}.$ext.tmp")
+        val outputFile = File(cacheDir, "${safeFileId(photo.linkId)}.$ext")
+        val tempFile = File(cacheDir, "${safeFileId(photo.linkId)}.$ext.tmp")
         // Atomic temp-rename: writes go to a `.tmp` sibling and only get renamed to
         // outputFile after the byte stream + manifest verification both finish. Without
         // this, a partial download from process death / network failure / mid-write
@@ -739,7 +740,7 @@ class PhotoDownloadService @Inject constructor(
         val decFile = blockDecFile(cacheDir, linkId, block.index)
         // Disambiguate the encrypted scratch file per-block so two coroutines on
         // adjacent blocks of the same linkId don't collide on the same enc_ path.
-        val encFile = File(cacheDir, "enc_${linkId}_${block.index}.bin")
+        val encFile = File(cacheDir, "enc_${safeFileId(linkId)}_${block.index}.bin")
         val decryptedBytes: ByteArray = if (sessionKey != null) {
             encFile.writeBytes(encBytes)
             val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, decFile) }
@@ -791,14 +792,14 @@ class PhotoDownloadService @Inject constructor(
     private data class BlockHashes(val encrypted: ByteArray, val decrypted: ByteArray)
 
     private fun blockDecFile(cacheDir: File, linkId: String, index: Int): File =
-        File(cacheDir, "dec_${linkId}_${index}.bin")
+        File(cacheDir, "dec_${safeFileId(linkId)}_${index}.bin")
 
     /** Deletes [linkId]'s resume state: every `dec_<linkId>_<index>.bin` (an exact name match, so another
      *  photo whose id starts the same is left alone) and its hash sidecar. */
     private fun dropBlockResumeState(cacheDir: File, linkId: String) {
         cacheDir.listFiles { _, name -> isBlockDecFileOf(name, linkId) }?.forEach { it.delete() }
         blockHashSidecar(cacheDir, linkId).delete()
-        File(cacheDir, "$linkId.hashes.tmp").delete()
+        File(cacheDir, "${safeFileId(linkId)}.hashes.tmp").delete()
     }
 
     /**
@@ -813,12 +814,12 @@ class PhotoDownloadService @Inject constructor(
      * bytes actually stored in `dec_*.bin` and can be recomputed locally on resume.
      */
     private fun blockHashSidecar(cacheDir: File, linkId: String): File =
-        File(cacheDir, "$linkId.hashes")
+        File(cacheDir, "${safeFileId(linkId)}.hashes")
 
     private fun writeBlockHashSidecar(cacheDir: File, linkId: String, hashes: List<BlockHashes>) {
         val sidecar = blockHashSidecar(cacheDir, linkId)
         try {
-            val tmp = File(cacheDir, "$linkId.hashes.tmp")
+            val tmp = File(cacheDir, "${safeFileId(linkId)}.hashes.tmp")
             // Two-step write: only rename a fully-written file into place so a process
             // death mid-write can never leave a half-line sidecar that would silently
             // corrupt the next resume's integrity check.
@@ -840,7 +841,7 @@ class PhotoDownloadService @Inject constructor(
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "writeBlockHashSidecar: $linkId failed: ${e.message}")
             // Best-effort cleanup of any partial write.
-            File(cacheDir, "$linkId.hashes.tmp").delete()
+            File(cacheDir, "${safeFileId(linkId)}.hashes.tmp").delete()
         }
     }
 
@@ -913,7 +914,7 @@ class PhotoDownloadService @Inject constructor(
             val ext = eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)
             if (ext.isEmpty()) return null
             val cacheDir = File(context.cacheDir, "fullres")
-            return File(cacheDir, "${photo.linkId}.$ext")
+            return File(cacheDir, "${safeFileId(photo.linkId)}.$ext")
         }
 
         /**
@@ -990,7 +991,7 @@ class PhotoDownloadService @Inject constructor(
 
 /** Whether [name] is one of [linkId]'s decrypted block files, `dec_<linkId>_<index>.bin`. */
 internal fun isBlockDecFileOf(name: String, linkId: String): Boolean {
-    val prefix = "dec_${linkId}_"
+    val prefix = "dec_${safeFileId(linkId)}_"
     if (!name.startsWith(prefix) || !name.endsWith(".bin")) return false
     val index = name.substring(prefix.length, name.length - ".bin".length)
     return index.isNotEmpty() && index.all { it.isDigit() }

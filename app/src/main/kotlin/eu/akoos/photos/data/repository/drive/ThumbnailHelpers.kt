@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -90,7 +91,7 @@ class ThumbnailHelpers @Inject constructor(
         fileName: String? = null,
     ): String? {
         return try {
-            val decFile = File(cacheDir, fileName ?: "thumb_$linkId.jpg")
+            val decFile = File(cacheDir, fileName ?: "thumb_${safeFileId(linkId)}.jpg")
             if (decFile.exists() && decFile.length() > 0) return "file://${decFile.absolutePath}"
 
             // DEBUG-only large-library simulator: a `simlocal://<seedIndex>` source resolves to a
@@ -125,8 +126,8 @@ class ThumbnailHelpers @Inject constructor(
                 // gallery scheduler racing PhotoEntityBuilder / AlbumService / the widget updater)
                 // never share a file; a shared name let one path delete the encrypted input while
                 // the other was still reading it inside the crypto.
-                val encFile = File.createTempFile("thumb_enc_${linkId}_", ".tmp", cacheDir)
-                val outFile = File.createTempFile("thumb_dec_${linkId}_", ".tmp", cacheDir)
+                val encFile = File.createTempFile("thumb_enc_${safeFileId(linkId)}_", ".tmp", cacheDir)
+                val outFile = File.createTempFile("thumb_dec_${safeFileId(linkId)}_", ".tmp", cacheDir)
                 try {
                     encFile.writeBytes(encryptedBytes)
                     val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, outFile) }

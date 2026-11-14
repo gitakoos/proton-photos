@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -422,7 +423,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 // Touch so a re-viewed thumbnail counts as young and survives LRU eviction —
                 // otherwise the warm-up's decrypt order, not actual use, decides what gets dropped.
                 runCatching {
-                    File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+                    File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
                         .setLastModified(System.currentTimeMillis())
                 }
             }
@@ -596,7 +597,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
      *  on disk, or null when no decrypt has produced it yet. Mirrors the cache path + URL
      *  shape [ThumbnailHelpers.downloadAndDecryptBinary] writes. */
     private fun cachedThumbnailUrl(linkId: String): String? {
-        val f = File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        val f = File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
         return if (f.exists() && f.length() > 0) "file://${f.absolutePath}" else null
     }
 
@@ -906,7 +907,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
             sessionKey = sessionKey,
             linkId = linkId,
             cacheDir = cacheDir,
-            fileName = "thumb_hd_$linkId.jpg",
+            fileName = "thumb_hd_${safeFileId(linkId)}.jpg",
         )
     }
 

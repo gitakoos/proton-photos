@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
@@ -126,7 +127,7 @@ class CloudPhotoReplacement(
         // The download lands in the full-res cache the viewer shares. One that was not there before stays
         // only as long as this replacement needs it, and one whose photo is gone (trashed below) goes with
         // it, so a batch of thousands never fills the phone with originals.
-        val cached = File(context.cacheDir, "fullres/${photo.linkId}.${mimeToFileExtension(photo.mimeType)}")
+        val cached = File(context.cacheDir, "fullres/${safeFileId(photo.linkId)}.${mimeToFileExtension(photo.mimeType)}")
         val wasCached = cached.exists()
         var replaced = false
         var newLinkId: String? = null

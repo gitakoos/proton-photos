@@ -88,11 +88,14 @@ object VaultZip {
     }
 
     /** [names] made unique inside one zip: a repeat gets " (2)", " (3)" before its extension. Blank
-     *  names become [fallback]. */
+     *  names become [fallback]. A name that is only dots would climb out of the extraction folder, so its
+     *  dots become underscores. */
     fun uniqueNames(names: List<String>, fallback: (index: Int) -> String): List<String> {
         val used = HashSet<String>()
         return names.mapIndexed { index, raw ->
-            val base = raw.trim().replace('/', '_').replace('\\', '_').ifBlank { fallback(index) }
+            val base = raw.trim().replace('/', '_').replace('\\', '_')
+                .let { if (it.isNotEmpty() && it.all { c -> c == '.' }) it.replace('.', '_') else it }
+                .ifBlank { fallback(index) }
             var candidate = base
             var n = 2
             while (!used.add(candidate.lowercase())) {

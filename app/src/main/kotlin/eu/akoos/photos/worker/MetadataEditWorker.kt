@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.worker
 
+import eu.akoos.photos.util.safeFileId
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -151,7 +152,7 @@ class MetadataEditWorker @AssistedInject constructor(
         // a blank that still draws a placeholder row. No decrypt or photo fetch here, just a cache probe.
         val items = initialRows.map { row ->
             row.deviceUri ?: run {
-                val thumb = java.io.File(context.cacheDir, "thumbnails/thumb_${row.linkId}.jpg")
+                val thumb = java.io.File(context.cacheDir, "thumbnails/thumb_${safeFileId(row.linkId)}.jpg")
                 if (thumb.exists()) android.net.Uri.fromFile(thumb).toString() else ""
             }
         }

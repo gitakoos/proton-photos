@@ -89,6 +89,13 @@ class VaultZipTest {
     }
 
     @Test
+    fun `entry names cannot climb out of the extraction folder`() {
+        val names = VaultZip.uniqueNames(listOf("..", ".", "../evil.jpg", "..\\evil.jpg", "a..b.jpg")) { "photo_$it" }
+        assertEquals(listOf("__", "_", ".._evil.jpg", ".._evil (2).jpg", "a..b.jpg"), names)
+        assertTrue(names.none { it == "." || it == ".." || it.contains('/') || it.contains('\\') })
+    }
+
+    @Test
     fun `the sealed password opens only with its own key`() {
         val gen = KeyGenerator.getInstance("AES").apply { init(256) }
         val key = gen.generateKey()

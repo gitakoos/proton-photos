@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.semantic
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -1059,10 +1060,10 @@ class SemanticIndexingScheduler @Inject constructor(
     }
 
     private fun cloudThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
 
     private fun cloudHdThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_hd_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_hd_${safeFileId(linkId)}.jpg")
 
     /** Power-of-two downsample that lands the decoded long edge in [SOURCE_MAX_EDGE, 2*SOURCE_MAX_EDGE):
      *  enough detail for the encoder without ever holding a full-resolution bitmap. */

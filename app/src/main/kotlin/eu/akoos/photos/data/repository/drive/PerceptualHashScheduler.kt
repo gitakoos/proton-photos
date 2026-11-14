@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -274,7 +275,7 @@ class PerceptualHashScheduler @Inject constructor(
     }
 
     private fun cloudThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
 
     private companion object {
         /** Worker pool size and concurrency bound. Bitmap decodes are light, so a small pool clears

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -1109,7 +1110,7 @@ class PhotoUploadService @Inject constructor(
         val localThumbnailUrl: String? = if (thumbnailBytes != null) {
             runCatching {
                 val thumbCacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
-                val thumbFile = File(thumbCacheDir, "thumb_$fileId.jpg")
+                val thumbFile = File(thumbCacheDir, "thumb_${safeFileId(fileId)}.jpg")
                 thumbFile.writeBytes(thumbnailBytes)
                 "file://${thumbFile.absolutePath}"
             }.getOrElse { e ->

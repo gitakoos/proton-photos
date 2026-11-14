@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -145,7 +146,7 @@ class AlbumSharingService @Inject constructor(
         val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
         if (coverLinkId != null) {
             photoListingDao.getByLinkId(coverLinkId)?.thumbnailUrl?.let { return it }
-            val file = File(thumbnailCacheDir, "thumb_$coverLinkId.jpg")
+            val file = File(thumbnailCacheDir, "thumb_${safeFileId(coverLinkId)}.jpg")
             if (file.exists() && file.length() > 0) return "file://${file.absolutePath}"
         }
         // Membership fallback: cross-account shares rewrite linkIds, so coverLinkId often
@@ -161,7 +162,7 @@ class AlbumSharingService @Inject constructor(
                     ?.thumbnailUrl
                 if (firstFromDb != null) return firstFromDb
                 for (mid in memberIds) {
-                    val file = File(thumbnailCacheDir, "thumb_$mid.jpg")
+                    val file = File(thumbnailCacheDir, "thumb_${safeFileId(mid)}.jpg")
                     if (file.exists() && file.length() > 0) return "file://${file.absolutePath}"
                 }
             }

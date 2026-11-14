@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.collage
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -68,7 +69,7 @@ class CollageBitmapSource @Inject constructor(
             is GalleryItem.LocalOnly -> decodeUri(Uri.parse(item.local.uri), maxPx)
             is GalleryItem.Synced -> decodeUri(Uri.parse(item.local.uri), maxPx)
             is GalleryItem.CloudOnly -> {
-                val cached = File(thumbnailDir, "thumb_${item.cloud.linkId}.jpg")
+                val cached = File(thumbnailDir, "thumb_${safeFileId(item.cloud.linkId)}.jpg")
                 if (cached.exists()) decodeFile(cached.absolutePath, maxPx, applyExif = false) else null
             }
         }
