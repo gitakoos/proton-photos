@@ -1900,8 +1900,8 @@
     <string name="settings_ai_indexing_paused_desc">Bis du fortsetzt, werden keine Fotos nach Gesichtern durchsucht.</string>
     <string name="settings_ai_indexing_wifi_desc">Die übrigen Fotos liegen nur in Drive und werden über WLAN geladen. Um über mobile Daten weiterzumachen, schalte „%1$s“ aus.</string>
     <string name="sdk_settings_title">Proton Drive SDK</string>
-    <string name="sdk_settings_row_desc">Teile der App mit Protons eigener Drive-Bibliothek ausprobieren</string>
-    <string name="sdk_settings_intro">Mit diesen Schaltern laufen Teile der App über Protons eigene Drive-Bibliothek statt über den eigenen Code der App. Sie werden gerade erprobt: Schlägt die Bibliothek fehl, erledigt die App dasselbe auf dem üblichen Weg, sodass nichts verloren geht. Jeder Schalter bleibt aus, bis du ihn einschaltest.</string>
+    <string name="sdk_settings_row_desc">Teile der App laufen über Protons eigene Drive-Bibliothek</string>
+    <string name="sdk_settings_intro">Mit diesen Schaltern laufen Teile der App über Protons eigene Drive-Bibliothek statt über den eigenen Code der App. Schlägt die Bibliothek fehl, erledigt die App dasselbe auf dem üblichen Weg, sodass nichts verloren geht.</string>
     <string name="sdk_route_tags">Tags und Favoriten</string>
     <string name="sdk_route_tags_desc">Herzen und Kategorien an Fotos in Drive</string>
     <string name="sdk_route_trash">Papierkorb und Wiederherstellen</string>

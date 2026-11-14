@@ -57,9 +57,9 @@ enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>) {
 
 /**
  * Decides, per [SdkRoute], whether an operation goes through the Drive SDK or the app's own requests. A
- * route runs through the SDK only on a device [SdkGate] clears and only while its switch is on, and an SDK
- * call that fails runs the app's own path instead, so turning a route on can never lose an operation the
- * app would otherwise have done.
+ * route runs through the SDK only on a device [SdkGate] clears and only while its switch is on (it is on
+ * until the user switches it off), and an SDK call that fails runs the app's own path instead, so turning a
+ * route on can never lose an operation the app would otherwise have done.
  */
 @Singleton
 class SdkRouting @Inject constructor(
@@ -69,9 +69,9 @@ class SdkRouting @Inject constructor(
     /** Whether this device can run the SDK at all. */
     val isCapable: Boolean get() = sdkGate.isCapable
 
-    /** The routes switched on, as stored. */
+    /** The routes switched on: every route the user has not switched off ([routeSwitchedOn]). */
     val switchedOn: Flow<Set<SdkRoute>> = context.settingsDataStore.data.map { prefs ->
-        SdkRoute.entries.filterTo(LinkedHashSet()) { prefs[it.key] == true }
+        SdkRoute.entries.filterTo(LinkedHashSet()) { routeSwitchedOn(prefs[it.key]) }
     }
 
     suspend fun setSwitchedOn(route: SdkRoute, on: Boolean) {
@@ -79,7 +79,7 @@ class SdkRouting @Inject constructor(
     }
 
     suspend fun isOn(route: SdkRoute): Boolean =
-        sdkGate.isCapable && context.settingsDataStore.data.first()[route.key] == true
+        sdkGate.isCapable && routeSwitchedOn(context.settingsDataStore.data.first()[route.key])
 
     /**
      * Runs [viaSdk] when [route] is on, else [fallback]. A failed SDK call is counted and [fallback] runs
@@ -90,6 +90,10 @@ class SdkRouting @Inject constructor(
     suspend fun <T> run(route: SdkRoute, viaSdk: suspend () -> T, on: Boolean = true, fallback: suspend () -> T): T =
         runRouted(route.label, on && isOn(route), viaSdk, fallback)
 }
+
+/** A route's switch as stored: on until the user switches it off, so a route nobody has touched runs
+ *  through the SDK, and only an explicit off keeps it on the app's own path. */
+internal fun routeSwitchedOn(stored: Boolean?): Boolean = stored ?: true
 
 /** [SdkRouting.run] with the switch already read, apart from Android so it is tested directly. */
 internal suspend fun <T> runRouted(

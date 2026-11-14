@@ -1935,8 +1935,8 @@
     <string name="settings_ai_indexing_paused_desc">Le foto non vengono analizzate per trovare volti finché non riprendi.</string>
     <string name="settings_ai_indexing_wifi_desc">Le foto rimaste sono solo su Drive e si scaricano con il Wi-Fi. Per continuare con i dati mobili, disattiva «%1$s».</string>
     <string name="sdk_settings_title">Proton Drive SDK</string>
-    <string name="sdk_settings_row_desc">Provare la libreria Drive di Proton per alcune parti dell\'app</string>
-    <string name="sdk_settings_intro">Questi interruttori fanno passare alcune parti dell\'app dalla libreria Drive di Proton invece che dal codice dell\'app. Sono in prova: se la libreria non riesce, l\'app fa la stessa cosa nel modo consueto, quindi non si perde nulla. Ogni interruttore resta spento finché non lo accendi.</string>
+    <string name="sdk_settings_row_desc">Alcune parti dell\'app passano dalla libreria Drive di Proton</string>
+    <string name="sdk_settings_intro">Questi interruttori fanno passare alcune parti dell\'app dalla libreria Drive di Proton invece che dal codice dell\'app. Se la libreria non riesce, l\'app fa la stessa cosa nel modo consueto, quindi non si perde nulla.</string>
     <string name="sdk_route_tags">Tag e preferiti</string>
     <string name="sdk_route_tags_desc">Cuori e categorie sulle foto in Drive</string>
     <string name="sdk_route_trash">Cestino e ripristino</string>

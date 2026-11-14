@@ -2005,8 +2005,8 @@
     <string name="settings_ai_indexing_paused_desc">Fotky sa na tváre neprehľadávajú, kým nebudete pokračovať.</string>
     <string name="settings_ai_indexing_wifi_desc">Zvyšné fotky sú len na Drive a sťahujú sa cez Wi-Fi. Ak chcete pokračovať cez mobilné dáta, vypnite „%1$s“.</string>
     <string name="sdk_settings_title">Proton Drive SDK</string>
-    <string name="sdk_settings_row_desc">Vyskúšať knižnicu Drive od Protonu pre časti aplikácie</string>
-    <string name="sdk_settings_intro">Tieto prepínače nechajú časti aplikácie bežať cez knižnicu Drive od Protonu namiesto vlastného kódu aplikácie. Skúšajú sa: ak knižnica zlyhá, aplikácia urobí to isté obvyklým spôsobom, takže sa nič nestratí. Každý prepínač zostane vypnutý, kým ho nezapnete.</string>
+    <string name="sdk_settings_row_desc">Časti aplikácie bežia cez knižnicu Drive od Protonu</string>
+    <string name="sdk_settings_intro">Tieto prepínače nechajú časti aplikácie bežať cez knižnicu Drive od Protonu namiesto vlastného kódu aplikácie. Ak knižnica zlyhá, aplikácia urobí to isté obvyklým spôsobom, takže sa nič nestratí.</string>
     <string name="sdk_route_tags">Štítky a obľúbené</string>
     <string name="sdk_route_tags_desc">Srdiečka a kategórie pri fotkách na Drive</string>
     <string name="sdk_route_trash">Kôš a obnovenie</string>

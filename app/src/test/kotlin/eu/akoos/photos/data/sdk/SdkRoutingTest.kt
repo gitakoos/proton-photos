@@ -43,6 +43,17 @@ class SdkRoutingTest {
     fun reset() = SdkDiagnostics.clear()
 
     @Test
+    fun `a route nobody has switched is on`() {
+        assertTrue(routeSwitchedOn(null))
+    }
+
+    @Test
+    fun `a route switched off stays off and one switched on stays on`() {
+        assertEquals(false, routeSwitchedOn(false))
+        assertTrue(routeSwitchedOn(true))
+    }
+
+    @Test
     fun `a route switched off runs only the app's own path`() = runTest {
         var sdkCalls = 0
         val result = runRouted("tags", on = false, viaSdk = { sdkCalls++; "sdk" }, fallback = { "own" })

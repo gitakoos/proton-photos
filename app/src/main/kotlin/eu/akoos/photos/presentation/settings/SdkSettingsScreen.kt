@@ -121,7 +121,7 @@ class SdkSettingsViewModel @Inject constructor(
     private val routing: SdkRouting,
 ) : ViewModel() {
     val switchedOn: StateFlow<Set<SdkRoute>> =
-        routing.switchedOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+        routing.switchedOn.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SdkRoute.entries.toSet())
 
     fun setSwitchedOn(route: SdkRoute, on: Boolean) {
         viewModelScope.launch { routing.setSwitchedOn(route, on) }
