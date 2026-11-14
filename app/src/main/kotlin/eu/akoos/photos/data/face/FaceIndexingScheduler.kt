@@ -36,6 +36,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.clearForUser
+import eu.akoos.photos.data.ml.backgroundMlThreadFactory
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -657,9 +658,7 @@ class FaceIndexingScheduler @Inject constructor(
      *  [Dispatchers.Default] (shared with Compose) and [Dispatchers.IO] (the load path) means a systematic
      *  wedge starves neither the UI nor the loads. Elastic, so a fresh run always gets a thread while an
      *  abandoned one lingers; idle threads are reclaimed. */
-    private val mlDispatcher = Executors.newCachedThreadPool { r ->
-        Thread(r, "face-ml").apply { isDaemon = true }
-    }.asCoroutineDispatcher()
+    private val mlDispatcher = Executors.newCachedThreadPool(backgroundMlThreadFactory("face-ml")).asCoroutineDispatcher()
 
     /** Caps how many cloud full-res downloads run at once. A few in parallel is the same shape the
      *  photo download path already uses, and overlapping them is what makes a cloud scan keep pace

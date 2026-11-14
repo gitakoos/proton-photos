@@ -72,7 +72,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -148,7 +150,8 @@ internal fun PhotoGrid(
     offlinePinIds: Set<String> = emptySet(),
     // linkId → freshly-decrypted thumbnail URL from ThumbnailUrlStore. A cloud cell reads its own entry
     // so a decrypt landing mid-scroll repaints only that tile (the timeline model no longer re-emits).
-    thumbnailUrls: Map<String, String> = emptyMap(),
+    // A State, read only inside cell scopes, so the grid body does not recompose per decrypt.
+    thumbnailUrls: State<Map<String, String>> = EMPTY_THUMBNAIL_URLS,
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
     denseGridWarningDismissed: Boolean = false,
@@ -234,9 +237,9 @@ internal fun PhotoGrid(
     val pendingCloudLinkIdOf: (GalleryItem) -> String? = { item ->
         when (item) {
             is GalleryItem.CloudOnly -> item.cloud.linkId
-                .takeIf { thumbnailUrls[it] == null && item.cloud.thumbnailUrl == null }
+                .takeIf { thumbnailUrls.value[it] == null && item.cloud.thumbnailUrl == null }
             is GalleryItem.Synced    -> item.cloud.linkId
-                .takeIf { thumbnailUrls[it] == null && item.cloud.thumbnailUrl == null }
+                .takeIf { thumbnailUrls.value[it] == null && item.cloud.thumbnailUrl == null }
             is GalleryItem.LocalOnly -> null
         }
     }
@@ -615,7 +618,7 @@ internal fun PhotoGrid(
                 // The freshly-decrypted URL for this cell's cloud row, read from the store map. Reading
                 // it per-cell (rather than passing the whole map to PhotoCell) keeps the cell skippable:
                 // only cells whose own URL changed re-run this remember and rebind.
-                val cellThumbUrl = cloudId?.let { thumbnailUrls[it] }
+                val cellThumbUrl by remember(cloudId, thumbnailUrls) { derivedStateOf { cloudId?.let { thumbnailUrls.value[it] } } }
                 // PhotoCell's inputs are resolved to primitives here in item scope so the cell stays
                 // skippable: an unstable Set/GalleryItem param would force EVERY visible cell to
                 // recompose on any selection toggle or thumbnail-decrypt re-emission.
@@ -722,6 +725,9 @@ private suspend fun visibleRangeDecrypt(
     }
 }
 
+/** Default for [PhotoGrid]'s URL map: a grid with no store behind it shows only the URLs its rows carry. */
+private val EMPTY_THUMBNAIL_URLS: State<Map<String, String>> = mutableStateOf(emptyMap())
+
 /** Clamp band for a mosaic tile's aspect ratio, kept to a moderate portrait-to-landscape range (2:3 to
  *  3:2). The staggered grid packs into whichever lane is shortest and a date header re-levels the lanes,
  *  so an extreme panorama or sliver tile leaves the neighbouring lanes far behind and opens a large gap
@@ -778,7 +784,7 @@ private fun MosaicPhotoGrid(
     downloadedCloudLinkIds: Set<String>,
     favoriteIds: Set<String>,
     offlinePinIds: Set<String>,
-    thumbnailUrls: Map<String, String>,
+    thumbnailUrls: State<Map<String, String>>,
     keyOf: (GalleryItem) -> String,
     indexByKey: GalleryKeyIndex,
     dragSelectModifier: Modifier,
@@ -869,7 +875,7 @@ private fun MosaicPhotoGrid(
                     contentType = { "photo" },
                 ) { item ->
                     val cloudId = cloudLinkIdOfMosaic(item)
-                    val cellThumbUrl = cloudId?.let { thumbnailUrls[it] }
+                    val cellThumbUrl by remember(cloudId, thumbnailUrls) { derivedStateOf { cloudId?.let { thumbnailUrls.value[it] } } }
                     val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl) {
                         photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl)
                     }

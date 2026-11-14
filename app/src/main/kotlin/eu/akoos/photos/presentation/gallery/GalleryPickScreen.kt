@@ -150,7 +150,7 @@ fun GalleryPickScreen(
     singlePick: Boolean = false,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val thumbnailUrls by viewModel.thumbnailUrls.collectAsStateWithLifecycle()
+    val thumbnailUrls = viewModel.thumbnailUrls.collectAsStateWithLifecycle()
     val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val appColors = AppColors.current

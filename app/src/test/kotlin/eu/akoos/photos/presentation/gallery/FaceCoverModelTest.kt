@@ -40,14 +40,14 @@ class FaceCoverModelTest {
 
     @Test
     fun `a cloud cover without a thumbnail is asked for, one with a thumbnail is not`() {
-        assertEquals(linkId, coverKeyToRequest(linkId, emptyMap()))
-        assertNull(coverKeyToRequest(linkId, mapOf(linkId to "file:///cache/thumbnails/thumb_x.jpg")))
+        assertEquals(linkId, coverKeyToRequest(linkId, null))
+        assertNull(coverKeyToRequest(linkId, "file:///cache/thumbnails/thumb_x.jpg"))
     }
 
     @Test
     fun `a device photo and a missing cover never ask the cloud`() {
-        assertNull(coverKeyToRequest(deviceUri, emptyMap()))
-        assertNull(coverKeyToRequest(null, emptyMap()))
+        assertNull(coverKeyToRequest(deviceUri, null))
+        assertNull(coverKeyToRequest(null, null))
         assertTrue(isCloudPhotoKey(linkId))
         assertFalse(isCloudPhotoKey(deviceUri))
         assertFalse(isCloudPhotoKey("file:///data/vault/a.jpg"))

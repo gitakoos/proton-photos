@@ -41,6 +41,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.math.sqrt
+import eu.akoos.photos.data.ml.BACKGROUND_ML_INTRA_OP_THREADS
 
 /**
  * Turns one aligned face crop into a [DIM]-d embedding by running the GhostFaceNet recognition
@@ -73,6 +74,7 @@ class FaceEmbedder(
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
 
     private val sessionOptions = OrtSession.SessionOptions().apply {
+        setIntraOpNumThreads(BACKGROUND_ML_INTRA_OP_THREADS)
         // Full graph optimizations over the default BASIC level; still CPU + fp32, so the calibrated
         // thresholds are unaffected. XNNPACK is not built into this Runtime package (requesting it aborts
         // at session creation), so the default CPU kernels run.

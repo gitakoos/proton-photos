@@ -396,7 +396,9 @@ fun GalleryScreen(
     val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
     // Fresh per-cell decrypted thumbnail URLs (see GalleryViewModel.thumbnailUrls). The timeline model
     // no longer carries them on the row, so the grid resolves each cloud cell's URL from this map.
-    val thumbnailUrls by viewModel.thumbnailUrls.collectAsStateWithLifecycle()
+    // Held as a State and read only inside the grid's cell scopes, so a decrypt landing does not
+    // recompose this screen.
+    val thumbnailUrls = viewModel.thumbnailUrls.collectAsStateWithLifecycle()
     val albumsViewModel: AlbumsViewModel = hiltViewModel()
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()

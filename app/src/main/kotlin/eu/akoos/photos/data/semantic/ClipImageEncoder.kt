@@ -29,6 +29,7 @@ import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import android.graphics.Bitmap
 import eu.akoos.photos.domain.usecase.normalize
+import eu.akoos.photos.data.ml.BACKGROUND_ML_INTRA_OP_THREADS
 import java.io.File
 import java.nio.FloatBuffer
 import kotlin.math.max
@@ -55,6 +56,7 @@ class ClipImageEncoder(private val modelFile: File) : AutoCloseable {
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
 
     private val sessionOptions = OrtSession.SessionOptions().apply {
+        setIntraOpNumThreads(BACKGROUND_ML_INTRA_OP_THREADS)
         // BASIC, not ALL_OPT: the extended transformer fusions rewrite this fp16 model's GELU into a
         // com.microsoft.Gelu contrib op, and the mobile Runtime's CPU provider has no fp16 kernel for it
         // (ORT_NOT_IMPLEMENTED at run time, so every embed fails). BASIC leaves the model's own ops, which

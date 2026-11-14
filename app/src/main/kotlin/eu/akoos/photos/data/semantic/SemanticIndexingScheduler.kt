@@ -36,6 +36,7 @@ import eu.akoos.photos.crypto.DecryptPriority
 import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.ml.backgroundMlThreadFactory
 import eu.akoos.photos.data.db.entity.ImageEmbeddingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -312,9 +313,7 @@ class SemanticIndexingScheduler @Inject constructor(
      *  stays wedged in an uncancellable native call and keeps its thread; keeping those off
      *  [Dispatchers.Default] and [Dispatchers.IO] means a systematic wedge starves neither the UI nor the
      *  loads. Elastic, so a fresh run always gets a thread while an abandoned one lingers. */
-    private val mlDispatcher = Executors.newCachedThreadPool { r ->
-        Thread(r, "semantic-ml").apply { isDaemon = true }
-    }.asCoroutineDispatcher()
+    private val mlDispatcher = Executors.newCachedThreadPool(backgroundMlThreadFactory("semantic-ml")).asCoroutineDispatcher()
 
     /** Caps how many cloud full-res downloads run at once, the same shape the face walk and the photo
      *  download path use, kept separate from [mlLock] so the downloads overlap the serialised inference. */
