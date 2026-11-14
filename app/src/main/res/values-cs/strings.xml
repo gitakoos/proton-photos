@@ -1941,6 +1941,9 @@
     <string name="settings_ai_ocr_remove_keep">Ponechat</string>
     <string name="settings_ai_face_toggle">Rozpoznávání obličejů</string>
     <string name="settings_ai_face_desc">Seskupí fotografie podle osob na nich, v tomto telefonu</string>
+    <string name="settings_face_scan_here">Rozpoznávání obličejů v tomto telefonu</string>
+    <string name="settings_face_scan_here_desc">Prochází fotografie v tomto telefonu a seskupuje je podle osob na nich</string>
+    <string name="settings_face_names_need_scan">Vaše druhé zařízení používá jiný model obličejů, a proto se přenesla jen jména. Zapněte zde rozpoznávání obličejů, aby se k nim přiřadila.</string>
     <string name="settings_ai_face_downloading">Stahování…</string>
     <string name="settings_ai_face_download_failed">Model obličejů se nepodařilo stáhnout.</string>
     <string name="settings_ai_face_download_retry">Opětovným zapnutím přepínače to zkuste znovu.</string>

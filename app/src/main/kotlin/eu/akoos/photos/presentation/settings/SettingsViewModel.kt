@@ -75,6 +75,7 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
 import eu.akoos.photos.data.face.FaceModelAssets
+import eu.akoos.photos.data.face.FaceReattachSnapshot
 import eu.akoos.photos.data.face.FaceIndexingProgress
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
@@ -402,6 +403,26 @@ class SettingsViewModel @Inject constructor(
     val faceCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId -> faceDao.observeFaceCountForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
+
+    private val faceNamesCheck = MutableStateFlow(0)
+
+    /** Whether the shared backup brought names this phone cannot put on faces yet: the scan is off while
+     *  the shared backup is on and names wait in the reattach file. A snapshot from a device with another
+     *  face model stages only its names there, and they land once this phone scans. Re-read on every
+     *  entry to the face page ([resumeFaceIndexingIfNeeded]). */
+    val faceNamesNeedScan: StateFlow<Boolean> = combine(
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+            .distinctUntilChanged(),
+        context.settingsDataStore.data.map { it[SettingsKeys.SHARED_BACKUP_ENABLED] == true }.distinctUntilChanged(),
+        faceNamesCheck,
+    ) { scanning, backupOn, _ -> !scanning && backupOn }
+        .map { possible ->
+            possible && withContext(Dispatchers.IO) {
+                FaceReattachSnapshot.stamp(FaceReattachSnapshot.file(File(context.filesDir, FaceModelAssets.DIRECTORY))) != null
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
      *  dropped, matching how the People rail maps them. */
@@ -1717,6 +1738,7 @@ class SettingsViewModel @Inject constructor(
      * no-op. Guest-safe: a null userId scans the local partition, exactly like the gallery's guest kick.
      */
     fun resumeFaceIndexingIfNeeded() {
+        faceNamesCheck.update { it + 1 }
         viewModelScope.launch {
             try {
                 val prefs = context.settingsDataStore.data.first()

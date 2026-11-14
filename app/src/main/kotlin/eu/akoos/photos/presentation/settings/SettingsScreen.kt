@@ -1217,6 +1217,7 @@ fun FaceRecognitionScreen(
     val faceMlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
     val faceGroups by viewModel.faceGroups.collectAsStateWithLifecycle()
     val faceCount by viewModel.faceCount.collectAsStateWithLifecycle()
+    val faceNamesNeedScan by viewModel.faceNamesNeedScan.collectAsStateWithLifecycle()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
@@ -1231,7 +1232,7 @@ fun FaceRecognitionScreen(
         // place, and a switched-on feature whose model is gone says so rather than looking as if it works.
         SettingsCard {
             ToggleRow(
-                label = stringResource(R.string.settings_ai_face_toggle),
+                label = stringResource(R.string.settings_face_scan_here),
                 description = when {
                     state.faceModelDownloading ->
                         stringResource(R.string.settings_ai_face_downloading)
@@ -1239,7 +1240,7 @@ fun FaceRecognitionScreen(
                         stringResource(R.string.settings_ai_face_download_failed)
                     state.faceEnabled && !state.faceRecognitionAvailable ->
                         stringResource(R.string.settings_ai_face_model_missing)
-                    else -> stringResource(R.string.settings_ai_face_desc)
+                    else -> stringResource(R.string.settings_face_scan_here_desc)
                 },
                 checked = state.faceEnabled,
                 onCheckedChange = viewModel::setFaceEnabled,
@@ -1284,13 +1285,22 @@ fun FaceRecognitionScreen(
             }
         }
 
-        // Status, maintenance, transfer and excluded faces only make sense once the scan is switched on,
-        // so they stay hidden while face recognition is off.
-        if (state.faceEnabled) {
+        // The people card shows whenever people exist, also with the scan off, since another device's
+        // people come through the shared backup. When only their names came over, the line below says why
+        // no face carries them yet.
+        if (faceNamesNeedScan) {
+            Text(
+                text = stringResource(R.string.settings_face_names_need_scan),
+                color = colors.fgMute,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
+            )
+        }
+        if (state.faceEnabled || faceGroups.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             FaceStatusCard(
                 ui = faceUi,
-                paused = faceScanPausedRow(facePauseSwitch, faceUi.state),
+                paused = state.faceEnabled && faceScanPausedRow(facePauseSwitch, faceUi.state),
                 groups = faceGroups,
                 faceCount = faceCount,
                 // Running state but the semantic walk holds the shared model gate = standing by behind it.
@@ -1300,6 +1310,11 @@ fun FaceRecognitionScreen(
                 onResume = viewModel::resumeFaceIndexing,
                 onOpenPerson = onOpenPerson,
             )
+        }
+
+        // Maintenance, transfer and excluded faces only make sense once the scan is switched on, so they
+        // stay hidden while face recognition is off.
+        if (state.faceEnabled) {
             Spacer(Modifier.height(20.dp))
             SettingsCard {
                 ToggleRow(

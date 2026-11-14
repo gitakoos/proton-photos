@@ -247,6 +247,7 @@ private const val NO_PERSON = -1L
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val peopleVisibility: eu.akoos.photos.presentation.people.PeopleVisibility,
     private val cloudRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
     private val deletePhotoUseCase: DeletePhotoUseCase,
@@ -753,6 +754,12 @@ class PhotoViewerViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Whether the people already known on a photo are shown (name chips, the People row of the details):
+     *  while this phone scans, or when the account holds people from elsewhere ([PeopleVisibility]). Reading
+     *  them needs no face model, unlike detecting faces on demand, which stays behind [faceEnabled]. */
+    val peopleVisible: StateFlow<Boolean> = peopleVisibility.visible()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** One person the face index found on the photo now on screen, for the "people in this photo" bar.
      *  [faceBox] is the 0..1 crop of this photo, so the chip shows the person's face from this frame. */
     data class ViewerPerson(
@@ -803,8 +810,7 @@ class PhotoViewerViewModel @Inject constructor(
         peopleJob?.cancel()
         peopleJob = viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
-            val prefs = context.settingsDataStore.data.first()
-            val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+            val aiOn = peopleVisibility.visible().first()
             val people: List<ViewerPerson> =
                 if (!aiOn) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
             // resolvePeople turns a failed read into an empty list, a cancelled one included, so a read

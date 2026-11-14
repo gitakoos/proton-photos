@@ -122,7 +122,7 @@ class HiddenPeopleDbTest {
     }
 
     private fun hiddenPeople() =
-        HiddenPeople(accounts, mockk(relaxed = true), mockk(relaxed = true), show, scheduler, undoController, context)
+        HiddenPeople(accounts, mockk(relaxed = true), mockk(relaxed = true), show, scheduler, undoController, mockk(relaxed = true))
 
     @Test
     fun `showing a hidden named person needs no regroup and offers the undo`() = runBlocking {

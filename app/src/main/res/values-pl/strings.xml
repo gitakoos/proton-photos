@@ -1933,6 +1933,9 @@
     <string name="settings_ai_ocr_remove_keep">Zachowaj</string>
     <string name="settings_ai_face_toggle">Rozpoznawanie twarzy</string>
     <string name="settings_ai_face_desc">Grupuje zdjęcia według osób, które są na nich widoczne, na tym telefonie</string>
+    <string name="settings_face_scan_here">Rozpoznawanie twarzy na tym telefonie</string>
+    <string name="settings_face_scan_here_desc">Przegląda zdjęcia na tym telefonie i grupuje je według osób, które są na nich widoczne</string>
+    <string name="settings_face_names_need_scan">Twoje drugie urządzenie używa innego modelu twarzy, więc przeniosły się tylko nazwiska. Włącz tutaj rozpoznawanie twarzy, aby je dopasować.</string>
     <string name="settings_ai_face_downloading">Pobieranie…</string>
     <string name="settings_ai_face_download_failed">Nie udało się pobrać modelu twarzy.</string>
     <string name="settings_ai_face_download_retry">Włącz przełącznik ponownie, aby spróbować jeszcze raz.</string>

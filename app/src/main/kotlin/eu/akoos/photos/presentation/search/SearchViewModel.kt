@@ -104,6 +104,7 @@ import eu.akoos.photos.util.retryOnDbTear
 import java.util.Calendar
 import java.util.Locale
 import javax.inject.Inject
+import eu.akoos.photos.presentation.people.PeopleVisibility
 
 /**
  * An album or device folder a search is narrowed to, shown as a pill in the field. [key] is `c:<linkId>`
@@ -155,6 +156,7 @@ class SearchViewModel @Inject constructor(
     private val albumMembershipDao: AlbumPhotoMembershipDao,
     private val labelRepo: PhotoLabelRepository,
     private val placeIndex: PhotoPlaceIndex,
+    private val peopleVisibility: PeopleVisibility,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -195,11 +197,8 @@ class SearchViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    /** The AI master + face toggles both on, the one gate [faceEnabled], [people] and
-     *  [peopleSuggestions] share. */
-    private val faceSwitchesOn: Flow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-        .distinctUntilChanged()
+    /** The AI master + face toggles both on: this phone scans for faces, the gate of [faceEnabled]. */
+    private val faceSwitchesOn: Flow<Boolean> = peopleVisibility.scanningHere()
 
     /** Whether on-device face grouping is switched on (the AI master + face toggles). Drives the
      *  People entry card and the selection's Add to person, both independent of sign-in, so a
@@ -494,7 +493,7 @@ class SearchViewModel @Inject constructor(
      * off, like [people].
      */
     val peopleSuggestions: StateFlow<List<PersonUi>> = combine(
-        faceSwitchesOn,
+        peopleVisibility.visible(),
         accountManager.getPrimaryUserId(),
     ) { faceOn, userId -> faceOn to userId }
         .flatMapLatest { (faceOn, userId) ->
@@ -515,7 +514,7 @@ class SearchViewModel @Inject constructor(
      *  independent of the query. Gated on the AI + face flags, so an ML-off session shows no chip; a
      *  local-only session surfaces its own named people. Mirrors the timeline's people rail. */
     val people: StateFlow<List<PersonUi>> = combine(
-        faceSwitchesOn,
+        peopleVisibility.visible(),
         accountManager.getPrimaryUserId(),
     ) { aiOn, userId -> aiOn to userId }
         .flatMapLatest { (aiOn, userId) ->
@@ -545,27 +544,26 @@ class SearchViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** What decides which shortcut tiles a name can reach: the Albums tab's own order and hidden set,
-     *  and whether face grouping is on, the gate the People tile has there. */
-    private data class TileSettings(val order: String?, val hidden: Set<String>, val faceOn: Boolean)
+     *  the People tile's own visibility is read separately ([PeopleVisibility]). */
+    private data class TileSettings(val order: String?, val hidden: Set<String>)
 
     private val tileSettings: Flow<TileSettings> = context.settingsDataStore.data
         .map {
             TileSettings(
                 order = it[SettingsKeys.ALBUMS_TILE_ORDER],
                 hidden = it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet(),
-                faceOn = it[SettingsKeys.FACE_ENABLED] ?: false,
             )
         }
         .distinctUntilChanged()
 
     /** The shortcut tiles the typed query names, offered under the same rules the Albums tab shows them
-     *  by: its order, a tile the user hid stays out, People needs face grouping, and Shared and Offline
+     *  by: its order, a tile the user hid stays out, People needs the people surfaces shown, and Shared and Offline
      *  need an account. Empty while the query is blank. */
     val destinations: StateFlow<List<LibraryTile>> =
-        combine(debouncedQuery, localizedText, tileSettings, isSignedIn) { q, text, settings, signedIn ->
+        combine(debouncedQuery, localizedText, tileSettings, isSignedIn, peopleVisibility.visible()) { q, text, settings, signedIn, peopleShown ->
             val offered = resolveTileOrder(settings.order).filter { tile ->
                 tile.name !in settings.hidden && when (tile) {
-                    LibraryTile.People -> settings.faceOn
+                    LibraryTile.People -> peopleShown
                     LibraryTile.Shared, LibraryTile.Offline -> signedIn
                     else -> true
                 }

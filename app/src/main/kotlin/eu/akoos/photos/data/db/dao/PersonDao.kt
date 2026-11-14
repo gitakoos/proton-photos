@@ -174,6 +174,10 @@ interface PersonDao {
     @Query("SELECT COUNT(*) FROM person WHERE userId = :userId")
     suspend fun countForUser(userId: String): Int
 
+    /** The same count, live, for a surface that appears once the account holds any person (hidden ones included). */
+    @Query("SELECT COUNT(*) FROM person WHERE userId = :userId")
+    fun observeCountForUser(userId: String): Flow<Int>
+
     /** How many of the account's people carry a name (the Unsorted bucket never counts), for the diagnostics. */
     @Query(
         "SELECT COUNT(*) FROM person WHERE userId = :userId AND isOther = 0 " +

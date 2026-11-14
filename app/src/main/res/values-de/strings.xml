@@ -1838,6 +1838,9 @@
     <string name="settings_ai_ocr_remove_keep">Behalten</string>
     <string name="settings_ai_face_toggle">Gesichtserkennung</string>
     <string name="settings_ai_face_desc">Fotos nach den Personen darauf gruppieren, auf diesem Telefon</string>
+    <string name="settings_face_scan_here">Gesichtserkennung auf diesem Telefon</string>
+    <string name="settings_face_scan_here_desc">Durchsucht die Fotos auf diesem Telefon und gruppiert sie nach den Personen darauf</string>
+    <string name="settings_face_names_need_scan">Dein anderes Gerät verwendet ein anderes Gesichtsmodell, deshalb sind nur die Namen angekommen. Schalte die Gesichtserkennung hier ein, um sie zuzuordnen.</string>
     <string name="settings_ai_face_downloading">Wird heruntergeladen…</string>
     <string name="settings_ai_face_download_failed">Das Gesichtsmodell konnte nicht heruntergeladen werden.</string>
     <string name="settings_ai_face_download_retry">Schalter erneut einschalten, um es noch einmal zu versuchen.</string>

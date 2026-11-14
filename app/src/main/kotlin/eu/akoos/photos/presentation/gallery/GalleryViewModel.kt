@@ -123,6 +123,7 @@ import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.SyncWorker
 import java.util.Date
 import javax.inject.Inject
+import eu.akoos.photos.presentation.people.PeopleVisibility
 
 /** Internal bag for the flows the gallery `combine` chain produces. Lives at top
  *  level so distinctUntilChanged downstream can do structural equality on it. */
@@ -234,6 +235,7 @@ internal class UploadEndHold(
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val peopleVisibility: PeopleVisibility,
     private val sameNamedPeopleMerge: eu.akoos.photos.domain.usecase.SameNamedPeopleMerge,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
@@ -663,9 +665,7 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observePeople() {
         val peopleFlow = combine(
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-                .distinctUntilChanged(),
+            peopleVisibility.visible(),
             accountManager.getPrimaryUserId(),
         ) { aiOn, userId -> aiOn to userId }
             .flatMapLatest { (aiOn, userId) ->

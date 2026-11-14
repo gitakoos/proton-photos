@@ -155,6 +155,7 @@ data class AlbumsUiState(
 @HiltViewModel
 class AlbumsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    peopleVisibility: eu.akoos.photos.presentation.people.PeopleVisibility,
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
     private val localMediaRepo: LocalMediaRepository,
@@ -167,6 +168,11 @@ class AlbumsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
     val uiState: StateFlow<AlbumsUiState> = _uiState.asStateFlow()
+
+    /** Whether the People tile is offered: this phone scans for faces, or the account already holds people
+     *  ([eu.akoos.photos.presentation.people.PeopleVisibility]). */
+    val peopleVisible: StateFlow<Boolean> = peopleVisibility.visible()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Whether a Proton account is signed in. A local-only session has no Drive to back up to, so the
      *  device-folder drawer drops its cloud rows. Defaults to signed-in so nothing flickers before the

@@ -64,6 +64,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import java.util.Calendar
 import javax.inject.Inject
+import eu.akoos.photos.presentation.people.PeopleVisibility
 
 /** A meteorological-season bucket — every item shot in one season-year, newest cover first. */
 data class SeasonBucket(
@@ -103,6 +104,7 @@ class MemoriesViewModel @Inject constructor(
     accountManager: AccountManager,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val thumbnailUrlStore: ThumbnailUrlStore,
+    private val peopleVisibility: PeopleVisibility,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -120,9 +122,7 @@ class MemoriesViewModel @Inject constructor(
                 val memories = combine(getGalleryItems.invokeLocalOnly(), context.onThisDayWindowDays()) { all, days ->
                     MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all, days), seasons = buckets(all))
                 }
-                val people = context.settingsDataStore.data
-                    .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-                    .distinctUntilChanged()
+                val people = peopleVisibility.visible()
                     .flatMapLatest { enabled ->
                         if (!enabled) flowOf(emptyList<PersonUi>())
                         else observePeopleUseCase(null, getGalleryItems.invokeLocalOnly())
@@ -138,9 +138,7 @@ class MemoriesViewModel @Inject constructor(
                 // People show in the Collection only with AI on, the same opt-in the rest of the
                 // grouping honours; the face crop needs the feed's original dimensions, so the use
                 // case is handed the same library flow.
-                val people = context.settingsDataStore.data
-                    .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-                    .distinctUntilChanged()
+                val people = peopleVisibility.visible()
                     .flatMapLatest { enabled ->
                         if (!enabled) flowOf(emptyList<PersonUi>())
                         else observePeopleUseCase(userId, getGalleryItems.invoke(userId))

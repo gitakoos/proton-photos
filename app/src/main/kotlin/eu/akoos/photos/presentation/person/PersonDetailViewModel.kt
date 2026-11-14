@@ -83,6 +83,7 @@ import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.toPersonUi
 import eu.akoos.photos.util.FaceDiagnostics
 import javax.inject.Inject
+import eu.akoos.photos.presentation.people.PeopleVisibility
 
 private const val TAG = "PersonDetailVM"
 
@@ -140,6 +141,7 @@ class PersonDetailViewModel @Inject constructor(
     private val faceEdits: eu.akoos.photos.data.face.FaceEditCounter,
     private val personCentroids: PersonCentroids,
     private val selectionFactory: eu.akoos.photos.presentation.common.GalleryItemSelectionController.Factory,
+    private val peopleVisibility: PeopleVisibility,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -216,9 +218,9 @@ class PersonDetailViewModel @Inject constructor(
             try {
                 val userId = accountManager.getPrimaryUserId().first()
                 val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-                // Faces off: read no face data and show an empty grid.
-                val prefs = context.settingsDataStore.data.first()
-                val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+                // People not shown (no scan here, nothing came in from the backup): read no face data and
+                // show an empty grid.
+                val faceOn = peopleVisibility.visible().first()
                 if (!faceOn) {
                     _uiState.update { it.copy(isLoading = false, items = emptyList()) }
                     return@launch
@@ -279,8 +281,7 @@ class PersonDetailViewModel @Inject constructor(
         keysJob?.cancel()
         keysJob = viewModelScope.launch {
             val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val prefs = context.settingsDataStore.data.first()
-            val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+            val faceOn = peopleVisibility.visible().first()
             if (!faceOn) { _keysForPicker.value = emptySet(); return@launch }
             val name = personDao.personById(personId)?.displayName
             val manual = if (name.isNullOrBlank()) flowOf(emptyList())

@@ -22,12 +22,8 @@
 
 package eu.akoos.photos.presentation.people
 
-import android.content.Context
-import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.ShowPersonUseCase
@@ -38,7 +34,6 @@ import eu.akoos.photos.presentation.gallery.toPersonUi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -57,16 +52,14 @@ class HiddenPeople @Inject constructor(
     private val showPersonUseCase: ShowPersonUseCase,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val undoController: UndoController,
-    @ApplicationContext private val context: Context,
+    private val peopleVisibility: PeopleVisibility,
 ) {
 
-    /** The hidden people, most-photographed first; a never-named group reads as unnamed. Empty while the master
-     *  AI switch or the face switch is off, the same gate every people surface holds. */
+    /** The hidden people, most-photographed first; a never-named group reads as unnamed. Empty while the people
+     *  surfaces are not shown ([PeopleVisibility]), the same gate every people surface holds. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun observe(): Flow<List<PersonUi>> = combine(
-        context.settingsDataStore.data
-            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-            .distinctUntilChanged(),
+        peopleVisibility.visible(),
         accountManager.getPrimaryUserId(),
     ) { faceOn, userId -> faceOn to userId }
         .flatMapLatest { (faceOn, userId) ->

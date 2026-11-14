@@ -1940,6 +1940,9 @@
     <string name="settings_ai_ocr_remove_keep">Obdrži</string>
     <string name="settings_ai_face_toggle">Prepoznavanje obrazov</string>
     <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v tem telefonu</string>
+    <string name="settings_face_scan_here">Prepoznavanje obrazov v tem telefonu</string>
+    <string name="settings_face_scan_here_desc">Pregleda fotografije v tem telefonu in jih razvrsti po osebah na njih</string>
+    <string name="settings_face_names_need_scan">Vaša druga naprava uporablja drug model obrazov, zato so se prenesla samo imena. Tukaj vklopite prepoznavanje obrazov, da jih povežete.</string>
     <string name="settings_ai_face_downloading">Prenašanje…</string>
     <string name="settings_ai_face_download_failed">Modela obrazov ni bilo mogoče prenesti.</string>
     <string name="settings_ai_face_download_retry">Za ponovni poskus znova vklopite stikalo.</string>

@@ -117,6 +117,7 @@ class PersonHideDbTest {
             faceEdits = edits,
             personCentroids = mockk(relaxed = true),
             selectionFactory = mockk(relaxed = true),
+            peopleVisibility = eu.akoos.photos.presentation.people.PeopleVisibility(accounts, db.personDao(), context),
             context = context,
         )
     }

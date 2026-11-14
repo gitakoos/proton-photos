@@ -536,6 +536,7 @@ fun PhotoViewerScreen(
     val longPressOpensMenu by viewModel.longPressOpensMenu.collectAsStateWithLifecycle()
     // Per-feature face gate: the people-in-this-photo action needs this AND the master switch.
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
+    val peopleVisible by viewModel.peopleVisible.collectAsStateWithLifecycle()
     // The people the face index found on the settled photo, and whether their name tags are pinned over
     // the faces. Reset on every page settle so tags never carry a previous photo's faces.
     val peopleInPhoto by viewModel.peopleInPhoto.collectAsStateWithLifecycle()
@@ -3136,7 +3137,7 @@ fun PhotoViewerScreen(
         }
         val detailsPrivate = secure || isVaultedItem || isHidden ||
             (detailsLinkId != null && detailsLinkId in hiddenCloudLinkIds)
-        val showPeopleBox = !trashMode && !detailsPrivate && aiFeaturesEnabled && faceEnabled &&
+        val showPeopleBox = !trashMode && !detailsPrivate && peopleVisible &&
             peopleBelongTo(peopleInPhotoKey, item)
         // The model the pager draws this photo from, so each face is cropped out of the image on screen.
         val detailsThumbUrls = LocalThumbnailUrls.current.value
