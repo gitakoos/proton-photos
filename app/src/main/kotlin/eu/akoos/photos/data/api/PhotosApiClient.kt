@@ -57,7 +57,10 @@ class PhotosApiClient @Inject constructor(
         append(android.os.Build.BRAND).append(' ').append(android.os.Build.MODEL)
         append(')')
     }
-    override val enableDebugLogging = BuildConfig.DEBUG
+    // Off in every build: it adds a body-level HTTP logger, and Retrofit's content-type wrapper hides
+    // isOneShot() from it, so the logger drains the Drive SDK's one-shot block upload stream and the
+    // real send then fails with "Stream body cannot be resent".
+    override val enableDebugLogging = false
 
     override suspend fun shouldUseDoh(): Boolean = true
 
