@@ -1,0 +1,15 @@
+repository: https://github.com/gitakoos/proton-photos
+release_filter: '^v[0-9]+\.[0-9]+\.[0-9]+(-test[0-9]+)?$'
+match: 'arm64-v8a-release\.apk$'
+prerelease_channel: beta
+
+name: Photos for Proton
+summary: A private gallery and end-to-end encrypted backup for Proton Drive Photos.
+description: |
+  Photos for Proton backs up your phone's photos and videos to Proton Drive with end-to-end encryption and shows your whole library in one gallery, with albums, sharing and a map. Search, face recognition and text copying run on your phone. Without a Proton account it works as a private gallery for the photos on your device.
+
+  Unofficial open-source client, not affiliated with Proton AG. Test builds are on the beta channel.
+license: GPL-3.0-only
+website: https://www.photosforproton.eu
+tags: [photos, gallery, backup, encryption, proton]
+metadata_sources: [github]
