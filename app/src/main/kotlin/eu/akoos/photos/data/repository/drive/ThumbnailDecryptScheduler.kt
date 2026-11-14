@@ -416,10 +416,9 @@ class ThumbnailDecryptScheduler @Inject constructor(
         // re-point the row at the cached file — a cheap DB write, no JNI — so the cell binds.
         cachedThumbnailUrl(linkId)?.let { url ->
             // Paint the cell now: the timeline projection no longer carries thumbnailUrl, so the store
-            // is what repaints this tile; the DB write is for persistence + next-launch seeding.
-            thumbnailUrlStore.put(linkId, url)
+            // is what repaints this tile; the batched DB write is for next-launch seeding.
+            thumbnailUrlStore.persist(linkId, url)
             scope.launch {
-                runCatching { photoListingDao.updateThumbnailUrl(linkId, url) }
                 // Touch so a re-viewed thumbnail counts as young and survives LRU eviction —
                 // otherwise the warm-up's decrypt order, not actual use, decides what gets dropped.
                 runCatching {
@@ -657,6 +656,8 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 }
             }
             if (evicted.isNotEmpty()) {
+                // A queued write must not put an evicted file's URL back after the rows are nulled.
+                thumbnailUrlStore.forgetPending(evicted)
                 runCatching { evicted.chunked(500).forEach { photoListingDao.clearThumbnailUrlsByLinkIds(it) } }
                     .onFailure { Log.w(TAG, "trim: clearing ${evicted.size} rows failed: ${it.message}") }
                 // Drop the evicted URLs from the store too so their cells stop pointing at deleted files
@@ -747,12 +748,10 @@ class ThumbnailDecryptScheduler @Inject constructor(
             parentLinkId = photo.parentLinkId ?: return,
             background = background,
         ) ?: return
-        // Repaint just this cell through the in-memory store (the timeline projection no longer
-        // carries thumbnailUrl, so a per-row DB write no longer re-emits the whole library). The DB
-        // write persists the URL for next-launch seeding.
-        thumbnailUrlStore.put(linkId, fileUrl)
-        runCatching { photoListingDao.updateThumbnailUrl(linkId, fileUrl) }
-            .onFailure { Log.w(TAG, "decryptOne $linkId: DB update failed: ${it.message}") }
+        // Repaint just this cell through the in-memory store. The store queues the URL for a batched
+        // DB write (a per-row write would make Room re-read the whole timeline), which seeds the next
+        // launch.
+        thumbnailUrlStore.persist(linkId, fileUrl)
     }
 
     /**

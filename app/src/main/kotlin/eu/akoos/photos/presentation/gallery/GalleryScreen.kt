@@ -392,7 +392,7 @@ fun GalleryScreen(
     onPendingWidgetPhotoConsumed: () -> Unit = {},
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.screenState.collectAsStateWithLifecycle()
     val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
     // Fresh per-cell decrypted thumbnail URLs (see GalleryViewModel.thumbnailUrls). The timeline model
     // no longer carries them on the row, so the grid resolves each cloud cell's URL from this map.
@@ -1351,6 +1351,7 @@ fun GalleryScreen(
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
+                        progress = viewModel.progress,
                         albumsState = albumsState,
                         isOnlineNow = isOnlineNow,
                         onFilterSelected = viewModel::onFilterSelected,
@@ -1442,10 +1443,8 @@ fun GalleryScreen(
             onDismiss = viewModel::clearSelection,
             // Whichever Photos grid is on screen: scrolling it collapses the drawer, so reaching
             // past it to carry on through the timeline needs no deliberate pull or tap first.
-            contentScrolling = if (mosaicGrid) {
-                staggeredState.isScrollInProgress
-            } else {
-                gridState.isScrollInProgress
+            contentScrollingProvider = {
+                if (mosaicGrid) staggeredState.isScrollInProgress else gridState.isScrollInProgress
             },
             modifier = Modifier.align(Alignment.BottomCenter),
             selectAllCount = selectAllCount,
@@ -1457,72 +1456,18 @@ fun GalleryScreen(
         )
 
         // ── UNIFIED PROGRESS PILL ─────────────────────────────────────────────
-        // One surface for the timeline's own long work, matching the device-folder back-up and
-        // album bulk actions. Sits at the top edge, clear of the selection drawer, which stays
-        // visible while these run. A multi-download is not here: it registers with the
-        // TransferCenter, so the Activity screen lists its photos and cancels the batch, and a
-        // second copy would just be a pill with no cancel of its own.
-        val opSharingTpl = stringResource(R.string.op_sharing_fmt)
+        GalleryOperationPill(
+            progress = viewModel.progress,
+            folderHideProgress = viewModel.folderHideProgress,
+            shareState = multiShareState,
+            visible = showOverlays,
+            topPadding = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp,
+            onCancelFolderHide = viewModel::cancelFolderHide,
+        )
+
         val opAddingLabel = stringResource(R.string.op_adding_to_album)
-        val opBackingUpTpl = stringResource(R.string.op_backing_up_fmt)
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opHidingLabel = stringResource(R.string.op_hiding)
-        val folderHidingTpl = stringResource(R.string.device_folder_hiding_fmt)
-        val shS = multiShareState
-        // Background back-up surfaces as the same pill as the share, so the user sees progress (and
-        // can cancel) in-app instead of only from the notification.
-        val uploadActive = state.isSyncing && state.uploadTotalCount > 0
-        // The pill's X hides the back-up pill for the rest of this run; it never stops the back-up, whose
-        // progress also shows by the avatar and whose cancel is in the notification and on Activity.
-        var uploadPillHidden by remember { mutableStateOf(false) }
-        LaunchedEffect(uploadActive) { if (!uploadActive) uploadPillHidden = false }
-        // Hiding a device folder from the Albums tab reports here too: it copies file by file and a
-        // folder can hold thousands, so it takes the pill's count and cancel rather than a blocking
-        // sheet the user would have to sit through.
-        val fh = viewModel.folderHideProgress.collectAsStateWithLifecycle().value
-        val galleryOpProgress = when {
-            shS is MultiShareState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    shS.done, shS.total, opSharingTpl.format(shS.done, shS.total))
-            fh != null ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    fh.done, fh.total, folderHidingTpl.format(fh.done, fh.total))
-            uploadActive && !uploadPillHidden ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    state.uploadDoneIdx, state.uploadTotalCount,
-                    opBackingUpTpl.format(state.uploadDoneIdx, state.uploadTotalCount))
-            else -> null
-        }
-        // Only the folder hide and the back-up are cancellable from the pill (a share finishes
-        // quickly and has its own controls). The branches mirror the chain above, so the X always
-        // belongs to the operation on show. Mirrors the upload notification's cancel.
-        val galleryOpCancel: (() -> Unit)? = when {
-            shS is MultiShareState.Working -> null
-            fh != null -> { { viewModel.cancelFolderHide() } }
-            uploadActive -> { { uploadPillHidden = true } }
-            else -> null
-        }
-        // Hold the last non-null progress so the pill can animate OUT cleanly when the work finishes,
-        // instead of vanishing the instant it goes null.
-        var lastOpProgress by remember { mutableStateOf(galleryOpProgress) }
-        if (galleryOpProgress != null) lastOpProgress = galleryOpProgress
-        // Rides the same scroll-hide signal as the header and dock, so it never sits orphaned over the
-        // grid once the rest of the chrome slides away (issue #98). Kept during selection mode.
-        AnimatedVisibility(
-            visible = showOverlays && galleryOpProgress != null,
-            enter = fadeIn() + slideInVertically { -it },
-            exit = fadeOut() + slideOutVertically { -it },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp),
-        ) {
-            eu.akoos.photos.presentation.common.OperationProgressPill(
-                progress = lastOpProgress,
-                onCancel = galleryOpCancel,
-                hidesOnly = uploadActive && fh == null,
-            )
-        }
-
         // Foreground bulk actions (delete / hide / move to album) take over the screen with a
         // blocking drawer so a second destructive tap can't land on a half-finished one. Background
         // work (downloads, back-up) stays in the passive pill above.

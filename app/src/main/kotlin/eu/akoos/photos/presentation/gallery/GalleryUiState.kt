@@ -122,6 +122,39 @@ data class GalleryUiState(
     val selectedCount: Int get() = selectedItems.size
 }
 
+/**
+ * The fast-changing back-up and transfer flags: they move with every uploaded photo, so they live in
+ * their own flow ([GalleryViewModel.progress]) and only the avatar and the progress pill read them,
+ * rather than the whole screen recomposing beside its full-library lists on each tick.
+ */
+data class GalleryProgress(
+    val isSyncing: Boolean = false,
+    val hasActiveUpload: Boolean = false,
+    val hasActiveDownload: Boolean = false,
+    val uploadDoneIdx: Int = 0,
+    val uploadTotalCount: Int = 0,
+)
+
+internal fun GalleryUiState.progress() = GalleryProgress(
+    isSyncing = isSyncing,
+    hasActiveUpload = hasActiveUpload,
+    hasActiveDownload = hasActiveDownload,
+    uploadDoneIdx = uploadDoneIdx,
+    uploadTotalCount = uploadTotalCount,
+)
+
+/** This state with the fields [progress] carries reset, so two states that differ only in back-up
+ *  ticks compare equal. */
+internal fun GalleryUiState.withoutProgress() = copy(
+    isSyncing = false,
+    hasActiveUpload = false,
+    hasActiveDownload = false,
+    uploadDoneIdx = 0,
+    uploadTotalCount = 0,
+    pendingUploadCount = 0,
+    uploadedCount = 0,
+)
+
 sealed class MultiDeleteState {
     data object Idle    : MultiDeleteState()
     data object Working : MultiDeleteState()

@@ -51,6 +51,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,6 +76,7 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.common.LocalVideoThumb
 import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -145,9 +147,15 @@ internal fun PhotoCell(
     val staticLoader = LocalStaticImageLoader.current
     val isLocalGif = localUri != null && photo.mimeType == "image/gif"
 
+    // The DB copy of a decrypted thumbnail URL is written in batches, so the live store is what shows
+    // a thumbnail the moment it lands.
+    val thumbnailUrls = LocalThumbnailUrls.current
+    val liveThumbnailUrl by remember(photo.linkId) { derivedStateOf { thumbnailUrls.value[photo.linkId] } }
+    val thumbnailUrl = photo.thumbnailUrl ?: liveThumbnailUrl
+
     val imageModel: Any? = when {
         localUri != null -> android.net.Uri.parse(localUri)
-        photo.thumbnailUrl != null -> photo.thumbnailUrl
+        thumbnailUrl != null -> thumbnailUrl
         else -> null
     }
 
@@ -157,7 +165,7 @@ internal fun PhotoCell(
     val isLocalVideoTile = localUri != null && photo.mimeType.startsWith("video/")
 
     // Lazy-decrypt: a null thumbnailUrl means the row is metadata-only. Decrypt while visible, cancel on scroll-away.
-    if (photo.thumbnailUrl == null && localUri == null) {
+    if (thumbnailUrl == null && localUri == null) {
         androidx.compose.runtime.DisposableEffect(photo.linkId) {
             onRequestThumbnail(photo.linkId)
             onDispose { onCancelThumbnail(photo.linkId) }

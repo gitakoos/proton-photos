@@ -275,6 +275,20 @@ class GalleryViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(GalleryUiState())
     val uiState: StateFlow<GalleryUiState> = _uiState.asStateFlow()
 
+    /** [uiState] without the back-up ticks: it changes only when something the screen body shows
+     *  changes, so an upload progress frame does not recompose the screen. The list fields keep their
+     *  instances, which keeps the equality check cheap. */
+    val screenState: StateFlow<GalleryUiState> = _uiState
+        .map { it.withoutProgress() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.withoutProgress())
+
+    /** The back-up and transfer ticks [screenState] leaves out, for the avatar and the progress pill. */
+    val progress: StateFlow<GalleryProgress> = _uiState
+        .map { it.progress() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.progress())
+
     /**
      * One-shot carrier for the multi-select share intent. A ViewModel can't call startActivity,
      * so [GalleryScreen] collects this and launches the chooser. replay=0 + single-buffer so a

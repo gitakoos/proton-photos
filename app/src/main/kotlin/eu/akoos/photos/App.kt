@@ -520,8 +520,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /**
-     * Privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]): wipe disk caches when the whole
-     * process backgrounds. Process-level ON_STOP is the right hook — it fires only when all
+     * Whole-process background hook: writes the decrypted-thumbnail URLs still queued for the database,
+     * and with the privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]) wipes disk caches. Process-level
+     * ON_STOP is the right hook: it fires only when all
      * Activities leave the started state, not on rotation / picker round-trips. Wipes fullres,
      * thumbnails, coil_cache, and import_thumbs; deliberately leaves in-flight upload block dirs and
      * DataStore alone.
@@ -531,6 +532,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             object : androidx.lifecycle.DefaultLifecycleObserver {
                 override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
                     appScope.launch {
+                        // Persist the decrypted-thumbnail URLs still queued, so the next cold start
+                        // finds them in the database. Before the wipe below, which nulls them again.
+                        runCatching { thumbnailUrlStore.flushPending() }
                         val enabled = runCatching {
                             settingsDataStore.data.first()[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] == true
                         }.getOrDefault(false)

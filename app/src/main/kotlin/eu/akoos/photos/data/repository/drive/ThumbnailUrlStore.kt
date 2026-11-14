@@ -56,8 +56,11 @@ import javax.inject.Singleton
  * view is a new value, while every view reads the same entries. Publishing is rate-limited by
  * [CoalescingPublisher]: the first change after a quiet spell goes out at once, and a burst of
  * decrypts collapses into at most one publish per [PUBLISH_WINDOW_MS]. A grid cell reads
- * `urls[linkId]` for its own row, so a publish rebinds only the cells whose value changed. The DB
- * write stays alongside every put so the URL persists for [seed] on the next launch.
+ * `urls[linkId]` for its own row, so a publish rebinds only the cells whose value changed. [persist]
+ * also queues the URL for the database so it survives for [seed] on the next launch. Those writes are
+ * batched in one transaction ([ThumbnailUrlWriteBuffer]): a per-thumbnail write would still make Room
+ * re-run the timeline query for every decrypt. [flushPending] writes what is queued, for the app going
+ * to the background.
  */
 @Singleton
 class ThumbnailUrlStore @Inject constructor(
@@ -73,6 +76,13 @@ class ThumbnailUrlStore @Inject constructor(
 
     private val publisher = CoalescingPublisher(appScope, PUBLISH_WINDOW_MS, ::publish)
 
+    private val writeBuffer = ThumbnailUrlWriteBuffer(
+        scope = appScope,
+        idleMs = PERSIST_IDLE_MS,
+        maxWaitMs = PERSIST_MAX_WAIT_MS,
+        write = { batch -> photoListingDao.updateThumbnailUrls(batch) },
+    )
+
     // Orders seed's check-then-insert against remove() and clear(). A put needs no lock: seed only
     // fills absent linkIds, so a live put always outranks the older seed row.
     private val lock = Any()
@@ -84,6 +94,18 @@ class ThumbnailUrlStore @Inject constructor(
     fun put(linkId: String, url: String) {
         if (entries.put(linkId, url) != url) publisher.mark()
     }
+
+    /** [put], and queue the URL for a batched database write so the next launch can [seed] it. */
+    fun persist(linkId: String, url: String) {
+        put(linkId, url)
+        writeBuffer.add(linkId, url)
+    }
+
+    /** Writes every queued URL to the database now. */
+    suspend fun flushPending() = writeBuffer.flush()
+
+    /** Drops the queued URLs of [linkIds] without writing them, ahead of their rows being nulled. */
+    fun forgetPending(linkIds: Collection<String>) = writeBuffer.discard(linkIds)
 
     /** One-time prime from the DB so cells decrypted in a previous session paint immediately, without
      *  re-decrypting. Fills only linkIds no live [put] holds yet (a decrypt can complete before the seed
@@ -125,6 +147,7 @@ class ThumbnailUrlStore @Inject constructor(
      *  of them are in the map. */
     fun remove(linkIds: Collection<String>) {
         if (linkIds.isEmpty()) return
+        writeBuffer.discard(linkIds)
         var removed = false
         synchronized(lock) {
             for (linkId in linkIds) if (entries.remove(linkId) != null) removed = true
@@ -135,6 +158,7 @@ class ThumbnailUrlStore @Inject constructor(
     /** Drop everything on sign-out so a re-login (same or different account) starts clean. Published
      *  at once rather than coalesced. */
     fun clear() {
+        writeBuffer.discard(entries.keys.toList())
         val hadEntries = synchronized(lock) {
             generation++
             val had = entries.isNotEmpty()
@@ -151,6 +175,12 @@ class ThumbnailUrlStore @Inject constructor(
     companion object {
         /** Shortest spacing between two coalesced publishes of [urls]. */
         internal const val PUBLISH_WINDOW_MS = 150L
+
+        /** Quiet spell after the last decrypt before the queued URLs are written. */
+        internal const val PERSIST_IDLE_MS = 3_000L
+
+        /** Longest a queued URL waits while decrypts keep arriving. */
+        internal const val PERSIST_MAX_WAIT_MS = 15_000L
     }
 }
 

@@ -353,6 +353,13 @@ interface PhotoListingDao {
     @Query("UPDATE photo_listing SET thumbnailUrl = :url WHERE linkId = :linkId")
     suspend fun updateThumbnailUrl(linkId: String, url: String)
 
+    /** [updateThumbnailUrl] for a batch in one transaction, so the timeline query re-runs once for the
+     *  whole batch instead of once per row. */
+    @Transaction
+    suspend fun updateThumbnailUrls(urls: Map<String, String>) {
+        for ((linkId, url) in urls) updateThumbnailUrl(linkId, url)
+    }
+
     /** linkId → already-decrypted thumbnailUrl for every own-stream row that carries one. Read once at
      *  startup to prime [ThumbnailUrlStore] so previously-decrypted cells paint immediately without a
      *  re-decrypt, now that the timeline projection no longer carries the column. Two-column light
