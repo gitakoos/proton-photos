@@ -40,11 +40,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -135,7 +137,7 @@ internal fun copiesAfterRead(
     else -> SharedBackupViewModel.Copies.Failed
 }
 
-/** The Drive backup card's automatic switch, its status, and the Back up now and Load from Drive rows. */
+/** The Drive backup card's switch, its sync status and the Sync now action, and the list of backups on Drive. */
 @HiltViewModel
 class SharedBackupViewModel @Inject constructor(
     private val store: SharedBackupStore,
@@ -157,12 +159,9 @@ class SharedBackupViewModel @Inject constructor(
         viewModelScope.launch { scheduler.setEnabled(enabled) }
     }
 
-    fun saveNow() {
+    /** One full round: takes in what the other devices saved, then saves this device's data. */
+    fun syncNow() {
         viewModelScope.launch { scheduler.saveNow() }
-    }
-
-    fun loadNow() {
-        viewModelScope.launch { scheduler.loadNow() }
     }
 
     /**
@@ -242,10 +241,11 @@ class SharedBackupViewModel @Inject constructor(
 
 /**
  * Backup to Proton Drive, on the second settings page: the one place the face and search data, the labels and the
- * hidden items are saved to Drive and loaded back. Automatic backup keeps them the same on every device; Back up now
- * saves at once, whether it is on or not, after taking in what the other devices saved; Load from Drive brings in
- * what the other devices saved. Under the card, the link for a face file an earlier version exported. The caller
- * shows it only to a signed-in account on a device the Drive client runs on.
+ * hidden items are saved to Drive and loaded back. One switch keeps them the same on every device, automatically.
+ * While it is on, a status row shows when the last sync ended, with a button that runs a round at once (takes in what
+ * the other devices saved, then saves). A row opens the list of backups on Drive. Under the card, the link for a face
+ * file an earlier version exported. The caller shows it only to a signed-in account on a device the Drive client runs
+ * on.
  */
 @Composable
 internal fun SharedBackupCard(
@@ -261,13 +261,13 @@ internal fun SharedBackupCard(
     Spacer(Modifier.height(8.dp))
     SettingsCard {
         ToggleRow(
-            label = stringResource(R.string.drive_backup_auto),
-            description = stringResource(R.string.drive_backup_auto_desc),
+            label = stringResource(R.string.drive_backup_switch_title),
+            description = stringResource(R.string.drive_backup_switch_desc),
             checked = state.status.enabled,
             onCheckedChange = { on -> if (on) askTurnOn = true else viewModel.setEnabled(false) },
         )
-        RowDivider()
-        run {
+        if (state.status.enabled) {
+            RowDivider()
             val line = when (sharedBackupLine(state.running, state.status)) {
                 SharedBackupLine.SYNCING -> stringResource(R.string.shared_backup_syncing)
                 SharedBackupLine.NEVER -> stringResource(R.string.shared_backup_never)
@@ -281,22 +281,24 @@ internal fun SharedBackupCard(
                     ),
                 )
             }
-            ActionRow(
-                label = stringResource(R.string.drive_backup_save_now),
-                description = line,
-                icon = Icons.Default.CloudUpload,
-                onClick = viewModel::saveNow,
-                enabled = !state.running,
-            )
+            val colors = AppColors.current
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Cloud, null, tint = colors.fgDim, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(14.dp))
+                Text(line, color = colors.fgMute, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = viewModel::syncNow, enabled = !state.running) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = stringResource(R.string.drive_backup_sync_now),
+                        tint = colors.fgDim,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
-        RowDivider()
-        ActionRow(
-            label = stringResource(R.string.drive_backup_load),
-            description = stringResource(R.string.drive_backup_load_desc),
-            icon = Icons.Default.CloudDownload,
-            onClick = viewModel::loadNow,
-            enabled = !state.running,
-        )
         RowDivider()
         ActionRow(
             label = stringResource(R.string.drive_copies_row),
