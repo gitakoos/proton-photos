@@ -97,6 +97,7 @@ fun NewsScreen(onBack: () -> Unit) {
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     fun openUrl(url: String) {
+        if (!isOpenableNewsUrl(url)) return
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
 
@@ -294,4 +295,10 @@ private fun NewsEntry(
             )
         }
     }
+}
+
+/** Whether a link from the news feed may be opened: only https and mailto, never another scheme. */
+internal fun isOpenableNewsUrl(url: String): Boolean {
+    val scheme = url.trim().substringBefore(':', "").lowercase()
+    return scheme == "https" || scheme == "mailto"
 }

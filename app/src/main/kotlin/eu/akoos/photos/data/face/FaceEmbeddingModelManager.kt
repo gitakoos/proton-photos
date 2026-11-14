@@ -35,6 +35,7 @@ package eu.akoos.photos.data.face
 
 import android.content.Context
 import android.util.Log
+import eu.akoos.photos.data.ml.modelSideLoadDir
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.Dispatchers
@@ -86,9 +87,9 @@ class FaceEmbeddingModelManager(context: Context) {
     /** App-private cache for the downloaded model. */
     private val modelsDir: File get() = File(appContext.filesDir, FaceModelAssets.DIRECTORY)
 
-    /** Side-load root, matching the detector rail's convention so one adb push serves the same way. */
+    /** Side-load root (debug builds only), matching the detector rail's convention so one adb push serves the same way. */
     private val sideLoadDir: File?
-        get() = appContext.getExternalFilesDir(null)?.let { File(it, FaceModelAssets.DIRECTORY) }
+        get() = modelSideLoadDir(appContext, FaceModelAssets.DIRECTORY)
 
     /**
      * The verified model file already on this device, or null when it would have to be fetched.

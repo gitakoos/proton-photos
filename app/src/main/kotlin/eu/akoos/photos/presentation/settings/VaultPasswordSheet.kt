@@ -72,7 +72,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.SheetBg
 
 /** The shortest vault password the sheet accepts. */
-internal const val VAULT_PASSWORD_MIN_LENGTH = 8
+internal const val VAULT_PASSWORD_MIN_LENGTH = 12
 
 /** Why a typed vault password cannot be saved yet, or null when it can. */
 internal enum class VaultPasswordProblem { TooShort, Mismatch }
