@@ -496,6 +496,7 @@ private fun SharedPhotoCell(
         onLongClick = onLongClick,
         onRequestThumbnail = onRequestThumbnail,
         onCancelThumbnail = onCancelThumbnail,
+        thumbPx = 512,
     )
 }
 
