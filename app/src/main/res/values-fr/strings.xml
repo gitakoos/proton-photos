@@ -1843,6 +1843,8 @@
     <string name="settings_ai_face_desc">Regroupe les photos selon les personnes qui y figurent, sur ce téléphone</string>
     <string name="settings_face_scan_here">Reconnaissance faciale sur ce téléphone</string>
     <string name="settings_face_scan_here_desc">Parcourt les photos de ce téléphone et les regroupe selon les personnes qui y figurent</string>
+    <string name="settings_semantic_index_here">Recherche par contenu sur ce téléphone</string>
+    <string name="settings_semantic_index_here_desc">Parcourt les photos de ce téléphone pour que vous puissiez les rechercher selon ce qu\'elles montrent</string>
     <string name="settings_face_names_need_scan">Votre autre appareil utilise un autre modèle de visages, donc seuls les noms sont arrivés. Activez la reconnaissance faciale ici pour les associer.</string>
     <string name="settings_ai_face_downloading">Téléchargement…</string>
     <string name="settings_ai_face_download_failed">Le modèle de visage n\'a pas pu être téléchargé.</string>

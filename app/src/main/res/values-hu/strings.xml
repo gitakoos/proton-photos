@@ -1837,6 +1837,8 @@
     <string name="settings_ai_face_desc">Csoportosítja a fényképeket a rajtuk lévő személyek szerint, ezen a telefonon</string>
     <string name="settings_face_scan_here">Arcfelismerés ezen a telefonon</string>
     <string name="settings_face_scan_here_desc">Átnézi a telefon fotóit, és a rajtuk lévő személyek szerint csoportosítja őket</string>
+    <string name="settings_semantic_index_here">Keresés tartalom szerint ezen a telefonon</string>
+    <string name="settings_semantic_index_here_desc">Átnézi a telefon fotóit, hogy rákereshess arra, mi látható rajtuk</string>
     <string name="settings_face_names_need_scan">A másik eszközöd más arcmodellt használ, ezért csak a nevek érkeztek át. Kapcsold be itt az arcfelismerést, hogy összepárosítsa őket.</string>
     <string name="settings_ai_face_downloading">Letöltés…</string>
     <string name="settings_ai_face_download_failed">Az arcmodellt nem sikerült letölteni.</string>

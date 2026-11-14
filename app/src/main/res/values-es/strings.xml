@@ -1874,6 +1874,8 @@
     <string name="settings_ai_face_desc">Agrupa las fotos por las personas que aparecen en ellas, en este teléfono</string>
     <string name="settings_face_scan_here">Reconocimiento facial en este teléfono</string>
     <string name="settings_face_scan_here_desc">Revisa las fotos de este teléfono y las agrupa por las personas que aparecen en ellas</string>
+    <string name="settings_semantic_index_here">Búsqueda por contenido en este teléfono</string>
+    <string name="settings_semantic_index_here_desc">Revisa las fotos de este teléfono para que puedas buscarlas por lo que muestran</string>
     <string name="settings_face_names_need_scan">Tu otro dispositivo usa un modelo facial distinto, así que solo llegaron los nombres. Activa aquí el reconocimiento facial para asignarlos.</string>
     <string name="settings_ai_face_downloading">Descargando…</string>
     <string name="settings_ai_face_download_failed">No se ha podido descargar el modelo facial.</string>

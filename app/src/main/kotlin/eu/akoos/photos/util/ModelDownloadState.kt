@@ -29,8 +29,9 @@ import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** The three on-device model sets that download over the network on opt-in. */
-enum class ModelDownloadKind { FACE, OCR, SEMANTIC }
+/** The on-device model sets that download over the network: three on opt-in, and the search text model
+ *  alone ([SEMANTIC_TEXT]) when content search runs on embeddings another device brought. */
+enum class ModelDownloadKind { FACE, OCR, SEMANTIC, SEMANTIC_TEXT }
 
 /** Where one kind's download stands right now. */
 enum class ModelDownloadPhase { DOWNLOADING, DONE, FAILED }

@@ -1873,6 +1873,8 @@
     <string name="settings_ai_face_desc">Raggruppa le foto in base alle persone presenti, su questo telefono</string>
     <string name="settings_face_scan_here">Riconoscimento facciale su questo telefono</string>
     <string name="settings_face_scan_here_desc">Esamina le foto di questo telefono e le raggruppa in base alle persone presenti</string>
+    <string name="settings_semantic_index_here">Ricerca per contenuto su questo telefono</string>
+    <string name="settings_semantic_index_here_desc">Esamina le foto di questo telefono così puoi cercarle in base a ciò che mostrano</string>
     <string name="settings_face_names_need_scan">Il tuo altro dispositivo usa un modello di volti diverso, quindi sono arrivati solo i nomi. Attiva qui il riconoscimento facciale per abbinarli.</string>
     <string name="settings_ai_face_downloading">Download in corso…</string>
     <string name="settings_ai_face_download_failed">Non è stato possibile scaricare il modello dei volti.</string>

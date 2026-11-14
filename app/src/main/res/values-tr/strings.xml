@@ -733,6 +733,8 @@
     <string name="settings_ai_face_desc">Fotoğrafları içindeki kişilere göre bu telefonda gruplar</string>
     <string name="settings_face_scan_here">Bu telefonda yüz tanıma</string>
     <string name="settings_face_scan_here_desc">Bu telefondaki fotoğrafları tarar ve içlerindeki kişilere göre gruplar</string>
+    <string name="settings_semantic_index_here">Bu telefonda içeriğe göre arama</string>
+    <string name="settings_semantic_index_here_desc">Bu telefondaki fotoğrafları tarar, böylece onları gösterdiklerine göre arayabilirsiniz</string>
     <string name="settings_face_names_need_scan">Diğer cihazınız farklı bir yüz modeli kullanıyor, bu yüzden yalnızca isimler geldi. Eşleştirmek için yüz tanımayı burada açın.</string>
     <string name="settings_ai_face_downloading">İndiriliyor…</string>
     <string name="settings_ai_face_download_failed">Yüz modeli indirilemedi.</string>

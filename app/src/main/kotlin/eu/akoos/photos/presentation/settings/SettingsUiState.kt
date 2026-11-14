@@ -137,9 +137,12 @@ data class SettingsUiState(
      *  say so and the feature stays off. */
     val semanticModelDownloadFailed: Boolean = false,
     /** Running byte count of the semantic-search model download in flight, measured against
-     *  [eu.akoos.photos.data.semantic.SemanticModelAssets.TOTAL_DOWNLOAD_BYTES], so the row shows a real
-     *  bar rather than an open-ended spinner. Reset to 0 whenever a download starts or ends. */
+     *  [semanticModelDownloadBytes], so the row shows a real bar rather than an open-ended spinner. Reset
+     *  to 0 whenever a download starts or ends. */
     val semanticModelDownloadProgress: Long = 0L,
+    /** What the semantic-search model download has to fetch: only the models not yet on the device, so
+     *  the drawer and the bar leave out a text model that content search already brought. */
+    val semanticModelDownloadBytes: Long = eu.akoos.photos.data.semantic.SemanticModelAssets.TOTAL_DOWNLOAD_BYTES,
     /** Whether Wi-Fi was connected when the semantic-search model download drawer was raised. Off means
      *  the drawer states the download will use mobile data, so a large fetch is never pulled silently over
      *  a metered link. */

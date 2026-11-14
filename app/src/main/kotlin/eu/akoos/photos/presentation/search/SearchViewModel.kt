@@ -105,6 +105,11 @@ import java.util.Calendar
 import java.util.Locale
 import javax.inject.Inject
 import eu.akoos.photos.presentation.people.PeopleVisibility
+import eu.akoos.photos.data.semantic.SemanticTextModelProvisioner
+import eu.akoos.photos.util.ModelDownloadKind
+import eu.akoos.photos.util.ModelDownloadPhase
+import eu.akoos.photos.util.ModelDownloadState
+import eu.akoos.photos.util.NetworkObserver
 
 /**
  * An album or device folder a search is narrowed to, shown as a pill in the field. [key] is `c:<linkId>`
@@ -157,6 +162,10 @@ class SearchViewModel @Inject constructor(
     private val labelRepo: PhotoLabelRepository,
     private val placeIndex: PhotoPlaceIndex,
     private val peopleVisibility: PeopleVisibility,
+    private val semanticVisibility: SemanticSearchVisibility,
+    private val textModelProvisioner: SemanticTextModelProvisioner,
+    private val modelDownloadState: ModelDownloadState,
+    private val networkObserver: NetworkObserver,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -389,19 +398,34 @@ class SearchViewModel @Inject constructor(
         // the main thread so typing stays smooth on large libraries.
         .flowOn(Dispatchers.Default)
 
-    /** The AI master switch and semantic search both on. The whole semantic feed hangs off this, the
-     *  same gate shape the [people] rail uses, so a semantic-off session adds nothing to [results]. */
-    private val semanticEnabled = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
+    /** Whether content search is available: this phone indexes for it, or a signed-in account holds
+     *  embeddings another device brought ([SemanticSearchVisibility]). The whole semantic feed hangs off
+     *  this, so a session without it adds nothing to [results]. */
+    private val semanticEnabled = semanticVisibility.available()
+
+    /** True once the search text model has been fetched this session, so a query typed while it was
+     *  missing is ranked again the moment it lands. */
+    private val textModelFetched = modelDownloadState.status
+        .map { it[ModelDownloadKind.SEMANTIC_TEXT]?.phase == ModelDownloadPhase.DONE }
         .distinctUntilChanged()
+
+    init {
+        // Content search that rests on another device's embeddings needs the text model here; it is
+        // fetched on an unmetered connection, and again whenever Wi-Fi returns while it is still missing.
+        viewModelScope.launch {
+            combine(semanticEnabled, networkObserver.isUnmetered) { available, unmetered -> available to unmetered }
+                .distinctUntilChanged()
+                .collect { (available, unmetered) -> textModelProvisioner.requestIfNeeded(available, unmetered) }
+        }
+    }
 
     /** The content-search feed: whether a search is still running for the current query, and the
      *  resolved matches so far. Held as one value so the loading flag and the matches never disagree. */
     private data class SemanticFeed(val loading: Boolean, val items: List<GalleryItem>)
 
     /**
-     * The image-content search as (still-running, ranked photo keys). Gated on the AI + semantic flags
-     * (never runs, empty when off) and guest-safe (a null account keys the local partition).
+     * The image-content search as (still-running, ranked photo keys). Gated on [semanticEnabled]
+     * (never runs, empty when unavailable) and guest-safe (a null account keys the local partition).
      *
      * A fresh query of [SEMANTIC_MIN_CHARS] or more emits loading true at once, so the screen's placeholder
      * shows through the settle delay AND the model run rather than only after; the ranking of the query
@@ -416,7 +440,8 @@ class SearchViewModel @Inject constructor(
     private val rankedKeys: Flow<Pair<Boolean, List<String>>> = combine(
         semanticEnabled,
         accountManager.getPrimaryUserId(),
-    ) { on, userId -> on to userId }
+        textModelFetched,
+    ) { on, userId, _ -> on to userId }
         .flatMapLatest { (on, userId) ->
             if (!on) flowOf(RankStep(false, emptyList()))
             else _query.map { it.trim() }.distinctUntilChanged().flatMapLatest { q ->

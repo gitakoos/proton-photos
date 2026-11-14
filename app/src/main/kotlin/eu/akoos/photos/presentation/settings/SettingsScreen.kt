@@ -1706,7 +1706,7 @@ fun SemanticSearchScreen(
     SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic_page_title), onBack = onBack) {
         SettingsCard {
             ToggleRow(
-                label = stringResource(R.string.settings_ai_semantic),
+                label = stringResource(R.string.settings_semantic_index_here),
                 // While the models fetch the row reads as busy, and a failed fetch is stated in place so
                 // the switch staying off is explained rather than looking stuck.
                 description = when {
@@ -1714,7 +1714,7 @@ fun SemanticSearchScreen(
                         stringResource(R.string.settings_ai_semantic_downloading)
                     state.semanticModelDownloadFailed ->
                         stringResource(R.string.settings_ai_semantic_download_failed)
-                    else -> stringResource(R.string.settings_ai_semantic_desc)
+                    else -> stringResource(R.string.settings_semantic_index_here_desc)
                 },
                 checked = state.semanticEnabled,
                 onCheckedChange = viewModel::setSemanticEnabled,
@@ -1724,7 +1724,7 @@ fun SemanticSearchScreen(
             // so far against the total, so a slow link reads as progress rather than a stall; a failed
             // fetch adds a line saying the switch itself is the retry.
             if (state.semanticModelDownloading) {
-                val semanticTotalBytes = SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+                val semanticTotalBytes = state.semanticModelDownloadBytes
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1796,7 +1796,7 @@ fun SemanticSearchScreen(
                     } else {
                         R.string.settings_ai_semantic_download_message_metered
                     },
-                    formatBytes(SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    formatBytes(state.semanticModelDownloadBytes),
                 ),
                 confirmLabel = stringResource(R.string.settings_ai_semantic_download_confirm),
                 dismissLabel = stringResource(R.string.cancel),

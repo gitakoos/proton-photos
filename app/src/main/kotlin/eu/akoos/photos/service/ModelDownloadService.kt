@@ -56,6 +56,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
 import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.data.semantic.SemanticModelManager
+import eu.akoos.photos.data.semantic.SemanticModelOutcome
 import eu.akoos.photos.data.semantic.SemanticModelPreparation
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.util.ModelDownloadKind
@@ -197,7 +198,7 @@ class ModelDownloadService : Service() {
         val userId = runCatching { accountManager.getPrimaryUserId().first() }.getOrNull()
         val total = totalFor(kind)
         // Reaching here means the user accepted the prompt, so record the consent the managers also check.
-        runCatching { settingsDataStore.edit { it[consentKeyFor(kind)] = true } }
+        consentKeyFor(kind)?.let { key -> runCatching { settingsDataStore.edit { it[key] = true } } }
         lastNotifiedBytes = -1L
         downloadState.running(kind, 0L, total)
         postNotification(buildNotification(kind, 0L, total))
@@ -248,6 +249,9 @@ class ModelDownloadService : Service() {
             ModelDownloadKind.SEMANTIC ->
                 SemanticModelManager(this)
                     .ensureDownloaded(onProgress = { onProgress(it) }) is SemanticModelPreparation.Ready
+            ModelDownloadKind.SEMANTIC_TEXT ->
+                SemanticModelManager(this)
+                    .ensureTextDownloaded(onProgress = { onProgress(it) }) is SemanticModelOutcome.Ready
         }
 
     /** Turn the feature on and kick its indexer, so a verified download flows straight into use. */
@@ -266,6 +270,8 @@ class ModelDownloadService : Service() {
                 // indexing pass. requestIndex clears any pause and starts the walk.
                 semanticIndexingScheduler.requestIndex(userId)
             }
+            // Only the query side of search: no switch is turned on and nothing is indexed.
+            ModelDownloadKind.SEMANTIC_TEXT -> Unit
         }
     }
 
@@ -329,19 +335,24 @@ class ModelDownloadService : Service() {
     private fun totalFor(kind: ModelDownloadKind): Long = when (kind) {
         ModelDownloadKind.FACE -> FaceModelAssets.TOTAL_DOWNLOAD_BYTES
         ModelDownloadKind.OCR -> 0L
-        ModelDownloadKind.SEMANTIC -> SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+        ModelDownloadKind.SEMANTIC -> SemanticModelManager(this).missingDownloadBytes()
+            .takeIf { it > 0L } ?: SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+        ModelDownloadKind.SEMANTIC_TEXT -> SemanticModelAssets.TEXT_MODEL.sizeBytes
     }
 
     private fun titleResFor(kind: ModelDownloadKind): Int = when (kind) {
         ModelDownloadKind.FACE -> R.string.model_download_title_face
         ModelDownloadKind.OCR -> R.string.model_download_title_ocr
-        ModelDownloadKind.SEMANTIC -> R.string.model_download_title_semantic
+        ModelDownloadKind.SEMANTIC, ModelDownloadKind.SEMANTIC_TEXT -> R.string.model_download_title_semantic
     }
 
-    private fun consentKeyFor(kind: ModelDownloadKind): Preferences.Key<Boolean> = when (kind) {
+    /** The consent flag a start records, or null for the text-only fetch: it is automatic and is not the
+     *  user's answer to the download prompt, so it must not stand in for it. */
+    private fun consentKeyFor(kind: ModelDownloadKind): Preferences.Key<Boolean>? = when (kind) {
         ModelDownloadKind.FACE -> SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED
         ModelDownloadKind.OCR -> SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED
         ModelDownloadKind.SEMANTIC -> SettingsKeys.SEMANTIC_MODEL_DOWNLOAD_ALLOWED
+        ModelDownloadKind.SEMANTIC_TEXT -> null
     }
 
     companion object {

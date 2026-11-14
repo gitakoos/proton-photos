@@ -147,6 +147,16 @@ class SemanticModelManager(context: Context) {
     fun areModelsPresent(): Boolean =
         listOf(SemanticModelAssets.IMAGE_MODEL, SemanticModelAssets.TEXT_MODEL).all { presentQuick(it) }
 
+    /**
+     * The bytes a fetch of both models still has to move: the size of each model not yet on the device,
+     * by the same existence check as [areModelsPresent]. With the text model already here (search on
+     * another device's embeddings fetched it alone) only the image model is counted.
+     */
+    fun missingDownloadBytes(): Long =
+        listOf(SemanticModelAssets.IMAGE_MODEL, SemanticModelAssets.TEXT_MODEL)
+            .filterNot { presentQuick(it) }
+            .sumOf { it.sizeBytes }
+
     /** A side-loaded copy first, then the app-private cache, by existence only. */
     private fun presentQuick(asset: SemanticModelAsset): Boolean {
         sideLoadDir?.let { if (File(it, asset.fileName).isFile) return true }
@@ -203,6 +213,25 @@ class SemanticModelManager(context: Context) {
                     }
                 }
                 SemanticModelPreparation.Ready(filesOf(resolved))
+            }
+        }
+
+    /**
+     * Gets only the text encoder in place, for search that runs on embeddings another device made: the
+     * query is embedded here, no photo is, so the image encoder is never fetched. A local copy is used
+     * with no network touched; otherwise the pinned file is fetched, verified and promoted. The caller
+     * decides whether a fetch is welcome (the automatic one waits for an unmetered connection), so this
+     * does not read the download consent the user's own switch records.
+     */
+    suspend fun ensureTextDownloaded(onProgress: (Long) -> Unit = {}): SemanticModelOutcome =
+        withContext(Dispatchers.IO) {
+            gate.withLock {
+                val asset = SemanticModelAssets.TEXT_MODEL
+                resolveLocal(asset)?.let { return@withLock SemanticModelOutcome.Ready(it) }
+                if (!asset.isPinned) {
+                    return@withLock SemanticModelOutcome.Unreachable(IOException(REASON_NOT_PINNED))
+                }
+                download(asset, onProgress)
             }
         }
 

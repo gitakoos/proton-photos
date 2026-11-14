@@ -1862,6 +1862,8 @@
     <string name="settings_ai_face_desc">Groepeert foto\'s op de mensen die erop staan, op deze telefoon</string>
     <string name="settings_face_scan_here">Gezichtsherkenning op deze telefoon</string>
     <string name="settings_face_scan_here_desc">Doorzoekt de foto\'s op deze telefoon en groepeert ze op de mensen die erop staan</string>
+    <string name="settings_semantic_index_here">Zoeken op inhoud op deze telefoon</string>
+    <string name="settings_semantic_index_here_desc">Doorzoekt de foto\'s op deze telefoon zodat je ze kunt zoeken op wat ze laten zien</string>
     <string name="settings_face_names_need_scan">Je andere apparaat gebruikt een ander gezichtsmodel, dus alleen de namen zijn overgekomen. Zet gezichtsherkenning hier aan om ze te koppelen.</string>
     <string name="settings_ai_face_downloading">Downloaden…</string>
     <string name="settings_ai_face_download_failed">Het gezichtsmodel kon niet worden gedownload.</string>

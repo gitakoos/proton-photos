@@ -778,6 +778,8 @@
     <string name="settings_ai_face_desc">Groups photos by the people in them, on this phone</string>
     <string name="settings_face_scan_here">Face recognition on this phone</string>
     <string name="settings_face_scan_here_desc">Looks through this phone\'s photos and groups them by the people in them</string>
+    <string name="settings_semantic_index_here">Search by content on this phone</string>
+    <string name="settings_semantic_index_here_desc">Looks through this phone\'s photos so you can search them by what they show</string>
     <string name="settings_face_names_need_scan">Your other device uses a different face model, so only the names came over. Turn on face recognition here to match them.</string>
     <string name="settings_ai_face_downloading">Downloading…</string>
     <string name="settings_ai_face_download_failed">The face model could not be downloaded.</string>

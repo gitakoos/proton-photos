@@ -1940,6 +1940,8 @@
     <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v tem telefonu</string>
     <string name="settings_face_scan_here">Prepoznavanje obrazov v tem telefonu</string>
     <string name="settings_face_scan_here_desc">Pregleda fotografije v tem telefonu in jih razvrsti po osebah na njih</string>
+    <string name="settings_semantic_index_here">Iskanje po vsebini v tem telefonu</string>
+    <string name="settings_semantic_index_here_desc">Pregleda fotografije v tem telefonu, da jih lahko iščete po tem, kaj prikazujejo</string>
     <string name="settings_face_names_need_scan">Vaša druga naprava uporablja drug model obrazov, zato so se prenesla samo imena. Tukaj vklopite prepoznavanje obrazov, da jih povežete.</string>
     <string name="settings_ai_face_downloading">Prenašanje…</string>
     <string name="settings_ai_face_download_failed">Modela obrazov ni bilo mogoče prenesti.</string>

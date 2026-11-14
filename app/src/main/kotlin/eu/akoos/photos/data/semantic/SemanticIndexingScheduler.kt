@@ -203,6 +203,15 @@ internal fun semanticRekeyPairs(
         .toList()
 
 /**
+ * The photos the walk still has to embed: every item whose [GalleryItem.stableId] holds no row yet. A
+ * backed-up photo is keyed by its Drive linkId, the same key an embedding imported from another device's
+ * shared backup carries, so an imported row counts as embedded and the photo is never embedded again here.
+ * Pure so the walk's filter is unit-tested without a database.
+ */
+internal fun semanticPendingItems(items: List<GalleryItem>, embeddedKeys: Set<String>): List<GalleryItem> =
+    items.filter { it.stableId !in embeddedKeys }
+
+/**
  * Mirrors a landed backup re-key into the walk's skip set: each device key no longer holds a row and
  * each cloud key does (moved there, or kept there), so the Synced photo reads as embedded and is not
  * queued for a second embedding.
@@ -425,7 +434,7 @@ class SemanticIndexingScheduler @Inject constructor(
             // embedding follows it there before the pending set is taken, instead of the walk
             // embedding the photo a second time.
             rekeyBackedUpPhotos(account, items, alreadyScanned)
-            val pending = items.filter { it.stableId !in alreadyScanned }
+            val pending = semanticPendingItems(items, alreadyScanned)
             val total = pending.size
             // Progress is cumulative across the auto-continue passes, not per pass: the total is the whole
             // library and the indexed value is how many photos have been embedded so far, so the bar climbs

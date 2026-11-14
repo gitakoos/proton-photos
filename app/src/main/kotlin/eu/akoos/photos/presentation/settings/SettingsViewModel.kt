@@ -1626,11 +1626,13 @@ class SettingsViewModel @Inject constructor(
                 // Note the connection now so the drawer can say the fetch will use mobile data when
                 // Wi-Fi is not there, the same gate sync applies before it moves large data.
                 val onWifi = networkObserver.currentlyOnWifi()
+                val missing = withContext(Dispatchers.IO) { semanticModelManager.missingDownloadBytes() }
                 _uiState.update {
                     it.copy(
                         semanticModelPrompt = SemanticModelPrompt.Download,
                         semanticModelDownloadFailed = false,
                         semanticModelOnWifi = onWifi,
+                        semanticModelDownloadBytes = missing,
                     )
                 }
             }

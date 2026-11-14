@@ -1943,6 +1943,8 @@
     <string name="settings_ai_face_desc">Zoskupí fotografie podľa osôb na nich, v tomto telefóne</string>
     <string name="settings_face_scan_here">Rozpoznávanie tvárí v tomto telefóne</string>
     <string name="settings_face_scan_here_desc">Prehľadá fotografie v tomto telefóne a zoskupí ich podľa osôb na nich</string>
+    <string name="settings_semantic_index_here">Vyhľadávanie podľa obsahu v tomto telefóne</string>
+    <string name="settings_semantic_index_here_desc">Prehľadá fotografie v tomto telefóne, aby ste ich mohli hľadať podľa toho, čo zobrazujú</string>
     <string name="settings_face_names_need_scan">Vaše druhé zariadenie používa iný model tvárí, preto sa preniesli iba mená. Zapnite tu rozpoznávanie tvárí, aby sa k nim priradili.</string>
     <string name="settings_ai_face_downloading">Sťahovanie…</string>
     <string name="settings_ai_face_download_failed">Model tvárí sa nepodarilo stiahnuť.</string>
