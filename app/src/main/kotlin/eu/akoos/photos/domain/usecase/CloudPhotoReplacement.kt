@@ -35,6 +35,10 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 
@@ -282,6 +286,7 @@ class CloudPhotoReplacement(
                 return Result.Failed("the original could not be moved to the trash", true, copyLink, carriedOver = true)
             }
             replaced = true
+            Replaced.record(photo.linkId, copyLink)
             return Result.Success(copyLink)
         } catch (e: CancellationException) {
             throw e
@@ -319,6 +324,27 @@ class CloudPhotoReplacement(
 
         fun release(linkId: String) {
             held.remove(linkId)
+        }
+    }
+
+    /** The photos this process has replaced, original link to the copy that took its place. A screen that
+     *  still holds the original (an open viewer) follows it to the copy; the original is in the trash. */
+    object Replaced {
+        /** Enough for any one session; the oldest go first. */
+        private const val KEEP = 200
+
+        private val links = MutableStateFlow<Map<String, String>>(emptyMap())
+        val map: StateFlow<Map<String, String>> = links.asStateFlow()
+
+        fun record(original: String, copy: String) {
+            if (original == copy || copy.isBlank()) return
+            links.update { held ->
+                val next = LinkedHashMap(held)
+                next.remove(original)
+                next[original] = copy
+                while (next.size > KEEP) next.remove(next.keys.first())
+                next
+            }
         }
     }
 }

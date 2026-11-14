@@ -217,6 +217,9 @@ private fun GalleryItem.localUriOrNull(): String? = when (this) {
     is GalleryItem.CloudOnly -> null
 }
 
+/** How many replacements in a row one photo is followed through, a guard against a loop. */
+private const val MAX_REPLACEMENT_HOPS = 8
+
 /**
  * Reconcile the static [snapshot] handed to the viewer against the [live] timeline so the open
  * viewer reflects a photo finishing upload (LocalOnly → Synced) and any metadata refresh, without
@@ -229,10 +232,15 @@ private fun GalleryItem.localUriOrNull(): String? = when (this) {
  * surface the viewer opens from: the caller already hands a filtered list (the gallery strips
  * hidden / timeline-excluded items, albums hand their own membership), and reconciliation never
  * injects an item that wasn't in that list. Returns [snapshot] unchanged until [live] first emits.
+ *
+ * A Drive photo [replaced] by an edited copy (original link to copy) resolves to that copy, followed
+ * through a later replacement of the copy too: the original is in the trash and the live timeline no
+ * longer carries it, and a Drive-only photo has no local uri to find the copy by.
  */
 internal fun reconcileViewerItems(
     snapshot: List<GalleryItem>,
     live: List<GalleryItem>,
+    replaced: Map<String, String> = emptyMap(),
 ): List<GalleryItem> {
     if (live.isEmpty() || snapshot.isEmpty()) return snapshot
     val byStableId = live.associateBy { it.stableId }
@@ -240,9 +248,19 @@ internal fun reconcileViewerItems(
         .mapNotNull { item -> item.localUriOrNull()?.let { it to item } }
         .toMap()
 
+    fun copyOf(stableId: String): GalleryItem? {
+        var link = stableId
+        repeat(MAX_REPLACEMENT_HOPS) {
+            link = replaced[link] ?: return null
+            byStableId[link]?.let { return it }
+        }
+        return null
+    }
+
     fun resolve(item: GalleryItem): GalleryItem =
         byStableId[item.stableId]
             ?: item.localUriOrNull()?.let { byLocalUri[it] }
+            ?: copyOf(item.stableId)
             ?: item
 
     val resolved = snapshot.map(::resolve)
@@ -433,12 +451,14 @@ fun PhotoViewerScreen(
     // change the uri the snapshot holds it under. The live merge leaves vaulted photos out, so the
     // vault reports its own moves and they are applied on top. See [applyVaultMoves].
     val vaultMoves by viewModel.vaultMoves.collectAsStateWithLifecycle()
+    // A Drive photo replaced by an edited copy while the viewer is open: the page moves to the copy.
+    val cloudReplacements by viewModel.cloudReplacements.collectAsStateWithLifecycle()
     // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
     // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
     // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
     var matched by remember(items) { mutableStateOf(items) }
-    LaunchedEffect(items, liveItems) {
-        matched = withContext(Dispatchers.Default) { reconcileViewerItems(items, liveItems) }
+    LaunchedEffect(items, liveItems, cloudReplacements) {
+        matched = withContext(Dispatchers.Default) { reconcileViewerItems(items, liveItems, cloudReplacements) }
     }
     // The vault's moves are applied on the spot, not with the matching: a moved file's page effects start in the
     // composition that sees the move, and they must find the new path in the list they read.

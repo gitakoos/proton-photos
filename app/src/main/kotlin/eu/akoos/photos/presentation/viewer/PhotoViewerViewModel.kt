@@ -904,6 +904,11 @@ class PhotoViewerViewModel @Inject constructor(
     val vaultMoves: StateFlow<Map<String, eu.akoos.photos.data.hidden.VaultMove>>
         get() = hiddenVaultEditor.moves
 
+    /** Drive photos replaced by an edited copy (a date or place change, a compression), original link to
+     *  copy, so an open page moves to the copy instead of showing the trashed original. */
+    val cloudReplacements: StateFlow<Map<String, String>>
+        get() = eu.akoos.photos.domain.usecase.CloudPhotoReplacement.Replaced.map
+
     /**
      * Delete a vaulted photo outright.
      *

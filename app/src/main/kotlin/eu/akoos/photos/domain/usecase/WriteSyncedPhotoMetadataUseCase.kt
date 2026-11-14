@@ -176,6 +176,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     if (it is CancellationException) throw it
                     Log.w(TAG, "trash of original $oldLinkId failed: ${it.message}")
                 }
+            CloudPhotoReplacement.Replaced.record(oldLinkId, resumeUploadedLinkId)
             return@withContext Result.Success
         }
 
@@ -363,6 +364,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     if (it is CancellationException) throw it
                     Log.w(TAG, "trash of original $oldLinkId failed: ${it.message}")
                 }
+            CloudPhotoReplacement.Replaced.record(oldLinkId, newLinkId)
             Result.Success
         } catch (e: CancellationException) {
             // Cancellation anywhere in the replacement. Before the re-pair the row is stuck at UPLOADING
