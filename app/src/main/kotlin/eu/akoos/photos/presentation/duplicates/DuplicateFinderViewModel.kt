@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -244,25 +245,20 @@ class DuplicateFinderViewModel @Inject constructor(
                 // burst of writes collapses to a periodic regroup instead of one full pairwise pass
                 // per hashed row.
                 .sample(400L)
-                // Build the fingerprint lookup map AFTER the sample, off the main thread, so a 50k
-                // library rebuilds it a couple of times a second at most, not once per hash write
-                // (rebuilding it in the combine transform is what pinned the heap during the fill).
-                .map { s ->
-                    // Drop items deleted this session BEFORE grouping so a stale source re-emit
-                    // can't bring a just-deleted duplicate back into a group with a dead preview.
-                    val live = if (s.deleted.isEmpty()) s.items
-                        else s.items.filterNot { it.stableId in s.deleted }
-                    val freshHashes = HashMap<String, LeanHash>(s.hashRows.size)
-                    for (r in s.hashRows) freshHashes[r.key] =
-                        LeanHash(PdqHash.Fingerprint(longArrayOf(r.h0, r.h1, r.h2, r.h3), r.quality, r.color), r.freshness)
-                    Prepared(live, s.localHashes, freshHashes, s.items, s.deleted, s.localHashes)
-                }
                 .flowOn(Dispatchers.Default)
+                // Keep only the newest sources. Without this flowOn queues up to 64 passes while a slow
+                // regroup runs; the queued value is only references, and the fingerprint map is built
+                // in the collector below, so a very large library holds one map at a time.
+                .conflate()
                 // A delete evicts perceptual_hash rows while observeLite reads that table, which can
                 // fault a cursor window mid-read on a large library. Re-run the stream instead of
                 // letting that torn read force-close the screen.
                 .retryOnDbTear(TAG) { _uiState.update { it.copy(isLoading = false) } }
-                .collect { p ->
+                .collect { s ->
+                // Build the fingerprint lookup map AFTER the sample, off the main thread, so a 50k
+                // library rebuilds it a couple of times a second at most, not once per hash write
+                // (rebuilding it in the combine transform is what pinned the heap during the fill).
+                val p = withContext(Dispatchers.Default) { prepare(s) }
                 val items = p.liveItems
                 // Exact-duplicate grouping depends only on the items, the session-deleted set, and the
                 // local hashes, none of which the background fingerprint fill touches, so reuse the
@@ -306,6 +302,18 @@ class DuplicateFinderViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** The items still live this session and the fresh fingerprints by key, from one sampled [s]. */
+    private fun prepare(s: Sources): Prepared {
+        // Drop items deleted this session BEFORE grouping so a stale source re-emit
+        // can't bring a just-deleted duplicate back into a group with a dead preview.
+        val live = if (s.deleted.isEmpty()) s.items
+            else s.items.filterNot { it.stableId in s.deleted }
+        val freshHashes = HashMap<String, LeanHash>(s.hashRows.size)
+        for (r in s.hashRows) freshHashes[r.key] =
+            LeanHash(PdqHash.Fingerprint(longArrayOf(r.h0, r.h1, r.h2, r.h3), r.quality, r.color), r.freshness)
+        return Prepared(live, s.localHashes, freshHashes, s.items, s.deleted, s.localHashes)
     }
 
     /**
