@@ -134,12 +134,15 @@ private const val REVIEW_DECODE_EDGE = 3072
  * more, pulling it down grows the photo back. A copy is marked for removal with the same top-left
  * circle the gallery uses, so the review reads like the rest of the app.
  *
- * Every copy's details are fetched as the group opens ([onRequestFullRes] over the cloud copies; device
- * copies already carry theirs), so the panel is populated rather than spinning. The removal selection
+ * The details of the copy shown and of its neighbours are fetched ahead ([onRequestFullRes] over the cloud
+ * copies; device copies already carry theirs), so the panel is populated rather than spinning. The removal selection
  * is the SAME hoisted set the card edits ([selected] / [onSelectionChange]), and delete goes through the
  * one keep-set contract ([keepIdsForRemoval] over [toggleDuplicateRemoval]), which can never tick a
  * group's last copy. Delete closes the review, since the pruned group would leave a stale copy here.
  */
+/** How many copies either side of the one shown have their full-res fetched ahead. */
+private const val REVIEW_FULL_RES_REACH = 2
+
 @Composable
 internal fun DuplicateGroupReview(
     group: DuplicateGroup,
@@ -180,10 +183,16 @@ internal fun DuplicateGroupReview(
     // extras and always keeps one, so such a selection is deleted from the list instead.
     val canDelete = !isDeleting && selected.isNotEmpty() && selected.size < allIds.size
 
-    // Fetch every copy's full-res (and thereby its true size and dimensions) as the group opens, so a
-    // swipe lands on already-resolved details instead of a spinner. Device copies need no fetch.
-    LaunchedEffect(group) {
-        group.items.forEach { if (it is GalleryItem.CloudOnly) onRequestFullRes(it) }
+    // Fetch the full-res (and thereby the true size and dimensions) of the copy shown and of the few on
+    // either side, so a swipe lands on already-resolved details instead of a spinner. Only those: a group
+    // of similar photos can hold thousands of copies, and fetching them all at once downloaded every one.
+    // Device copies need no fetch.
+    LaunchedEffect(group, pagerState.settledPage) {
+        val shown = pagerState.settledPage
+        for (index in (shown - REVIEW_FULL_RES_REACH)..(shown + REVIEW_FULL_RES_REACH)) {
+            val item = group.items.getOrNull(index)
+            if (item is GalleryItem.CloudOnly) onRequestFullRes(item)
+        }
     }
 
     // Read the visible copy's full EXIF once off the main thread and cache it: a device copy from its

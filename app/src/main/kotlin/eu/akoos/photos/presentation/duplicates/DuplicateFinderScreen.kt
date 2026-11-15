@@ -31,7 +31,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -57,10 +56,11 @@ import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import eu.akoos.photos.presentation.common.ScrollScrubber
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -850,11 +850,10 @@ private fun DuplicateGroupCard(
         }
         Text(stringResource(R.string.duplicates_pick_remove), color = FgMute, fontSize = 12.sp)
 
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            group.items.forEachIndexed { index, item ->
+        // Lazy: a group of similar photos can hold thousands of copies, and a plain row built a tile (and
+        // started an image load) for every one of them the moment the card scrolled into view.
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            itemsIndexed(group.items, key = { _, item -> item.stableId }) { index, item ->
                 DuplicateCopyThumb(
                     item = item,
                     location = duplicateLocationOf(item, albumNames),
