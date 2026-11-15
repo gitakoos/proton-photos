@@ -54,6 +54,22 @@ class SdkRoutingTest {
     }
 
     @Test
+    fun `a route off by default stays off until switched on, and an explicit switch wins either way`() {
+        assertEquals(false, routeSwitchedOn(null, defaultOn = false))
+        assertTrue(routeSwitchedOn(true, defaultOn = false))
+        assertEquals(false, routeSwitchedOn(false, defaultOn = true))
+    }
+
+    @Test
+    fun `the seven original routes are on by default`() {
+        val original = listOf(
+            SdkRoute.TAGS, SdkRoute.TRASH, SdkRoute.DOWNLOAD, SdkRoute.UPLOAD,
+            SdkRoute.ALBUMS, SdkRoute.EVENTS, SdkRoute.SHARED,
+        )
+        assertTrue(original.all { it.defaultOn })
+    }
+
+    @Test
     fun `a route switched off runs only the app's own path`() = runTest {
         var sdkCalls = 0
         val result = runRouted("tags", on = false, viaSdk = { sdkCalls++; "sdk" }, fallback = { "own" })
