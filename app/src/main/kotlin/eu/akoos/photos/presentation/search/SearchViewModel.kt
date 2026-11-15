@@ -135,6 +135,21 @@ private class ScopeFilter(private val linkIds: Set<String>?, private val folder:
     }
 }
 
+/** Diacritic-folded, lowercased form so a name search like "akos" matches "Ákos". */
+private fun foldForMatch(s: String): String =
+    java.text.Normalizer.normalize(s.trim().lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+
+/** The people of [named] whose name holds [query], diacritics folded both ways, at most [limit] of them in
+ *  [named]'s order; none for a blank query or a person with no name. */
+internal fun peopleMatching(named: List<PersonUi>, query: String, limit: Int = 12): List<PersonUi> {
+    val needle = foldForMatch(query)
+    if (needle.isBlank()) return emptyList()
+    return named
+        .filter { person -> person.displayName?.let { foldForMatch(it).contains(needle) } == true }
+        .take(limit)
+}
+
 /**
  * One step of the content search: whether it is running, and the ranked keys when it has them. [keys] is
  * null while a new query is still being embedded, which leaves the previous query's ranking in place.
@@ -172,22 +187,24 @@ class SearchViewModel @Inject constructor(
     /** Hidden vault filter — same DataStore key the gallery uses. Without this the
      *  search page surfaces hidden photos via name / date / content-filter matches,
      *  defeating the point of the Hidden vault. */
+    // Each of these three passes a value on only when its own set changes: the settings store is written
+    // for unrelated keys all the time (once per uploaded photo), and every repeat re-filtered the library.
     private val hiddenUrisFlow = context.settingsDataStore.data.map {
         it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     /** Cloud linkIds pinned for offline — the Offline category chip filters results to these.
      *  Same DataStore key the gallery and album-detail surfaces read. */
     private val offlinePinIdsFlow = context.settingsDataStore.data.map {
         it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     /** MediaStore uris hearted on the device, the half of the Favourites chip Drive cannot answer,
      *  since a photo that was never backed up has no PhotoTag to carry one. Same DataStore key the
      *  gallery reads, so the chip narrows to the same photos on both surfaces. */
     private val favoriteIdsFlow = context.settingsDataStore.data.map {
         it[SettingsKeys.FAVORITE_IDS] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     private fun List<GalleryItem>.dropHidden(hiddenUris: Set<String>): List<GalleryItem> =
         filter { item ->
@@ -511,30 +528,6 @@ class SearchViewModel @Inject constructor(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /**
-     * Named people whose name matches the typed query, so a name search reaches a person and their
-     * photos even when no filename matches the text. Diacritics are folded both ways, so "akos" finds
-     * "Ákos". Empty while the query is blank or nothing matches, and while the AI or face switch is
-     * off, like [people].
-     */
-    val peopleSuggestions: StateFlow<List<PersonUi>> = combine(
-        peopleVisibility.visible(),
-        accountManager.getPrimaryUserId(),
-    ) { faceOn, userId -> faceOn to userId }
-        .flatMapLatest { (faceOn, userId) ->
-            if (!faceOn) flowOf(emptyList())
-            else combine(observePeopleUseCase(userId, allItems, namedOnly = true), debouncedQuery) { people, q ->
-                val needle = foldForMatch(q)
-                if (needle.isBlank()) emptyList()
-                else people
-                    .filter { !it.displayName.isNullOrBlank() && foldForMatch(it.displayName!!).contains(needle) }
-                    .mapNotNull { it.toPersonUi() }
-                    .take(12)
-            }
-        }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     /** All NAMED people for the People rail (the filter chip + face bar in the shared category rail),
      *  independent of the query. Gated on the AI + face flags, so an ML-off session shows no chip; a
      *  local-only session surfaces its own named people. Mirrors the timeline's people rail. */
@@ -548,6 +541,19 @@ class SearchViewModel @Inject constructor(
                 summaries.filter { !it.displayName.isNullOrBlank() }.mapNotNull { it.toPersonUi() }
             }
         }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Named people whose name matches the typed query, so a name search reaches a person and their
+     * photos even when no filename matches the text. Diacritics are folded both ways, so "akos" finds
+     * "Ákos". Empty while the query is blank or nothing matches, and while the AI or face switch is
+     * off, like [people]. Narrowed from [people] itself, which holds every named person under the same
+     * gate, so the people are summed up over the library once, not once for each list.
+     */
+    val peopleSuggestions: StateFlow<List<PersonUi>> = combine(people, debouncedQuery) { named, q ->
+        peopleMatching(named, q)
+    }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -630,11 +636,6 @@ class SearchViewModel @Inject constructor(
             _personSelection.value = PersonSelection(personId, keys)
         }
     }
-
-    /** Diacritic-folded, lowercased form so a name search like "akos" matches "Ákos". */
-    private fun foldForMatch(s: String): String =
-        java.text.Normalizer.normalize(s.trim().lowercase(), java.text.Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "")
 
     /** Adapt a domain [PersonSummary] to [PersonUi], dropping a person with no resolvable cover. */
     private fun PersonSummary.toPersonUi(): PersonUi? {

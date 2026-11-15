@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -79,7 +80,7 @@ class DayDetailViewModel @Inject constructor(
      *  key the gallery uses. */
     private val hiddenUrisFlow = context.settingsDataStore.data.map {
         it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     init {
         viewModelScope.launch {

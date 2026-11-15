@@ -87,7 +87,7 @@ class CalendarViewModel @Inject constructor(
      *  photos. Same DataStore key the gallery uses. */
     private val hiddenUrisFlow = context.settingsDataStore.data.map {
         it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     private val _uiState = MutableStateFlow(CalendarUiState())
     val uiState: StateFlow<CalendarUiState> = _uiState.asStateFlow()
