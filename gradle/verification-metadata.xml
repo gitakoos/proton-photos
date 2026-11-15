@@ -6820,7 +6820,7 @@
       </component>
       <component group="eu.akoos.sqlcipher" name="sqlcipher-android" version="4.20.0-openssl-3.5.9">
          <artifact name="sqlcipher-android-4.20.0-openssl-3.5.9.aar">
-            <sha256 value="8c318de51a9f2a003af89b27930379914e9aad2e98adeb643c1493e6e0d89a98" origin="SHA256SUMS of the release"/>
+            <sha256 value="e546d1afdf8aeea150cb59f0f28f44c79036fd94a19cd75942d4c9c287f0ce64" origin="SHA256SUMS of the release"/>
          </artifact>
       </component>
       <component group="io.coil-kt" name="coil" version="2.6.0">
