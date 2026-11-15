@@ -850,6 +850,10 @@ object SettingsKeys {
      *  its time left out, so an unchanged copy is not written again. */
     val SHARED_BACKUP_SAVED = stringSetPreferencesKey("shared_backup_saved")
 
+    /** What the last round that went through saw of the backup folders, as `"nodeUid|revisionUid"` per file, so the
+     *  check made while the app is open runs a round only when another device wrote a file since. */
+    val SHARED_BACKUP_SEEN = stringSetPreferencesKey("shared_backup_seen")
+
     /** When each synced setting and set member last changed here, as `"id|millis|fingerprint"`, so the shared backup
      *  can put this device's settings together with another's, the later change winning. Wiped at sign-out together
      *  with the account-tied settings, in the same edit. */

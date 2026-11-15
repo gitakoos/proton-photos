@@ -37,6 +37,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
@@ -94,6 +95,7 @@ import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
 import eu.akoos.photos.data.sharedbackup.mlCopyPassedOver
 import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
 import eu.akoos.photos.data.sharedbackup.SharedBackupStore
+import eu.akoos.photos.data.sharedbackup.seenRevisions
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.sdk.SdkGate
@@ -745,6 +747,9 @@ class MlSyncWorker @AssistedInject constructor(
             if (albumOrderRead && sharedBackupRunner.saveAlbumOrder(userId, ownDeviceId, now) == null) failedParts += "save album order"
         }
         val failed = failedParts.isNotEmpty()
+        // Every other device's copy in the listing was taken in or passed over, so the check made while the app is
+        // open starts a round again only once one of them is replaced.
+        if (!failed) runCatching { sharedBackupStore.recordSeen(seenRevisions(listing)) }
         return endRound(
             tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS),
             failed,
@@ -1016,7 +1021,8 @@ class MlSyncWorker @AssistedInject constructor(
          * [anyNetwork], otherwise on an unmetered one. Under [ExistingWorkPolicy.KEEP] a job already queued or
          * running stays and this request is dropped, unless [replaceWaiting], for a round the user asked for that
          * takes the place of an automatic one still waiting for its network. The operation also rides as a tag,
-         * so a reader knows it while the job is still queued.
+         * so a reader knows it while the job is still queued. An [expedited] round starts ahead of other work, as an
+         * ordinary one once the app's quota of such work is used up.
          */
         fun enqueueRound(
             context: Context,
@@ -1024,6 +1030,7 @@ class MlSyncWorker @AssistedInject constructor(
             anyNetwork: Boolean,
             replaceWaiting: Boolean,
             mode: RoundMode = RoundMode.AUTO,
+            expedited: Boolean = false,
         ): UUID {
             ensureChannel(context)
             val request = MlSyncRequest.Round(userId.id, mode)
@@ -1033,6 +1040,7 @@ class MlSyncWorker @AssistedInject constructor(
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
                 .addTag(TAG)
                 .addTag(MlSyncWorkData.operationTag(request.operation))
+                .apply { if (expedited) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
                 .build()
             val policy = if (replaceWaiting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
             WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK_NAME, policy, work)

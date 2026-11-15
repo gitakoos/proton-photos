@@ -25,6 +25,9 @@ package eu.akoos.photos.data.sharedbackup
 import android.content.Context
 import android.util.Log
 import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -36,14 +39,18 @@ import eu.akoos.photos.data.autosave.AutoSaveCoordinator
 import eu.akoos.photos.data.autosave.AutoSaveKind
 import eu.akoos.photos.data.autosave.AutoSaveStore
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.mlsync.MlDriveStore
 import eu.akoos.photos.data.mlsync.MlSyncOperation
+import eu.akoos.photos.data.mlsync.MlSyncSignOut
 import eu.akoos.photos.data.mlsync.MlSyncWorkData
 import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.sdk.SdkGate
 import eu.akoos.photos.data.settingssync.SettingsSyncRegistry
 import eu.akoos.photos.data.settingssync.SettingsSyncStore
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.SyncDiagnostics
 import eu.akoos.photos.worker.MlSyncWorker
 import eu.akoos.photos.worker.SharedBackupTriggerWorker
@@ -61,6 +68,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -72,6 +80,12 @@ import javax.inject.Singleton
  * now row. The round itself is the ML sync job, one at a time; the automatic ones keep to an unmetered connection
  * when backups do, the Sync now row and the switch take any connection. The planned checks are WorkManager jobs, so
  * they survive the app being left or killed.
+ *
+ * While the app is in the foreground the round comes sooner: a change still waiting goes out at once as the app is
+ * left, and the backup folders are listed on coming back to the app and every [CHECK_EVERY_MS] while it stays open
+ * (at most once per [CHECK_AT_MOST_EVERY_MS]), a round running only when another device's file there is new since
+ * the last round that went through saw the folders. Nothing of this runs in the background, for a guest, while
+ * signed out or signing out, offline, or with the backup off.
  */
 /** How long a round after a change the user made waits: [SharedBackupScheduler.SAVE_AFTER_MS], or less once the
  *  first change still waiting came [SharedBackupScheduler.SAVE_AT_MOST_AFTER_MS] ago. */
@@ -90,6 +104,11 @@ class SharedBackupScheduler @Inject constructor(
     private val autoSave: AutoSaveCoordinator,
     private val autoSaveStore: AutoSaveStore,
     private val settingsSync: SettingsSyncStore,
+    private val network: NetworkObserver,
+    private val sdkGate: dagger.Lazy<SdkGate>,
+    private val signOut: dagger.Lazy<MlSyncSignOut>,
+    private val runner: dagger.Lazy<SharedBackupRunner>,
+    private val driveStore: dagger.Lazy<MlDriveStore>,
     @AppScope private val appScope: CoroutineScope,
 ) {
     private val workManager: WorkManager
@@ -98,6 +117,12 @@ class SharedBackupScheduler @Inject constructor(
     /** When the first change the user made that no round has picked up yet came, or 0. */
     @Volatile
     private var firstWaitingChangeMs = 0L
+
+    /** When the backup folders were last listed for another device's newer file, or a round was asked for, or 0. */
+    @Volatile
+    private var lastCheckMs = 0L
+
+    private val foregroundLoop = ForegroundCheckLoop(appScope) { checkForNewer() }
 
     /** Watches the data the shared backup keeps and runs a round now when it is on. Called once, from the main process. */
     fun start() {
@@ -148,7 +173,10 @@ class SharedBackupScheduler @Inject constructor(
                 Log.w(TAG, "settings watch stopped: ${e.javaClass.simpleName}")
             }
         }
+        // The round at start reads the folders, so the app coming to the foreground right after lists nothing more.
+        lastCheckMs = System.currentTimeMillis()
         appScope.launch { runCatching { syncNow() } }
+        watchForeground()
         // The same account signing back in finds its automatic backup on again; the sign-out wiped the switch, as it
         // wipes every account-tied setting, so another account on this device never inherits it.
         appScope.launch {
@@ -205,11 +233,113 @@ class SharedBackupScheduler @Inject constructor(
     suspend fun syncNow(userAsked: Boolean = false) {
         if (!store.isEnabled()) return
         val userId = accountManager.getPrimaryUserId().first() ?: return
-        firstWaitingChangeMs = 0L
-        val anyNetwork = userAsked || context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] == false
-        val replaceWaiting = userAsked && withContext(Dispatchers.IO) { automaticRoundWaiting() }
-        MlSyncWorker.enqueueRound(context, userId, anyNetwork, replaceWaiting)
+        enqueueRound(userId, userAsked, expedited = false)
     }
+
+    private suspend fun enqueueRound(userId: UserId, userAsked: Boolean, expedited: Boolean) {
+        firstWaitingChangeMs = 0L
+        lastCheckMs = System.currentTimeMillis()
+        val anyNetwork = userAsked || anyNetworkAllowed()
+        val replaceWaiting = userAsked && withContext(Dispatchers.IO) { automaticRoundWaiting() }
+        MlSyncWorker.enqueueRound(context, userId, anyNetwork, replaceWaiting, expedited = expedited)
+    }
+
+    /** Whether an automatic round may take any connection, not only an unmetered one. */
+    private suspend fun anyNetworkAllowed(): Boolean =
+        context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] == false
+
+    /** Lists the backup folders on coming back to the app and every [CHECK_EVERY_MS] while it stays in the foreground,
+     *  and sends a change still waiting as it is left. Registered on the main thread, from [start]. */
+    private fun watchForeground() {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    foregroundLoop.foreground()
+                }
+
+                override fun onStop(owner: LifecycleOwner) {
+                    foregroundLoop.background()
+                    appScope.launch { appLeft() }
+                }
+            },
+        )
+    }
+
+    /**
+     * As the app leaves the foreground: a change the user made that still waits for its round goes out now, as
+     * expedited work, instead of after the rest of its [SAVE_AFTER_MS]. Not while a failed round's wait runs.
+     */
+    internal suspend fun appLeft() {
+        try {
+            flushIfWaiting()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "waiting change not sent: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private suspend fun flushIfWaiting() {
+        val status = store.status.first()
+        if (!status.enabled) return
+        if (!flushOnBackground(firstWaitingChangeMs, status.lastFailed, status.lastAtMs, System.currentTimeMillis())) return
+        val userId = accountManager.getPrimaryUserId().first() ?: return
+        if (signOut.get().isSigningOut(userId)) return
+        val running = withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.RUNNING) }
+        enqueueRound(userId, userAsked = false, expedited = true)
+        // The round now queued takes the change in. One already running may have read before it, so then the planned
+        // check after the change stays.
+        if (!running) workManager.cancelUniqueWork(SOON_WORK)
+        Log.i(TAG, "app left with a change waiting: round now")
+        SyncDiagnostics.log("shared backup: app left with a change waiting, round now")
+    }
+
+    /**
+     * Lists the backup folders, one listing per folder and no download, and runs a round when another device's file
+     * there is new since the last round that went through saw them ([newerFiles]). At most once per
+     * [CHECK_AT_MOST_EVERY_MS]; nothing when the backup is off, for a guest, while signed out or signing out, offline
+     * or on a connection the round may not use, after a failed round (its next one is planned already), or while
+     * another Drive job runs.
+     */
+    internal suspend fun checkForNewer() {
+        val now = System.currentTimeMillis()
+        if (checkTooSoon(now, lastCheckMs)) return
+        val userId = accountManager.getPrimaryUserId().first()
+        val status = store.status.first()
+        val conditions = CheckConditions(
+            enabled = status.enabled,
+            signedIn = userId != null,
+            signingOut = userId != null && signOut.get().isSigningOut(userId),
+            online = network.isOnline.value,
+            networkAllowed = network.isUnmetered.value || anyNetworkAllowed(),
+            lastFailed = status.lastFailed,
+        )
+        if (userId == null || !checkAllowed(conditions) || !sdkGate.get().isCapable) return
+        if (withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING) }) return
+        if (!DriveJobLock.mutex.tryLock()) return
+        lastCheckMs = now
+        val newer = try {
+            val listing = runner.get().list(userId) ?: return
+            newerFiles(listing, driveStore.get().deviceId(), store.ownCopyTaken(), store.seen())
+        } finally {
+            DriveJobLock.mutex.unlock()
+        }
+        if (newer.isEmpty()) {
+            Log.i(TAG, "check: nothing new")
+            return
+        }
+        val where = newer.keys.joinToString(",") { it.name.lowercase() }
+        Log.i(TAG, "check: another device wrote $where, round now")
+        SyncDiagnostics.log("shared backup check: another device wrote $where, round now")
+        // Asked for in full: the round takes in only the copies newer than the ones taken in last and writes only
+        // what changed here, so the kinds with nothing new cost a listing each.
+        if (store.isEnabled()) enqueueRound(userId, userAsked = false, expedited = false)
+    }
+
+    /** Whether an ML sync job is in one of [states]. */
+    private fun mlSyncJob(vararg states: WorkInfo.State): Boolean = runCatching {
+        workManager.getWorkInfosForUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME).get().any { it.state in states }
+    }.getOrDefault(false)
 
     /** The user's "Back up now": reads what the other devices saved, then writes every copy of this device's. */
     suspend fun saveNow() = manualRound(RoundMode.SAVE_NOW)
@@ -247,7 +377,7 @@ class SharedBackupScheduler @Inject constructor(
      * Notes a change of [kinds]. One the user made plans a round [SAVE_AFTER_MS] later; a scan's waits for the
      * half-hourly round, so a scan writing for hours neither keeps moving the user's change nor runs a round of its own.
      */
-    private suspend fun changed(kinds: Collection<SharedBackupKind>, byUser: Boolean) {
+    internal suspend fun changed(kinds: Collection<SharedBackupKind>, byUser: Boolean) {
         val now = System.currentTimeMillis()
         store.markChanged(kinds, now, byUser)
         if (!byUser || !store.isEnabled()) return

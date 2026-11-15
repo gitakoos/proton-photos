@@ -113,6 +113,7 @@ object AccountScopedPreferences {
                         SettingsKeys.SHARED_BACKUP_LAST_AT,
                         SettingsKeys.SHARED_BACKUP_LAST_FAILED,
                         SettingsKeys.SHARED_BACKUP_SAVED,
+                        SettingsKeys.SHARED_BACKUP_SEEN,
                         SettingsKeys.SHARED_BACKUP_CHANGED_AT,
                         SettingsKeys.SHARED_BACKUP_FACES_CHANGED_AT,
                         SettingsKeys.SHARED_BACKUP_SEARCH_CHANGED_AT,
