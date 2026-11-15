@@ -47,7 +47,6 @@ import me.proton.core.network.data.ApiProvider
 import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.AddAlbumMultipleEntry
 import eu.akoos.photos.data.api.dto.AddAlbumMultipleRequest
-import eu.akoos.photos.data.api.dto.AlbumDto
 import eu.akoos.photos.data.api.dto.BatchLinksRequest
 import eu.akoos.photos.data.api.dto.CreateAlbumLinkData
 import eu.akoos.photos.data.api.dto.CreateAlbumRequest
@@ -66,9 +65,12 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.VideoDurationBackfillScheduler
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
+import eu.akoos.photos.data.sdk.ListedAlbum
 import eu.akoos.photos.data.sdk.SdkAlbumOps
+import eu.akoos.photos.data.sdk.SdkListingOps
 import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.data.sdk.SdkRouting
+import eu.akoos.photos.data.sdk.toListedAlbum
 import eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos
 import eu.akoos.photos.domain.entity.AlbumNotFoundException
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -210,6 +212,7 @@ class AlbumService @Inject constructor(
     private val albumCacheCleanup: AlbumCacheCleanup,
     private val sdkRouting: SdkRouting,
     private val sdkAlbumOps: SdkAlbumOps,
+    private val sdkListingOps: SdkListingOps,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -373,6 +376,27 @@ class AlbumService @Inject constructor(
         membershipCacheComplete = false
     }
 
+    /** This user's own albums on [volumeId], through the app's own album list, page by page. */
+    internal suspend fun albumListOwnPath(userId: UserId, volumeId: String): List<ListedAlbum> {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val albumStubs = mutableListOf<ListedAlbum>()
+        var anchorId: String? = null
+        do {
+            val response = semaphore.withPermit {
+                manager.invoke { getAlbums(volumeId, anchorId) }.valueOrThrow
+            }
+            response.albums.mapTo(albumStubs) { it.toListedAlbum() }
+            anchorId = if (response.more) response.anchorId else null
+        } while (anchorId != null)
+        return albumStubs
+    }
+
+    /**
+     * The album list comes from the app's own listing, or with [SdkRoute.ALBUM_LIST] on from the Drive SDK:
+     * the ids and their order from the SDK's album list, the photo count, cover and last activity from each
+     * album's node ([SdkListingOps.albums]). The names, sharing and covers' thumbnails come from the app's
+     * own link reads on either path. Any SDK failure lists the albums through the app's own listing.
+     */
     suspend fun loadAlbums(userId: UserId): List<Album> = withContext(Dispatchers.IO) {
         val volumeId = shareService.getVolumeId(userId)
         val shareId = shareService.getShareId(userId, volumeId)
@@ -390,17 +414,14 @@ class AlbumService @Inject constructor(
             }
             ?: error("loadAlbums: root link key unavailable — album names cannot be decrypted")
         val thumbnailCacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
-        val manager = apiProvider.get<DriveApiService>(userId)
-        val albumStubs = mutableListOf<AlbumDto>()
-        var anchorId: String? = null
-
-        do {
-            val response = semaphore.withPermit {
-                manager.invoke { getAlbums(volumeId, anchorId) }.valueOrThrow
-            }
-            albumStubs.addAll(response.albums)
-            anchorId = if (response.more) response.anchorId else null
-        } while (anchorId != null)
+        val listingStarted = System.nanoTime()
+        var listedThroughSdk = false
+        val albumStubs: List<ListedAlbum> = sdkRouting.run(
+            SdkRoute.ALBUM_LIST,
+            viaSdk = { sdkListingOps.albums(userId, volumeId).also { listedThroughSdk = true } },
+        ) { albumListOwnPath(userId, volumeId) }
+        Log.d(TAG, "loadAlbums: listing ${albumStubs.size} albums through " +
+            "${if (listedThroughSdk) "the SDK" else "the app"} in ${(System.nanoTime() - listingStarted) / 1_000_000} ms")
 
         // Initial batch fetch + retry pass for any album whose link details didn't come
         // back in the first round (silent chunk failure inside batchFetchLinkDetails). The

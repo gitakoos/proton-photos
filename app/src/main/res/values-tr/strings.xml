@@ -821,6 +821,8 @@
     <string name="sdk_route_save_to_library_desc">Sizinle paylaşılan bir albümdeki fotoğrafı kendi kitaplığınıza kaydetme</string>
     <string name="sdk_route_timeline">Fotoğraf zaman çizelgesi</string>
     <string name="sdk_route_timeline_desc">Drive zaman çizelgenizdeki fotoğrafları listeleme</string>
+    <string name="sdk_route_album_list">Albüm listesi</string>
+    <string name="sdk_route_album_list_desc">Drive\'daki kendi albümlerinizi listeleme</string>
     <string name="sdk_route_activity">%1$s. Bu oturumda: kitaplık üzerinden %2$d, her zamanki yoldan %3$d.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>
     <string name="settings_ai_grouping_progress">%2$d yüzden %1$d</string>

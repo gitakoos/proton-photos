@@ -1921,6 +1921,8 @@
     <string name="sdk_route_save_to_library_desc">Egy veled megosztott album fotójának mentése a saját könyvtáradba</string>
     <string name="sdk_route_timeline">Fotó-idővonal</string>
     <string name="sdk_route_timeline_desc">A Drive-idővonalad fotóinak listázása</string>
+    <string name="sdk_route_album_list">Albumlista</string>
+    <string name="sdk_route_album_list_desc">A saját Drive-albumaid listázása</string>
     <string name="sdk_route_activity">%1$s. Ebben a munkamenetben: %2$d a könyvtáron át, %3$d a megszokott módon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>

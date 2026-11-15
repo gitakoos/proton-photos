@@ -866,6 +866,8 @@
     <string name="sdk_route_save_to_library_desc">Saving a photo from an album shared with you to your own library</string>
     <string name="sdk_route_timeline">Photo timeline</string>
     <string name="sdk_route_timeline_desc">Listing the photos in your Drive timeline</string>
+    <string name="sdk_route_album_list">Album list</string>
+    <string name="sdk_route_album_list_desc">Listing your own albums in Drive</string>
     <string name="sdk_route_activity">%1$s. This session: %2$d through the library, %3$d done the usual way.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d of %2$d faces</string>

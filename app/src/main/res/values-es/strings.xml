@@ -1958,6 +1958,8 @@
     <string name="sdk_route_save_to_library_desc">Guardar una foto de un álbum compartido contigo en tu biblioteca</string>
     <string name="sdk_route_timeline">Cronología de fotos</string>
     <string name="sdk_route_timeline_desc">Listar las fotos de tu cronología de Drive</string>
+    <string name="sdk_route_album_list">Lista de álbumes</string>
+    <string name="sdk_route_album_list_desc">Listar tus propios álbumes de Drive</string>
     <string name="sdk_route_activity">%1$s. En esta sesión: %2$d con la biblioteca, %3$d de la forma habitual.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <string name="settings_ai_grouping_progress">%1$d de %2$d rostros</string>

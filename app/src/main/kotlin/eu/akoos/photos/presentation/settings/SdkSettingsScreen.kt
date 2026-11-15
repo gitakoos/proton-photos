@@ -107,6 +107,7 @@ private fun SdkRoute.titleRes(): Int = when (this) {
     SdkRoute.SHARED_BY_ME -> R.string.sdk_route_shared_by_me
     SdkRoute.SAVE_TO_LIBRARY -> R.string.sdk_route_save_to_library
     SdkRoute.TIMELINE -> R.string.sdk_route_timeline
+    SdkRoute.ALBUM_LIST -> R.string.sdk_route_album_list
 }
 
 private fun SdkRoute.descriptionRes(): Int = when (this) {
@@ -120,6 +121,7 @@ private fun SdkRoute.descriptionRes(): Int = when (this) {
     SdkRoute.SHARED_BY_ME -> R.string.sdk_route_shared_by_me_desc
     SdkRoute.SAVE_TO_LIBRARY -> R.string.sdk_route_save_to_library_desc
     SdkRoute.TIMELINE -> R.string.sdk_route_timeline_desc
+    SdkRoute.ALBUM_LIST -> R.string.sdk_route_album_list_desc
 }
 
 @HiltViewModel
