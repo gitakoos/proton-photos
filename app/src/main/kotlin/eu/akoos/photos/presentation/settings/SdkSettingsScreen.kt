@@ -38,9 +38,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
 import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.data.sdk.SdkRouting
+import eu.akoos.photos.data.sdk.routeOn
+import eu.akoos.photos.data.sdk.routesShown
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
@@ -55,8 +58,8 @@ import javax.inject.Inject
 
 /**
  * Switches that send parts of the app through Proton's Drive SDK instead of the app's own requests, one
- * per [SdkRoute], all off until turned on. The page also counts, for this run of the app, how many
- * operations went through the SDK and how many fell back to the usual way after an SDK failure.
+ * per [SdkRoute] this build may run ([routesShown]). The page also counts, for this run of the app, how
+ * many operations went through the SDK and how many fell back to the usual way after an SDK failure.
  */
 @Composable
 fun SdkSettingsScreen(
@@ -64,10 +67,11 @@ fun SdkSettingsScreen(
     viewModel: SdkSettingsViewModel = hiltViewModel(),
 ) {
     val switchedOn by viewModel.switchedOn.collectAsStateWithLifecycle()
+    val shownRoutes = remember { routesShown(BuildConfig.DEBUG) }
     // The counts are read again whenever an SDK call or a fallback is counted.
     val activity by SdkDiagnostics.changes.collectAsStateWithLifecycle()
     val counts = remember(activity) {
-        SdkRoute.entries.associateWith { SdkDiagnostics.sdkCount(it.label) to SdkDiagnostics.fallbackCount(it.label) }
+        shownRoutes.associateWith { SdkDiagnostics.sdkCount(it.label) to SdkDiagnostics.fallbackCount(it.label) }
     }
 
     SettingsSubPageScaffold(title = stringResource(R.string.sdk_settings_title), onBack = onBack) {
@@ -77,7 +81,7 @@ fun SdkSettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp),
         )
         SettingsCard {
-            SdkRoute.entries.forEachIndexed { index, route ->
+            shownRoutes.forEachIndexed { index, route ->
                 if (index > 0) RowDivider()
                 ToggleRow(
                     label = stringResource(route.titleRes()),
@@ -136,7 +140,7 @@ class SdkSettingsViewModel @Inject constructor(
         routing.switchedOn.stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            SdkRoute.entries.filterTo(LinkedHashSet()) { it.defaultOn },
+            SdkRoute.entries.filterTo(LinkedHashSet()) { routeOn(it, null, BuildConfig.DEBUG) },
         )
 
     fun setSwitchedOn(route: SdkRoute, on: Boolean) {

@@ -27,6 +27,7 @@ import android.util.Log
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.SdkDiagnostics
@@ -47,8 +48,19 @@ class SdkOutcomeUnknownException(message: String, cause: Throwable?) : IllegalSt
 /**
  * A group of Drive operations that can run through the Drive SDK, each behind its own switch. [defaultOn] is
  * the switch's state until the user touches it: a route still being tried out starts off.
+ *
+ * @property releaseAllowed false keeps the route off in a release build whatever its stored switch says, and
+ *   leaves its switch off the SDK settings page there; a debug build still shows and runs it. Drive SDK
+ *   0.33.0 returns every time value (capture time, album last activity) shifted by the phone's UTC offset,
+ *   which the timeline, album list and album photos routes would read; saving to the library has not been
+ *   tried on a device yet.
  */
-enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>, val defaultOn: Boolean = true) {
+enum class SdkRoute(
+    val label: String,
+    val key: Preferences.Key<Boolean>,
+    val defaultOn: Boolean = true,
+    val releaseAllowed: Boolean = true,
+) {
     TAGS("tags", SettingsKeys.SDK_ROUTE_TAGS),
     TRASH("trash", SettingsKeys.SDK_ROUTE_TRASH),
     DOWNLOAD("download", SettingsKeys.SDK_ROUTE_DOWNLOAD),
@@ -57,10 +69,10 @@ enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>, val de
     EVENTS("events", SettingsKeys.SDK_ROUTE_EVENTS),
     SHARED("shared", SettingsKeys.SDK_ROUTE_SHARED),
     SHARED_BY_ME("shared-by-me", SettingsKeys.SDK_ROUTE_SHARED_BY_ME, defaultOn = false),
-    SAVE_TO_LIBRARY("save-to-library", SettingsKeys.SDK_ROUTE_SAVE_TO_LIBRARY, defaultOn = false),
-    TIMELINE("timeline", SettingsKeys.SDK_ROUTE_TIMELINE, defaultOn = false),
-    ALBUM_LIST("album-list", SettingsKeys.SDK_ROUTE_ALBUM_LIST, defaultOn = false),
-    ALBUM_PHOTOS("album-photos", SettingsKeys.SDK_ROUTE_ALBUM_PHOTOS, defaultOn = false),
+    SAVE_TO_LIBRARY("save-to-library", SettingsKeys.SDK_ROUTE_SAVE_TO_LIBRARY, defaultOn = false, releaseAllowed = false),
+    TIMELINE("timeline", SettingsKeys.SDK_ROUTE_TIMELINE, defaultOn = false, releaseAllowed = false),
+    ALBUM_LIST("album-list", SettingsKeys.SDK_ROUTE_ALBUM_LIST, defaultOn = false, releaseAllowed = false),
+    ALBUM_PHOTOS("album-photos", SettingsKeys.SDK_ROUTE_ALBUM_PHOTOS, defaultOn = false, releaseAllowed = false),
     THUMBNAILS("thumbnails", SettingsKeys.SDK_ROUTE_THUMBNAILS, defaultOn = false),
 }
 
@@ -78,9 +90,9 @@ class SdkRouting @Inject constructor(
     /** Whether this device can run the SDK at all. */
     val isCapable: Boolean get() = sdkGate.isCapable
 
-    /** The routes switched on, each by its stored switch or else its default ([routeSwitchedOn]). */
+    /** The routes switched on, each by its stored switch or else its default ([routeOn]). */
     val switchedOn: Flow<Set<SdkRoute>> = context.settingsDataStore.data.map { prefs ->
-        SdkRoute.entries.filterTo(LinkedHashSet()) { routeSwitchedOn(prefs[it.key], it.defaultOn) }
+        SdkRoute.entries.filterTo(LinkedHashSet()) { routeOn(it, prefs[it.key], BuildConfig.DEBUG) }
     }
 
     suspend fun setSwitchedOn(route: SdkRoute, on: Boolean) {
@@ -88,7 +100,7 @@ class SdkRouting @Inject constructor(
     }
 
     suspend fun isOn(route: SdkRoute): Boolean =
-        sdkGate.isCapable && routeSwitchedOn(context.settingsDataStore.data.first()[route.key], route.defaultOn)
+        sdkGate.isCapable && routeOn(route, context.settingsDataStore.data.first()[route.key], BuildConfig.DEBUG)
 
     /**
      * Runs [viaSdk] when [route] is on, else [fallback]. A failed SDK call is counted and [fallback] runs
@@ -103,6 +115,17 @@ class SdkRouting @Inject constructor(
 /** A route's switch as stored, or [defaultOn] while the user has never touched it: a route on by default
  *  stays on until switched off, and one off by default stays off until switched on. */
 internal fun routeSwitchedOn(stored: Boolean?, defaultOn: Boolean = true): Boolean = stored ?: defaultOn
+
+/** Whether [route] may run at all in this kind of build: always in a debug build, in a release build only
+ *  with [SdkRoute.releaseAllowed]. */
+internal fun routeAvailable(route: SdkRoute, debug: Boolean): Boolean = debug || route.releaseAllowed
+
+/** [route]'s switch ([routeSwitchedOn]), held off in a build where the route is not [routeAvailable]. */
+internal fun routeOn(route: SdkRoute, stored: Boolean?, debug: Boolean): Boolean =
+    routeAvailable(route, debug) && routeSwitchedOn(stored, route.defaultOn)
+
+/** The routes whose switch the SDK settings page shows in this kind of build, in their order. */
+internal fun routesShown(debug: Boolean): List<SdkRoute> = SdkRoute.entries.filter { routeAvailable(it, debug) }
 
 /** [SdkRouting.run] with the switch already read, apart from Android so it is tested directly. */
 internal suspend fun <T> runRouted(
