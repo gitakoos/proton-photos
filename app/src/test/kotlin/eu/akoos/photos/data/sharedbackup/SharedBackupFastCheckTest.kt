@@ -32,6 +32,7 @@ import eu.akoos.photos.data.mlsync.MlDriveNaming
 import eu.akoos.photos.data.mlsync.SettingsDriveNaming
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -192,6 +193,40 @@ class SharedBackupFastCheckTest {
         runCurrent()
         assertEquals(4, checks)
         loop.background()
+    }
+
+    @Test
+    fun `the next check is due two minutes after the last look or round, whichever came later`() = runTest {
+        var checks = 0
+        var last = 0L
+        val loop = ForegroundCheckLoop(backgroundScope, { nextCheckInMs(currentTime, last) }) {
+            checks++
+            last = currentTime
+        }
+        loop.foreground()
+        runCurrent()
+        assertEquals(1, checks)
+
+        // A round asked for a minute after that look moves the next one to two minutes after the round.
+        advanceTimeBy(60_000L)
+        last = currentTime
+        advanceTimeBy(CHECK_EVERY_MS - 60_000L)
+        runCurrent()
+        assertEquals(1, checks)
+        advanceTimeBy(60_000L - 1)
+        runCurrent()
+        assertEquals(1, checks)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(2, checks)
+        loop.background()
+    }
+
+    @Test
+    fun `the next check's wait counts from the later of the look and the round`() {
+        assertEquals(CHECK_EVERY_MS, nextCheckInMs(nowMs = 1_000L, lastMs = 1_000L))
+        assertEquals(30_000L, nextCheckInMs(nowMs = 100_000L, lastMs = 10_000L))
+        assertTrue(nextCheckInMs(nowMs = 500_000L, lastMs = 10_000L) <= 0L)
     }
 
     @Test

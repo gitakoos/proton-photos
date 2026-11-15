@@ -82,10 +82,11 @@ import javax.inject.Singleton
  * they survive the app being left or killed.
  *
  * While the app is in the foreground the round comes sooner: a change still waiting goes out at once as the app is
- * left, and the backup folders are listed on coming back to the app and every [CHECK_EVERY_MS] while it stays open
- * (at most once per [CHECK_AT_MOST_EVERY_MS]), a round running only when another device's file there is new since
- * the last round that went through saw the folders. Nothing of this runs in the background, for a guest, while
- * signed out or signing out, offline, or with the backup off. A pull to refresh does the same at once ([refresh]).
+ * left, and the backup folders are listed on coming back to the app and, while it stays open, [CHECK_EVERY_MS] after
+ * the last look or round (at most once per [CHECK_AT_MOST_EVERY_MS]), a round running only when another device's
+ * file there is new since the last round that went through saw the folders. Nothing of this runs in the background,
+ * for a guest, while signed out or signing out, offline, or with the backup off. A pull to refresh does the same at
+ * once ([refresh]).
  */
 /** How long a round after a change the user made waits: [SharedBackupScheduler.SAVE_AFTER_MS], or less once the
  *  first change still waiting came [SharedBackupScheduler.SAVE_AT_MOST_AFTER_MS] ago. */
@@ -118,11 +119,15 @@ class SharedBackupScheduler @Inject constructor(
     @Volatile
     private var firstWaitingChangeMs = 0L
 
-    /** When the backup folders were last listed for another device's newer file, or a round was asked for, or 0. */
+    /** When the backup folders were last listed for another device's newer file, or a round was asked for or ended,
+     *  or 0. */
     @Volatile
     private var lastCheckMs = 0L
 
-    private val foregroundLoop = ForegroundCheckLoop(appScope) { checkForNewer() }
+    private val foregroundLoop = ForegroundCheckLoop(
+        appScope,
+        untilNextMs = { nextCheckInMs(System.currentTimeMillis(), lastCheckMs) },
+    ) { checkForNewer() }
 
     /** Watches the data the shared backup keeps and runs a round now when it is on. Called once, from the main process. */
     fun start() {
@@ -307,7 +312,6 @@ class SharedBackupScheduler @Inject constructor(
             if (flushIfWaiting("refresh")) return
             if (checkForNewer() != CheckOutcome.NOTHING_NEW) return
             scheduleNext()
-            foregroundLoop.restart()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -349,7 +353,8 @@ class SharedBackupScheduler @Inject constructor(
             lastFailed = status.lastFailed,
         )
         if (userId == null || !checkAllowed(conditions) || !sdkGate.get().isCapable) return CheckOutcome.SKIPPED
-        if (withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING) }) return CheckOutcome.SKIPPED
+        val roundQueued = withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING) }
+        if (roundQueued) return CheckOutcome.SKIPPED
         if (!DriveJobLock.mutex.tryLock()) return CheckOutcome.SKIPPED
         lastCheckMs = now
         val newer = try {
@@ -398,9 +403,10 @@ class SharedBackupScheduler @Inject constructor(
         }
     }.getOrDefault(false)
 
-    /** Plans the next round [ROUND_EVERY_MS] from now, or [SAVE_AFTER_MS] after one that failed. The round worker
-     *  calls this as it ends. */
+    /** Plans the next round [ROUND_EVERY_MS] from now, or [SAVE_AFTER_MS] after one that failed, and the next look at
+     *  the backup folders [CHECK_EVERY_MS] from now. The round worker calls this as it ends. */
     suspend fun scheduleNext() {
+        lastCheckMs = System.currentTimeMillis()
         if (!store.isEnabled()) return
         enqueueCheck(NEXT_WORK, if (store.status.first().lastFailed) SAVE_AFTER_MS else ROUND_EVERY_MS)
     }

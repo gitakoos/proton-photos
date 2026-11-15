@@ -38,6 +38,10 @@ internal const val CHECK_EVERY_MS = 2L * 60_000L
 /** Two looks at the backup folders, the one at start or on coming back to the app included, are at least this far apart. */
 internal const val CHECK_AT_MOST_EVERY_MS = 60_000L
 
+/** How long after [nowMs] the next look at the backup folders is due: [CHECK_EVERY_MS] after the last look or round
+ *  asked for or ended ([lastMs]), whichever came later. Zero or less when it is due. */
+internal fun nextCheckInMs(nowMs: Long, lastMs: Long): Long = lastMs + CHECK_EVERY_MS - nowMs
+
 /** Whether a look at the backup folders at [nowMs] comes too soon after the one at [lastCheckMs] (0 when none yet). */
 internal fun checkTooSoon(nowMs: Long, lastCheckMs: Long): Boolean =
     lastCheckMs > 0L && nowMs >= lastCheckMs && nowMs - lastCheckMs < CHECK_AT_MOST_EVERY_MS
@@ -108,11 +112,13 @@ internal fun newerFiles(
         .filterValues { it.isNotEmpty() }
 
 /**
- * Runs [check] at once and then every [CHECK_EVERY_MS] while the app is in the foreground ([foreground]), and stops
- * when it leaves ([background]). The check keeps its own [CHECK_AT_MOST_EVERY_MS] gap.
+ * Runs [check] at once and then whenever the next one is due ([untilNextMs], see [nextCheckInMs]) while the app is in
+ * the foreground ([foreground]), and stops when it leaves ([background]). A check that did not look is tried again
+ * [CHECK_EVERY_MS] later. The check keeps its own [CHECK_AT_MOST_EVERY_MS] gap.
  */
 internal class ForegroundCheckLoop(
     private val scope: CoroutineScope,
+    private val untilNextMs: () -> Long = { 0L },
     private val check: suspend () -> Unit,
 ) {
     private var job: Job? = null
@@ -123,31 +129,24 @@ internal class ForegroundCheckLoop(
     @Synchronized
     fun foreground() {
         if (job?.isActive == true) return
-        job = loop(waitFirst = false)
-    }
-
-    /** Starts the [CHECK_EVERY_MS] wait for the next check again, while the app is in the foreground. */
-    @Synchronized
-    fun restart() {
-        if (job?.isActive != true) return
-        job?.cancel()
-        job = loop(waitFirst = true)
-    }
-
-    private fun loop(waitFirst: Boolean): Job =
-        scope.launch {
-            if (waitFirst) delay(CHECK_EVERY_MS)
+        job = scope.launch {
+            runCheck()
             while (isActive) {
-                try {
-                    check()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "check failed: ${e.javaClass.simpleName}")
-                }
-                delay(CHECK_EVERY_MS)
+                delay(untilNextMs().takeIf { it > 0L } ?: CHECK_EVERY_MS)
+                if (untilNextMs() <= 0L) runCheck()
             }
         }
+    }
+
+    private suspend fun runCheck() {
+        try {
+            check()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "check failed: ${e.javaClass.simpleName}")
+        }
+    }
 
     @Synchronized
     fun background() {

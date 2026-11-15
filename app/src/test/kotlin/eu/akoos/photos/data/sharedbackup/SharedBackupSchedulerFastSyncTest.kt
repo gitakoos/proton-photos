@@ -219,9 +219,10 @@ class SharedBackupSchedulerFastSyncTest {
     fun `a pull finding nothing new plans the next round as a round ending now would`() = runBlocking {
         turnOn()
         seenAll()
-        val scheduler = scheduler()
-        scheduler.scheduleNext()
+        // The next round as an earlier run of the app planned it.
+        scheduler().scheduleNext()
         val before = planned(SharedBackupScheduler.NEXT_WORK).single().id
+        val scheduler = scheduler()
 
         scheduler.refreshNow()
         assertTrue(enqueued.isEmpty())
@@ -232,6 +233,17 @@ class SharedBackupSchedulerFastSyncTest {
         scheduler.refreshNow()
         coVerify(exactly = 1) { runner.list(user) }
         assertEquals(after, planned(SharedBackupScheduler.NEXT_WORK).single().id)
+    }
+
+    @Test
+    fun `a round that just ended moves the next look at the folders`() = runBlocking {
+        turnOn()
+        val scheduler = scheduler()
+        scheduler.scheduleNext()
+        scheduler.checkForNewer()
+        scheduler.refreshNow()
+        coVerify(exactly = 0) { runner.list(any()) }
+        assertTrue(enqueued.isEmpty())
     }
 
     @Test
