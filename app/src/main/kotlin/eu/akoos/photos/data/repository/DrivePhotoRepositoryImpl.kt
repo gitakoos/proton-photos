@@ -39,7 +39,7 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
-import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.AlbumService
@@ -493,9 +493,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override fun observeSharedByMePhotos(linkIds: List<String>): Flow<List<SharedPhoto>> =
         // Chunked: the shared-by-me feed grows with how much the user has shared. The comparator
-        // restates observeByLinkIds' ORDER BY, though the feed order below is what actually ships.
-        linkIds.combineSqlChunks(compareByDescending<PhotoListingEntity> { it.captureTime }) { chunk ->
-            photoListingDao.observeByLinkIds(chunk)
+        // restates observeDisplayRowsByLinkIds' ORDER BY, though the feed order below is what actually ships.
+        linkIds.combineSqlChunks(compareByDescending<PhotoListingDisplayRow> { it.captureTime }) { chunk ->
+            photoListingDao.observeDisplayRowsByLinkIds(chunk)
         }.map { rows ->
             val byId = rows.associateBy { it.linkId }
             // Preserve the caller's order (the feed order) and drop rows the DB doesn't have yet.

@@ -164,3 +164,41 @@ data class PhotoPickerRow(
     val linkId: String,
     val thumbnailUrl: String?,
 )
+
+/**
+ * The display columns of a [PhotoListingEntity] row, thumbnail URL included, for the screens that
+ * observe a set of photos by link: album detail, a hidden album, an import run and the shared-by-me
+ * feed. A full row also carries the per-row crypto material (encNodeKey, encNodePassphrase,
+ * contentKeyPacket, encXAttr), kilobytes each, which [toDomain] drops; Room re-runs these reads on
+ * every write to the table, so reading the full rows materialised every one of those blobs again
+ * each time only to discard it. [toDomain] builds the same [CloudPhoto] as [PhotoListingEntity.toDomain].
+ */
+data class PhotoListingDisplayRow(
+    val linkId: String,
+    val shareId: String,
+    val volumeId: String,
+    val captureTime: Long,
+    val displayName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val thumbnailUrl: String?,
+    val revisionId: String,
+    val contentHash: String?,
+    val tagsCsv: String,
+    val durationMs: Long?,
+) {
+    fun toDomain(): CloudPhoto = CloudPhoto(
+        linkId = linkId,
+        shareId = shareId,
+        volumeId = volumeId,
+        captureTime = captureTime,
+        displayName = displayName,
+        mimeType = mimeType,
+        sizeBytes = sizeBytes,
+        thumbnailUrl = thumbnailUrl,
+        revisionId = revisionId,
+        contentHash = contentHash,
+        tags = parseTagsCsv(tagsCsv),
+        durationMs = durationMs,
+    )
+}

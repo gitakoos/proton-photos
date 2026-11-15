@@ -271,7 +271,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
      * sorts ahead of older work; if the linkId is already queued at [Band.PREFETCH] it is
      * promoted to VISIBLE in place. Returns immediately — the actual work runs on a worker
      * and surfaces to the UI through the existing Flow on [PhotoListingDao.observeAll] /
-     * [PhotoListingDao.observeByLinkIds].
+     * [PhotoListingDao.observeDisplayRowsByLinkIds].
      */
     fun request(userId: UserId, photo: PhotoListingEntity) {
         bumpGeneration()

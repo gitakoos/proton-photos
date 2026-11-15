@@ -30,6 +30,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.LinkIdName
 import kotlinx.coroutines.flow.Flow
+import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoListingLite
 import eu.akoos.photos.data.db.entity.PhotoPickerRow
@@ -343,10 +344,15 @@ interface PhotoListingDao {
     )
     suspend fun seedContentHash(userId: String, linkId: String, contentHash: String)
 
-    /** Live observation for a specific set of linkIds — used by album detail screen. Callers chunk
+    /** Live observation for a specific set of linkIds (album detail, a hidden album, an import run, the
+     *  shared-by-me feed), as the display columns only: see [PhotoListingDisplayRow]. Callers chunk
      *  [linkIds] and restate this ORDER BY when merging the slices back together. */
-    @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds) ORDER BY captureTime DESC")
-    fun observeByLinkIds(linkIds: List<String>): Flow<List<PhotoListingEntity>>
+    @Query(
+        "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, thumbnailUrl, " +
+            "revisionId, contentHash, tagsCsv, durationMs FROM photo_listing WHERE linkId IN (:linkIds) " +
+            "ORDER BY captureTime DESC",
+    )
+    fun observeDisplayRowsByLinkIds(linkIds: List<String>): Flow<List<PhotoListingDisplayRow>>
 
     /** Writes JUST the thumbnailUrl — a full-row upsert would race a concurrent metadata refresh
      *  and could overwrite the freshly-decrypted URL with a stale null. */

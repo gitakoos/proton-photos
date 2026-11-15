@@ -84,7 +84,7 @@ class ObservePlacesUseCase @Inject constructor(
             val locationFlow = photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
             else getGalleryItems.invoke(userId)
-            combine(locationFlow, libraryFlow, thumbnailUrlStore.urls) { locations, library, urls ->
+            combine(locationFlow, libraryFlow) { locations, library ->
                 val locale = Locale.getDefault()
                 if (labelLocale != locale) {
                     labelCache.clear()
@@ -92,14 +92,16 @@ class ObservePlacesUseCase @Inject constructor(
                 }
                 val itemByKey = itemsByKey(library)
                 val located = locations.filterNot { it.isNullIsland() }.mapNotNull { loc ->
-                    itemByKey[loc.id]?.let {
-                        LocatedItem(loc.id, loc.latitude, loc.longitude, resolveThumbnail(it, urls))
-                    }
+                    itemByKey[loc.id]?.let { LocatedItem(loc.id, loc.latitude, loc.longitude, it) }
                 }
                 val labels = HashMap<String, PlaceLabelParts?>(located.size)
                 for (item in located) labels[item.id] = labelFor(item)
                 groupPlaces(located) { labels[it.id] }
             }
+                // The store's URLs go onto the covers only, one per city and country, after the grouping: a
+                // thumbnail that lands no longer regroups every located photo of the library. A cover is
+                // picked by capture time, which a URL does not change, so the result is the same.
+                .combine(thumbnailUrlStore.urls) { grouped, urls -> grouped.withCoverUrls(urls) }
         }
         .flowOn(Dispatchers.Default)
         .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
@@ -110,17 +112,6 @@ class ObservePlacesUseCase @Inject constructor(
             ?: return null
         return PlaceLabelParts(geo.city, geo.countryCode, geo.countryName).also { labelCache[item.id] = it }
     }
-
-    /** Overlay the store's freshly-decrypted thumbnail URL onto a cloud-only item so its cover has an
-     *  image source; a Local/Synced item already paints from its local uri. */
-    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
-        if (item is GalleryItem.CloudOnly) {
-            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
-            if (url == item.cloud.thumbnailUrl) item
-            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
-        } else {
-            item
-        }
 
     /** Index the merged library by the keys a `photo_location` id can carry (a local content uri and a
      *  cloud linkId), so a located row resolves to its item by id. */
@@ -138,4 +129,26 @@ class ObservePlacesUseCase @Inject constructor(
         }
         return byKey
     }
+}
+
+/**
+ * These places with the store's freshly-decrypted thumbnail URL set on each cloud-only cover, so the cover
+ * has an image source; a device or synced cover already paints from its local uri. A cover with no new
+ * URL is handed back as it is.
+ */
+internal fun PlacesData.withCoverUrls(urls: Map<String, String>): PlacesData = PlacesData(
+    countries = countries.map { country ->
+        val cover = country.cover?.withStoreUrl(urls)
+        if (cover === country.cover) country else country.copy(cover = cover)
+    },
+    cities = cities.map { city ->
+        val cover = city.cover?.withStoreUrl(urls)
+        if (cover === city.cover) city else city.copy(cover = cover)
+    },
+)
+
+private fun GalleryItem.withStoreUrl(urls: Map<String, String>): GalleryItem {
+    if (this !is GalleryItem.CloudOnly) return this
+    val url = urls[cloud.linkId] ?: cloud.thumbnailUrl
+    return if (url == cloud.thumbnailUrl) this else GalleryItem.CloudOnly(cloud.copy(thumbnailUrl = url))
 }

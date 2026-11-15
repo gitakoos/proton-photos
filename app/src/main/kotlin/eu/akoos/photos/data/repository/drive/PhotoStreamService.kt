@@ -64,7 +64,7 @@ import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
-import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
 import eu.akoos.photos.data.db.entity.toCloudPhotos
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -671,10 +671,11 @@ class PhotoStreamService @Inject constructor(
 
     /** Chunked at the one layer every caller (album detail, album download, hidden album) shares, so
      *  an album larger than SQLite's host-variable cap resolves instead of failing the statement. The
-     *  comparator restates observeByLinkIds' own ORDER BY: a merged read is otherwise chunk-major. */
+     *  comparator restates observeDisplayRowsByLinkIds' own ORDER BY: a merged read is otherwise
+     *  chunk-major. */
     fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
-        linkIds.combineSqlChunks(compareByDescending<PhotoListingEntity> { it.captureTime }) { chunk ->
-            photoListingDao.observeByLinkIds(chunk)
+        linkIds.combineSqlChunks(compareByDescending<PhotoListingDisplayRow> { it.captureTime }) { chunk ->
+            photoListingDao.observeDisplayRowsByLinkIds(chunk)
         }.map { list -> list.map { it.toDomain() } }
 
     suspend fun refreshCloudPhotos(userId: UserId, force: Boolean = false) {
