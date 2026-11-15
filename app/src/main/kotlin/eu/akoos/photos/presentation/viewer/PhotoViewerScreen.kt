@@ -32,6 +32,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -48,7 +50,12 @@ import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -148,6 +155,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -1063,6 +1071,17 @@ fun PhotoViewerScreen(
     // whatever the user had before it.
     val showChrome = showOverlays && textState !is ViewerTextState.Showing
 
+    // Immersive browsing follows the tap that hid the chrome, not text mode: text recognition
+    // still needs the system bars for its inset squeeze, while a plain hide drops them and
+    // fades the page to pitch black with the chrome.
+    val immersive = !showOverlays
+    val viewerBg by animateColorAsState(
+        targetValue = if (immersive) Color.Black else Bg0,
+        animationSpec = tween(durationMillis = 220),
+        label = "viewerImmersiveBg",
+    )
+    ViewerImmersiveSystemUi(immersive = immersive, themeBackground = Bg0)
+
     // Pause if the user single-taps anywhere on a photo (the same gesture that
     // toggles chrome). We do this by observing [showOverlays] — when it flips from
     // hidden to visible while playing, the user just tapped, so stop the slideshow.
@@ -1339,7 +1358,7 @@ fun PhotoViewerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Bg0)
+            .background(viewerBg)
             .onSizeChanged { containerSize = it }
             .onGloballyPositioned { viewerOrigin = it.positionInRoot() }
             // Sees every press and lift first and consumes none, for the video chrome's auto-hide.
@@ -1554,11 +1573,11 @@ fun PhotoViewerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // Theme-reactive page background: pure black viewer chrome in dark
-                    // mode, white in light mode. Bg0 also covers the one-frame window
-                    // between the thumb hiding and the full-res draw, so no off-theme
-                    // flash can show through.
-                    .background(Bg0),
+                    // Theme-reactive page background while the chrome is up (near-black in
+                    // dark mode, light in light mode); fades to pitch black with immersive
+                    // browsing. Also covers the one-frame window between the thumb hiding
+                    // and the full-res draw, so no off-theme flash can show through.
+                    .background(viewerBg),
                 contentAlignment = Alignment.Center,
             ) {
                 // The poster is the SAME thumbnail the grid and the bottom reel show for this item, so
@@ -1643,7 +1662,7 @@ fun PhotoViewerScreen(
                         },
                         // On a cache miss (this video's own poster not yet decoded) paint the themed
                         // background at once, never the image a recycled pager slot kept from a neighbour.
-                        placeholder = ColorPainter(Bg0),
+                        placeholder = ColorPainter(viewerBg),
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
@@ -1704,6 +1723,7 @@ fun PhotoViewerScreen(
                                         uri = Uri.fromFile(motionFile),
                                         autoPlay = true,
                                         onEnded = { viewModel.stopMotionPhoto() },
+                                        pageBackground = viewerBg,
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 } else if (isPanoramaMode) {
@@ -1829,6 +1849,8 @@ fun PhotoViewerScreen(
                                     // via a Compose graphicsLayer (which does not scale a SurfaceView).
                                     scale = scale,
                                     offset = offset,
+                                    // Letterbox/shutter follow immersive black with the page.
+                                    pageBackground = viewerBg,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -3541,5 +3563,44 @@ private fun HdrWindowColorMode(enabled: Boolean) {
             if (enabled) ActivityInfo.COLOR_MODE_HDR else ActivityInfo.COLOR_MODE_DEFAULT
         android.util.Log.d(ULTRA_HDR_TAG, "window color mode hdr=$enabled")
         onDispose { window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT }
+    }
+}
+
+/**
+ * Hides the status and navigation bars while immersive browsing is on, and brings them back with
+ * the chrome. A swipe from the edge still flashes the bars briefly; icons stay light over the
+ * pitch-black page. Leaving the viewer always restores the bars.
+ *
+ * Applied in a [SideEffect] so it wins over MainActivity's theme-driven bar-icon contrast on the
+ * same frame.
+ */
+@Composable
+private fun ViewerImmersiveSystemUi(immersive: Boolean, themeBackground: Color) {
+    val view = LocalView.current
+    val restoreLightIcons = themeBackground.luminance() > 0.5f
+    val currentRestoreLightIcons by rememberUpdatedState(restoreLightIcons)
+    SideEffect {
+        val window = view.context.findActivity()?.window ?: return@SideEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        if (immersive) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.isAppearanceLightStatusBars = restoreLightIcons
+            controller.isAppearanceLightNavigationBars = restoreLightIcons
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    DisposableEffect(view) {
+        onDispose {
+            val window = view.context.findActivity()?.window ?: return@onDispose
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = currentRestoreLightIcons
+            controller.isAppearanceLightNavigationBars = currentRestoreLightIcons
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 }

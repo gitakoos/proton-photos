@@ -164,6 +164,10 @@ internal fun VideoPlayer(
      *  layer. The same shared center-pivot scale/offset the still image uses; 1f / Zero = no zoom. */
     scale: Float = 1f,
     offset: androidx.compose.ui.geometry.Offset = androidx.compose.ui.geometry.Offset.Zero,
+    /** Letterbox and shutter fill — matches the viewer page (theme Bg0, or pitch black while
+     *  immersive). The PlayerView paints these itself, so Compose's page background alone cannot
+     *  reach the bars beside a landscape clip. */
+    pageBackground: Color = Bg0,
 ) {
     val context = LocalContext.current
     val loop = onEnded == null
@@ -228,9 +232,10 @@ internal fun VideoPlayer(
     // video so its aspect ratio is preserved instead of stretched. The controller stays off; our own pill
     // and the ExoPlayer listeners drive playback.
     // Fill the PlayerView shutter (shown until the first frame) and its letterbox with the viewer page
-    // background (Bg0) in both themes, instead of the XML's opaque black, so a video opens without a white
-    // flash or a white-to-black jump and matches the surrounding viewer and the photo path.
-    val shutterColor = Bg0.toArgb()
+    // background, instead of the XML's opaque black, so a video opens without a white flash or a
+    // white-to-black jump and matches the surrounding viewer and the photo path — including the
+    // fade to pitch black when the chrome hides.
+    val shutterColor = pageBackground.toArgb()
     AndroidView(
         factory = { ctx ->
             (android.view.LayoutInflater.from(ctx)
