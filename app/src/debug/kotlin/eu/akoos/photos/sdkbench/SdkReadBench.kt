@@ -31,15 +31,25 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.data.repository.drive.PhotosShareService
+import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
+import eu.akoos.photos.data.repository.drive.ThumbnailHelpers
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlInfo
+import eu.akoos.photos.data.repository.drive.cachedThumbnailFile
 import eu.akoos.photos.data.sdk.SdkDriveClientProvider
+import eu.akoos.photos.data.sdk.SdkListingOps
+import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.network.data.ApiProvider
 import me.proton.drive.sdk.entity.LegacyNodeUid
 import me.proton.drive.sdk.entity.ThumbnailType
 
@@ -53,18 +63,27 @@ import me.proton.drive.sdk.entity.ThumbnailType
  *  - ALBUMS: the SDK's album list (ids, then their nodes) against the app's own album list.
  *  - TIMELINE: the SDK's whole timeline listing.
  *
+ * With `--ez routes true` it times instead each read that has its own switch, both ways, as the switch on
+ * and off runs it: the timeline (the SDK listing filled from the links, against the app's own pages), the
+ * album list, the largest album's photos, and N grid thumbnails written to a scratch folder.
+ *
  * Trigger:  adb shell am broadcast -a eu.akoos.photos.SDK_READ_BENCH --ei nodes 100 -p <applicationId>
+ *           adb shell am broadcast -a eu.akoos.photos.SDK_READ_BENCH --ez routes true --ei nodes 24 -p <applicationId>
  * Output:   adb logcat -s SdkReadBench
  */
 class SdkReadBenchReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val nodes = intent.getIntExtra("nodes", 100).coerceIn(1, 1000)
+        val routes = intent.getBooleanExtra("routes", false)
         val appContext = context.applicationContext
         // Not goAsync: the SDK reads outlast the broadcast timeout, so the work runs in its own thread.
         Thread {
             try {
-                runBlocking { SdkReadBench(appContext).run(nodes) }
+                runBlocking {
+                    val bench = SdkReadBench(appContext)
+                    if (routes) bench.runRoutes(nodes) else bench.run(nodes)
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "bench failed: ${t.message}", t)
             }
@@ -81,12 +100,87 @@ interface SdkReadBenchDeps {
     fun photoListingDao(): PhotoListingDao
     fun linkDetailHelpers(): LinkDetailHelpers
     fun albumService(): AlbumService
+    fun photoStreamService(): PhotoStreamService
+    fun sdkListingOps(): SdkListingOps
+    fun apiProvider(): ApiProvider
+    fun thumbnailHelpers(): ThumbnailHelpers
+    fun thumbnailDecryptScheduler(): ThumbnailDecryptScheduler
+    fun cryptoServiceClient(): CryptoServiceClient
 }
 
 private const val TAG = "SdkReadBench"
 
-private class SdkReadBench(context: Context) {
+private class SdkReadBench(private val context: Context) {
     private val deps = EntryPointAccessors.fromApplication(context, SdkReadBenchDeps::class.java)
+
+    /** Each read with its own switch, the SDK's way and the app's own way. */
+    suspend fun runRoutes(thumbCount: Int) {
+        val userId = deps.accountManager().getPrimaryUserId().first() ?: error("signed out")
+        val volumeId = deps.shareService().getVolumeId(userId)
+        Log.i(TAG, "routes start")
+
+        step("TIMELINE route sdk") { "${deps.photoStreamService().timelineViaSdk(userId, volumeId).size} photos" }
+        step("TIMELINE route app") {
+            val manager = deps.apiProvider().get<DriveApiService>(userId)
+            var count = 0
+            var cursor: String? = null
+            do {
+                val links = manager.invoke { getPhotoLinks(volumeId, cursor) }.valueOrThrow.links
+                count += links.size
+                cursor = links.lastOrNull()?.linkId
+            } while (links.isNotEmpty())
+            "$count photos, without the walk's pause between pages"
+        }
+
+        step("ALBUM_LIST route sdk") { "${deps.sdkListingOps().albums(userId, volumeId).size} albums" }
+        step("ALBUM_LIST route app") { "${deps.albumService().albumListOwnPath(userId, volumeId).size} albums" }
+
+        val album = runCatching { deps.albumService().albumListOwnPath(userId, volumeId) }.getOrNull()
+            ?.maxByOrNull { it.photoCount }
+        if (album != null) {
+            step("ALBUM_PHOTOS route sdk") { "${deps.sdkListingOps().albumPhotos(userId, volumeId, album.linkId).size} photos" }
+            step("ALBUM_PHOTOS route app") { "${deps.albumService().albumChildrenOwnPath(userId, volumeId, album.linkId).size} photos" }
+        }
+
+        // Grid thumbnails of library photos in the photos root, which the switch covers, written to a scratch
+        // folder so the gallery's own cache neither answers nor changes.
+        val scratch = File(context.cacheDir, "sdk_bench_thumbs").apply { deleteRecursively(); mkdirs() }
+        val rootLinkId = deps.shareService().photosRootLinkId()
+        val rows = deps.photoListingDao().getByLinkIds(deps.photoListingDao().getAllLinkIds(userId.id).take(500))
+            .filter { it.volumeId == volumeId && it.parentLinkId == rootLinkId }
+            .filter { it.serverThumbnailUrl != null && it.contentKeyPacket != null && it.encNodeKey != null && it.encNodePassphrase != null }
+            .take(thumbCount)
+        step("THUMBNAILS route sdk") {
+            var written = 0
+            for (row in rows) {
+                runCatching {
+                    cachedThumbnailFile(scratch, "sdk_${row.linkId.hashCode()}.jpg", row.linkId) {
+                        deps.sdkListingOps().thumbnail(userId, volumeId, row.linkId, ThumbnailType.THUMBNAIL)
+                    }
+                }.onSuccess { written++ }
+            }
+            "$written of ${rows.size} thumbnails"
+        }
+        step("THUMBNAILS route app") {
+            val rootKey = deps.shareService().getRootLinkKeyBytes(userId) ?: error("root key unavailable")
+            val crypto = deps.cryptoServiceClient()
+            var written = 0
+            for (row in rows) {
+                val nodeKey = crypto.decryptNodeKey(row.encNodeKey!!, row.encNodePassphrase!!, rootKey)
+                val sessionKey = crypto.decryptSessionKey(row.contentKeyPacket!!, nodeKey)
+                val fileName = "app_${row.linkId.hashCode()}.jpg"
+                val stored = ThumbnailUrlInfo(bareUrl = row.serverThumbnailUrl!!, token = row.serverThumbnailToken)
+                val url = deps.thumbnailHelpers().downloadAndDecryptBinary(stored, nodeKey, sessionKey, row.linkId, scratch, fileName = fileName)
+                    ?: deps.thumbnailDecryptScheduler().fetchFreshThumbnailInfo(userId, row.linkId, volumeId)?.let { fresh ->
+                        deps.thumbnailHelpers().downloadAndDecryptBinary(fresh, nodeKey, sessionKey, row.linkId, scratch, fileName = fileName)
+                    }
+                if (url != null) written++
+            }
+            "$written of ${rows.size} thumbnails"
+        }
+        scratch.deleteRecursively()
+        Log.i(TAG, "routes done")
+    }
 
     suspend fun run(nodeCount: Int) {
         val userId = deps.accountManager().getPrimaryUserId().first() ?: error("signed out")
