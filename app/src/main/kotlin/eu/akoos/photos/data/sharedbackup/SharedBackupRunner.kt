@@ -118,20 +118,31 @@ data class SharedBackupCopy(val deviceId: String, val file: MlDriveFile) {
 }
 
 /**
+ * Whether [file] changed since the last round that went through saw the backup folders ([seen], node to active
+ * revision): another revision, or a file not there then. An empty [seen], before any such round, tells nothing.
+ * The times Drive gives can be shifted (by the phone's UTC offset in Drive SDK 0.33), so a copy whose time looks
+ * no newer than the one taken in last is still taken in once its revision changed.
+ */
+internal fun changedSinceSeen(file: MlDriveFile, seen: Map<String, String>): Boolean =
+    seen.isNotEmpty() && seen[file.nodeUid] != file.activeRevisionUid
+
+/**
  * Each other install's newest copy in [files] (its install read by [deviceIdOf]) that is newer than the copy of that
- * install taken in last ([applied]); never [ownDeviceId]'s own. Pure, so it is unit-tested directly.
+ * install taken in last ([applied]) or changed since a round last saw it ([changedSinceSeen]); never [ownDeviceId]'s
+ * own. Pure, so it is unit-tested directly.
  */
 internal fun newerCopies(
     files: List<MlDriveFile>,
     deviceIdOf: (String) -> String?,
     ownDeviceId: String,
     applied: Map<String, Long>,
+    seen: Map<String, String> = emptyMap(),
 ): List<SharedBackupCopy> =
     files.mapNotNull { file -> deviceIdOf(file.name)?.let { SharedBackupCopy(it, file) } }
         .filter { it.deviceId != ownDeviceId }
         .groupBy { it.deviceId }
         .map { (_, copies) -> copies.maxWith(compareBy<SharedBackupCopy> { it.madeAtMs }.thenBy { it.file.nodeUid }) }
-        .filter { (applied[it.deviceId] ?: -1L) < it.madeAtMs }
+        .filter { (applied[it.deviceId] ?: -1L) < it.madeAtMs || changedSinceSeen(it.file, seen) }
 
 /**
  * The parts of a shared-backup round that are not the machine-learning import: listing the four Drive folders,
@@ -203,7 +214,8 @@ class SharedBackupRunner @Inject constructor(
      * data deleted, wiped by a model change, or its search index reset) takes every other install's newest file
      * again, whatever was taken in before: filling gaps twice changes nothing. So does every kind when [retake], the
      * user's "Load from Drive". Not so the faces once they were deleted everywhere ([facesWiped]): a copy from before
-     * the delete is turned away as it is read, and one turned away once is not fetched again until it changes.
+     * the delete is turned away as it is read, and one turned away once is not fetched again until it changes. A file
+     * whose revision changed since a round last saw it ([seen]) is taken whatever its time says ([changedSinceSeen]).
      */
     suspend fun mlFilesToTake(
         userId: UserId,
@@ -211,6 +223,7 @@ class SharedBackupRunner @Inject constructor(
         ownDeviceId: String,
         retake: Boolean = false,
         facesWiped: Boolean = false,
+        seen: Map<String, String> = emptyMap(),
     ): List<MlRestoreFile> {
         val holdsFaces = facesWiped || faceScanDao.hasAnyForUser(userId.id)
         val faces = if (!retake && holdsFaces) applied(userId, SharedBackupKind.FACES) else emptyMap()
@@ -218,7 +231,7 @@ class SharedBackupRunner @Inject constructor(
         return MlDriveNaming.selectForImport(listing.ml, ownDeviceId).mapNotNull { pick ->
             val taken = if (pick.kind == eu.akoos.photos.data.mlsync.MlDriveFileKind.FACES) faces else search
             val madeAt = SharedBackupCopy(pick.deviceId, pick.file).madeAtMs
-            if ((taken[pick.deviceId] ?: -1L) >= madeAt) return@mapNotNull null
+            if ((taken[pick.deviceId] ?: -1L) >= madeAt && !changedSinceSeen(pick.file, seen)) return@mapNotNull null
             MlRestoreFile(pick.kind, pick.file.activeRevisionUid, madeAt, pick.deviceId)
         }
     }
@@ -228,9 +241,15 @@ class SharedBackupRunner @Inject constructor(
      * a copy could not be read, so the round does not write this device's labels over an unread copy. [retake] takes
      * every other install's newest copy in again, even one taken in before.
      */
-    suspend fun takeInLabels(userId: UserId, listing: SharedBackupListing, ownDeviceId: String, retake: Boolean = false): Boolean {
+    suspend fun takeInLabels(
+        userId: UserId,
+        listing: SharedBackupListing,
+        ownDeviceId: String,
+        retake: Boolean = false,
+        seen: Map<String, String> = emptyMap(),
+    ): Boolean {
         val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.LABELS)
-        val copies = newerCopies(listing.labels, LabelDriveNaming::parse, ownDeviceId, applied)
+        val copies = newerCopies(listing.labels, LabelDriveNaming::parse, ownDeviceId, applied, seen)
         if (copies.isEmpty()) return true
         val read = ArrayList<Pair<SharedBackupCopy, LabelSnapshot>>()
         for (copy in copies) {
@@ -258,9 +277,15 @@ class SharedBackupRunner @Inject constructor(
      * Takes the other installs' hidden lists newer than the ones taken in last into this device's hidden photos and
      * albums. False when a copy could not be read. [retake] takes every other install's newest list in again.
      */
-    suspend fun takeInHidden(userId: UserId, listing: SharedBackupListing, ownDeviceId: String, retake: Boolean = false): Boolean {
+    suspend fun takeInHidden(
+        userId: UserId,
+        listing: SharedBackupListing,
+        ownDeviceId: String,
+        retake: Boolean = false,
+        seen: Map<String, String> = emptyMap(),
+    ): Boolean {
         val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.HIDDEN)
-        val copies = newerCopies(listing.hidden, HiddenDriveNaming::parse, ownDeviceId, applied)
+        val copies = newerCopies(listing.hidden, HiddenDriveNaming::parse, ownDeviceId, applied, seen)
         if (copies.isEmpty()) return true
         val read = ArrayList<Pair<SharedBackupCopy, HiddenSnapshot>>()
         for (copy in copies) {
@@ -293,9 +318,10 @@ class SharedBackupRunner @Inject constructor(
         readsAs: String,
         ownDeviceId: String,
         retake: Boolean = false,
+        seen: Map<String, String> = emptyMap(),
     ): Boolean {
         val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.SETTINGS)
-        val copies = newerCopies(listing.settings, SettingsDriveNaming::parse, readsAs, applied)
+        val copies = newerCopies(listing.settings, SettingsDriveNaming::parse, readsAs, applied, seen)
         if (copies.isEmpty()) return true
         val read = ArrayList<Pair<SharedBackupCopy, SettingsSnapshot>>()
         for (copy in copies) {
@@ -328,9 +354,10 @@ class SharedBackupRunner @Inject constructor(
         readsAs: String,
         ownDeviceId: String,
         retake: Boolean = false,
+        seen: Map<String, String> = emptyMap(),
     ): Boolean {
         val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.ALBUM_ORDER)
-        val copies = newerCopies(listing.albumOrder, AlbumOrderDriveNaming::parse, readsAs, applied)
+        val copies = newerCopies(listing.albumOrder, AlbumOrderDriveNaming::parse, readsAs, applied, seen)
         if (copies.isEmpty()) return true
         val read = ArrayList<Pair<SharedBackupCopy, AlbumOrderSnapshot>>()
         for (copy in copies) {

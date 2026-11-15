@@ -669,8 +669,9 @@ class MlSyncWorker @AssistedInject constructor(
         val knownWipe = sharedBackupStore.facesWipedAt()
         roundWipeAtMs = knownWipe
         roundAfterFreshStart = takesOwnCopy
+        val seen = runCatching { sharedBackupStore.seen() }.getOrDefault(emptyMap())
         val plan = planRestore(
-            sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake, facesWiped = knownWipe > 0L),
+            sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake, facesWiped = knownWipe > 0L, seen),
             FaceSnapshotMode.Merge,
         )
         if (plan.isNotEmpty()) {
@@ -697,10 +698,10 @@ class MlSyncWorker @AssistedInject constructor(
                 withContext(NonCancellable) { walks.handBack(userId) }
             }
         }
-        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake)
-        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake)
-        val settingsRead = sharedBackupRunner.takeInSettings(userId, listing, readsAs, ownDeviceId, retake)
-        val albumOrderRead = sharedBackupRunner.takeInAlbumOrder(userId, listing, readsAs, ownDeviceId, retake)
+        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake, seen)
+        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake, seen)
+        val settingsRead = sharedBackupRunner.takeInSettings(userId, listing, readsAs, ownDeviceId, retake, seen)
+        val albumOrderRead = sharedBackupRunner.takeInAlbumOrder(userId, listing, readsAs, ownDeviceId, retake, seen)
         if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead && settingsRead && albumOrderRead) {
             sharedBackupStore.markOwnCopyTaken()
         }
@@ -747,8 +748,10 @@ class MlSyncWorker @AssistedInject constructor(
             if (albumOrderRead && sharedBackupRunner.saveAlbumOrder(userId, ownDeviceId, now) == null) failedParts += "save album order"
         }
         val failed = failedParts.isNotEmpty()
-        // Every other device's copy in the listing was taken in or passed over, so the check made while the app is
-        // open starts a round again only once one of them is replaced.
+        // Every other device's copy in the listing was taken in or passed over, or is the revision a round saw
+        // before (a changed revision is taken in whatever its time says), so the check made while the app is open
+        // starts a round again only once one of them is replaced. Only the first round, with nothing seen yet, goes
+        // by the listing's times alone.
         if (!failed) runCatching { sharedBackupStore.recordSeen(seenRevisions(listing)) }
         return endRound(
             tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS),
