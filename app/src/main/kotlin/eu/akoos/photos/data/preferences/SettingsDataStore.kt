@@ -1078,6 +1078,9 @@ object SettingsKeys {
     /** List, leave and add to albums shared with this user, and download their photos, through the Drive SDK; see [SDK_ROUTE_TAGS]. */
     val SDK_ROUTE_SHARED = booleanPreferencesKey("sdk_route_shared")
 
+    /** List the photos this user shares by link through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_SHARED_BY_ME = booleanPreferencesKey("sdk_route_shared_by_me")
+
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +

@@ -22,11 +22,13 @@
 
 package eu.akoos.photos.data.sdk
 
+import android.util.Log
 import kotlinx.coroutines.flow.toList
 import me.proton.core.domain.entity.UserId
 import me.proton.drive.sdk.entity.AlbumNode
 import me.proton.drive.sdk.entity.LegacyNodeUid
 import me.proton.drive.sdk.entity.MemberRole
+import me.proton.drive.sdk.entity.NodeUid
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,7 +49,7 @@ data class SdkSharedAlbum(
  * Albums other users shared with this user, through the Drive SDK: the list and leaving one. The list is
  * all or nothing: an album the SDK names without its share id cannot be opened by the rest of the app,
  * so it fails the whole call and the app's own listing answers instead. Run only through [SdkRouting]
- * ([SdkRoute.SHARED]).
+ * ([SdkRoute.SHARED]). Also the feed of items this user shares ([SdkRoute.SHARED_BY_ME]).
  */
 @Singleton
 class SdkSharedOps @Inject constructor(
@@ -60,6 +62,22 @@ class SdkSharedOps @Inject constructor(
             client.enumerateNodes(uids).toList().filterIsInstance<AlbumNode>().map { it.toSharedAlbum() }
         } ?: throw SdkSharedException("the SDK cannot run on this device")
 
+    /**
+     * The link ids of every item this user shares from the photo volume [volumeId], in the server's order:
+     * the same feed the app's own listing walks, page by page to the end. All or nothing: an item on any
+     * other volume fails the call, so the app's own listing answers instead. Run only through [SdkRouting]
+     * ([SdkRoute.SHARED_BY_ME]).
+     */
+    suspend fun sharedByMeLinkIds(userId: UserId, volumeId: String): List<String> =
+        clientProvider.withPhotosClient(userId) { client ->
+            val started = System.nanoTime()
+            val linkIds = sharedByMeLinkIdsOf(client.enumerateSharedNodeUids().toList(), volumeId)
+            runCatching {
+                Log.d(TAG, "shared-by-me through the SDK: ${linkIds.size} links in ${(System.nanoTime() - started) / 1_000_000} ms")
+            }
+            linkIds
+        } ?: throw SdkSharedException("the SDK cannot run on this device")
+
     /** Leaves the album on [volumeId]: this user's membership ends, the album stays with its owner. */
     suspend fun leave(userId: UserId, volumeId: String, albumLinkId: String) {
         clientProvider.withPhotosClient(userId) { client ->
@@ -70,6 +88,15 @@ class SdkSharedOps @Inject constructor(
 
 /** Thrown when the SDK cannot do the shared-album operation, so the app's own path does it instead. */
 class SdkSharedException(message: String) : IllegalStateException(message)
+
+private const val TAG = "SdkSharedOps"
+
+/** The link ids of [uids], which must all be legacy uids on [volumeId]; any other uid throws. */
+internal fun sharedByMeLinkIdsOf(uids: List<NodeUid>, volumeId: String): List<String> = uids.map { uid ->
+    val legacy = uid as? LegacyNodeUid ?: throw SdkSharedException("a shared item came back without a link id")
+    if (legacy.volumeId != volumeId) throw SdkSharedException("a shared item came back on another volume")
+    legacy.linkId
+}
 
 internal fun AlbumNode.toSharedAlbum(): SdkSharedAlbum {
     val uid = uid as? LegacyNodeUid ?: throw SdkSharedException("an album came back without a link id")

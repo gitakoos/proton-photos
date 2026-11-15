@@ -1438,28 +1438,14 @@ class AlbumSharingService @Inject constructor(
      */
     suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto> = withContext(Dispatchers.IO) {
         val volumeId = shareService.getVolumeId(userId)
-        val manager = apiProvider.get<DriveApiService>(userId)
 
-        // 1. Walk the shared-by-me feed.
-        val sharedLinkIds = mutableListOf<String>()
-        var anchorId: String? = null
-        var page = 0
-        try {
-            do {
-                val resp = semaphore.withPermit {
-                    manager.invoke { getSharedByMeListings(volumeId, anchorId) }.valueOrThrow
-                }
-                page++
-                sharedLinkIds.addAll(resp.links.map { it.linkId })
-                anchorId = if (resp.more) resp.anchorId else null
-                Log.d(TAG, "loadSharedByMePhotos: feed page=$page links=${resp.links.size} more=${resp.more}")
-            } while (anchorId != null)
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            // No feed → no shared photos; don't fail the caller (shared-albums section renders).
-            Log.w(TAG, "loadSharedByMePhotos: shares feed failed: ${e.message}", e)
-            return@withContext emptyList()
-        }
+        // 1. Walk the shared-by-me feed. Null when the app's own walk failed: no feed, no shared photos.
+        val feedStarted = System.nanoTime()
+        val sharedLinkIds = sdkRouting.run(
+            eu.akoos.photos.data.sdk.SdkRoute.SHARED_BY_ME,
+            viaSdk = { sdkSharedOps.sharedByMeLinkIds(userId, volumeId) },
+        ) { walkSharedByMeFeed(userId, volumeId) } ?: return@withContext emptyList()
+        val feedMs = (System.nanoTime() - feedStarted) / 1_000_000
         if (sharedLinkIds.isEmpty()) return@withContext emptyList()
 
         // 2. Exclude albums already represented in the shared-albums section.
@@ -1487,8 +1473,33 @@ class AlbumSharingService @Inject constructor(
                 )
             }.getOrNull()
         }
-        Log.d(TAG, "loadSharedByMePhotos: feedLinks=${sharedLinkIds.size} candidates=${candidateLinkIds.size} photos=${result.size}")
+        Log.d(TAG, "loadSharedByMePhotos: feedLinks=${sharedLinkIds.size} feedMs=$feedMs candidates=${candidateLinkIds.size} photos=${result.size}")
         result
+    }
+
+    /** The app's own walk of the shared-by-me feed, to its last page; null when a page failed. */
+    private suspend fun walkSharedByMeFeed(userId: UserId, volumeId: String): List<String>? {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val sharedLinkIds = mutableListOf<String>()
+        var anchorId: String? = null
+        var page = 0
+        try {
+            do {
+                val resp = semaphore.withPermit {
+                    manager.invoke { getSharedByMeListings(volumeId, anchorId) }.valueOrThrow
+                }
+                page++
+                sharedLinkIds.addAll(resp.links.map { it.linkId })
+                anchorId = if (resp.more) resp.anchorId else null
+                Log.d(TAG, "loadSharedByMePhotos: feed page=$page links=${resp.links.size} more=${resp.more}")
+            } while (anchorId != null)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            // No feed → no shared photos; don't fail the caller (shared-albums section renders).
+            Log.w(TAG, "loadSharedByMePhotos: shares feed failed: ${e.message}", e)
+            return null
+        }
+        return sharedLinkIds
     }
 
     suspend fun loadShareInvitations(userId: UserId, shareId: String): List<ShareInvitation> = withContext(Dispatchers.IO) {

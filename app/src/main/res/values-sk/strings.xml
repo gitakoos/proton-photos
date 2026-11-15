@@ -2021,6 +2021,8 @@
     <string name="sdk_route_events_desc">Udržiavanie časovej osi aktuálnej so zmenami z iných zariadení a z webu</string>
     <string name="sdk_route_shared">Albumy zdieľané s vami</string>
     <string name="sdk_route_shared_desc">Zobrazenie a opustenie albumov, ktoré s vami zdieľali iní, pridávanie fotiek do nich a otváranie ich fotiek v plnom rozlíšení</string>
+    <string name="sdk_route_shared_by_me">Fotky, ktoré zdieľate</string>
+    <string name="sdk_route_shared_by_me_desc">Zobrazenie fotiek, ktoré ste zdieľali verejným odkazom</string>
     <string name="sdk_route_activity">%1$s. V tejto relácii: %2$d cez knižnicu, %3$d obvyklým spôsobom.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d tvárí</string>

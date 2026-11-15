@@ -1921,6 +1921,8 @@
     <string name="sdk_route_events_desc">Garder la chronologie à jour avec les modifications faites sur d\'autres appareils et sur le web</string>
     <string name="sdk_route_shared">Albums partagés avec vous</string>
     <string name="sdk_route_shared_desc">Lister et quitter les albums que d\'autres ont partagés avec vous, y ajouter des photos et ouvrir leurs photos en pleine résolution</string>
+    <string name="sdk_route_shared_by_me">Photos que vous partagez</string>
+    <string name="sdk_route_shared_by_me_desc">Lister les photos que vous avez partagées avec un lien public</string>
     <string name="sdk_route_activity">%1$s. Cette session : %2$d via la bibliothèque, %3$d de la manière habituelle.</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d sur %2$d visages</string>
