@@ -66,8 +66,10 @@ interface PersonManualPhotoDao {
     @Query("DELETE FROM person_manual_photo WHERE userId = :userId AND personName = :personName AND photoKey IN (:photoKeys)")
     suspend fun removeChunk(userId: String, personName: String, photoKeys: List<String>)
 
-    /** Re-key every manual membership when a person is renamed, so the photos follow the new name. */
-    @Query("UPDATE person_manual_photo SET personName = :newName WHERE userId = :userId AND personName = :oldName")
+    /** Re-key every manual membership when a person is renamed or merged, so the photos follow the new name. A
+     *  photo already added to the new name stays there once (OR REPLACE), as a merge of two people holding the
+     *  same photo needs. */
+    @Query("UPDATE OR REPLACE person_manual_photo SET personName = :newName WHERE userId = :userId AND personName = :oldName")
     suspend fun rename(userId: String, oldName: String, newName: String)
 
     @Query("DELETE FROM person_manual_photo WHERE userId = :userId")

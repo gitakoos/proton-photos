@@ -33,7 +33,8 @@ import org.junit.Test
  * Pins how the person page moves once its group is named or merged: where the name-or-merge sheet sends
  * it, whether that person's page opens or is already the one below, when an emptied grid hands back to
  * the caller (exactly once, and never under the open sheet), when a freshly named group looks for its
- * merge suggestion, and when a held suggestion for a group merged away is dropped.
+ * merge suggestion, when a held suggestion for a group merged away is dropped, and how the page reads a
+ * person that goes while it is open.
  */
 class PersonPageRulesTest {
 
@@ -130,5 +131,15 @@ class PersonPageRulesTest {
         assertFalse("a looser match is a card for the user", autoAcceptsSuggestion(0.5f))
         assertFalse(autoAcceptsSuggestion(0.58f))
         assertFalse("an unranked candidate never folds", autoAcceptsSuggestion(-1f))
+    }
+    @Test
+    fun `a person gone while its page is open keeps its title and is marked gone`() {
+        val row = PersonEntity(id = 4L, userId = "acct", displayName = "Teszt58", faceCount = 1)
+
+        val shown = pageIdentityAfter(null, row)
+        assertEquals(PageIdentity("Teszt58", isOther = false), shown)
+        assertEquals(PageIdentity("Teszt58", isOther = false, gone = true), pageIdentityAfter(shown, null))
+        assertEquals("a row missing from the first read is an unnamed person", PageIdentity(null, false), pageIdentityAfter(null, null))
+        assertEquals("a row back again is no longer gone", shown, pageIdentityAfter(shown.copy(gone = true), row))
     }
 }

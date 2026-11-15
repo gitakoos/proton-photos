@@ -663,6 +663,40 @@ class FaceSnapshotRoundTripTest {
     }
 
     @Test
+    fun `a name taken off on the other device takes its hand-added photos off here, and a person with no face goes`() = runTest {
+        seedSource()
+        PersonNameLog.unnamed(source.personNameDao(), ACCOUNT, "Zoe", 200L)
+        target.personDao().upsert(PersonEntity(id = 30, userId = ACCOUNT, displayName = "Zoe", faceCount = 1))
+        target.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Zoe", "linkZ")))
+        FaceCurationLog.manualPhotos(target.faceCurationTimeDao(), ACCOUNT, "Zoe", listOf("linkZ"), removed = false, 100L)
+        target.personNameDao().setState(PersonNameStateEntity(ACCOUNT, "Zoe", 100L))
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Zoe" in namedPeople())
+        assertNull(target.personDao().personById(30))
+        assertFalse("Zoe" to "linkZ" in manualPhotos())
+        assertTrue(
+            target.faceCurationTimeDao().allForUser(ACCOUNT).any { it.personName == "Zoe" && it.ref == "linkZ" && it.removed },
+        )
+    }
+
+    @Test
+    fun `every name holding hand-added photos has a person after an import, either way`() = runTest {
+        seedSource()
+        source.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Wes", "linkW")))
+        target.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Yan", "linkY")))
+
+        import(export(), FaceSnapshotMode.Merge)
+        assertTrue("Yan" in namedPeople())
+        assertTrue("Wes" in namedPeople())
+
+        import(export(), FaceSnapshotMode.Replace)
+        assertTrue("Wes" in namedPeople())
+        assertEquals(1, target.personDao().namedPeopleForUser(ACCOUNT).count { it.displayName == "Wes" })
+    }
+
+    @Test
     fun `the later cover wins, here or there`() = runTest {
         seedSource()
         FaceCurationLog.cover(source.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 200L)

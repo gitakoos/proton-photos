@@ -42,7 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -50,7 +50,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.withIndex
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
@@ -235,7 +235,9 @@ class PersonDetailViewModel @Inject constructor(
                     if (looksForSuggestionOnNaming(wasNamed, isNamed = name != null)) loadMergeSuggestion(personId)
                     wasNamed = name != null
 
-                    val manualKeys = if (name == null) flowOf(emptyList())
+                    // A person gone while its page is open no longer holds the photos added to its name, so the
+                    // grid empties and the page leaves.
+                    val manualKeys = if (name == null || identity.gone) flowOf(emptyList())
                         else personManualPhotoDao.photoKeysForName(account, name)
 
                     combine(
@@ -265,19 +267,14 @@ class PersonDetailViewModel @Inject constructor(
 
     /** The page's title as it changes: the person's name and whether it is the Unsorted bucket. A row
      *  missing from the first read still emits, as an unnamed person, so the grid settles; one that
-     *  disappears later (merged away, or an emptied Unsorted bucket) emits nothing, so the title holds
-     *  while the page leaves. */
+     *  disappears later (merged away, removed, or an emptied Unsorted bucket) keeps its title and is marked
+     *  [PageIdentity.gone] while the page leaves. */
     private fun observeIdentity(account: String, personId: Long): Flow<PageIdentity> =
         personDao.observePersonForUser(account, personId)
             .retryOnDbTear(IDENTITY_TEAR_TAG, maxAttempts = 5, onRetry = { FaceDiagnostics.recordDbTear(IDENTITY_TEAR_TAG, it) })
-            .withIndex()
-            .filter { (index, row) -> index == 0 || row != null }
-            .map { (_, row) ->
-                PageIdentity(name = HiddenPersonToken.visibleName(row?.displayName), isOther = row?.isOther == true)
-            }
+            .scan<PersonEntity?, PageIdentity?>(null) { held, row -> pageIdentityAfter(held, row) }
+            .filterNotNull()
             .distinctUntilChanged()
-
-    private data class PageIdentity(val name: String?, val isOther: Boolean)
 
     /** Observe the person's current photo keys (faces minus removed, plus manual adds), so the add
      *  picker can exclude what the person already holds. */
@@ -555,7 +552,7 @@ class PersonDetailViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val faceIds = faceDao.faceIdsForPersonInPhotos(account, personId, photoKeys)
-            notThisPerson(account, personId, faceIds, photoKeys)
+            notThisPerson(account, personId, faceIds, photoKeys, shownName = _uiState.value.personName)
             _message.value = R.string.person_msg_removed
         }
     }
@@ -753,3 +750,15 @@ internal fun looksForSuggestionOnNaming(wasNamed: Boolean?, isNamed: Boolean): B
  * longer exists.
  */
 internal fun dropsHeldSuggestion(candidateRow: PersonEntity?): Boolean = candidateRow == null
+
+/** What a person page shows for its person: the visible name, whether it is the Unsorted bucket, and whether
+ *  the person is gone while the page is open. */
+internal data class PageIdentity(val name: String?, val isOther: Boolean, val gone: Boolean = false)
+
+/** The page identity after [row] is read, [held] being the one shown so far: a row missing from the first
+ *  read is an unnamed person, one missing later keeps what was shown, marked gone. */
+internal fun pageIdentityAfter(held: PageIdentity?, row: PersonEntity?): PageIdentity = when {
+    row != null -> PageIdentity(name = HiddenPersonToken.visibleName(row.displayName), isOther = row.isOther)
+    held == null -> PageIdentity(name = null, isOther = false)
+    else -> held.copy(gone = true)
+}

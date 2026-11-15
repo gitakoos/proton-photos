@@ -48,7 +48,9 @@ import javax.inject.Inject
  * edit, and a regroup is requested.
  *
  * Shared by the person page's "Remove from person" and the viewer's face tag, so both keep the same
- * bookkeeping. A nameless person records no rejection, as the mark is keyed by name.
+ * bookkeeping. A nameless person records no rejection, as the mark is keyed by name. A person left with no
+ * photo at all goes. A page still open on a person that is gone passes the name it shows as [shownName], so
+ * the photos added to that name by hand still come off it.
  */
 class NotThisPersonUseCase @Inject constructor(
     private val accountManager: AccountManager,
@@ -63,15 +65,28 @@ class NotThisPersonUseCase @Inject constructor(
     private val appDatabase: AppDatabase,
     private val faceEdits: FaceEditCounter,
 ) {
-    suspend operator fun invoke(account: String, personId: Long, faceIds: List<String>, photoKeys: Collection<String>) {
+    suspend operator fun invoke(
+        account: String,
+        personId: Long,
+        faceIds: List<String>,
+        photoKeys: Collection<String>,
+        shownName: String? = null,
+    ) {
         faceEdits.edit {
-            appDatabase.withTransaction { record(account, personId, faceIds, photoKeys) }
+            appDatabase.withTransaction { record(account, personId, faceIds, photoKeys, shownName) }
         }
         faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
     }
 
-    private suspend fun record(account: String, personId: Long, faceIds: List<String>, photoKeys: Collection<String>) {
-        val name = personDao.personById(personId)?.displayName
+    private suspend fun record(
+        account: String,
+        personId: Long,
+        faceIds: List<String>,
+        photoKeys: Collection<String>,
+        shownName: String?,
+    ) {
+        val person = personDao.personById(personId)?.takeIf { it.userId == account }
+        val name = if (person != null) person.displayName else shownName
         val now = System.currentTimeMillis()
         if (!name.isNullOrBlank() && faceIds.isNotEmpty()) {
             notPersonDao.add(faceIds.map { NotPersonEntity(account, name, it) })
@@ -83,9 +98,15 @@ class NotThisPersonUseCase @Inject constructor(
             personManualPhotoDao.remove(account, name, photoKeys)
             FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys.filter { it in attached }, removed = true, now)
         }
+        if (person == null) return
         val manual = if (name.isNullOrBlank()) emptyList()
             else personManualPhotoDao.photoKeysForNameList(account, name)
         val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
+        if (count == 0 && !person.isOther) {
+            personDao.deleteByIds(listOf(personId))
+            clusterSummaryDao.deleteByPerson(personId)
+            return
+        }
         val cover = resolveCover(account, personId, name)
         personDao.updateCoverAndCount(personId, cover, count)
         // The unassigned faces changed the cluster, so its stored summary is stale; drop it, and the caller

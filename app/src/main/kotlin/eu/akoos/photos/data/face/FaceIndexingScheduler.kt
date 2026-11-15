@@ -63,6 +63,7 @@ import eu.akoos.photos.domain.model.FaceBoxNorm
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+import eu.akoos.photos.domain.usecase.keepHandAddedPeople
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
 import eu.akoos.photos.domain.usecase.FaceRegroupOutcome
 import eu.akoos.photos.domain.usecase.IncrementalBatch
@@ -873,6 +874,14 @@ class FaceIndexingScheduler @Inject constructor(
 
             val account = accountOf(userId)
             restoreWalkState(account)
+            // A name holding photos added to it by hand has a person: one an older build's regroup dropped, or
+            // that came from another device under a name no face here carries, gets it back here.
+            runCatching {
+                val fenceToken = writeFence.token()
+                appDatabase.withTransaction {
+                    if (writeFence.allows(fenceToken)) keepHandAddedPeople(appDatabase, account)
+                }
+            }.onFailure { Log.w(TAG, "hand-added people check failed: ${it.message}") }
             val items = try {
                 val provider = galleryItemsProvider.get()
                 (if (userId == null) provider.invokeLocalOnly() else provider.invoke(userId)).first()

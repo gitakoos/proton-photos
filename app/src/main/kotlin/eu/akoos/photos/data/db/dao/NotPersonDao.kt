@@ -72,8 +72,9 @@ interface NotPersonDao {
     @Query("DELETE FROM not_person WHERE userId = :userId AND personName = :personName AND faceId = :faceId")
     suspend fun deleteMark(userId: String, personName: String, faceId: String)
 
-    /** Re-key the marks when a person is renamed, so the rejections follow the new name. */
-    @Query("UPDATE not_person SET personName = :newName WHERE userId = :userId AND personName = :oldName")
+    /** Re-key the marks when a person is renamed or merged, so the rejections follow the new name; a face already
+     *  marked as not the new name keeps one mark (OR REPLACE). */
+    @Query("UPDATE OR REPLACE not_person SET personName = :newName WHERE userId = :userId AND personName = :oldName")
     suspend fun rename(userId: String, oldName: String, newName: String)
 
     /** Drop the "not this person" marks for a name, when that person is dismissed as "not a person". */

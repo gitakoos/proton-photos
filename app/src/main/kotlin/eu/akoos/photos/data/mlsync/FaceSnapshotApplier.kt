@@ -41,6 +41,7 @@ import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.ReattachLabel
 import eu.akoos.photos.domain.usecase.isPortableFaceKey
+import eu.akoos.photos.domain.usecase.keepHandAddedPeople
 import eu.akoos.photos.domain.usecase.rekeyCurationTimes
 import java.io.InputStream
 
@@ -132,9 +133,13 @@ internal class FaceSnapshotApplied(
  * Attached photos, "not this person" marks and covers carry the time each was set by hand, and the pieces taken
  * away by hand come as [MlSnapshotRecord.Removal]s before the faces. Of a setting and a removal of the same piece,
  * here or there, the later wins, and of two covers the later; the times are kept here as well.
+ *
+ * Every name holding photos added by hand has a person here before and after the apply ([keepHandAddedPeople]),
+ * so a rename, a merge and a name taken off meet the person and carry its photos the way a change made here
+ * does: a name taken off takes them off too.
  */
 internal class FaceSnapshotApplier(
-    db: AppDatabase,
+    private val db: AppDatabase,
     private val account: String,
     private val mode: FaceSnapshotMode,
     private val fit: FaceSnapshotFit,
@@ -221,6 +226,7 @@ internal class FaceSnapshotApplier(
         }
         enter(Section.END)
         if (full) finishRows()
+        keepHandAddedPeople(db, account)
         if (curationNotes.isNotEmpty()) curationDao.set(curationNotes)
         return FaceSnapshotApplied(
             facesWritten = facesWritten,
@@ -260,6 +266,7 @@ internal class FaceSnapshotApplier(
     }
 
     private suspend fun prepare() {
+        if (merge) keepHandAddedPeople(db, account)
         for (person in personDao.namedPeopleForUser(account)) person.displayName?.takeIf { it.isNotBlank() }?.let(spelling::hold)
         // The hidden rows' spellings come after the named people's, so a person held here keeps its spelling.
         for (row in hiddenDao.rowsForUser(account)) {
@@ -366,18 +373,27 @@ internal class FaceSnapshotApplier(
     }
 
     /** Takes the name [from] off the person holding it here, as a name taken off here does, when that came later
-     *  than the name was given here; the person stays, unnamed. */
+     *  than the name was given here, with the photos added to the name by hand before that; the person stays,
+     *  unnamed, unless it held no face, and then it goes. */
     private suspend fun onNameRemoved(from: String, at: Long) {
         val heldFrom = heldName(from, at)
         val fromId = heldFrom?.let { personIdByName[it] }
-        if (nameChangeApplies(namedAt[heldFrom ?: from] ?: 0L, at)) moveHidden(heldFrom ?: from, null, foldsIntoPerson = false)
+        if (nameChangeApplies(namedAt[heldFrom ?: from] ?: 0L, at)) {
+            moveHidden(heldFrom ?: from, null, foldsIntoPerson = false)
+            dropManualPhotos(heldFrom ?: from, at)
+        }
         if (merge && fromId != null && nameChangeApplies(namedAt[heldFrom] ?: 0L, at)) {
             val faceIds = faceDao.faceIdsForPerson(account, fromId)
             personDao.updateName(fromId, null)
             if (faceIds.isNotEmpty()) faceDao.clearManualNameByIds(faceIds)
             personIdByName.remove(heldFrom)
             nameByPersonId.remove(fromId)
-            touchedPeople += fromId
+            if (faceIds.isEmpty()) {
+                personDao.deleteByIds(listOf(fromId))
+                touchedPeople -= fromId
+            } else {
+                touchedPeople += fromId
+            }
         }
         addChange(PersonNameChangeEntity(account, from, "", at))
         if ((namedAt[from] ?: 0L) <= at && from !in personIdByName) {
@@ -470,6 +486,17 @@ internal class FaceSnapshotApplier(
             }
         }
         note(key, removed = true, at)
+    }
+
+    /** Takes off [name] the photos added to it by hand that were set here before [at], keeping each removal so an
+     *  older setting of the same photo is passed over and handed on as removed. */
+    private suspend fun dropManualPhotos(name: String, at: Long) {
+        val dropped = manualPhotoDao.photoKeysForNameList(account, name).filter { photoKey ->
+            curationChangeApplies(curation[CurationKey(MlSnapshotFormat.REMOVAL_MANUAL_PHOTO, name, photoKey)]?.changedAt ?: 0L, at)
+        }
+        if (dropped.isEmpty()) return
+        manualPhotoDao.remove(account, name, dropped)
+        for (photoKey in dropped) note(CurationKey(MlSnapshotFormat.REMOVAL_MANUAL_PHOTO, name, photoKey), removed = true, at)
     }
 
     /** Whether a setting of the piece [key] stamped [at] is taken: not when this device removed it later. */

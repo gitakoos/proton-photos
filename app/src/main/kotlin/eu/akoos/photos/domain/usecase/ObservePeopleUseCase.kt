@@ -37,6 +37,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.FaceBoxNorm
@@ -56,7 +57,7 @@ private const val FACE_SOURCE_MAX_EDGE = 1600
  * Observes the account's clustered people and resolves each to a [PersonSummary]: cover face, display
  * name, face count and a normalised cover-face box. People arrive most-photographed first from
  * [PersonDao]; a person whose cover face no longer resolves, or whose cover photo has left the
- * library, is dropped, so the list matches the People rail the gallery has always shown. Reusable by
+ * library, takes another live face, else (a named person) a photo added to it by hand, else is dropped, so the list matches the People rail the gallery has always shown. Reusable by
  * every people surface (the rail, an album picker, a person-detail screen) so the resolution and
  * ordering live in one place.
  *
@@ -142,18 +143,18 @@ class ObservePeopleUseCase @Inject constructor(
         // Resolve each person to a cover face whose photo is still in the library: the stored cover when
         // it is live, else the person's next available face. Losing the cover photo (hidden, vaulted,
         // deleted, reaped) then reshuffles the cover instead of hiding the whole person; only a person
-        // with no live face left is dropped. While the feed is still loading, keep the stored cover and
-        // drop nobody. The stored covers are read together in a few bounded statements, with no vectors;
+        // with no live face left, and none of its hand-added photos in the library, is dropped. While the
+        // feed is still loading, keep the stored cover and drop nobody. The stored covers are read together in a few bounded statements, with no vectors;
         // the per-person fallback runs only where the stored cover is missing or off the feed.
         var storedReadNs = 0L
         var fallbackNs = 0L
         var fallbacks = 0
-        val covers = withContext(Dispatchers.Default) {
+        val faceCovers = withContext(Dispatchers.Default) {
             val readStart = System.nanoTime()
             val storedById = runCatching { faceDao.facesByIds(account, people.mapNotNull { it.coverFaceId }) }
                 .getOrNull()?.associateBy { it.id } ?: emptyMap()
             storedReadNs = System.nanoTime() - readStart
-            people.mapNotNull { person ->
+            people.map { person ->
                 val stored = person.coverFaceId?.let { storedById[it] }
                 val fallback: suspend () -> FaceOnPhoto? = {
                     fallbacks++
@@ -162,16 +163,32 @@ class ObservePeopleUseCase @Inject constructor(
                         ?.firstOrNull { it.photoKey in feedKeys }
                         .also { fallbackNs += System.nanoTime() - fallbackStart }
                 }
-                val cover = chooseLiveCoverFace(stored, feedKeys, feedEmpty, { it.photoKey }, fallback)
-                    ?: return@mapNotNull null
-                person to cover
+                person to chooseLiveCoverFace(stored, feedKeys, feedEmpty, { it.photoKey }, fallback)
+            }
+        }
+        // A named person with no live face stands for the photos added to it by hand: one of those in the library
+        // is its cover, shown whole. The hand-added rows read for it serve the counts below too.
+        var manualRows: List<PersonManualPhotoEntity>? = null
+        val facelessNames = faceCovers.mapNotNull { (person, face) ->
+            person.displayName?.takeIf { face == null && it.isNotBlank() }
+        }
+        val handCovers = if (facelessNames.isEmpty()) emptyMap() else {
+            val rows = runCatching { personManualPhotoDao.allForUser(account) }.getOrNull().also { manualRows = it }
+            if (rows.isNullOrEmpty()) emptyMap() else withContext(Dispatchers.Default) {
+                handAddedCovers(facelessNames, rows.groupBy({ it.personName }, { it.photoKey }), items)
+            }
+        }
+        val covers = faceCovers.mapNotNull { (person, face) ->
+            when {
+                face != null -> PersonCover(person, face.photoKey, face)
+                else -> person.displayName?.let { handCovers[it] }?.let { PersonCover(person, it, null) }
             }
         }
         if (covers.isEmpty()) return PeopleBuild(emptyList(), fallbacks, storedReadNs, fallbackNs)
         // A named person's tile counts what its page shows: the photos of its faces and the ones added by
         // hand that are in the library now, by the same item match the page uses, so a photo in the trash,
         // hidden or vaulted is not counted. While the feed is still loading the stored count stands.
-        val liveCounts: Map<Long, Int> = if (feedEmpty || covers.none { !it.first.displayName.isNullOrBlank() }) {
+        val liveCounts: Map<Long, Int> = if (feedEmpty || covers.none { !it.person.displayName.isNullOrBlank() }) {
             emptyMap()
         } else {
             val feedIds: Set<String> = idsMemo.get()?.takeIf { it.first === items }?.second
@@ -179,12 +196,12 @@ class ObservePeopleUseCase @Inject constructor(
                     .also { idsMemo.set(items to it) }
             // Two reads for every named person at once rather than two per person, which on a library with
             // hundreds of named people would add seconds to every build.
-            val named = covers.mapNotNull { (person, _) ->
-                person.displayName?.takeIf { it.isNotBlank() }?.let { person.id to it }
+            val named = covers.mapNotNull { cover ->
+                cover.person.displayName?.takeIf { it.isNotBlank() }?.let { cover.person.id to it }
             }
             val reads = runCatching {
                 faceDao.distinctPhotoKeysForPeople(account, named.map { it.first }) to
-                    personManualPhotoDao.allForUser(account)
+                    (manualRows ?: personManualPhotoDao.allForUser(account))
             }.getOrNull()
             if (reads == null) emptyMap() else withContext(Dispatchers.Default) {
                 livePhotoCounts(named, reads.first.map { it.personId to it.photoKey }, reads.second.map { it.personName to it.photoKey }, feedIds)
@@ -192,7 +209,7 @@ class ObservePeopleUseCase @Inject constructor(
         }
         // One light pass for the chosen covers' dimensions (early-continue on every other item), only when a
         // cover holds an older pixel box: a fraction box needs none. A backed-up photo answers to its uri too.
-        val neededKeys = covers.filter { !isFractionBox(it.second) }.mapTo(HashSet()) { it.second.photoKey }
+        val neededKeys = covers.mapNotNullTo(HashSet()) { cover -> cover.face?.takeIf { !isFractionBox(it) }?.photoKey }
         val coverDims = if (neededKeys.isEmpty()) emptyMap() else withContext(Dispatchers.Default) {
             val dims = HashMap<String, Pair<Int, Int>>()
             for (item in items) {
@@ -211,12 +228,12 @@ class ObservePeopleUseCase @Inject constructor(
             }
             dims
         }
-        val summaries = covers.map { (person, face) ->
+        val summaries = covers.map { (person, coverKey, face) ->
             PersonSummary(
                 personId = person.id,
                 displayName = person.displayName,
-                coverPhotoKey = face.photoKey,
-                faceBox = normalizedFaceBox(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom, coverDims[face.photoKey]),
+                coverPhotoKey = coverKey,
+                faceBox = face?.let { normalizedFaceBox(it.boxLeft, it.boxTop, it.boxRight, it.boxBottom, coverDims[coverKey]) },
                 faceCount = liveCounts[person.id] ?: person.faceCount,
                 isOther = person.isOther,
             )
@@ -277,6 +294,34 @@ class ObservePeopleUseCase @Inject constructor(
         while (longEdge / (sample * 2) >= FACE_SOURCE_MAX_EDGE) sample *= 2
         return sample
     }
+}
+
+/** A person of the list with the photo its tile shows: the photo of [face], or, for a named person with no live
+ *  face, a photo added to it by hand, with no face to centre on. */
+private data class PersonCover(val person: PersonEntity, val photoKey: String, val face: FaceOnPhoto?)
+
+/**
+ * The cover photo for each of [names] (people with no live face) out of the photos added to it by hand
+ * ([manualKeys], name to photo keys): the first of them in the order of [items], the library feed, so a photo
+ * in the trash, hidden or vaulted is never one. While the feed is still loading, the first hand-added photo
+ * stands. A name with none of its photos in the library gets none.
+ */
+internal fun handAddedCovers(
+    names: Collection<String>,
+    manualKeys: Map<String, List<String>>,
+    items: List<GalleryItem>,
+): Map<String, String> {
+    if (items.isEmpty()) return names.mapNotNull { name -> manualKeys[name]?.firstOrNull()?.let { name to it } }.toMap()
+    val namesByKey = HashMap<String, MutableList<String>>()
+    for (name in names) for (key in manualKeys[name].orEmpty()) namesByKey.getOrPut(key) { ArrayList() }.add(name)
+    if (namesByKey.isEmpty()) return emptyMap()
+    val out = HashMap<String, String>()
+    for (item in items) {
+        val waiting = namesByKey[item.stableId] ?: continue
+        for (name in waiting) out.putIfAbsent(name, item.stableId)
+        if (out.size == names.size) break
+    }
+    return out
 }
 
 /** One build of the people list and what it cost: how many people needed the per-person fallback, and the
