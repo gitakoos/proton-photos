@@ -174,6 +174,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.painterResource
@@ -415,6 +416,7 @@ fun GalleryScreen(
     val cloudSaveUi by cloudSaveVm.ui.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val resources = LocalResources.current
     val appColors = AppColors.current
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     // People rail: the face bar is open either because the chip is toggled on (this flag) or because a
@@ -941,7 +943,7 @@ fun GalleryScreen(
                     ),
                 )
             } else if (state.hideCloudNoticePending) {
-                snackbarHostState.showSnackbar(context.getString(R.string.hide_cloud_copy_notice))
+                snackbarHostState.showSnackbar(resources.getString(R.string.hide_cloud_copy_notice))
             }
             viewModel.resetMultiHideState()
         }
@@ -964,11 +966,11 @@ fun GalleryScreen(
         if (multiDownloadState is MultiDownloadState.Done) {
             val msg = if (multiDownloadState.failed == 0)
                 if (multiDownloadState.succeeded == 1)
-                    context.getString(R.string.gallery_download_done_singular)
+                    resources.getString(R.string.gallery_download_done_singular)
                 else
-                    context.getString(R.string.gallery_download_done, multiDownloadState.succeeded)
+                    resources.getString(R.string.gallery_download_done, multiDownloadState.succeeded)
             else
-                context.getString(R.string.gallery_download_partial, multiDownloadState.succeeded, multiDownloadState.failed)
+                resources.getString(R.string.gallery_download_partial, multiDownloadState.succeeded, multiDownloadState.failed)
             snackbarHostState.showSnackbar(msg)
             viewModel.resetMultiDownloadState()
         }
@@ -1124,11 +1126,11 @@ fun GalleryScreen(
                     is AddToAlbumMessage.AddedAndUploading -> context.resources.getQuantityString(
                         R.plurals.gallery_add_to_album_some_queued, outcome.uploading, outcome.uploading,
                     )
-                    is AddToAlbumMessage.Uploading -> context.getString(R.string.gallery_add_to_album_queued)
+                    is AddToAlbumMessage.Uploading -> resources.getString(R.string.gallery_add_to_album_queued)
                     // Edge case: nothing added and nothing queued but the op still "succeeded"
                     // (e.g. the photos were already in the picked album). Surface a snackbar anyway.
                     AddToAlbumMessage.NothingAdded ->
-                        context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
+                        resources.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
                 }
                 if (msg != null) snackbarHostState.showSnackbar(msg)
                 viewModel.resetAddToAlbumState()
@@ -1147,9 +1149,9 @@ fun GalleryScreen(
         when (multiStripState) {
             is MultiStripState.Done -> {
                 val msg = if (multiStripState.skipped == 0)
-                    context.getString(R.string.gallery_stripped_metadata, multiStripState.stripped)
+                    resources.getString(R.string.gallery_stripped_metadata, multiStripState.stripped)
                 else
-                    context.getString(R.string.gallery_stripped_with_skipped,
+                    resources.getString(R.string.gallery_stripped_with_skipped,
                         multiStripState.stripped, multiStripState.skipped)
                 snackbarHostState.showSnackbar(msg)
                 viewModel.resetMultiStripState()
@@ -1629,7 +1631,7 @@ fun GalleryScreen(
                     tabScope.launch {
                         val msg = if (queued > 0) R.string.backup_started
                             else R.string.device_folder_already_backed_up
-                        snackbarHostState.showSnackbar(context.getString(msg))
+                        snackbarHostState.showSnackbar(resources.getString(msg))
                     }
                 }
             },

@@ -57,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -107,7 +108,7 @@ internal fun isDayEnabled(day: LocalDate, latest: LocalDate?): Boolean = latest 
 internal fun CalendarCard(selectedDay: Long, latest: LocalDate?, onPick: (Long) -> Unit, modifier: Modifier = Modifier) {
     val colors = AppColors.current
     val shape = RoundedCornerShape(14.dp)
-    val locale = Locale.getDefault()
+    val locale = LocalLocale.current.platformLocale
     val selected = remember(selectedDay) { utcMillisToDate(selectedDay) }
     var shown by remember(selectedDay) { mutableStateOf(YearMonth.from(selected)) }
     var monthMode by remember { mutableStateOf(false) }

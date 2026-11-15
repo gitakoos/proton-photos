@@ -464,6 +464,7 @@ fun PhotoEditorScreen(
     // before navigating, otherwise the screen pops back while the system prompt is still
     // building and the user never sees the Allow/Deny choice.
     val saveContext = androidx.compose.ui.platform.LocalContext.current
+    val saveResources = androidx.compose.ui.platform.LocalResources.current
     androidx.compose.runtime.LaunchedEffect(state.saveResult, state.pendingDeleteIntent) {
         if (state.pendingDeleteIntent != null) return@LaunchedEffect
         when (state.saveResult) {
@@ -474,7 +475,7 @@ fun PhotoEditorScreen(
             is SaveResult.SuccessAsCopy -> {
                 android.widget.Toast.makeText(
                     saveContext,
-                    saveContext.getString(
+                    saveResources.getString(
                         (state.saveResult as? SaveResult.SuccessAsCopy)?.messageRes
                             ?: R.string.editor_saved_as_copy_toast,
                     ),
@@ -495,7 +496,7 @@ fun PhotoEditorScreen(
         if (state.savedAsCopy) {
             android.widget.Toast.makeText(
                 saveContext,
-                saveContext.getString(R.string.editor_saved_as_copy),
+                saveResources.getString(R.string.editor_saved_as_copy),
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
         }

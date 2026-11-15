@@ -96,6 +96,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
@@ -166,6 +167,7 @@ internal fun VideoPlayer(
     offset: androidx.compose.ui.geometry.Offset = androidx.compose.ui.geometry.Offset.Zero,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val loop = onEnded == null
     val exoPlayer = remember(uri, reloadKey) {
         ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
@@ -193,7 +195,7 @@ internal fun VideoPlayer(
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 android.widget.Toast.makeText(
                     context,
-                    context.getString(R.string.viewer_video_play_failed),
+                    resources.getString(R.string.viewer_video_play_failed),
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
             }

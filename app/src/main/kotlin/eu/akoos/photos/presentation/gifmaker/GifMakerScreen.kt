@@ -499,7 +499,7 @@ private fun GifSavePill(onClick: () -> Unit) {
 
 @Composable
 private fun GifToolTab(tool: GifTool, selected: Boolean, onClick: () -> Unit) {
-    val label = LocalContext.current.getString(tool.labelRes)
+    val label = stringResource(tool.labelRes)
     // The selection fills in and the icon springs up a touch, so switching tools reads as a
     // deliberate move rather than an instant swap.
     val bgAlpha by animateFloatAsState(if (selected) 0.22f else 0f, tween(200), label = "gif_tab_bg")

@@ -133,6 +133,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -729,6 +730,7 @@ private const val HEADER_EASE_MS = 220
 @Composable
 private fun SearchSideEffects(vm: SearchViewModel, snackbarHostState: SnackbarHostState) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val pendingDeleteIntent by vm.pendingDeleteIntent.collectAsStateWithLifecycle()
     val pendingStripIntent by vm.pendingStripIntent.collectAsStateWithLifecycle()
     val multiStripState by vm.multiStripState.collectAsStateWithLifecycle()
@@ -806,8 +808,8 @@ private fun SearchSideEffects(vm: SearchViewModel, snackbarHostState: SnackbarHo
         when (val s = multiStripState) {
             is MultiStripState.Done -> {
                 val msg = if (s.skipped > 0)
-                    context.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
-                else context.getString(R.string.gallery_stripped_metadata, s.stripped)
+                    resources.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
+                else resources.getString(R.string.gallery_stripped_metadata, s.stripped)
                 snackbarHostState.showSnackbar(msg)
                 vm.resetMultiStripState()
             }
@@ -1283,6 +1285,7 @@ private fun BoxScope.SearchSelectionLayer(
     onEditMetadata: (items: List<GalleryItem>) -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val albums by vm.albums.collectAsStateWithLifecycle()
     val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
@@ -1399,7 +1402,7 @@ private fun BoxScope.SearchSelectionLayer(
                     onClick = {
                         vm.backUpSelected { queued ->
                             if (queued > 0) scope.launch {
-                                snackbarHostState.showSnackbar(context.getString(R.string.backup_started))
+                                snackbarHostState.showSnackbar(resources.getString(R.string.backup_started))
                             }
                         }
                     },
@@ -1415,9 +1418,9 @@ private fun BoxScope.SearchSelectionLayer(
                     onClick = {
                         vm.downloadSelected { succeeded, failed ->
                             val msg = when {
-                                failed > 0 -> context.getString(R.string.gallery_download_partial, succeeded, failed)
-                                succeeded == 1 -> context.getString(R.string.gallery_download_done_singular)
-                                else -> context.getString(R.string.gallery_download_done, succeeded)
+                                failed > 0 -> resources.getString(R.string.gallery_download_partial, succeeded, failed)
+                                succeeded == 1 -> resources.getString(R.string.gallery_download_done_singular)
+                                else -> resources.getString(R.string.gallery_download_done, succeeded)
                             }
                             scope.launch { snackbarHostState.showSnackbar(msg) }
                         }

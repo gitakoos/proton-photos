@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -138,6 +139,7 @@ fun NameOrMergeSheet(
 ) {
     val viewModel: NameOrMergeViewModel = hiltViewModel()
     val context = LocalContext.current
+    val resources = LocalResources.current
     // A selection's key spans all its photos, so it is built once per subject.
     val subjectKey = remember(subject) { subject.key }
     val people by viewModel.people.collectAsStateWithLifecycle()
@@ -150,7 +152,7 @@ fun NameOrMergeSheet(
         viewModel.bind(subject)
         viewModel.outcomes.collect { outcome ->
             if (outcome.subjectKey != subjectKey) return@collect
-            Toast.makeText(context, context.getString(outcome.message), Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, resources.getString(outcome.message), Toast.LENGTH_SHORT).show()
             if (outcome is NameOrMergeViewModel.Outcome.Done) {
                 currentOnDone(outcome.personId)
                 currentOnDismiss()

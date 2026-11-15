@@ -102,6 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -182,7 +183,7 @@ fun MetadataEditorScreen(
         appLock.runWhenOpen { writeConsentLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
     }
 
-    val screenContext = LocalContext.current
+    val screenResources = LocalResources.current
     val savedMessage = stringResource(R.string.metadata_editor_saved)
     val failedMessage = stringResource(R.string.metadata_editor_write_failed)
     LaunchedEffect(Unit) {
@@ -190,7 +191,7 @@ fun MetadataEditorScreen(
             when (event) {
                 MetadataEditorEvent.Saved -> snackbarHostState.showSnackbar(savedMessage)
                 is MetadataEditorEvent.PartlySaved -> snackbarHostState.showSnackbar(
-                    screenContext.getString(
+                    screenResources.getString(
                         R.string.metadata_editor_saved_partial, event.saved, event.failed,
                     ),
                 )

@@ -66,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -752,7 +753,7 @@ private fun DetailsSummaryCard(
     onRename: (() -> Unit)?,
     onAllDetails: () -> Unit,
 ) {
-    val locale = Locale.getDefault()
+    val locale = LocalLocale.current.platformLocale
     val is24Hour = eu.akoos.photos.presentation.util.LocalIs24Hour.current
     val day = remember(dateMs, locale) {
         SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(locale, "dMMMMy"), locale).format(Date(dateMs))

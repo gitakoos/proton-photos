@@ -94,6 +94,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -148,6 +149,7 @@ fun CollageScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val resources = LocalResources.current
     var bottomTab by remember { mutableStateOf(CollageTab.LAYOUT) }
     var showSaveConfirm by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
@@ -167,12 +169,12 @@ fun CollageScreen(
     LaunchedEffect(state.exportEvent) {
         when (state.exportEvent) {
             CollageExportEvent.SUCCESS -> {
-                Toast.makeText(context, context.getString(R.string.collage_saved), Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, resources.getString(R.string.collage_saved), Toast.LENGTH_SHORT).show()
                 viewModel.consumeExportEvent()
                 onClose()
             }
             CollageExportEvent.FAILURE -> {
-                Toast.makeText(context, context.getString(R.string.collage_save_failed), Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, resources.getString(R.string.collage_save_failed), Toast.LENGTH_SHORT).show()
                 viewModel.consumeExportEvent()
             }
             null -> Unit

@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -165,6 +166,7 @@ fun AlbumPhotoPickerScreen(
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val resources = LocalResources.current
     // Seed the source manager's pre-selection once. The picker VM is fresh per route open, so this runs a
     // single time to mark the videos already on the timeline as selected.
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -216,7 +218,7 @@ fun AlbumPhotoPickerScreen(
             if (done.queued > 0) {
                 Toast.makeText(
                     context,
-                    context.getString(R.string.gallery_add_to_album_queued),
+                    resources.getString(R.string.gallery_add_to_album_queued),
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -373,7 +375,7 @@ fun AlbumPhotoPickerScreen(
                                     else if (key in lockedKeys) {}
                                     else if (key in selected || maxSelectable == null || selected.size < maxSelectable) viewModel.toggle(key)
                                     else android.widget.Toast.makeText(
-                                        context, context.getString(R.string.picker_selection_limit, maxSelectable),
+                                        context, resources.getString(R.string.picker_selection_limit, maxSelectable),
                                         android.widget.Toast.LENGTH_SHORT,
                                     ).show()
                                 },

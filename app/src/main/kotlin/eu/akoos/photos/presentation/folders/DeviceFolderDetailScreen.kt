@@ -550,6 +550,7 @@ private fun FolderSideEffects(
 ) {
     val folderCtx = androidx.compose.ui.platform.LocalContext.current
     val shareCtx = folderCtx
+    val folderResources = androidx.compose.ui.platform.LocalResources.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     val appLock = LocalAppLock.current
     // The VM builds the system-share intent off the UI thread; the screen launches the chooser. The
@@ -601,8 +602,8 @@ private fun FolderSideEffects(
         when (val s = multiStripState) {
             is MultiStripState.Done -> {
                 val msg = if (s.skipped > 0)
-                    folderCtx.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
-                else folderCtx.getString(R.string.gallery_stripped_metadata, s.stripped)
+                    folderResources.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
+                else folderResources.getString(R.string.gallery_stripped_metadata, s.stripped)
                 snackbarHostState.showSnackbar(msg)
                 viewModel.resetMultiStripState()
             }
@@ -1436,7 +1437,7 @@ private fun DeviceFolderConfirms(
 
     // Confirm before uploading the current selection (single or multiple) to Drive.
     if (showUpload && selectedUris.isNotEmpty()) {
-        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val resources = androidx.compose.ui.platform.LocalResources.current
         ConfirmSheet(
             title = stringResource(R.string.upload_confirm_title),
             message = stringResource(R.string.upload_confirm_message, selectedUris.size),
@@ -1448,7 +1449,7 @@ private fun DeviceFolderConfirms(
                     scope.launch {
                         val msg = if (outcome.queued > 0) R.string.backup_started
                             else R.string.device_folder_already_backed_up
-                        snackbarHostState.showSnackbar(ctx.getString(msg))
+                        snackbarHostState.showSnackbar(resources.getString(msg))
                     }
                 }
             },

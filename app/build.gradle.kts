@@ -27,7 +27,7 @@ base {
 
 android {
     namespace = "eu.akoos.photos"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         // applicationId is intentionally OUTSIDE the me.proton.* namespace — this is an

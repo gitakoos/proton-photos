@@ -62,6 +62,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.BuildConfig
@@ -1023,9 +1024,10 @@ fun NavGraph(
             val mergeSuggestion by personVm.mergeSuggestion.collectAsStateWithLifecycle()
             val personMessage by personVm.message.collectAsStateWithLifecycle()
             val personCtx = androidx.compose.ui.platform.LocalContext.current
+            val personResources = androidx.compose.ui.platform.LocalResources.current
             LaunchedEffect(personMessage) {
                 personMessage?.let {
-                    android.widget.Toast.makeText(personCtx, personCtx.getString(it), android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(personCtx, personResources.getString(it), android.widget.Toast.LENGTH_SHORT).show()
                     personVm.clearMessage()
                 }
             }
@@ -1146,9 +1148,10 @@ fun NavGraph(
             val personActions = viewerPerson?.let { hiltViewModel<PersonDetailViewModel>(backStackEntry) }
             val personActionMessage = personActions?.message?.collectAsStateWithLifecycle()?.value
             val personActionCtx = androidx.compose.ui.platform.LocalContext.current
+            val personActionResources = androidx.compose.ui.platform.LocalResources.current
             LaunchedEffect(personActionMessage) {
                 personActionMessage?.let {
-                    android.widget.Toast.makeText(personActionCtx, personActionCtx.getString(it), android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(personActionCtx, personActionResources.getString(it), android.widget.Toast.LENGTH_SHORT).show()
                     personActions.clearMessage()
                 }
             }
@@ -1741,6 +1744,7 @@ fun NavGraph(
             } else {
                 val labelsVm = hiltViewModel<eu.akoos.photos.presentation.common.AddLabelsViewModel>()
                 val pickerContext = LocalContext.current
+                val pickerResources = LocalResources.current
                 var alreadyLabelled by remember(targets) { mutableStateOf<Set<String>>(emptySet()) }
                 LaunchedEffect(targets) {
                     alreadyLabelled = eu.akoos.photos.presentation.settings.photosCarryingAll(
@@ -1749,9 +1753,9 @@ fun NavGraph(
                 }
                 AlbumPhotoPickerScreen(
                     title = if (targets.size == 1) {
-                        pickerContext.getString(R.string.label_picker_title, targets.single())
+                        pickerResources.getString(R.string.label_picker_title, targets.single())
                     } else {
-                        pickerContext.getString(R.string.label_picker_title_many)
+                        pickerResources.getString(R.string.label_picker_title_many)
                     },
                     showUnfiledFilter = false,
                     excludeKeys = alreadyLabelled,
@@ -2364,6 +2368,7 @@ private fun UndoSnackbarHost(
     undoBarViewModel: UndoBarViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val pending by undoBarViewModel.pending.collectAsStateWithLifecycle()
     val hostState = remember { SnackbarHostState() }
 
@@ -2384,13 +2389,13 @@ private fun UndoSnackbarHost(
                 R.plurals.gallery_moved_to_trash_snackbar, action.count, action.count)
             is UndoAction.AlbumRemove -> context.resources.getQuantityString(
                 R.plurals.album_removed_undo_snackbar, action.count, action.count)
-            is UndoAction.PersonVisibility -> context.getString(
+            is UndoAction.PersonVisibility -> resources.getString(
                 if (action.nowHidden) R.string.person_hidden_snackbar else R.string.person_shown_snackbar)
         }
         val result = withTimeoutOrNull(5000L) {
             hostState.showSnackbar(
                 message = message,
-                actionLabel = context.getString(R.string.gallery_undo),
+                actionLabel = resources.getString(R.string.gallery_undo),
                 duration = SnackbarDuration.Indefinite,
             )
         }
