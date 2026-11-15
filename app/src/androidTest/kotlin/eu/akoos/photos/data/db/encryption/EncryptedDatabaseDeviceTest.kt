@@ -196,7 +196,7 @@ class EncryptedDatabaseDeviceTest {
     @Test
     fun aLostKeySetsTheDatabaseAsideAndStartsEmptyWhileVaultFilesStay() {
         writePlaintextDatabase(syncRows = 10_500, tagRows = 0, embeddingRows = 0)
-        openThroughGate(gate()).close()
+        openThroughGate(gate()).apply { openHelper.writableDatabase }.close()
         val vaultFile = File(root, "files/hidden/a.jpg").apply { parentFile!!.mkdirs(); writeText("photo") }
         deleteAlias()
 
@@ -213,7 +213,7 @@ class EncryptedDatabaseDeviceTest {
     @Test
     fun aFileEncryptedWithAnotherKeyIsReportedUnreadableNotDeleted() {
         writePlaintextDatabase(syncRows = 100, tagRows = 0, embeddingRows = 0)
-        openThroughGate(gate()).close()
+        openThroughGate(gate()).apply { openHelper.writableDatabase }.close()
         val engine = SqlCipherEngine(File(state, "corrupt"))
 
         assertEquals(ProbeResult.Unreadable, engine.probe(encryptedFile, rawKeySpec(ByteArray(32) { 1 })))

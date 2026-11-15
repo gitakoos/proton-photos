@@ -90,8 +90,12 @@ internal class DeferredOpenHelper(
     @Volatile private var delegate: SupportSQLiteOpenHelper? = null
     private var writeAheadLogging: Boolean? = null
 
+    /**
+     * The name Room was built with, whichever file the gate opens: Room's driver refuses to open a helper whose
+     * name differs from the one it asks for, and every reader resolves it to the same databases directory.
+     */
     override val databaseName: String?
-        get() = delegate?.databaseName ?: DatabaseOpenGate.ENCRYPTED_NAME
+        get() = configuration.name
 
     override fun setWriteAheadLoggingEnabled(enabled: Boolean) {
         synchronized(this) {

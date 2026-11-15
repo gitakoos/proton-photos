@@ -87,6 +87,10 @@ internal class SqlCipherEngine(private val corruptMarker: File) : CipherEngine {
     override fun export(plain: File, partial: File, keySpec: String): ExportReport {
         SqlCipherLibrary.ensureLoaded()
         val before: Snapshot
+        // ATTACH opens its file with the main connection's flags, which do not include create: an empty file is
+        // the new database SQLCipher writes into.
+        partial.parentFile?.mkdirs()
+        partial.createNewFile()
         SQLiteDatabase.openDatabase(plain.path, ByteArray(0), null, SQLiteDatabase.OPEN_READWRITE, handler, null).use { db ->
             before = snapshot(db)
             db.rawExecSQL("ATTACH DATABASE ? AS encrypted KEY ?", partial.path, keySpec)
