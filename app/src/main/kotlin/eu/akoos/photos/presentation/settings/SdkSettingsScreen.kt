@@ -109,6 +109,7 @@ private fun SdkRoute.titleRes(): Int = when (this) {
     SdkRoute.TIMELINE -> R.string.sdk_route_timeline
     SdkRoute.ALBUM_LIST -> R.string.sdk_route_album_list
     SdkRoute.ALBUM_PHOTOS -> R.string.sdk_route_album_photos
+    SdkRoute.THUMBNAILS -> R.string.sdk_route_thumbnails
 }
 
 private fun SdkRoute.descriptionRes(): Int = when (this) {
@@ -124,6 +125,7 @@ private fun SdkRoute.descriptionRes(): Int = when (this) {
     SdkRoute.TIMELINE -> R.string.sdk_route_timeline_desc
     SdkRoute.ALBUM_LIST -> R.string.sdk_route_album_list_desc
     SdkRoute.ALBUM_PHOTOS -> R.string.sdk_route_album_photos_desc
+    SdkRoute.THUMBNAILS -> R.string.sdk_route_thumbnails_desc
 }
 
 @HiltViewModel

@@ -825,6 +825,8 @@
     <string name="sdk_route_album_list_desc">Drive\'daki kendi albümlerinizi listeleme</string>
     <string name="sdk_route_album_photos">Albüm içeriği</string>
     <string name="sdk_route_album_photos_desc">Size ait ya da sizinle paylaşılan bir albümdeki fotoğrafları listeleme</string>
+    <string name="sdk_route_thumbnails">Küçük resimler</string>
+    <string name="sdk_route_thumbnails_desc">Fotoğraf ızgarasındaki küçük önizlemeleri ve yüz tanımanın kullandığı büyük önizlemeleri indirme</string>
     <string name="sdk_route_activity">%1$s. Bu oturumda: kitaplık üzerinden %2$d, her zamanki yoldan %3$d.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>
     <string name="settings_ai_grouping_progress">%2$d yüzden %1$d</string>

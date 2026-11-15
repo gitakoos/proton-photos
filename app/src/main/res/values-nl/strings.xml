@@ -1950,6 +1950,8 @@
     <string name="sdk_route_album_list_desc">Je eigen albums in Drive weergeven</string>
     <string name="sdk_route_album_photos">Albuminhoud</string>
     <string name="sdk_route_album_photos_desc">De foto\'s in een album weergeven, van jezelf of met je gedeeld</string>
+    <string name="sdk_route_thumbnails">Miniaturen</string>
+    <string name="sdk_route_thumbnails_desc">De kleine voorbeelden in het fotoraster ophalen en de grotere die gezichtsherkenning gebruikt</string>
     <string name="sdk_route_activity">%1$s. Deze sessie: %2$d via de bibliotheek, %3$d op de gebruikelijke manier.</string>
     <string name="settings_ai_indexing_progress">%1$d van %2$d foto\'s</string>
     <string name="settings_ai_grouping_progress">%1$d van %2$d gezichten</string>

@@ -1962,6 +1962,8 @@
     <string name="sdk_route_album_list_desc">Listar tus propios álbumes de Drive</string>
     <string name="sdk_route_album_photos">Contenido de los álbumes</string>
     <string name="sdk_route_album_photos_desc">Listar las fotos de un álbum, tuyo o compartido contigo</string>
+    <string name="sdk_route_thumbnails">Miniaturas</string>
+    <string name="sdk_route_thumbnails_desc">Descargar las vistas previas pequeñas de la cuadrícula de fotos y las más grandes que usa el reconocimiento facial</string>
     <string name="sdk_route_activity">%1$s. En esta sesión: %2$d con la biblioteca, %3$d de la forma habitual.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <string name="settings_ai_grouping_progress">%1$d de %2$d rostros</string>

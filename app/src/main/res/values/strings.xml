@@ -870,6 +870,8 @@
     <string name="sdk_route_album_list_desc">Listing your own albums in Drive</string>
     <string name="sdk_route_album_photos">Album contents</string>
     <string name="sdk_route_album_photos_desc">Listing the photos in an album, yours or one shared with you</string>
+    <string name="sdk_route_thumbnails">Thumbnails</string>
+    <string name="sdk_route_thumbnails_desc">Fetching the small previews in the photo grid and the larger ones face recognition reads</string>
     <string name="sdk_route_activity">%1$s. This session: %2$d through the library, %3$d done the usual way.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d of %2$d faces</string>

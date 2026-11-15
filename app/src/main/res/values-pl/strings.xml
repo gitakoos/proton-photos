@@ -2021,6 +2021,8 @@
     <string name="sdk_route_album_list_desc">Wyświetlanie Twoich własnych albumów w Drive</string>
     <string name="sdk_route_album_photos">Zawartość albumów</string>
     <string name="sdk_route_album_photos_desc">Wyświetlanie zdjęć w albumie, Twoim lub udostępnionym Tobie</string>
+    <string name="sdk_route_thumbnails">Miniatury</string>
+    <string name="sdk_route_thumbnails_desc">Pobieranie małych podglądów w siatce zdjęć i większych, z których korzysta rozpoznawanie twarzy</string>
     <string name="sdk_route_activity">%1$s. W tej sesji: %2$d przez bibliotekę, %3$d w zwykły sposób.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>

@@ -1961,6 +1961,8 @@
     <string name="sdk_route_album_list_desc">Elencare i tuoi album su Drive</string>
     <string name="sdk_route_album_photos">Contenuto degli album</string>
     <string name="sdk_route_album_photos_desc">Elencare le foto di un album, tuo o condiviso con te</string>
+    <string name="sdk_route_thumbnails">Miniature</string>
+    <string name="sdk_route_thumbnails_desc">Scaricare le piccole anteprime della griglia di foto e quelle più grandi usate dal riconoscimento dei volti</string>
     <string name="sdk_route_activity">%1$s. In questa sessione: %2$d tramite la libreria, %3$d nel modo consueto.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <string name="settings_ai_grouping_progress">%1$d di %2$d volti</string>

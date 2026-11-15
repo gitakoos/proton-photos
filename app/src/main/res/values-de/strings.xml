@@ -1926,6 +1926,8 @@
     <string name="sdk_route_album_list_desc">Deine eigenen Alben in Drive auflisten</string>
     <string name="sdk_route_album_photos">Albuminhalt</string>
     <string name="sdk_route_album_photos_desc">Die Fotos eines Albums auflisten, deines oder eines mit dir geteilten</string>
+    <string name="sdk_route_thumbnails">Miniaturansichten</string>
+    <string name="sdk_route_thumbnails_desc">Die kleinen Vorschaubilder im Fotoraster und die größeren für die Gesichtserkennung laden</string>
     <string name="sdk_route_activity">%1$s. In dieser Sitzung: %2$d über die Bibliothek, %3$d auf dem üblichen Weg.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <string name="settings_ai_grouping_progress">%1$d von %2$d Gesichtern</string>

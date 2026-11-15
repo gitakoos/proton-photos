@@ -1925,6 +1925,8 @@
     <string name="sdk_route_album_list_desc">A saját Drive-albumaid listázása</string>
     <string name="sdk_route_album_photos">Albumok tartalma</string>
     <string name="sdk_route_album_photos_desc">Egy album fotóinak listázása, akár a sajátod, akár veled megosztott</string>
+    <string name="sdk_route_thumbnails">Bélyegképek</string>
+    <string name="sdk_route_thumbnails_desc">A fotórács kis előnézeteinek és az arcfelismerés nagyobb előnézeteinek letöltése</string>
     <string name="sdk_route_activity">%1$s. Ebben a munkamenetben: %2$d a könyvtáron át, %3$d a megszokott módon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>
