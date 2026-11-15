@@ -237,11 +237,23 @@ class SharedBackupScheduler @Inject constructor(
     }
 
     private suspend fun enqueueRound(userId: UserId, userAsked: Boolean, expedited: Boolean) {
-        firstWaitingChangeMs = 0L
-        lastCheckMs = System.currentTimeMillis()
         val anyNetwork = userAsked || anyNetworkAllowed()
         val replaceWaiting = userAsked && withContext(Dispatchers.IO) { automaticRoundWaiting() }
+        val running = withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.RUNNING) }
         MlSyncWorker.enqueueRound(context, userId, anyNetwork, replaceWaiting, expedited = expedited)
+        roundAsked(running)
+    }
+
+    /**
+     * What every round asked for resets, whichever trigger asked: the next look at the backup folders waits from now,
+     * and the change still waiting and its planned check after the change go, since the round queued takes it in. Not
+     * while a round already runs ([running]): it may have read before the change, so the change keeps its check.
+     */
+    private fun roundAsked(running: Boolean) {
+        lastCheckMs = System.currentTimeMillis()
+        if (running) return
+        firstWaitingChangeMs = 0L
+        workManager.cancelUniqueWork(SOON_WORK)
     }
 
     /** Whether an automatic round may take any connection, not only an unmetered one. */
@@ -310,11 +322,7 @@ class SharedBackupScheduler @Inject constructor(
         if (!flushOnBackground(firstWaitingChangeMs, status.lastFailed, status.lastAtMs, System.currentTimeMillis())) return false
         val userId = accountManager.getPrimaryUserId().first() ?: return false
         if (signOut.get().isSigningOut(userId)) return false
-        val running = withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.RUNNING) }
         enqueueRound(userId, userAsked = false, expedited = true)
-        // The round now queued takes the change in. One already running may have read before it, so then the planned
-        // check after the change stays.
-        if (!running) workManager.cancelUniqueWork(SOON_WORK)
         Log.i(TAG, "$reason with a change waiting: round now")
         SyncDiagnostics.log("shared backup: $reason with a change waiting, round now")
         return true
@@ -379,7 +387,9 @@ class SharedBackupScheduler @Inject constructor(
     private suspend fun manualRound(mode: RoundMode) {
         val userId = accountManager.getPrimaryUserId().first() ?: return
         val replaceWaiting = withContext(Dispatchers.IO) { automaticRoundWaiting() }
+        val running = withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.RUNNING) }
         MlSyncWorker.enqueueRound(context, userId, anyNetwork = true, replaceWaiting = replaceWaiting, mode = mode)
+        roundAsked(running)
     }
 
     private fun automaticRoundWaiting(): Boolean = runCatching {

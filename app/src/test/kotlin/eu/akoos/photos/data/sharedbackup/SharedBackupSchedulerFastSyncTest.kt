@@ -371,6 +371,43 @@ class SharedBackupSchedulerFastSyncTest {
     }
 
     @Test
+    fun `sync now takes the waiting change in, so no other round follows for it`() = runBlocking {
+        turnOn()
+        val scheduler = scheduler()
+        scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+        assertEquals(1, planned(SharedBackupScheduler.SOON_WORK).size)
+
+        scheduler.saveNow()
+        assertEquals(1, enqueued.size)
+        assertTrue(planned(SharedBackupScheduler.SOON_WORK).isEmpty())
+
+        // Neither leaving the app nor a pull right after sends the change a second time, nor lists the folders.
+        scheduler.appLeft()
+        scheduler.refreshNow()
+        assertEquals(1, enqueued.size)
+        coVerify(exactly = 0) { runner.list(any()) }
+    }
+
+    @Test
+    fun `every round asked for drops the planned check after the change it takes in`() = runBlocking {
+        turnOn()
+        val scheduler = scheduler()
+        scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+        scheduler.syncNow()
+        assertTrue(planned(SharedBackupScheduler.SOON_WORK).isEmpty())
+
+        scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+        scheduler.loadNow()
+        assertTrue(planned(SharedBackupScheduler.SOON_WORK).isEmpty())
+
+        // The look at the folders that finds another device's newer file resets the same way.
+        scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+        scheduler().checkForNewer()
+        assertEquals(3, enqueued.size)
+        assertTrue(planned(SharedBackupScheduler.SOON_WORK).isEmpty())
+    }
+
+    @Test
     fun `what a round saw is read back by a new store`() = runBlocking {
         val seen = mapOf("node-a" to "rev-1", "node-b" to "rev-7")
         store.recordSeen(seen)
