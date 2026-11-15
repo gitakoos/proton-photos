@@ -1794,6 +1794,8 @@
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Foto\'s</string>
     <string name="activity_downloading_state">Downloaden</string>
+    <string name="activity_cancel_upload_item">Deze upload annuleren</string>
+    <string name="activity_cancel_download_item">Deze download annuleren</string>
     <string name="activity_tab_uploads">Uploads</string>
     <string name="activity_tab_downloads">Downloads</string>
     <string name="activity_tab_history">Geschiedenis</string>

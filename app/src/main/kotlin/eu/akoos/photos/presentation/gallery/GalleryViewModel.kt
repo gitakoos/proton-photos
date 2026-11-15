@@ -620,6 +620,7 @@ class GalleryViewModel @Inject constructor(
                     eu.akoos.photos.domain.usecase.UploadStatus.WaitingForWifi -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.PreparingBackup -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.StorageFull -> false
+                    eu.akoos.photos.domain.usecase.UploadStatus.Cancelled -> false
                 }
                 // Between two photos the pipeline reports Done and then the next one starting, which flipped this
                 // off and on again for every photo (the back-up pill vanished and slid back in with a new
@@ -2308,10 +2309,9 @@ class GalleryViewModel @Inject constructor(
             _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
             // One thumbnail URI per selected photo so the Activity screen lists them individually.
             val thumbUris = items.map { thumbUriFor(it) }
-            val transferId = transferCenter.start(
-                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
-                onCancel = { job?.cancel() },
-            )
+            val transfer = eu.akoos.photos.presentation.common.GalleryDownloadTransfer(
+                transferCenter, context, items, thumbUris,
+            ) { job?.cancel() }
             // Resolve per-photo album folder so cloud-album photos go to DCIM/<AlbumName>/
             // instead of bunching in a generic Proton Photos folder. AlbumService caches the
             // membership map for 20 min so repeated downloads don't re-fetch.
@@ -2328,12 +2328,14 @@ class GalleryViewModel @Inject constructor(
                     folderName = "", // empty = save non-album photos directly into DCIM/Camera
                     folderByLinkId = memberships,
                     onSaved = { savedUris.add(it) },
+                    cancels = transfer.cancels,
+                    onItemState = transfer::onItemState,
                 ) { progress ->
                     _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(progress.done, progress.total)) }
-                    transferCenter.progress(transferId, progress.done)
+                    transfer.onProgress(progress)
                 }
             } finally {
-                transferCenter.finish(transferId)
+                transfer.finish()
             }
             transferCenter.log(
                 TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),

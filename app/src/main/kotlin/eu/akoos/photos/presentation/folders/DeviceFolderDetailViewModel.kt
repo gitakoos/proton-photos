@@ -1583,7 +1583,8 @@ internal class BackupTargetEnd(
                 job?.cancel()
                 job = null
             }
-            UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
+            UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi,
+            UploadStatus.Cancelled -> {
                 if (job == null && target.value.isNotEmpty()) arm(BACKUP_TARGET_HOLD_MS)
             }
             UploadStatus.Done -> Unit

@@ -244,19 +244,38 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         return albumIdsByPhoto
     }
 
+    /** Runs at the start of every [downloadFullResPhoto] call, while that download is in flight. */
+    var onDownloadStarted: (suspend (CloudPhoto) -> Unit)? = null
+
+    /** linkIds [downloadFullResPhoto] was asked for, in call order. */
+    val downloadedLinkIds = mutableListOf<String>()
+
+    /** linkIds [discardPartialDownload] was asked to clean up. */
+    val discardedDownloads = mutableListOf<String>()
+
+    override fun discardPartialDownload(photo: CloudPhoto) {
+        discardedDownloads += photo.linkId
+    }
+
     override suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): eu.akoos.photos.data.localcrypto.CachedOriginal = eu.akoos.photos.data.localcrypto.CachedOriginal(
-        (fullResCacheDir?.let { dir ->
-            File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
-        } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
-            writeBytes(downloadBytes)
-            deleteOnExit()
-        },
-    )
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal = downloadFullResPhotoAfterHook(photo)
+
+    private suspend fun downloadFullResPhotoAfterHook(photo: CloudPhoto): eu.akoos.photos.data.localcrypto.CachedOriginal {
+        downloadedLinkIds += photo.linkId
+        onDownloadStarted?.invoke(photo)
+        return eu.akoos.photos.data.localcrypto.CachedOriginal(fakeFullResFile(photo))
+    }
+
+    private fun fakeFullResFile(photo: CloudPhoto): File = (fullResCacheDir?.let { dir ->
+        File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
+    } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
+        writeBytes(downloadBytes)
+        deleteOnExit()
+    }
 
     /** When set, downloads land where the real full-res cache keeps them (`<dir>/<linkId>.<ext>`). */
     var fullResCacheDir: File? = null

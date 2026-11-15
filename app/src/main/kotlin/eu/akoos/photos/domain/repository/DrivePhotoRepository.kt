@@ -211,6 +211,9 @@ interface DrivePhotoRepository {
      */
     suspend fun retryPendingOrphanDeletes(userId: UserId)
 
+    /** Drops the partial and resume files a stopped download of [photo] left in the cache. */
+    fun discardPartialDownload(photo: CloudPhoto) {}
+
     /**
      * Adds photos to an album. Returns an explicit breakdown of per-photo crypto failures so
      * the UI can warn when some entries are missing. If *every* entry fails (and the input was

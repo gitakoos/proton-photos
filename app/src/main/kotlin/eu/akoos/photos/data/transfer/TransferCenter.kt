@@ -83,6 +83,8 @@ class TransferCenter @Inject constructor(
         /** Per-item status label keyed by an [itemKeys] entry, e.g. each photo's current phase. A key
          *  absent from the map is a done (or not-tracked) item and drops off the Activity list. */
         val itemStatus: Map<String, String> = emptyMap(),
+        /** Whether each listed item may be stopped on its own from its row, see [cancelItem]. */
+        val itemCancelable: Boolean = false,
     )
 
     /** One finished transfer, persisted for the History tab. [at] is epoch millis, newest first.
@@ -107,6 +109,9 @@ class TransferCenter @Inject constructor(
      *  state stays a plain data class; the action stops the batch's coroutine when the user taps X. */
     private val cancels = java.util.concurrent.ConcurrentHashMap<Long, () -> Unit>()
 
+    /** Stop actions for one item of a batch, keyed by transfer id; called with the item's key. */
+    private val itemCancels = java.util.concurrent.ConcurrentHashMap<Long, (String) -> Unit>()
+
     /** The batches whose cancel lets the items already running finish: their row stays, without its
      *  cancel button, until the batch itself calls [finish]. */
     private val finishesRunning = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
@@ -123,22 +128,28 @@ class TransferCenter @Inject constructor(
         onCancel: (() -> Unit)? = null,
         /** The cancel lets the items already running finish, so the row stays until [finish]. */
         cancelFinishesRunning: Boolean = false,
+        /** Stops one item, given its [itemKeys] entry, so each row can be cancelled on its own. */
+        onCancelItem: ((String) -> Unit)? = null,
     ): Long {
         val id = ids.incrementAndGet()
         if (onCancel != null) cancels[id] = onCancel
+        if (onCancelItem != null) itemCancels[id] = onCancelItem
         if (cancelFinishesRunning) finishesRunning.add(id)
         _active.update {
             it + Active(
                 id, kind, done = 0, total = total, name = name, items = items,
                 cancelable = onCancel != null, itemKeys = itemKeys, itemStatus = itemStatus,
+                itemCancelable = onCancelItem != null,
             )
         }
         return id
     }
 
-    /** Advance the done counter of a live transfer. */
-    fun progress(id: Long, done: Int) {
-        _active.update { list -> list.map { if (it.id == id) it.copy(done = done) else it } }
+    /** Advance the done counter of a live transfer, and its total when items left the batch. */
+    fun progress(id: Long, done: Int, total: Int? = null) {
+        _active.update { list ->
+            list.map { if (it.id == id) it.copy(done = done, total = total ?: it.total) else it }
+        }
     }
 
     /** Set or clear one item's status within a live transfer, keyed by its [Active.itemKeys] entry. A
@@ -157,6 +168,7 @@ class TransferCenter @Inject constructor(
     /** Drop a live transfer once it ends (success or failure). */
     fun finish(id: Long) {
         cancels.remove(id)
+        itemCancels.remove(id)
         finishesRunning.remove(id)
         _active.update { list -> list.filterNot { it.id == id } }
     }
@@ -164,6 +176,7 @@ class TransferCenter @Inject constructor(
     /** Stop a running batch from its Activity-screen row: run its cancel action, then drop it. The
      *  batch's own finally still calls [finish], which is a harmless second removal. */
     fun cancel(id: Long) {
+        itemCancels.remove(id)
         cancels.remove(id)?.invoke()
         if (id in finishesRunning) {
             // The photos still being worked on finish: the row shows them going, with nothing to cancel.
@@ -171,6 +184,14 @@ class TransferCenter @Inject constructor(
         } else {
             _active.update { list -> list.filterNot { it.id == id } }
         }
+    }
+
+    /** Stop one item of a running batch from its Activity-screen row and drop the row at once. The
+     *  rest of the batch keeps going. */
+    fun cancelItem(id: Long, key: String) {
+        val stop = itemCancels[id] ?: return
+        stop(key)
+        setItemStatus(id, key, null)
     }
 
     /** Newest-first view of the persisted transfer log. */

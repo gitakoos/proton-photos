@@ -42,6 +42,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
@@ -141,6 +142,9 @@ private const val ENCRYPT_PARALLELISM = 3
 
 /** Throttle window for [PhotoUploadService.uploadFile]'s onProgress callback (per phase). */
 private const val PROGRESS_THROTTLE_MS = 250L
+
+/** How long a cancelled upload waits for its draft delete before queuing it for the next pass. */
+private const val ORPHAN_DELETE_ON_CANCEL_TIMEOUT_MS = 10_000L
 
 /**
  * Drive thumbnail types + max edges, matching ConfigurationProvider.thumbnailDefault/thumbnailPhoto.
@@ -379,6 +383,9 @@ class PhotoUploadService @Inject constructor(
             // it instead of leaving an orphan link on Drive.
             var orphanFileId: String? = null
             var orphanShareId: String? = null
+            // Set just before the commit request goes out. From then on a cancel cannot tell whether the
+            // photo landed, so the draft is no longer a cleanup target.
+            var commitStarted = false
             try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
@@ -995,6 +1002,7 @@ class PhotoUploadService @Inject constructor(
             } ?: hash.also {
                 Log.w(TAG, "uploadFile: photos root NodeHashKey unavailable — falling back to bare SHA-256 for ContentHash; expect Drive web rejection")
             }
+            commitStarted = true
             if (useVolumeEndpoints) {
                 val v2Request = CommitRevisionV2Request(
                     manifestSignature = manifestSignature,
@@ -1065,6 +1073,27 @@ class PhotoUploadService @Inject constructor(
                 // concurrency tears down cleanly.
                 runCatching { tempDir.deleteRecursively() }
                     .onFailure { Log.w(TAG, "uploadFile: cancel cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
+                // The resume record went with tempDir, so the uncommitted draft can never be finished:
+                // drop it now, or queue the delete for the next pass when Drive cannot be reached.
+                val orphan = orphanFileId
+                val orphanShare = orphanShareId
+                if (orphan != null && orphanShare != null && !commitStarted) {
+                    withContext(NonCancellable) {
+                        val dropped = withTimeoutOrNull(ORPHAN_DELETE_ON_CANCEL_TIMEOUT_MS) {
+                            runCatching {
+                                apiProvider.get<DriveApiService>(userId).invoke {
+                                    deleteLinks(orphanShare, eu.akoos.photos.data.api.dto.DeleteLinksRequest(listOf(orphan)))
+                                }.valueOrThrow
+                            }.isSuccess
+                        } == true
+                        if (dropped) {
+                            Log.d(TAG, "uploadFile: cancelled upload's draft $orphan deleted")
+                        } else {
+                            Log.w(TAG, "uploadFile: cancelled upload's draft $orphan not deleted now; queuing for retry")
+                            runCatching { enqueuePendingOrphanDelete(orphanShare, orphan) }
+                        }
+                    }
+                }
                 throw e
             } catch (e: Throwable) {
                 // Non-cancel failure. Split by retry-eligibility:

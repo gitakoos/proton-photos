@@ -1769,6 +1769,8 @@
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Fotók</string>
     <string name="activity_downloading_state">Letöltés</string>
+    <string name="activity_cancel_upload_item">A feltöltés megszakítása</string>
+    <string name="activity_cancel_download_item">A letöltés megszakítása</string>
     <string name="activity_tab_uploads">Feltöltések</string>
     <string name="activity_tab_downloads">Letöltések</string>
     <string name="activity_tab_history">Előzmények</string>

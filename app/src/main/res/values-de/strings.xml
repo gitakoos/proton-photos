@@ -1770,6 +1770,8 @@
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Fotos</string>
     <string name="activity_downloading_state">Wird geladen</string>
+    <string name="activity_cancel_upload_item">Diesen Upload abbrechen</string>
+    <string name="activity_cancel_download_item">Diesen Download abbrechen</string>
     <string name="activity_tab_uploads">Uploads</string>
     <string name="activity_tab_downloads">Downloads</string>
     <string name="activity_tab_history">Verlauf</string>

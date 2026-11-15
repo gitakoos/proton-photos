@@ -709,6 +709,15 @@ class SettingsViewModel @Inject constructor(
                                 uploadDeferReason = null,
                             )
                         }
+                        // A photo the user stopped on its own leaves the list; its bytes stop counting.
+                        UploadStatus.Cancelled -> {
+                            uploadedBytesByUri.remove(evt.uri)
+                            current.copy(
+                                uploadDoneCount = evt.doneIdx,
+                                uploadTotalCount = evt.totalCount,
+                                uploadEvents = current.uploadEvents.filter { it.uri != evt.uri },
+                            )
+                        }
                         UploadStatus.WaitingForWifi,
                         UploadStatus.PreparingBackup,
                         UploadStatus.StorageFull -> {
@@ -741,7 +750,8 @@ class SettingsViewModel @Inject constructor(
                                 UploadStatus.Idle,
                                 UploadStatus.WaitingForWifi,
                                 UploadStatus.PreparingBackup,
-                                UploadStatus.StorageFull -> UploadEventStatus.Done // unreachable
+                                UploadStatus.StorageFull,
+                                UploadStatus.Cancelled -> UploadEventStatus.Done // unreachable
                             }
                             // New-batch detection: a fresh Uploading/Encrypting event that
                             // arrives when the previous batch fully completed (done == total > 0)

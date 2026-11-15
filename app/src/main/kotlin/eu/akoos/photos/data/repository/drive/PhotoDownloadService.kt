@@ -193,6 +193,20 @@ class PhotoDownloadService @Inject constructor(
     }
 
     /**
+     * Removes what a stopped download of [linkId] left in the cache: the half-stitched `.tmp`, the
+     * per-block resume files and their hash sidecar. Left alone while another caller is still
+     * downloading the same photo, since those files are its working state.
+     */
+    fun discardPartialDownload(linkId: String, mimeType: String) {
+        if (inFlight[linkId]?.isCompleted == false) return
+        val cacheDir = File(context.cacheDir, "fullres")
+        val ext = eu.akoos.photos.util.mimeToFileExtension(mimeType)
+        File(cacheDir, "${safeFileId(linkId)}.$ext.tmp").delete()
+        cacheDir.listFiles { _, name -> isBlockEncFileOf(name, linkId) }?.forEach { it.delete() }
+        dropBlockResumeState(cacheDir, linkId)
+    }
+
+    /**
      * The map reads a cloud photo's place from its Drive attributes, which some uploaders leave without a
      * Location. Once the file is here its own GPS fills that gap, so the photo is plotted like the rest.
      * Never fails the download.
@@ -996,8 +1010,13 @@ class PhotoDownloadService @Inject constructor(
 }
 
 /** Whether [name] is one of [linkId]'s decrypted block files, `dec_<linkId>_<index>.bin`. */
-internal fun isBlockDecFileOf(name: String, linkId: String): Boolean {
-    val prefix = "dec_${safeFileId(linkId)}_"
+internal fun isBlockDecFileOf(name: String, linkId: String): Boolean = isBlockFileOf("dec_", name, linkId)
+
+/** Whether [name] is one of [linkId]'s encrypted block scratch files, `enc_<linkId>_<index>.bin`. */
+internal fun isBlockEncFileOf(name: String, linkId: String): Boolean = isBlockFileOf("enc_", name, linkId)
+
+private fun isBlockFileOf(kind: String, name: String, linkId: String): Boolean {
+    val prefix = "$kind${safeFileId(linkId)}_"
     if (!name.startsWith(prefix) || !name.endsWith(".bin")) return false
     val index = name.substring(prefix.length, name.length - ".bin".length)
     return index.isNotEmpty() && index.all { it.isDigit() }

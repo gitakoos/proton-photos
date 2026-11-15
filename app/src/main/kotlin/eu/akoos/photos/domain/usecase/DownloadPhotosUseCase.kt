@@ -40,6 +40,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.PhotoLocationResolver
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.transfer.ItemCancels
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.CaptureDateOverride
@@ -49,11 +50,13 @@ import eu.akoos.photos.util.isExifWritableImageMime
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -74,7 +77,9 @@ class DownloadPhotosUseCase @Inject constructor(
     private val linkDetailHelpers: LinkDetailHelpers,
     private val locationResolver: PhotoLocationResolver,
 ) {
-    data class Progress(val done: Int, val total: Int, val failed: Int, val skipped: Int = 0)
+    /** [done] counts every finished photo (saved, skipped or failed); [total] leaves out the photos the
+     *  user cancelled on their own, which [cancelled] counts. */
+    data class Progress(val done: Int, val total: Int, val failed: Int, val skipped: Int = 0, val cancelled: Int = 0)
 
     /** Pre-resolved per-file metadata for a download set, keyed strictly by linkId. A linkId
      *  absent from a map means "not prefetched" — the downloader falls back to its per-file
@@ -219,6 +224,10 @@ class DownloadPhotosUseCase @Inject constructor(
         folderName: String = "",
         folderByLinkId: Map<String, String> = emptyMap(),
         onSaved: (String) -> Unit = {},
+        /** Lets the caller stop one cloud photo, keyed by its linkId, while the rest carry on. */
+        cancels: ItemCancels? = null,
+        /** Told when a cloud photo (by linkId) starts downloading (true) and when it is over (false). */
+        onItemState: (key: String, running: Boolean) -> Unit = { _, _ -> },
         onProgress: suspend (Progress) -> Unit = {},
     ): Progress = coroutineScope {
         val cloudItems = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud }
@@ -227,8 +236,12 @@ class DownloadPhotosUseCase @Inject constructor(
         // them otherwise), so only the MediaStore name+size check is needed here — no SyncState
         // pre-check like the album path.
         val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(alreadyOnDevice)
+        val cancelled = AtomicInteger(0)
         val gate = Semaphore(DOWNLOAD_PARALLELISM)
-        fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), items.size, failed.get(), skipped.get())
+        fun snapshot() = Progress(
+            done.get() + skipped.get() + failed.get(), items.size - cancelled.get(), failed.get(), skipped.get(),
+            cancelled.get(),
+        )
         onProgress(snapshot())
 
         // Same batch-prefetch as the album path: resolve link details for the whole multi-select
@@ -237,48 +250,63 @@ class DownloadPhotosUseCase @Inject constructor(
         cloudItems.map { photo ->
             async {
                 gate.withPermit {
-                    try {
-                        val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
-                        if (existing != null) {
-                            linkSyncState(userId, existing, photo)
-                            skipped.incrementAndGet()
-                            Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
-                        } else {
-                            // Per-photo override beats the default folder. Album-bound photos land in
-                            // DCIM/<AlbumName>/; non-album photos in DCIM/Camera (folder = "").
-                            val folder = folderByLinkId[photo.linkId] ?: folderName
-                            val file = cloudRepo.downloadFullResPhoto(
-                                userId, photo,
-                                preResolvedLinkDetail = prefetch.linkDetailByLinkId[photo.linkId],
-                            )
-                            // The cache keeps the original encrypted; the save stamps and copies a plaintext
-                            // scratch copy of it, deleted after.
-                            val gps = resolveGpsForExif(userId, photo)
-                            val savedUri = file.withPlainFile(context) { plain ->
-                                saveFileToMediaStore(
-                                    plain, photo.displayName, photo.mimeType, folder,
-                                    captureTimeSeconds = photo.captureTime,
-                                    gps = gps,
-                                )
-                            }
-                            file.delete()
-                            // A null uri means the file was never written: MediaStore refused the
-                            // insert, or the copy failed part-way, which on a full volume is the
-                            // common case. Counting it as done reported a photo saved that is not on
-                            // the device, so a batch that ran out of space still read as complete.
-                            if (savedUri != null) {
-                                linkSyncState(userId, savedUri, photo)
-                                onSaved(savedUri.toString())
-                                done.incrementAndGet()
+                    val body: suspend () -> Unit = {
+                        onItemState(photo.linkId, true)
+                        try {
+                            val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
+                            if (existing != null) {
+                                linkSyncState(userId, existing, photo)
+                                skipped.incrementAndGet()
+                                Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
                             } else {
-                                failed.incrementAndGet()
+                                // Per-photo override beats the default folder. Album-bound photos land in
+                                // DCIM/<AlbumName>/; non-album photos in DCIM/Camera (folder = "").
+                                val folder = folderByLinkId[photo.linkId] ?: folderName
+                                val file = cloudRepo.downloadFullResPhoto(
+                                    userId, photo,
+                                    preResolvedLinkDetail = prefetch.linkDetailByLinkId[photo.linkId],
+                                )
+                                // The cache keeps the original encrypted; the save stamps and copies a
+                                // plaintext scratch copy of it. Both go on every exit, a cancel included,
+                                // so a stopped photo leaves neither behind.
+                                val savedUri = try {
+                                    val gps = resolveGpsForExif(userId, photo)
+                                    file.withPlainFile(context) { plain ->
+                                        saveFileToMediaStore(
+                                            plain, photo.displayName, photo.mimeType, folder,
+                                            captureTimeSeconds = photo.captureTime,
+                                            gps = gps,
+                                        )
+                                    }
+                                } finally {
+                                    file.delete()
+                                }
+                                // A null uri means the file was never written: MediaStore refused the
+                                // insert, or the copy failed part-way, which on a full volume is the
+                                // common case. Counting it as done reported a photo saved that is not on
+                                // the device, so a batch that ran out of space still read as complete.
+                                if (savedUri != null) {
+                                    linkSyncState(userId, savedUri, photo)
+                                    onSaved(savedUri.toString())
+                                    done.incrementAndGet()
+                                } else {
+                                    failed.incrementAndGet()
+                                }
                             }
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
+                            failed.incrementAndGet()
                         }
-                    } catch (e: Exception) {
-                        if (e is kotlinx.coroutines.CancellationException) throw e
-                        Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
-                        failed.incrementAndGet()
                     }
+                    val stopped = if (cancels != null) cancels.run(photo.linkId, body) else { body(); false }
+                    if (stopped) {
+                        // Only this photo stops: its partial and resume files go, the others carry on.
+                        cancelled.incrementAndGet()
+                        runCatching { cloudRepo.discardPartialDownload(photo) }
+                        Log.d(TAG, "Download of ${photo.linkId} cancelled by the user")
+                    }
+                    onItemState(photo.linkId, false)
                     onProgress(snapshot())
                 }
             }
@@ -601,8 +629,11 @@ class DownloadPhotosUseCase @Inject constructor(
                 }
             }
             uri
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // A stopped download must not leave its row in the gallery, written or half written.
+            withContext(NonCancellable) { runCatching { context.contentResolver.delete(uri, null, null) } }
+            throw e
         } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
             // Clean up the pending MediaStore entry on failure
             context.contentResolver.delete(uri, null, null)
             Log.w(TAG, "saveFileToMediaStore failed for $displayName: ${e.message}")

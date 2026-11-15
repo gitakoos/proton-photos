@@ -1861,6 +1861,8 @@
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Zdjęcia</string>
     <string name="activity_downloading_state">Pobieranie</string>
+    <string name="activity_cancel_upload_item">Anuluj to przesyłanie</string>
+    <string name="activity_cancel_download_item">Anuluj to pobieranie</string>
     <string name="activity_tab_uploads">Wysyłanie</string>
     <string name="activity_tab_downloads">Pobieranie</string>
     <string name="activity_tab_history">Historia</string>

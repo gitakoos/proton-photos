@@ -309,6 +309,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         mainPhotoLinkId = mainPhotoLinkId, extraTags = extraTags, onProgress = onProgress,
     )
 
+    override fun discardPartialDownload(photo: CloudPhoto) =
+        downloadService.discardPartialDownload(photo.linkId, photo.mimeType)
+
     override suspend fun retryPendingOrphanDeletes(userId: UserId) =
         uploadService.retryPendingOrphanDeletes(userId)
 

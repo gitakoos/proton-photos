@@ -144,4 +144,7 @@ interface SyncStateRepository {
      *  leaving ALBUM_ADD / AUTO_FOLDER / EDITOR rows queued and never touching an UPLOADING or SYNCED
      *  row. Returns the rows changed. Called from the user-cancel path only. */
     suspend fun clearManualQueue(): Int
+
+    /** [clearManualQueue] for the one photo [localUri]: a single cancelled "back up now" upload. */
+    suspend fun clearManualQueueFor(localUri: String): Int = 0
 }

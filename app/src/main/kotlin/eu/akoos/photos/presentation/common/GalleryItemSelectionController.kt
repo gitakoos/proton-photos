@@ -401,10 +401,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             // One thumbnail URI per selected photo so the Activity screen lists them individually.
             val thumbUris = items.map { thumbUriFor(it) }
-            val transferId = transferCenter.start(
-                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
-                onCancel = { job?.cancel() },
-            )
+            val transfer = GalleryDownloadTransfer(transferCenter, context, items, thumbUris) { job?.cancel() }
             _downloadStarted.tryEmit(items.size)
             val memberships: Map<String, String> = runCatching { driveRepo.getAlbumMemberships(userId) }
                 .getOrElse { emptyMap() }
@@ -416,9 +413,11 @@ class GalleryItemSelectionController @AssistedInject constructor(
                     folderName = "",
                     folderByLinkId = memberships,
                     onSaved = { savedUris.add(it) },
-                ) { progress -> transferCenter.progress(transferId, progress.done) }
+                    cancels = transfer.cancels,
+                    onItemState = transfer::onItemState,
+                ) { progress -> transfer.onProgress(progress) }
             } finally {
-                transferCenter.finish(transferId)
+                transfer.finish()
             }
             transferCenter.log(TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList())
             selection.clear()

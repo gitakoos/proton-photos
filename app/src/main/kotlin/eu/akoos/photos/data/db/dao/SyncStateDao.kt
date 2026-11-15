@@ -395,6 +395,13 @@ interface SyncStateDao {
     )
     suspend fun clearManualQueue(): Int
 
+    /** [clearManualQueue] for the one photo [localUri], for a single upload the user cancelled. */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = NULL " +
+            "WHERE localUri = :localUri AND queueSource = 'MANUAL' AND status NOT IN ('UPLOADING','SYNCED')"
+    )
+    suspend fun clearManualQueueFor(localUri: String): Int
+
     /** The reason a row was queued (a QueueSource constant), or null when it carries none. Read so a
      *  failure demotion can re-queue the row under its ORIGINAL source instead of guessing one. */
     @Query("SELECT queueSource FROM sync_state WHERE localUri = :localUri LIMIT 1")

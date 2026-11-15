@@ -105,6 +105,10 @@ class ActivityViewModel @Inject constructor(
         val history: List<TransferCenter.HistoryEntry> = emptyList(),
         /** Whether the OS currently counts the battery as low (at or under its 15% floor). */
         val batteryLow: Boolean = false,
+        /** Backup photos the user cancelled one by one in the current batch; their rows are hidden. */
+        val cancelledUploadUris: Set<String> = emptySet(),
+        /** How many of the batch's finished photos ([uploadDone]) were cancelled rather than uploaded. */
+        val uploadCancelled: Int = 0,
     ) {
         val isUploading: Boolean get() = uploadTotal > 0 && uploadDone < uploadTotal
         val pendingCount: Int get() = pendingUris.size
@@ -206,7 +210,14 @@ class ActivityViewModel @Inject constructor(
                         // resume on their own; this one waits on the user freeing space.
                         UploadStatus.Idle,
                         UploadStatus.StorageFull ->
-                            s.copy(uploadDone = 0, uploadTotal = 0, uploadEvents = emptyList())
+                            s.copy(uploadDone = 0, uploadTotal = 0, uploadEvents = emptyList(), uploadCancelled = 0)
+                        // One photo the user stopped: it leaves the list and does not count as uploaded.
+                        UploadStatus.Cancelled -> s.copy(
+                            uploadDone = evt.doneIdx,
+                            uploadTotal = evt.totalCount,
+                            uploadEvents = s.uploadEvents.filter { it.uri != evt.uri },
+                            uploadCancelled = s.uploadCancelled + 1,
+                        )
                         // Deferral frames carry no per-file payload.
                         UploadStatus.WaitingForWifi,
                         UploadStatus.PreparingBackup -> s
@@ -243,6 +254,7 @@ class ActivityViewModel @Inject constructor(
                                 uploadTotal = evt.totalCount,
                                 uploadEvents = next,
                                 uploadStopped = stopped,
+                                uploadCancelled = if (isNewBatch) 0 else s.uploadCancelled,
                             )
                         }
                     }
@@ -261,6 +273,10 @@ class ActivityViewModel @Inject constructor(
                 .flowOn(Dispatchers.Default)
                 .retryOnDbTear("ActivityPending")
                 .collect { pending -> _uiState.update { it.copy(pendingUris = pending) } }
+        }
+        // Single uploads the user cancelled in this batch, hidden from the card the moment they are tapped.
+        viewModelScope.launch {
+            upload.cancelledItems.collect { uris -> _uiState.update { it.copy(cancelledUploadUris = uris) } }
         }
         // Battery state, live: the "waiting for battery" note has to clear the moment the phone goes
         // on a charger, so a one-off read at screen open would leave a stale reason on screen.
@@ -332,6 +348,16 @@ class ActivityViewModel @Inject constructor(
         // keeps showing (it finishes and backs up); the still-pending ones stay in the DB for a
         // later auto-backup but no longer read as an active upload here.
         _uiState.update { it.copy(uploadStopped = true) }
+    }
+
+    /** Stop one backup upload, running or still queued, from its row's X; the rest keep going. */
+    fun cancelUploadItem(uri: String) {
+        upload.cancelItem(uri)
+    }
+
+    /** Stop one photo of a gallery download from its row's X; the rest of the batch keeps going. */
+    fun cancelTransferItem(id: Long, key: String) {
+        transferCenter.cancelItem(id, key)
     }
 
     /** Stop a running gallery download or offline batch from its row's X button. */

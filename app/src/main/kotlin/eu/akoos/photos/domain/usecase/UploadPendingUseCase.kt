@@ -38,6 +38,10 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
@@ -140,6 +144,18 @@ class UploadPendingUseCase @Inject constructor(
      */
     private val stopRequested = AtomicBoolean(false)
 
+    /** The single uploads the user stopped from their Activity row, see [cancelItem]. */
+    private val itemCancels = eu.akoos.photos.data.transfer.ItemCancels()
+
+    private val _cancelledItems = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Device uris of the uploads the user cancelled one by one since the current batch began, so the
+     * Activity screen stops listing them at once. Emptied when the next batch begins, which is also
+     * when an automatic backup may take such a photo up again.
+     */
+    val cancelledItems: StateFlow<Set<String>> = _cancelledItems.asStateFlow()
+
     /**
      * One-shot "the user asked for this run" flag, set by [requestManualRun] when Sync now is tapped.
      * The next [invoke] consumes it and lets the folder sweep's own rows through even with auto-backup
@@ -185,6 +201,28 @@ class UploadPendingUseCase @Inject constructor(
                     }
                 }
                 .onFailure { e -> Log.w(UPLOAD_TAG, "clearManualQueue on cancel failed: ${e.message}") }
+        }
+    }
+
+    /**
+     * Stop the upload of one photo and leave the rest of the batch running. A photo still waiting is
+     * never started; one already running is cancelled the way a stopped worker cancels it, so its
+     * claim goes back to LOCAL_ONLY, its resume blocks are wiped and an unfinished draft on Drive is
+     * deleted. It is not marked backed up and the batch does not retry it.
+     *
+     * What happens next follows [requestStop]: a manual "back up now" photo is de-queued and waits
+     * until the user asks again, while an automatic folder backup or an album add keeps its queued
+     * intent and is taken up by the next backup run. The de-queue is guarded so it never touches an
+     * UPLOADING claim or a SYNCED row; the running item's own row is de-queued once its claim is
+     * released (see [settleCancelledItem]).
+     */
+    fun cancelItem(localUri: String) {
+        itemCancels.cancel(localUri)
+        _cancelledItems.update { it + localUri }
+        Log.d(UPLOAD_TAG, "User cancel: stopping upload ${eu.akoos.photos.util.uploadLogRef(localUri)}")
+        appScope.launch {
+            runCatching { syncStateRepo.clearManualQueueFor(localUri) }
+                .onFailure { e -> Log.w(UPLOAD_TAG, "clearManualQueueFor on cancel failed: ${e.message}") }
         }
     }
 
@@ -319,6 +357,9 @@ class UploadPendingUseCase @Inject constructor(
         // (new photo / periodic / app-open) resumes normally. The flag only affects the batch that
         // was in flight when the user tapped stop.
         stopRequested.set(false)
+        // Single cancels belong to the batch they were made in: a photo kept queued is eligible again.
+        itemCancels.clear()
+        _cancelledItems.value = emptySet()
         // Recover claims stranded by a process death before selecting anything. Runs once per
         // process, inside the lock and ahead of every row claim below, so it resets only rows a
         // prior (now-dead) process left UPLOADING with no cloud copy, never a live claim this
@@ -597,6 +638,7 @@ class UploadPendingUseCase @Inject constructor(
 
         val successCount = AtomicInteger(0)
         val finishedCount = AtomicInteger(0)
+        val cancelledCount = AtomicInteger(0)
         val totalCount = pending.size
 
         // The batch's upload slots. At most UPLOAD_PARALLELISM uploads are on the wire at once, matching the
@@ -630,7 +672,7 @@ class UploadPendingUseCase @Inject constructor(
             suspend fun upload(state: SyncState) = uploadSemaphore.withPermit {
                 // Re-check after taking the slot: rows ahead may have set a flag while this one waited.
                 if (shouldStop()) return@withPermit
-                uploadOne(
+                val cancelled = itemCancels.run(state.localUri) { uploadOne(
                     userId = userId,
                     state = state,
                     totalCount = totalCount,
@@ -650,7 +692,12 @@ class UploadPendingUseCase @Inject constructor(
                     onStorageFull = { storageFullHit.set(true) },
                     uploadSlot = uploadSemaphore,
                     savedBytes = savedBytes,
-                )
+                ) }
+                if (cancelled) {
+                    settleCancelledItem(
+                        state.localUri, totalCount, finishedCount, cancelledCount, successCount, successUris,
+                    )
+                }
             }
             coroutineScope {
                 val videoPool = async { runUploadWorkers(videos, VIDEO_PIPELINE_DEPTH, shouldStop) { upload(it) } }
@@ -691,7 +738,50 @@ class UploadPendingUseCase @Inject constructor(
         val closingStatus = if (storageFullHit.get()) UploadStatus.StorageFull else UploadStatus.Idle
         _progress.tryEmit(UploadProgress("", "", closingStatus, totalCount, totalCount))
         PerfDiagnostics.mark("upload:end", pending.size)
-        Result(attempted = pending.size, successCount = finalSuccess)
+        // A photo the user cancelled was not attempted: counting it would read an all-cancelled batch
+        // as all-failed, and the worker would retry it.
+        Result(attempted = pending.size - cancelledCount.get(), successCount = finalSuccess)
+    }
+
+    /**
+     * Closes the books on one upload [cancelItem] stopped. A cancel that landed after the photo was
+     * already committed (the row is backed up) counts as the success it is. Otherwise the photo leaves
+     * the batch: a manual "back up now" row is de-queued (its claim release just re-queued it), the
+     * finished tally moves on so the batch's count still completes, and a Cancelled frame lets the
+     * screens drop its row. Non-cancellable so the bookkeeping lands while the batch winds down.
+     */
+    @Suppress("LongParameterList")
+    private suspend fun settleCancelledItem(
+        localUri: String,
+        totalCount: Int,
+        finishedCount: AtomicInteger,
+        cancelledCount: AtomicInteger,
+        successCount: AtomicInteger,
+        successUris: MutableCollection<String>,
+    ) = withContext(NonCancellable) {
+        val ref = eu.akoos.photos.util.uploadLogRef(localUri)
+        val row = runCatching { syncStateRepo.getByUri(localUri) }.getOrNull()
+        val committed = row?.cloudFileId != null &&
+            (row.status == SyncStatus.SYNCED || row.status == SyncStatus.CLOUD_ONLY)
+        if (committed) {
+            if (localUri !in successUris) {
+                successCount.incrementAndGet()
+                successUris.add(localUri)
+                _progress.tryEmit(
+                    UploadProgress(localUri, "", UploadStatus.Done, finishedCount.incrementAndGet(), totalCount),
+                )
+            }
+            Log.d(UPLOAD_TAG, "User cancel came after upload $ref was committed; kept as backed up")
+            return@withContext
+        }
+        runCatching { syncStateRepo.clearManualQueueFor(localUri) }
+            .onFailure { e -> Log.w(UPLOAD_TAG, "clearManualQueueFor after cancel failed: ${e.message}") }
+        cancelledCount.incrementAndGet()
+        _progress.tryEmit(
+            UploadProgress(localUri, "", UploadStatus.Cancelled, finishedCount.incrementAndGet(), totalCount),
+        )
+        Log.d(UPLOAD_TAG, "User cancel: upload $ref stopped, the rest of the batch continues")
+        eu.akoos.photos.util.SyncDiagnostics.log("upload $ref CANCELLED by user")
     }
 
     /**
@@ -798,11 +888,11 @@ class UploadPendingUseCase @Inject constructor(
                 Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: already claimed by another pass or no longer local-only")
                 return
             }
-            // Once claimed, this item runs to completion. No stop/cancel check is placed between the
-            // claim and the encrypt/upload below: interrupting an in-flight upload would tear down a
-            // native PGP call and crash the process. A user stop is honoured only at the upload workers'
-            // item boundary (before the claim), so a claimed item is never abandoned mid-pipeline. A row
-            // stranded UPLOADING by a genuine process death is recovered on the next pass.
+            // Once claimed, the batch stop never abandons this item: a user stop is honoured only at the
+            // upload workers' item boundary (before the claim). Only a cancel of this one photo
+            // ([cancelItem]) or an OS stop cancels it mid-pipeline, and every native PGP call below runs
+            // non-cancellably, so such a cancel lands between them; the catch below releases the claim.
+            // A row stranded UPLOADING by a genuine process death is recovered on the next pass.
             // Optional rename: derive cloud displayName from the source's capture timestamp
             // (MediaStore DATE_TAKEN). The on-device file keeps its own name unless "mirror to
             // local" is on, which renames it to match — deferred until AFTER the upload succeeds
