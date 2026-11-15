@@ -1944,6 +1944,8 @@
     <string name="sdk_route_shared_by_me_desc">Foto\'s weergeven die je met een openbare link hebt gedeeld</string>
     <string name="sdk_route_save_to_library">Gedeelde foto\'s opslaan</string>
     <string name="sdk_route_save_to_library_desc">Een foto uit een met jou gedeeld album opslaan in je eigen bibliotheek</string>
+    <string name="sdk_route_timeline">Fototijdlijn</string>
+    <string name="sdk_route_timeline_desc">De foto\'s in je Drive-tijdlijn weergeven</string>
     <string name="sdk_route_activity">%1$s. Deze sessie: %2$d via de bibliotheek, %3$d op de gebruikelijke manier.</string>
     <string name="settings_ai_indexing_progress">%1$d van %2$d foto\'s</string>
     <string name="settings_ai_grouping_progress">%1$d van %2$d gezichten</string>

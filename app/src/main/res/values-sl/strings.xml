@@ -2022,6 +2022,8 @@
     <string name="sdk_route_shared_by_me_desc">Prikaz fotografij, ki ste jih delili z javno povezavo</string>
     <string name="sdk_route_save_to_library">Shranjevanje deljenih fotografij</string>
     <string name="sdk_route_save_to_library_desc">Shranjevanje fotografije iz albuma, deljenega z vami, v vašo knjižnico</string>
+    <string name="sdk_route_timeline">Časovnica fotografij</string>
+    <string name="sdk_route_timeline_desc">Prikaz fotografij na vaši časovnici v Drive</string>
     <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>

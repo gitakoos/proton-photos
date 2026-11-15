@@ -68,6 +68,7 @@ import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
 import eu.akoos.photos.data.db.entity.toCloudPhotos
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.sdk.toListedPhotoFacts
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.DriveNotFoundException
 import eu.akoos.photos.util.FreshQueryGate
@@ -481,6 +482,7 @@ class PhotoStreamService @Inject constructor(
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
     private val sdkEventOps: eu.akoos.photos.data.sdk.SdkEventOps,
+    private val sdkListingOps: eu.akoos.photos.data.sdk.SdkListingOps,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope appScope: CoroutineScope,
     db: AppDatabase,
@@ -738,6 +740,30 @@ class PhotoStreamService @Inject constructor(
             }
         }
 
+    /**
+     * The whole timeline through the Drive SDK ([eu.akoos.photos.data.sdk.SdkRoute.TIMELINE]), as the stubs the
+     * app's own walk collects. The ids, their order and the capture times come from the SDK. The name hash,
+     * content hash and tags, which the SDK's timeline does not carry, come from each photo's link through the
+     * app's own batch read, and a link that names another capture time fails the call. RelatedPhotos stays
+     * empty, as nothing reads it. The app's own page after the SDK's last photo must come back empty, so an
+     * SDK walk that stopped short fails instead of passing for the whole library. Any failure or gap fails
+     * the call, and the app's own walk lists the timeline instead.
+     */
+    internal suspend fun timelineViaSdk(userId: UserId, volumeId: String): List<PhotoLinkDto> {
+        val listed = sdkListingOps.timeline(userId, volumeId)
+        val facts = HashMap<String, eu.akoos.photos.data.sdk.ListedPhotoFacts>(listed.size)
+        for (chunk in listed.chunked(REFRESH_BATCH)) {
+            linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, chunk.map { it.linkId })
+                .forEach { (linkId, detail) -> facts[linkId] = detail.toListedPhotoFacts() }
+        }
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val after = fetchPhotoPageWithRetry(manager, volumeId, listed.lastOrNull()?.linkId)
+        if (after.links.isNotEmpty()) {
+            throw eu.akoos.photos.data.sdk.SdkListingException("the SDK timeline ended before the app's own listing")
+        }
+        return eu.akoos.photos.data.sdk.timelineStubsOf(listed, facts)
+    }
+
     private suspend fun doRefreshCloudPhotos(userId: UserId, force: Boolean = false) {
         // Default to "incomplete" until the loop below proves the listing finished cleanly;
         // any early return or thrown error then correctly leaves the event anchor unsaved.
@@ -833,7 +859,29 @@ class PhotoStreamService @Inject constructor(
             // Whether the walk reached the end of the listing during this pass. Set only after the
             // loop below runs out of pages, so a walk that paused on a rate limit leaves it false.
             var paginationComplete = false
-            try {
+            // A walk that starts fresh may list the whole timeline through the Drive SDK instead. Null means
+            // the app's own walk below runs, which is all that happens while the route is off.
+            val listingStarted = System.nanoTime()
+            val sdkTimeline: List<PhotoLinkDto>? = sdkRouting.run(
+                eu.akoos.photos.data.sdk.SdkRoute.TIMELINE,
+                viaSdk = { timelineViaSdk(userId, activeVolumeId) },
+                on = startedFresh,
+            ) { null }
+            if (sdkTimeline != null) {
+                try {
+                    streamLinks.addAll(sdkTimeline)
+                    // Unguarded like the per-page removal below: a failed write must leave the pass incomplete.
+                    sdkTimeline.map { it.linkId }.forEachSqlChunk {
+                        listingSweepSnapshotDao.deleteListed(userId.id, activeVolumeId, it)
+                    }
+                    paginationComplete = true
+                    eu.akoos.photos.util.SyncDiagnostics.log("listing done through the SDK: ${streamLinks.size} links")
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    eu.akoos.photos.util.SyncDiagnostics.log("listing PAUSED (${listingErrorDetail(e)}) at ${streamLinks.size} links")
+                    Log.w(TAG, "refreshCloudPhotos: SDK listing not applied (${e.javaClass.simpleName}: ${e.message})")
+                }
+            } else try {
                 var lastLinkId: String? = resumeCursor
                 // Raised only where the server answered with an empty page. A null lastLinkId is how
                 // the loop exits, but it is also how the stall exit bails out, so the two would be
@@ -932,6 +980,8 @@ class PhotoStreamService @Inject constructor(
                 eu.akoos.photos.util.SyncDiagnostics.log("listing PAUSED (${listingErrorDetail(e)}) at ${streamLinks.size} links")
                 Log.w(TAG, "refreshCloudPhotos: stream paused at saved cursor (${e.javaClass.simpleName}: ${e.message})")
             }
+            Log.d(TAG, "refreshCloudPhotos: listing ${streamLinks.size} links through " +
+                "${if (sdkTimeline != null) "the SDK" else "the app"} in ${(System.nanoTime() - listingStarted) / 1_000_000} ms")
             listedLinks = streamLinks.size
 
             // The one sweep site. It runs the moment pagination ends, rather than after the much

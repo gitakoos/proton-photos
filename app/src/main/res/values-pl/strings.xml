@@ -2015,6 +2015,8 @@
     <string name="sdk_route_shared_by_me_desc">Wyświetlanie zdjęć udostępnionych przez Ciebie linkiem publicznym</string>
     <string name="sdk_route_save_to_library">Zapisywanie udostępnionych zdjęć</string>
     <string name="sdk_route_save_to_library_desc">Zapisywanie zdjęcia z albumu udostępnionego Tobie we własnej bibliotece</string>
+    <string name="sdk_route_timeline">Oś czasu zdjęć</string>
+    <string name="sdk_route_timeline_desc">Wyświetlanie zdjęć z Twojej osi czasu w Drive</string>
     <string name="sdk_route_activity">%1$s. W tej sesji: %2$d przez bibliotekę, %3$d w zwykły sposób.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>
