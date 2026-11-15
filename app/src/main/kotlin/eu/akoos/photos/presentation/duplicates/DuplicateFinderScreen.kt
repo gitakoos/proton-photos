@@ -237,16 +237,23 @@ fun DuplicateFinderScreen(
 
         // The groups the list shows under BOTH filters (sync status and match type). Select all but the
         // first and the shared delete bar act on exactly these, so neither reaches a hidden group.
-        val listedGroups = (if (showExact) deviceGroups + cloudGroups else emptyList()) +
-            (if (showSim) similarDeviceGroups + similarCloudGroups else emptyList())
+        // Remembered with each group's key, so a redraw (every progress tick of the similar-photo scan)
+        // does not join the member ids of every listed group again, two or three times over.
+        val listedGroups = remember(
+            showExact, showSim, deviceGroups, cloudGroups, similarDeviceGroups, similarCloudGroups,
+        ) {
+            (if (showExact) deviceGroups + cloudGroups else emptyList()) +
+                (if (showSim) similarDeviceGroups + similarCloudGroups else emptyList())
+        }
+        val listedKeys = remember(listedGroups) { listedGroups.map(::duplicateGroupKey) }
 
         // Every VISIBLE group the user has ticked copies in, as (group, removeIds). Aggregating from the
         // visible lists (not by iterating groupSelections, which keeps stale entries for groups the
         // current filter hides) is what stops the shared delete bar from touching a hidden group.
-        val batchSelections = listedGroups
-            .mapNotNull { g ->
-                val remove = groupSelections[duplicateGroupKey(g)].orEmpty()
-                if (remove.isEmpty()) null else g to remove
+        val batchSelections = listedGroups.indices
+            .mapNotNull { i ->
+                val remove = groupSelections[listedKeys[i]].orEmpty()
+                if (remove.isEmpty()) null else listedGroups[i] to remove
             }
         // Groups the user chose Delete group on: every copy is ticked and the whole group goes. A group
         // only counts while all its copies are still ticked, so unticking one returns it to a normal pick.
@@ -290,8 +297,8 @@ fun DuplicateFinderScreen(
             }
         }
         // Whether Select all has anything left to tick: a listed group of two or more copies with no pick.
-        val canSelectMore = listedGroups.any {
-            it.items.size > 1 && groupSelections[duplicateGroupKey(it)].isNullOrEmpty()
+        val canSelectMore = listedGroups.indices.any { i ->
+            listedGroups[i].items.size > 1 && groupSelections[listedKeys[i]].isNullOrEmpty()
         }
         var showBatchConfirm by remember { mutableStateOf(false) }
         // A selection lives only on this screen, so leaving the overview would silently drop the ticked
