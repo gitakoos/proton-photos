@@ -497,10 +497,12 @@ fun SearchScreen(
     }
     val density = LocalDensity.current
     // What a picker draws over the bottom: its tab bar, or the keyboard once it is up.
-    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
     // The keyboard animates its height, so the field follows the larger of the two: it never dips below the
-    // tab bar's top while the keyboard slides in or out, and then snaps back.
-    val pickBottomBase = pick?.let { maxOf(it.bottomInset, imeBottom + 8.dp) } ?: 0.dp
+    // tab bar's top while the keyboard slides in or out, and then snaps back. The keyboard height is read
+    // only for a picker: read here always, every frame of the keyboard animation redrew the whole screen.
+    val pickBottomBase = pick?.let {
+        maxOf(it.bottomInset, WindowInsets.ime.asPaddingValues().calculateBottomPadding() + 8.dp)
+    } ?: 0.dp
     if (pick != null) {
         val scrolled by remember {
             derivedStateOf { resultsGridState.firstVisibleItemIndex > 0 || resultsGridState.firstVisibleItemScrollOffset > 0 }
@@ -1500,7 +1502,7 @@ private fun BoxScope.SearchSelectionLayer(
         onDismiss = { vm.clearSelection() },
         // Scrolling the results collapses the drawer, so reaching past it to carry on through
         // them needs no deliberate pull or tap first.
-        contentScrolling = resultsGridState.isScrollInProgress,
+        contentScrollingProvider = { resultsGridState.isScrollInProgress },
         modifier = Modifier.align(Alignment.BottomCenter),
         selectAllCount = selectAllCount,
         onSelectAll = if (selectAllCount != null) {

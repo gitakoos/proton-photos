@@ -595,14 +595,16 @@ internal fun PhotoGrid(
             // truly flat thumbnail wall. The single placeholder "bucket" produced above
             // is still iterated to render its items.
             if (effectiveGrouping != TimelineGrouping.None) {
-                val selectedInGroup = monthItems.count { it in selectedItems }
+                val headerSelectable = isSelectionMode && groupSelectable
                 item(span = { GridItemSpan(columnCount) }, contentType = "header") {
                     MonthHeader(
                         month = month,
                         photoCount = monthPhotos,
                         videoCount = monthVideos,
-                        isSelectionMode = isSelectionMode && groupSelectable,
-                        selectedInGroup = selectedInGroup,
+                        isSelectionMode = headerSelectable,
+                        // Counted here, for a header on screen, and only while it shows a tick: counting
+                        // every group up front walked the whole library on each selection change.
+                        selectedInGroup = if (headerSelectable) monthItems.count { it in selectedItems } else 0,
                         groupSize = monthItems.size,
                         onToggleGroup = { onToggleGroup(monthItems) },
                         modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
@@ -855,14 +857,14 @@ private fun MosaicPhotoGrid(
                 // block rather than whitespace.
                 val sparseSection = monthItems.size < columnCount
                 if (effectiveGrouping != TimelineGrouping.None) {
-                    val selectedInGroup = monthItems.count { it in selectedItems }
+                    val headerSelectable = isSelectionMode && groupSelectable
                     item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
                         MonthHeader(
                             month = month,
                             photoCount = monthPhotos,
                             videoCount = monthVideos,
-                            isSelectionMode = isSelectionMode && groupSelectable,
-                            selectedInGroup = selectedInGroup,
+                            isSelectionMode = headerSelectable,
+                            selectedInGroup = if (headerSelectable) monthItems.count { it in selectedItems } else 0,
                             groupSize = monthItems.size,
                             onToggleGroup = { onToggleGroup(monthItems) },
                             modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),

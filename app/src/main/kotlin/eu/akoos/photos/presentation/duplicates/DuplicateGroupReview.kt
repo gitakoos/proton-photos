@@ -99,7 +99,7 @@ import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase.DuplicateGroup
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.duplicates.DuplicateFinderViewModel.CloudFullRes
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -322,7 +322,8 @@ internal fun DuplicateGroupReview(
                 // The instant base layer (device file, or a cloud copy's decrypted thumbnail) stays drawn
                 // under the full-res so the sharp image fades in over it, not over Bg0: the same technique
                 // the photo viewer uses so the swap morphs instead of flashing white.
-                val thumbModel = inputs.imageData ?: LocalThumbnailUrls.current.value[inputs.stableKey]
+                val storeThumb by rememberStoreThumbnailUrl(inputs.stableKey)
+                val thumbModel = inputs.imageData ?: storeThumb
                 val onThisPage = page == pagerState.currentPage
                 Box(
                     Modifier

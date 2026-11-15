@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -59,7 +60,7 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.gallery.GRID_THUMB_PX
 import eu.akoos.photos.presentation.gallery.HIDDEN_THUMB_PX
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.hiddenThumbKey
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
@@ -114,7 +115,7 @@ fun CloudPhotoCell(
     // The freshly-decrypted URL for this cell's cloud row, from the shared store. Used only when the
     // caller passes no explicit [cloudThumbnailUrl] (the Shared tab keeps its own URL and wins). A
     // cell keyed on a linkId not in the map just misses and stays on the caller's value.
-    val storeThumbnailUrl = cloudLinkId?.let { LocalThumbnailUrls.current.value[it] }
+    val storeThumbnailUrl by rememberStoreThumbnailUrl(cloudLinkId)
     val effectiveCloudUrl = cloudThumbnailUrl ?: storeThumbnailUrl
 
     // Coil model: prefer local Uri (faster, no network), otherwise the CDN URL.

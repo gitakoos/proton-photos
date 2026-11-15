@@ -124,7 +124,7 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.photoDateSections
 import eu.akoos.photos.presentation.common.rememberGroupingPinchModifier
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
@@ -307,9 +307,8 @@ fun DeviceFolderDetailScreen(
     // folders only ever hold
     // local items, so the cover comes from the local URI; the cloud branch resolves the shared store
     // URL for parity with the other detail heroes.
-    val thumbUrls = LocalThumbnailUrls.current.value
     val pinnedCoverUri by viewModel.pinnedCoverUri.collectAsStateWithLifecycle()
-    val coverModel: Any? = remember(items, thumbUrls, pinnedCoverUri) {
+    val coverItem: GalleryItem? = remember(items, pinnedCoverUri) {
         val pinned = pinnedCoverUri?.let { uri ->
             items.firstOrNull { item ->
                 when (item) {
@@ -319,12 +318,18 @@ fun DeviceFolderDetailScreen(
                 }
             }
         }
-        (pinned ?: items.firstOrNull())?.let { item ->
+        pinned ?: items.firstOrNull()
+    }
+    // Only the cover's own store entry is read, so a thumbnail landing for another photo does not
+    // redraw this whole screen.
+    val coverStoreUrl by rememberStoreThumbnailUrl((coverItem as? GalleryItem.CloudOnly)?.cloud?.linkId)
+    val coverModel: Any? = remember(coverItem, coverStoreUrl) {
+        coverItem?.let { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                 is GalleryItem.Synced -> Uri.parse(item.local.uri)
                 is GalleryItem.CloudOnly ->
-                    (thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
+                    (coverStoreUrl ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
             }
         }
     }
@@ -1186,7 +1191,7 @@ private fun BoxScope.DeviceFolderSelectionDrawer(
         onDismiss = { viewModel.clearSelection() },
         // Scrolling the folder grid collapses the drawer, so reaching past it to carry on
         // through the photos needs no deliberate pull or tap first.
-        contentScrolling = gridState.isScrollInProgress,
+        contentScrollingProvider = { gridState.isScrollInProgress },
         modifier = Modifier.align(Alignment.BottomCenter),
         selectAllCount = selectAllCount,
         onSelectAll = if (selectAllCount != null) {

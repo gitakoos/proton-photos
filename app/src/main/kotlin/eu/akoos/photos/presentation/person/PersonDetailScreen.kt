@@ -517,7 +517,7 @@ fun PersonDetailScreen(
             actions = personSelectionActions,
             onDismiss = { clearSelection() },
             // Scrolling the grid collapses the drawer, so carrying on through the photos needs no pull first.
-            contentScrolling = gridState.isScrollInProgress,
+            contentScrollingProvider = { gridState.isScrollInProgress },
             modifier = Modifier.align(Alignment.BottomCenter),
             selectAllCount = selectAllCount,
             onSelectAll = if (selectAllCount != null) {

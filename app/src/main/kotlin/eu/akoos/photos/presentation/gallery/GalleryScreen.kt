@@ -37,6 +37,8 @@ import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.animation.AnimatedVisibility
@@ -591,20 +593,20 @@ fun GalleryScreen(
         LaunchedEffect(gridState, staggeredState, mosaicGrid, state.filteredItems) {
             val rendered = state.filteredItems
             if (rendered.isEmpty()) return@LaunchedEffect
-            // Stable-key → filteredItems index, for the two cell key shapes the grid emits.
-            val indexByLinkId = HashMap<String, Int>(rendered.size)
-            rendered.forEachIndexed { idx, gi -> cloudLinkIdOf(gi)?.let { indexByLinkId[it] = idx } }
+            // Grid cell key -> filteredItems index, for every cell key shape the grid emits (a synced or
+            // device cell is keyed by its local uri, not a link). Built off the main thread: it covers the
+            // whole list and is rebuilt on every list change.
+            val indexByKey = withContext(Dispatchers.Default) { GalleryKeyIndex(rendered) }
             var lastAnchor = -1
             snapshotFlow {
                 // Anchor on the last visible cell of whichever grid is showing so prefetch warms the
                 // rows just past the viewport in mosaic mode too, not only the fixed grid.
-                val last = if (mosaicGrid)
+                if (mosaicGrid)
                     staggeredState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
                 else
                     gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
-                last?.removePrefix("cloud_")?.removePrefix("synced_")
-            }.collect { anchorLinkId ->
-                val anchorIdx = anchorLinkId?.let { indexByLinkId[it] } ?: return@collect
+            }.collect { anchorKey ->
+                val anchorIdx = anchorKey?.let { indexByKey.positionOfKey(it) }?.takeIf { it >= 0 } ?: return@collect
                 // Only look ahead while moving forward; reverse scroll keeps warm rows warm.
                 if (anchorIdx <= lastAnchor) { lastAnchor = anchorIdx; return@collect }
                 lastAnchor = anchorIdx
@@ -635,7 +637,9 @@ fun GalleryScreen(
         if (memoryLinkIds.isNotEmpty()) viewModel.requestThumbnailsVisible(memoryLinkIds)
     }
 
-    val mediaPermissions = MediaPermissions.requestSet(Build.VERSION.SDK_INT)
+    // Remembered: a fresh array each pass would make the grid's permission callback a new value every
+    // time this screen recomposes, so the whole photo grid would rebuild with it instead of skipping.
+    val mediaPermissions = remember { MediaPermissions.requestSet(Build.VERSION.SDK_INT) }
     // Whether the request going out now asks for access the app already held: its instant answer then
     // changes nothing the device list was read under, so it must not start another whole-library scan.
     val askedWhileGranted = remember { java.util.concurrent.atomic.AtomicBoolean(false) }

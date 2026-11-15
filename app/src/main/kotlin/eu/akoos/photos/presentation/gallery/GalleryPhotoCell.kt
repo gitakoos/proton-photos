@@ -52,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -101,11 +102,24 @@ import eu.akoos.photos.presentation.util.formatVideoTime
  *
  * Holds a [State] rather than the bare map so the provider hands down a STABLE reference: the map
  * changes on every decrypt during a scroll, and providing the value itself would recompose the whole
- * nav root each time. Cells read `.current.value`, so only the tiles whose entry changed rebind.
+ * nav root each time. Cells read their own entry through [rememberStoreThumbnailUrl], so only the tiles
+ * whose entry changed rebind.
  * Defaults to an empty map so a cell composed outside any provider falls back to the item's own URL.
  */
 val LocalThumbnailUrls: ProvidableCompositionLocal<State<Map<String, String>>> =
     compositionLocalOf { mutableStateOf(emptyMap()) }
+
+/**
+ * [key]'s entry in [LocalThumbnailUrls], or null for a null [key] or one the store does not hold. Read
+ * through a derived state so the caller recomposes only when this one entry changes: reading the
+ * store's `.value` directly subscribes to the whole map, and every thumbnail that lands anywhere would
+ * redraw the tile.
+ */
+@Composable
+fun rememberStoreThumbnailUrl(key: String?): State<String?> {
+    val urls = LocalThumbnailUrls.current
+    return remember(key, urls) { derivedStateOf { key?.let { urls.value[it] } } }
+}
 
 /** Primitive, Compose-stable snapshot of everything [PhotoCell] renders for one [GalleryItem].
  *  Computed in the caller's item scope so the cell itself takes only stable params (and stays
@@ -339,7 +353,8 @@ internal fun PhotoCell(
     // cell's linkId. [stableKey] is the cloud linkId for a cloud cell, and a local cell's stableKey
     // (its uri) simply misses the map. The lookup is O(1); the resolved value drives both the
     // placeholder decision and the image request below.
-    val resolvedImageData = imageData ?: LocalThumbnailUrls.current.value[stableKey]
+    val storeImageData by rememberStoreThumbnailUrl(stableKey)
+    val resolvedImageData = imageData ?: storeImageData
 
     // A local GIF animates only when the user opted into grid autoplay; otherwise the decoder-free
     // loader renders its still first frame. Every other cell keeps the default (animating) loader.

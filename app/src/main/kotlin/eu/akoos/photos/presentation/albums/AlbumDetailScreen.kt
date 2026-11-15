@@ -1531,7 +1531,7 @@ private fun BoxScope.AlbumSelectionDrawer(
         onDismiss = { viewModel.clearSelection() },
         // Scrolling the album grid collapses the drawer, so reaching past it to carry on
         // through the photos needs no deliberate pull or tap first.
-        contentScrolling = gridState.isScrollInProgress,
+        contentScrollingProvider = { gridState.isScrollInProgress },
         modifier = Modifier.align(Alignment.BottomCenter),
         selectAllCount = selectAllCount,
         onSelectAll = if (selectAllCount != null) {

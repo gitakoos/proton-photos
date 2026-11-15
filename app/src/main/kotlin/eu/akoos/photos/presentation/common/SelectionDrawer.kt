@@ -130,7 +130,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.PhotoCellInputs
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.theme.Accent
@@ -1190,7 +1190,8 @@ private fun SelectionThumb(
     cacheThumbnails: Boolean,
     onClick: () -> Unit,
 ) {
-    val imageData = inputs.imageData ?: LocalThumbnailUrls.current.value[inputs.stableKey]
+    val storeImageData by rememberStoreThumbnailUrl(inputs.stableKey)
+    val imageData = inputs.imageData ?: storeImageData
     val edge by animateDpAsState(
         targetValue = if (enlarged) THUMB_PREVIEW_SIZE else THUMB_SIZE,
         animationSpec = tween(THUMB_PREVIEW_MS),

@@ -187,6 +187,7 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.LocalVideoThumb
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.people.NameOrMergeSheet
 import eu.akoos.photos.presentation.people.NameOrMergeSubject
 import eu.akoos.photos.presentation.theme.Accent
@@ -1588,11 +1589,11 @@ fun PhotoViewerScreen(
                 // neighbour: a device photo or video decodes from its own file (Coil's VideoFrameDecoder
                 // grabs a frame for a video), and a cloud-only item uses its cloud thumbnail resolved from
                 // the shared store (falling back to any URL still on the item, e.g. an album row).
-                val thumbUrls = LocalThumbnailUrls.current.value
+                val storeThumbUrl by rememberStoreThumbnailUrl((item as? GalleryItem.CloudOnly)?.cloud?.linkId)
                 val thumbModel: Any? = when (item) {
                     is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                     is GalleryItem.Synced -> Uri.parse(item.local.uri)
-                    is GalleryItem.CloudOnly -> thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+                    is GalleryItem.CloudOnly -> storeThumbUrl ?: item.cloud.thumbnailUrl
                     null -> null
                 }
                 // Skip the AsyncImage poster for local videos once the user has tapped Play.

@@ -119,7 +119,7 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
 import eu.akoos.photos.presentation.common.offlineTurnsOn
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
@@ -331,16 +331,16 @@ fun LocationPhotosContent(
     }
 
     // Cover = the newest item's image (the list is sorted newest-first by capture time).
-    // A cloud cover reads its decrypted URL from the shared store first; key on that map so the
-    // cover repaints when the decrypt lands.
-    val thumbUrls = LocalThumbnailUrls.current.value
-    val coverModel: Any? = remember(state.items, thumbUrls) {
+    // A cloud cover reads its decrypted URL from the shared store first, its own entry only, so the
+    // cover repaints when its decrypt lands and a thumbnail landing elsewhere leaves the screen alone.
+    val coverStoreUrl by rememberStoreThumbnailUrl((state.items.firstOrNull() as? GalleryItem.CloudOnly)?.cloud?.linkId)
+    val coverModel: Any? = remember(state.items, coverStoreUrl) {
         state.items.firstOrNull()?.let { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                 is GalleryItem.Synced -> Uri.parse(item.local.uri)
                 is GalleryItem.CloudOnly ->
-                    (thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
+                    (coverStoreUrl ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
             }
         }
     }
@@ -712,7 +712,7 @@ fun LocationPhotosContent(
             onDismiss = { viewModel.clearSelection() },
             // Scrolling the grid collapses the drawer, so reaching past it to carry on through the
             // photos needs no deliberate pull or tap first.
-            contentScrolling = gridState.isScrollInProgress,
+            contentScrollingProvider = { gridState.isScrollInProgress },
             modifier = Modifier.align(Alignment.BottomCenter),
             selectAllCount = selectAllCount,
             onSelectAll = if (selectAllCount != null) {
