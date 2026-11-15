@@ -247,6 +247,7 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    implementation(libs.sqlcipher.android)
     // The unit tests declare their own small @Database classes; Room generates them from the test sources too.
     kspTest(libs.room.compiler)
 

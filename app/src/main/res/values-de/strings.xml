@@ -581,6 +581,7 @@
     <string name="about_lib_hilt">Dependency Injection</string>
     <string name="about_lib_coil">Bildlade-Bibliothek</string>
     <string name="about_lib_room">Lokale Datenbank</string>
+    <string name="about_lib_sqlcipher">Datenbankverschlüsselung, lizenziert unter BSD 3-clause</string>
     <string name="about_lib_gopenpgp">OpenPGP-Implementierung</string>
     <string name="about_lib_geonames">Ortsnamen-Datensatz, lizenziert unter CC BY 4.0</string>
     <string name="about_lib_osmdroid">Kartenansicht, lizenziert unter Apache 2.0</string>

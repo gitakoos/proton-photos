@@ -787,6 +787,7 @@
     <string name="about_lib_hilt">Vkládání závislostí</string>
     <string name="about_lib_coil">Knihovna pro načítání obrázků</string>
     <string name="about_lib_room">Místní databáze</string>
+    <string name="about_lib_sqlcipher">Šifrování databáze, licence BSD 3-clause</string>
     <string name="about_lib_gopenpgp">Implementace OpenPGP</string>
     <string name="about_lib_geonames">Datová sada názvů měst, licencováno pod CC BY 4.0</string>
     <string name="about_lib_osmdroid">Zobrazení mapy, licencováno pod Apache 2.0</string>

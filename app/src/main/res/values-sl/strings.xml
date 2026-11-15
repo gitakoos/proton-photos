@@ -788,6 +788,7 @@
     <string name="about_lib_hilt">Vbrizgavanje odvisnosti</string>
     <string name="about_lib_coil">Knjižnica za nalaganje slik</string>
     <string name="about_lib_room">Lokalna podatkovna zbirka</string>
+    <string name="about_lib_sqlcipher">Šifriranje podatkovne zbirke, licenca BSD 3-clause</string>
     <string name="about_lib_gopenpgp">Izvedba OpenPGP</string>
     <string name="about_lib_geonames">Nabor imen mest, licenciran po CC BY 4.0</string>
     <string name="about_lib_osmdroid">Pogled zemljevida, licenciran po Apache 2.0</string>

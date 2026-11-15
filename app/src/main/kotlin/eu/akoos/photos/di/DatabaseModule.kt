@@ -53,6 +53,7 @@ import me.proton.core.usersettings.data.db.OrganizationDatabase
 import me.proton.core.usersettings.data.db.UserSettingsDatabase
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.Migrations
+import eu.akoos.photos.data.db.encryption.EncryptedOpenHelperFactory
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.ClusterSummaryDao
@@ -143,6 +144,7 @@ abstract class DatabaseModule {
         @Singleton
         fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
+                .openHelperFactory(EncryptedOpenHelperFactory(context))
                 .addMigrations(*Migrations.ALL)
                 .build()
 

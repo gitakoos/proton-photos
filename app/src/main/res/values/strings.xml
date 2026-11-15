@@ -1196,6 +1196,7 @@
     <string name="about_lib_hilt">Dependency injection</string>
     <string name="about_lib_coil">Image loading library</string>
     <string name="about_lib_room">Local database</string>
+    <string name="about_lib_sqlcipher">Database encryption, licensed under BSD 3-clause</string>
     <string name="about_lib_gopenpgp">OpenPGP implementation</string>
     <string name="about_lib_geonames">City name dataset, licensed under CC BY 4.0</string>
     <string name="about_lib_osmdroid">Map view, licensed under Apache 2.0</string>

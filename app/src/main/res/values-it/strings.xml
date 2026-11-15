@@ -585,6 +585,7 @@
     <string name="about_lib_hilt">Iniezione delle dipendenze</string>
     <string name="about_lib_coil">Libreria di caricamento immagini</string>
     <string name="about_lib_room">Database locale</string>
+    <string name="about_lib_sqlcipher">Crittografia del database, con licenza BSD 3-clause</string>
     <string name="about_lib_gopenpgp">Implementazione OpenPGP</string>
     <string name="about_lib_geonames">Set di dati con nomi di città, con licenza CC BY 4.0</string>
     <string name="about_lib_osmdroid">Vista mappa, con licenza Apache 2.0</string>

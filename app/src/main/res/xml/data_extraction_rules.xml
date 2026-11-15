@@ -2,9 +2,10 @@
 <!--
     Empty allowlist - blocks the Android 12+ device-to-device transfer and
     cloud-backup paths from copying anything app-private. Pairs with
-    allowBackup="false" which covers the pre-12 Auto Backup path. The encrypted
-    Room DB holding refresh tokens, the DataStore with sync prefs, and any
-    cache content stay on the original device.
+    allowBackup="false" which covers the pre-12 Auto Backup path. The Room DB
+    (encrypted with a key that only this device's Keystore can unwrap), the
+    DataStore with sync prefs, the hidden vault and any cache content stay on
+    the original device.
 -->
 <data-extraction-rules>
     <cloud-backup>

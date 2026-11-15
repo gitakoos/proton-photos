@@ -32,6 +32,7 @@ osmdroid = "6.1.20"
 onnxruntime = "1.28.0"
 exifinterface = "1.4.2"
 zip4j = "2.11.6"
+sqlcipher = "4.20.0"
 
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
@@ -154,6 +155,9 @@ osmdroid-android = { module = "org.osmdroid:osmdroid-android", version.ref = "os
 # EXIF reading/writing
 exifinterface = { module = "androidx.exifinterface:exifinterface", version.ref = "exifinterface" }
 zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
+
+# Encrypted SQLite for the Room database
+sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 
 # Coroutines
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

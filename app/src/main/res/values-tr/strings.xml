@@ -1141,6 +1141,7 @@
     <string name="about_lib_hilt">Bağımlılık enjeksiyonu</string>
     <string name="about_lib_coil">Görsel yükleme kitaplığı</string>
     <string name="about_lib_room">Yerel veritabanı</string>
+    <string name="about_lib_sqlcipher">Veritabanı şifreleme, BSD 3-clause lisanslı</string>
     <string name="about_lib_gopenpgp">OpenPGP uygulaması</string>
     <string name="about_lib_geonames">Şehir adı veri kümesi, CC BY 4.0 lisanslı</string>
     <string name="about_lib_osmdroid">Harita görünümü, Apache 2.0 lisanslı</string>

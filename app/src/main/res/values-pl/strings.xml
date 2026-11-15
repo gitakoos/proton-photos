@@ -787,6 +787,7 @@
     <string name="about_lib_hilt">Wstrzykiwanie zależności</string>
     <string name="about_lib_coil">Biblioteka wczytywania obrazów</string>
     <string name="about_lib_room">Lokalna baza danych</string>
+    <string name="about_lib_sqlcipher">Szyfrowanie bazy danych, licencja BSD 3-clause</string>
     <string name="about_lib_gopenpgp">Implementacja OpenPGP</string>
     <string name="about_lib_geonames">Zbiór nazw miast, na licencji CC BY 4.0</string>
     <string name="about_lib_osmdroid">Widok mapy, na licencji Apache 2.0</string>

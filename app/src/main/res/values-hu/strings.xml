@@ -604,6 +604,7 @@
     <string name="about_lib_hilt">Függőség-injektálás</string>
     <string name="about_lib_coil">Képbetöltő könyvtár</string>
     <string name="about_lib_room">Helyi adatbázis</string>
+    <string name="about_lib_sqlcipher">Adatbázis-titkosítás, BSD 3-clause licenc alatt</string>
     <string name="about_lib_gopenpgp">OpenPGP implementáció</string>
     <string name="about_lib_geonames">Városnév-adatbázis, CC BY 4.0 licenc alatt</string>
     <string name="about_lib_osmdroid">Térképnézet, Apache 2.0 licenc alatt</string>

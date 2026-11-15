@@ -581,6 +581,7 @@
     <string name="about_lib_hilt">Injection de dépendances</string>
     <string name="about_lib_coil">Bibliothèque de chargement d\'images</string>
     <string name="about_lib_room">Base de données locale</string>
+    <string name="about_lib_sqlcipher">Chiffrement de la base de données, sous licence BSD 3-clause</string>
     <string name="about_lib_gopenpgp">Implémentation OpenPGP</string>
     <string name="about_lib_geonames">Jeu de données de noms de villes, sous licence CC BY 4.0</string>
     <string name="about_lib_osmdroid">Vue cartographique, sous licence Apache 2.0</string>

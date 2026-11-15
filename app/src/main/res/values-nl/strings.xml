@@ -627,6 +627,7 @@
     <string name="about_lib_hilt">Afhankelijkheidsinjectie</string>
     <string name="about_lib_coil">Bibliotheek voor afbeeldingen laden</string>
     <string name="about_lib_room">Lokale database</string>
+    <string name="about_lib_sqlcipher">Databaseversleuteling, gelicentieerd onder BSD 3-clause</string>
     <string name="about_lib_gopenpgp">OpenPGP-implementatie</string>
     <string name="about_lib_geonames">Dataset met plaatsnamen, gelicentieerd onder CC BY 4.0</string>
     <string name="about_lib_osmdroid">Kaartweergave, gelicentieerd onder Apache 2.0</string>
