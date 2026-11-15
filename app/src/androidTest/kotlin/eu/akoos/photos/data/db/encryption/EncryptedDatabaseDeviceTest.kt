@@ -42,8 +42,8 @@ import java.security.KeyStore
 
 /**
  * The move to the encrypted database on the real SQLCipher build, on a device: the app's own schema with
- * thousands of rows, an interrupted copy, a lost key, and how long scans take before and after. Every file
- * lives in a scratch folder; the installed app's own database is never touched.
+ * thousands of rows, an interrupted copy, a lost key, and files written before and after the connection
+ * settings. Every file lives in a scratch folder; the installed app's own database is never touched.
  */
 @RunWith(AndroidJUnit4::class)
 class EncryptedDatabaseDeviceTest {
@@ -74,12 +74,15 @@ class EncryptedDatabaseDeviceTest {
         KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.let { if (it.containsAlias(alias)) it.deleteEntry(alias) }
     }
 
-    private fun gate() = DatabaseOpenGate(
+    private val tuning get() = SqlCipherTuning.forContext(ctx)
+
+    /** The production engine, with the copy settings; [SqlCipherEngine] without them is the build before them. */
+    private fun gate(engine: CipherEngine = SqlCipherEngine(File(state, "corrupt"), tuning.cacheBytes)) = DatabaseOpenGate(
         databasesDir = databases,
         stateDir = state,
         setAsideDir = aside,
         keys = DatabaseKeyStore(state, AndroidKeystoreWrapper(alias)),
-        engine = SqlCipherEngine(File(state, "corrupt")),
+        engine = engine,
         versionCode = 1,
         freeBytes = { null },
         clock = System::currentTimeMillis,
@@ -211,6 +214,39 @@ class EncryptedDatabaseDeviceTest {
     }
 
     @Test
+    fun aFileEncryptedBeforeTheConnectionSettingsOpensWithThemAndTheOtherWayRound() {
+        writePlaintextDatabase(syncRows = 10_500, tagRows = 0, embeddingRows = 0)
+        // Copied exactly as the build before the settings did it: SQLCipher's defaults, which is the file a
+        // phone already moved to the encrypted database holds.
+        gate(SqlCipherEngine(File(state, "corrupt"))).prepare()
+        assertTrue(plainFile.exists() && encryptedFile.exists())
+
+        val db = openThroughGate(gate())
+        val sql = db.openHelper.writableDatabase
+        assertEquals(10_500L, count(db, "sync_state"))
+        assertEquals(SqlCipherBudget.cacheSizePragma(tuning.cacheBytes), longPragma(sql, "cache_size"))
+        assertEquals(tuning.softHeapLimitBytes, longPragma(sql, "soft_heap_limit"))
+        assertEquals(4096L, longPragma(sql, "cipher_page_size"))
+        db.close()
+        assertFalse(plainFile.exists())
+
+        // A copy made with the settings opens on SQLCipher's defaults, the way the build before them opens it.
+        writePlaintextDatabase(syncRows = 2_000, tagRows = 0, embeddingRows = 0)
+        val tunedCopy = File(databases, "tuned_copy.db")
+        val spec = rawKeySpec(ByteArray(32) { 9 })
+        SqlCipherEngine(File(state, "corrupt"), tuning.cacheBytes).export(plainFile, tunedCopy, spec)
+        net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(
+            tunedCopy.path, spec.toByteArray(Charsets.US_ASCII), null,
+            net.zetetic.database.sqlcipher.SQLiteDatabase.OPEN_READONLY, null, null,
+        ).use { old ->
+            old.rawQuery("SELECT count(*) FROM sync_state").use { it.moveToFirst(); assertEquals(2_000L, it.getLong(0)) }
+        }
+    }
+
+    private fun longPragma(db: androidx.sqlite.db.SupportSQLiteDatabase, name: String): Long =
+        db.query("PRAGMA $name").use { it.moveToFirst(); it.getLong(0) }
+
+    @Test
     fun aFileEncryptedWithAnotherKeyIsReportedUnreadableNotDeleted() {
         writePlaintextDatabase(syncRows = 100, tagRows = 0, embeddingRows = 0)
         openThroughGate(gate()).apply { openHelper.writableDatabase }.close()
@@ -220,86 +256,7 @@ class EncryptedDatabaseDeviceTest {
         assertTrue(encryptedFile.exists())
     }
 
-    @Test
-    fun scanTimingPlaintextAgainstEncrypted() {
-        val rows = 130_000
-        val plainMs = timeLibrary(File(databases, "perf_plain.db"), null, rows)
-        val encMs = timeLibrary(File(databases, "perf_enc.db"), rawKeySpec(ByteArray(32) { 3 }), rows)
-        Log.i(TAG, "perf rows=$rows plain insert=${plainMs[0]} scan=${plainMs[1]} | encrypted insert=${encMs[0]} scan=${encMs[1]} ms")
-
-        val source = File(databases, "perf_plain.db")
-        val started = System.nanoTime()
-        SqlCipherEngine(File(state, "corrupt")).export(source, File(databases, "perf_copy.db"), rawKeySpec(ByteArray(32) { 4 }))
-        Log.i(TAG, "perf copy of ${source.length() / (1024 * 1024)} MB took ${(System.nanoTime() - started) / 1_000_000} ms")
-    }
-
-    /** Insert time and the best of three scans of the timeline's display columns, ms. */
-    private fun timeLibrary(file: File, keySpec: String?, rows: Int): LongArray {
-        val insertStart = System.nanoTime()
-        withDatabase(file, keySpec) { exec, tx -> fill(exec, tx, rows) }
-        val insertMs = (System.nanoTime() - insertStart) / 1_000_000
-        var best = Long.MAX_VALUE
-        repeat(3) {
-            val start = System.nanoTime()
-            withDatabase(file, keySpec, scan = true) { _, _ -> }
-            best = minOf(best, (System.nanoTime() - start) / 1_000_000)
-        }
-        return longArrayOf(insertMs, best)
-    }
-
-    /** Opens [file] plaintext on the platform SQLite or encrypted on SQLCipher, in WAL like the app. */
-    private fun withDatabase(
-        file: File,
-        keySpec: String?,
-        scan: Boolean = false,
-        block: (exec: (String, Array<Any?>) -> Unit, tx: (() -> Unit) -> Unit) -> Unit,
-    ) {
-        if (keySpec == null) {
-            val flags = android.database.sqlite.SQLiteDatabase.CREATE_IF_NECESSARY or
-                android.database.sqlite.SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING
-            android.database.sqlite.SQLiteDatabase.openDatabase(file.path, null, flags).use { db ->
-                if (scan) db.rawQuery(SCAN, null).use { c -> while (c.moveToNext()) c.getString(0) }
-                block({ sql, args -> db.execSQL(sql, args) }) { body ->
-                    db.beginTransaction()
-                    try { body(); db.setTransactionSuccessful() } finally { db.endTransaction() }
-                }
-            }
-        } else {
-            SqlCipherLibrary.ensureLoaded()
-            val flags = net.zetetic.database.sqlcipher.SQLiteDatabase.CREATE_IF_NECESSARY or
-                net.zetetic.database.sqlcipher.SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING
-            net.zetetic.database.sqlcipher.SQLiteDatabase.openDatabase(
-                file.path, keySpec.toByteArray(Charsets.US_ASCII), null, flags, null, null,
-            ).use { db ->
-                if (scan) db.rawQuery(SCAN).use { c -> while (c.moveToNext()) c.getString(0) }
-                block({ sql, args -> db.execSQL(sql, args) }) { body ->
-                    db.beginTransaction()
-                    try { body(); db.setTransactionSuccessful() } finally { db.endTransaction() }
-                }
-            }
-        }
-    }
-
-    private fun fill(exec: (String, Array<Any?>) -> Unit, tx: (() -> Unit) -> Unit, rows: Int) {
-        exec(
-            "CREATE TABLE photo (linkId TEXT PRIMARY KEY, captureTime INTEGER, displayName TEXT, mimeType TEXT, " +
-                "sizeBytes INTEGER, contentHash TEXT, crypto TEXT)",
-            emptyArray(),
-        )
-        exec("CREATE INDEX photo_time ON photo(captureTime)", emptyArray())
-        val crypto = "x".repeat(400)
-        tx {
-            for (i in 0 until rows) {
-                exec(
-                    "INSERT INTO photo VALUES (?,?,?,?,?,?,?)",
-                    arrayOf<Any?>("link$i", 1_600_000_000_000L + i * 1000L, "IMG_$i.jpg", "image/jpeg", 3_000_000L + i, "hash$i", crypto),
-                )
-            }
-        }
-    }
-
     private companion object {
         const val TAG = "DbEncTest"
-        const val SCAN = "SELECT linkId, captureTime, displayName, mimeType, sizeBytes, contentHash FROM photo ORDER BY captureTime DESC"
     }
 }

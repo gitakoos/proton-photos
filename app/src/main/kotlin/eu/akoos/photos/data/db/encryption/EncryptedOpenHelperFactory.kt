@@ -58,7 +58,7 @@ class EncryptedOpenHelperFactory(context: Context) : SupportSQLiteOpenHelper.Fac
                 stateDir = stateDir,
                 setAsideDir = File(context.noBackupFilesDir, "database_set_aside"),
                 keys = DatabaseKeyStore(stateDir, AndroidKeystoreWrapper()),
-                engine = SqlCipherEngine(File(stateDir, "corrupt")),
+                engine = SqlCipherEngine(File(stateDir, "corrupt"), SqlCipherTuning.forContext(context).cacheBytes),
                 versionCode = BuildConfig.VERSION_CODE,
                 freeBytes = { dir -> runCatching { dir.mkdirs(); StatFs(dir.path).availableBytes }.getOrNull() },
                 clock = System::currentTimeMillis,
@@ -124,7 +124,8 @@ internal class DeferredOpenHelper(
             val helper = when (target) {
                 is OpenTarget.Encrypted -> {
                     SqlCipherLibrary.ensureLoaded()
-                    CipherOpenHelper(configuration, target.name, rawKeySpec(target.key), gate.corruptMarker)
+                    val tuning = SqlCipherTuning.forContext(configuration.context)
+                    CipherOpenHelper(configuration, target.name, rawKeySpec(target.key), gate.corruptMarker, tuning)
                 }
                 is OpenTarget.Plain -> FrameworkSQLiteOpenHelperFactory().create(
                     SupportSQLiteOpenHelper.Configuration.builder(configuration.context)
@@ -145,12 +146,16 @@ internal class DeferredOpenHelper(
     }
 }
 
-/** SQLCipher's own support helper, with an error handler that marks a corruption instead of acting on it. */
+/**
+ * SQLCipher's own support helper, with an error handler that marks a corruption instead of acting on it and the
+ * connection settings of [SqlCipherTuning] on every connection.
+ */
 private class CipherOpenHelper(
     configuration: SupportSQLiteOpenHelper.Configuration,
     name: String,
     keySpec: String,
     corruptMarker: File,
+    tuning: SqlCipherTuning,
 ) : SupportSQLiteOpenHelper {
 
     private val openHelper = object : SQLiteOpenHelper(
@@ -161,7 +166,7 @@ private class CipherOpenHelper(
         configuration.callback.version,
         0,
         MarkingErrorHandler(corruptMarker),
-        null,
+        tuning.hook,
         false,
     ) {
         override fun onConfigure(db: SQLiteDatabase) = configuration.callback.onConfigure(db)

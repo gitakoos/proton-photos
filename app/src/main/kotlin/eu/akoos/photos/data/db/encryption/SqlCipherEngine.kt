@@ -33,6 +33,8 @@ import java.io.File
 internal object SqlCipherLibrary {
     @Volatile private var loaded = false
 
+    val isLoaded: Boolean get() = loaded
+
     fun ensureLoaded() {
         if (loaded) return
         synchronized(this) {
@@ -54,8 +56,15 @@ internal class MarkingErrorHandler(private val marker: File) : DatabaseErrorHand
     }
 }
 
-/** The real [CipherEngine], on SQLCipher. */
-internal class SqlCipherEngine(private val corruptMarker: File) : CipherEngine {
+/**
+ * The real [CipherEngine], on SQLCipher. With [cacheBytes], the copy and its check keep that much of the new file
+ * decrypted in memory, so the index pages the copy builds and the integrity check walks are not written,
+ * encrypted, read back and decrypted again many times over; null keeps SQLCipher's defaults.
+ */
+internal class SqlCipherEngine(
+    private val corruptMarker: File,
+    private val cacheBytes: Long? = null,
+) : CipherEngine {
 
     private val handler get() = MarkingErrorHandler(corruptMarker)
 
@@ -93,8 +102,16 @@ internal class SqlCipherEngine(private val corruptMarker: File) : CipherEngine {
         partial.createNewFile()
         SQLiteDatabase.openDatabase(plain.path, ByteArray(0), null, SQLiteDatabase.OPEN_READWRITE, handler, null).use { db ->
             before = snapshot(db)
+            cacheBytes?.let { db.rawExecSQL("PRAGMA soft_heap_limit = ${it + SqlCipherBudget.HEADROOM_BYTES}") }
             db.rawExecSQL("ATTACH DATABASE ? AS encrypted KEY ?", partial.path, keySpec)
             try {
+                if (cacheBytes != null) {
+                    // The copy is a scratch file: it is checked, synced and renamed only once complete, and thrown
+                    // away on any failure, so it needs no journal and no sync of its own while it is written.
+                    db.rawExecSQL("PRAGMA encrypted.journal_mode = OFF")
+                    db.rawExecSQL("PRAGMA encrypted.synchronous = OFF")
+                    db.rawExecSQL("PRAGMA encrypted.cache_size = ${SqlCipherBudget.cacheSizePragma(cacheBytes)}")
+                }
                 db.rawExecSQL("SELECT sqlcipher_export('encrypted')")
                 db.execSQL("PRAGMA encrypted.user_version = ${before.userVersion}")
             } finally {
@@ -102,6 +119,7 @@ internal class SqlCipherEngine(private val corruptMarker: File) : CipherEngine {
             }
         }
         open(partial, keySpec, SQLiteDatabase.OPEN_READONLY).use { db ->
+            cacheBytes?.let { db.rawExecSQL("PRAGMA cache_size = ${SqlCipherBudget.cacheSizePragma(it)}") }
             val integrity = firstColumn(db, "PRAGMA integrity_check")
             check(integrity == listOf("ok")) { "integrity check failed" }
             val after = snapshot(db)
