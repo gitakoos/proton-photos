@@ -158,6 +158,11 @@ object HiddenVaultDiagnostics {
         )
     }
 
+    /** HIDDEN rows put back from the vault's records after the database was rebuilt empty. */
+    fun reseeded(count: Int) {
+        SyncDiagnostics.log("hide: rows re-filed after a rebuilt database=$count")
+    }
+
     /** A reveal is starting over [count] photos. */
     fun revealStarted(count: Int) {
         SyncDiagnostics.log("reveal: start $count")

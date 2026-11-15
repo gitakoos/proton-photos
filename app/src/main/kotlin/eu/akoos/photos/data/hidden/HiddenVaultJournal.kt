@@ -34,6 +34,7 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.dao.LocalTagDao
+import eu.akoos.photos.data.db.encryption.DatabaseRebuildMarker
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FacePhotoRemoval
@@ -51,6 +52,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -555,6 +557,35 @@ class HiddenVaultJournal @Inject constructor(
      * The vault's own records are neither read nor written here. They say what the vault holds, while
      * this is only one row disagreeing with the device about one photo.
      */
+    /**
+     * Re-files the vault's backed-up photos after the database was replaced by an empty one it could not read:
+     * the vault's own records name each Drive copy, so each gets its HIDDEN row back before the sweep runs.
+     */
+    private suspend fun reseedAfterRebuild(userId: UserId) {
+        val records = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP].orEmpty()
+        val alreadyHidden = syncStateRepo.getVaulted(userId).mapNotNullTo(HashSet()) { it.cloudFileId }
+        val rows = HiddenVaultDecisions.rowsToReseed(records, { hiddenStorage.hasBlob(it) }, alreadyHidden)
+        val now = System.currentTimeMillis()
+        for ((vaultUri, linkId) in rows) {
+            syncStateRepo.upsert(
+                SyncState(
+                    localUri = vaultUri,
+                    cloudFileId = linkId,
+                    localHash = "",
+                    cloudHash = null,
+                    status = SyncStatus.HIDDEN,
+                    lastSyncAttemptMs = now,
+                    lastSyncSuccessMs = null,
+                    backedUpAtMs = null,
+                    sizeBytes = 0L,
+                ),
+                userId,
+            )
+        }
+        DatabaseRebuildMarker.clear(context)
+        HiddenVaultDiagnostics.reseeded(rows.size)
+    }
+
     private suspend fun repairRevealedRows() {
         if (!revealedRowsRepaired.compareAndSet(false, true)) return
         val startedAt = SystemClock.elapsedRealtime()
@@ -566,6 +597,7 @@ class HiddenVaultJournal @Inject constructor(
                 revealedRowsRepaired.set(false)
                 return
             }
+            if (DatabaseRebuildMarker.isPresent(context)) reseedAfterRebuild(userId)
             val rows = syncStateRepo.getVaulted(userId)
             if (rows.isEmpty()) {
                 HiddenVaultDiagnostics.vaultedRowsSwept(examined = 0, synced = 0, localOnly = 0, stranded = 0)

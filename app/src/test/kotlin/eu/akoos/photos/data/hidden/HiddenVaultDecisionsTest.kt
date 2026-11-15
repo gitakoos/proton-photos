@@ -775,4 +775,26 @@ class HiddenVaultDecisionsTest {
     fun `an empty vault has nothing to save`() {
         assertTrue(HiddenVaultDecisions.deviceOnlyVaultUris(emptySet(), setOf("file:///v/a")).isEmpty())
     }
+
+    @Test
+    fun `a rebuilt database gets a hidden row back for every backed-up photo the vault still holds`() {
+        val rows = HiddenVaultDecisions.rowsToReseed(
+            vaultCloudIds = setOf("file:///v/a|L1", "file:///v/b|L2", "file:///v/gone|L3", "file:///v/c|"),
+            blobExists = { it != "file:///v/gone" },
+            alreadyHidden = setOf("L2"),
+        )
+
+        assertEquals(listOf("file:///v/a" to "L1"), rows)
+    }
+
+    @Test
+    fun `one Drive copy named twice by the vault gets one hidden row`() {
+        val rows = HiddenVaultDecisions.rowsToReseed(
+            vaultCloudIds = setOf("file:///v/a|L1", "file:///v/b|L1"),
+            blobExists = { true },
+            alreadyHidden = emptySet(),
+        )
+
+        assertEquals(1, rows.size)
+    }
 }

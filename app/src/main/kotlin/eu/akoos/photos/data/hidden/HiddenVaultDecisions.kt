@@ -308,6 +308,29 @@ object HiddenVaultDecisions {
         else -> VaultedRowFix.REVEAL_LOCAL_ONLY
     }
 
+    /**
+     * The HIDDEN rows a rebuilt, empty database is missing: one per vault record `vaultUri|linkId` whose file the
+     * vault still holds and whose Drive copy no HIDDEN row names yet, keyed on the vault uri. Without them the Drive
+     * copy of every vaulted backed-up photo would show in the timeline again.
+     */
+    fun rowsToReseed(
+        vaultCloudIds: Set<String>,
+        blobExists: (vaultUri: String) -> Boolean,
+        alreadyHidden: Set<String>,
+    ): List<Pair<String, String>> {
+        val seen = HashSet<String>()
+        val out = ArrayList<Pair<String, String>>()
+        for (entry in vaultCloudIds) {
+            val vaultUri = entry.substringBefore('|')
+            val linkId = entry.substringAfter('|', "")
+            if (vaultUri.isBlank() || linkId.isBlank()) continue
+            if (linkId in alreadyHidden || !seen.add(linkId)) continue
+            if (!blobExists(vaultUri)) continue
+            out += vaultUri to linkId
+        }
+        return out
+    }
+
     /** How [confirmSplit] divides a hide batch: the vault uris to publish as hidden, and the ones whose
      *  device original the check still finds, which must not be hidden. */
     data class ConfirmSplit(val publish: List<String>, val survivors: List<String>)
