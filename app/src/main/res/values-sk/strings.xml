@@ -2029,6 +2029,8 @@
     <string name="sdk_route_timeline_desc">Zobrazenie zoznamu fotiek na vašej časovej osi v Drive</string>
     <string name="sdk_route_album_list">Zoznam albumov</string>
     <string name="sdk_route_album_list_desc">Zobrazenie zoznamu vašich vlastných albumov v Drive</string>
+    <string name="sdk_route_album_photos">Obsah albumov</string>
+    <string name="sdk_route_album_photos_desc">Zobrazenie fotiek v albume, vašom alebo zdieľanom s vami</string>
     <string name="sdk_route_activity">%1$s. V tejto relácii: %2$d cez knižnicu, %3$d obvyklým spôsobom.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d tvárí</string>

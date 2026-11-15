@@ -70,6 +70,7 @@ import eu.akoos.photos.data.sdk.SdkAlbumOps
 import eu.akoos.photos.data.sdk.SdkListingOps
 import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.data.sdk.SdkRouting
+import eu.akoos.photos.data.sdk.toAlbumChild
 import eu.akoos.photos.data.sdk.toListedAlbum
 import eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos
 import eu.akoos.photos.domain.entity.AlbumNotFoundException
@@ -849,7 +850,6 @@ class AlbumService @Inject constructor(
         countIsKnown: Boolean,
         onAlbumSettled: ((linkId: String, outcome: PrefetchOutcome) -> Unit)? = null,
     ) {
-        val manager = apiProvider.get<DriveApiService>(userId)
         for (album in albums) {
             val volumeId = albumChildrenVolumeId(album, ownVolumeId)
             if (volumeId == null) {
@@ -866,15 +866,7 @@ class AlbumService @Inject constructor(
                 continue
             }
             try {
-                val linkIds = mutableListOf<String>()
-                var anchor: String? = null
-                do {
-                    val resp = semaphore.withPermit {
-                        manager.invoke { getAlbumChildren(volumeId, album.linkId, anchor) }.valueOrThrow
-                    }
-                    resp.photos.mapTo(linkIds) { it.linkId }
-                    anchor = if (resp.more) resp.anchorId else null
-                } while (anchor != null)
+                val linkIds = listAlbumChildren(userId, volumeId, album.linkId).children.map { it.linkId }
                 albumPhotoMembershipDao.replaceAllForAlbum(album.linkId, linkIds.distinct())
                 onAlbumSettled?.invoke(album.linkId, PrefetchOutcome.COMPLETED)
             } catch (e: Exception) {
@@ -1036,27 +1028,56 @@ class AlbumService @Inject constructor(
         return response.album.link.linkId
     }
 
+    /** The photos of one of this user's own albums; every caller reads only their ids. */
     suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild> = withContext(Dispatchers.IO) {
-        val volumeId = shareService.getVolumeId(userId)
+        listAlbumChildren(userId, shareService.getVolumeId(userId), albumLinkId).children
+    }
+
+    /** The photos of the album [albumLinkId] on [volumeId], through the app's own album listing, page by page. */
+    internal suspend fun albumChildrenOwnPath(userId: UserId, volumeId: String, albumLinkId: String): List<AlbumChild> {
         val manager = apiProvider.get<DriveApiService>(userId)
         val children = mutableListOf<AlbumChild>()
-        var anchorId: String? = null
-
+        var anchor: String? = null
         do {
-            val response = semaphore.withPermit {
-                manager.invoke { getAlbumChildren(volumeId, albumLinkId, anchorId) }.valueOrThrow
+            val resp = semaphore.withPermit {
+                manager.invoke { getAlbumChildren(volumeId, albumLinkId, anchor) }.valueOrThrow
             }
-            response.photos.mapTo(children) { dto ->
+            resp.photos.mapTo(children) { dto ->
                 AlbumChild(
                     linkId = dto.linkId,
                     captureTime = dto.captureTime,
                     addedTime = dto.addedTime,
+                    isChildOfAlbum = dto.isChildOfAlbum,
                 )
             }
-            anchorId = if (response.more) response.anchorId else null
-        } while (anchorId != null)
+            anchor = if (resp.more) resp.anchorId else null
+        } while (anchor != null)
+        return children
+    }
 
-        children
+    /** An album's photos and whether the Drive SDK listed them. */
+    internal data class ListedAlbumChildren(val children: List<AlbumChild>, val throughSdk: Boolean)
+
+    /**
+     * The photos of the album [albumLinkId] on [volumeId], through the app's own album listing, or with
+     * [SdkRoute.ALBUM_PHOTOS] on through the Drive SDK. The SDK gives the ids, their order and the capture
+     * times; it gives no added time, which nothing reads, and no IsChildOfAlbum flag, so its children carry
+     * false. Only [loadAlbumPhotos] reads that flag, and it asks the app's own listing for it whenever a
+     * photo's parent leaves the flag to decide ([wireDecidesAlbumChild]). Any SDK failure lists the album
+     * through the app's own listing.
+     */
+    internal suspend fun listAlbumChildren(userId: UserId, volumeId: String, albumLinkId: String): ListedAlbumChildren {
+        val started = System.nanoTime()
+        var throughSdk = false
+        val children = sdkRouting.run(
+            SdkRoute.ALBUM_PHOTOS,
+            viaSdk = {
+                sdkListingOps.albumPhotos(userId, volumeId, albumLinkId).map { it.toAlbumChild() }.also { throughSdk = true }
+            },
+        ) { albumChildrenOwnPath(userId, volumeId, albumLinkId) }
+        Log.d(TAG, "album $albumLinkId: listing ${children.size} photos through " +
+            "${if (throughSdk) "the SDK" else "the app"} in ${(System.nanoTime() - started) / 1_000_000} ms")
+        return ListedAlbumChildren(children, throughSdk)
     }
 
     /**
@@ -1206,23 +1227,8 @@ class AlbumService @Inject constructor(
         }
 
         // Fetch album children using the resolved volumeId (may be an external share's volume)
-        val manager = apiProvider.get<DriveApiService>(userId)
-        val children = mutableListOf<AlbumChild>()
-        var anchor: String? = null
-        do {
-            val resp = semaphore.withPermit {
-                manager.invoke { getAlbumChildren(resolvedVolumeId, albumLinkId, anchor) }.valueOrThrow
-            }
-            resp.photos.mapTo(children) { dto ->
-                AlbumChild(
-                    linkId = dto.linkId,
-                    captureTime = dto.captureTime,
-                    addedTime = dto.addedTime,
-                    isChildOfAlbum = dto.isChildOfAlbum,
-                )
-            }
-            anchor = if (resp.more) resp.anchorId else null
-        } while (anchor != null)
+        val listedChildren = listAlbumChildren(userId, resolvedVolumeId, albumLinkId)
+        var children = listedChildren.children
 
         // Notify the caller so it can drop its skeleton and start observing the DB
         // rows for these linkIds — chunked upserts below will trickle in via the Flow.
@@ -1321,6 +1327,18 @@ class AlbumService @Inject constructor(
                 Log.w(TAG, "loadAlbumPhotos: cached album ids unavailable: ${it.message}")
                 emptySet()
             } + albumLinkId
+
+        // The SDK's listing has no IsChildOfAlbum flag. Where a rebuilt photo's parent leaves that flag to
+        // decide, take every flag from the app's own listing, so the rows match it exactly.
+        if (listedChildren.throughSdk) {
+            val rootLinkId = shareService.photosRootLinkId()
+            val flagDecides = linkDetailMap.values.any { wireDecidesAlbumChild(it.link.parentLinkId, albumLinkIds, rootLinkId) }
+            if (flagDecides) {
+                val wire = albumChildrenOwnPath(userId, resolvedVolumeId, albumLinkId).associate { it.linkId to it.isChildOfAlbum }
+                children = children.map { it.copy(isChildOfAlbum = wire[it.linkId] ?: false) }
+                Log.d(TAG, "loadAlbumPhotos: IsChildOfAlbum taken from the app's own listing for album $albumLinkId")
+            }
+        }
 
         // Deduplicate by linkId in case the same photo was added to the album multiple times.
         val uniqueChildren = children.distinctBy { it.linkId }

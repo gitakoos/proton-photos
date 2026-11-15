@@ -1785,8 +1785,6 @@ class AlbumSharingService @Inject constructor(
         sourceVolumeId: String,
         onProgress: (copied: Int, total: Int) -> Unit = { _, _ -> },
     ): SaveSharedAlbumResult = withContext(Dispatchers.IO) {
-        val manager = apiProvider.get<DriveApiService>(userId)
-
         val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
 
         // === Phase 3: create the new owned album =================================
@@ -1795,15 +1793,7 @@ class AlbumSharingService @Inject constructor(
         val newAlbumLinkId = newAlbum.linkId
 
         // === Phase 5: walk the shared album's children + copy each ===============
-        val children = mutableListOf<String>()
-        var anchor: String? = null
-        do {
-            val resp = semaphore.withPermit {
-                manager.invoke { getAlbumChildren(sourceVolumeId, sourceAlbumLinkId, anchor) }.valueOrThrow
-            }
-            resp.photos.forEach { children.add(it.linkId) }
-            anchor = if (resp.more) resp.anchorId else null
-        } while (anchor != null)
+        val children = albumService.listAlbumChildren(userId, sourceVolumeId, sourceAlbumLinkId).children.map { it.linkId }
 
         val photoDetailMap = linkDetailHelpers
             .batchFetchLinkDetailsViaShare(userId, sharingShareId, children.distinct())

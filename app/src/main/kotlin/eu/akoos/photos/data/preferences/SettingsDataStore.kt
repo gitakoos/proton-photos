@@ -1090,6 +1090,9 @@ object SettingsKeys {
     /** List this user's own albums through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
     val SDK_ROUTE_ALBUM_LIST = booleanPreferencesKey("sdk_route_album_list")
 
+    /** List an album's photos through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_ALBUM_PHOTOS = booleanPreferencesKey("sdk_route_album_photos")
+
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +

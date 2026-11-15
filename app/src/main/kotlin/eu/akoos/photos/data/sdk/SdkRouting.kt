@@ -60,6 +60,7 @@ enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>, val de
     SAVE_TO_LIBRARY("save-to-library", SettingsKeys.SDK_ROUTE_SAVE_TO_LIBRARY, defaultOn = false),
     TIMELINE("timeline", SettingsKeys.SDK_ROUTE_TIMELINE, defaultOn = false),
     ALBUM_LIST("album-list", SettingsKeys.SDK_ROUTE_ALBUM_LIST, defaultOn = false),
+    ALBUM_PHOTOS("album-photos", SettingsKeys.SDK_ROUTE_ALBUM_PHOTOS, defaultOn = false),
 }
 
 /**

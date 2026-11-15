@@ -2026,6 +2026,8 @@
     <string name="sdk_route_timeline_desc">Prikaz fotografij na vaši časovnici v Drive</string>
     <string name="sdk_route_album_list">Seznam albumov</string>
     <string name="sdk_route_album_list_desc">Prikaz vaših lastnih albumov v Drive</string>
+    <string name="sdk_route_album_photos">Vsebina albumov</string>
+    <string name="sdk_route_album_photos_desc">Prikaz fotografij v albumu, vašem ali deljenem z vami</string>
     <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>

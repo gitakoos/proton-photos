@@ -1929,6 +1929,8 @@
     <string name="sdk_route_timeline_desc">Lister les photos de votre chronologie Drive</string>
     <string name="sdk_route_album_list">Liste des albums</string>
     <string name="sdk_route_album_list_desc">Lister vos propres albums dans Drive</string>
+    <string name="sdk_route_album_photos">Contenu des albums</string>
+    <string name="sdk_route_album_photos_desc">Lister les photos d\'un album, le vôtre ou un album partagé avec vous</string>
     <string name="sdk_route_activity">%1$s. Cette session : %2$d via la bibliothèque, %3$d de la manière habituelle.</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d sur %2$d visages</string>
