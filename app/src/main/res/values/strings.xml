@@ -2780,4 +2780,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, disguise icon, selected</string>
     <string name="app_icon_a11y_disguise">%1$s, disguise icon</string>
     <string name="app_icon_a11y_selected">%1$s, selected</string>
+    <string name="album_arrange_photos">Arrange photos</string>
+    <string name="arrange_hint">Hold a photo to move it. Tap photos to select several.</string>
+    <string name="arrange_move_to_start">Move to start</string>
+    <string name="arrange_move_to_end">Move to end</string>
+    <string name="arrange_move_here">Move here</string>
+    <string name="arrange_pick_target">Tap the photo to put the selection next to</string>
+    <string name="arrange_before">Before it</string>
+    <string name="arrange_after">After it</string>
+    <string name="arrange_done">Done</string>
+    <string name="arrange_selected_count">%1$d selected</string>
+    <string name="arrange_discard_title">Discard the new order?</string>
+    <string name="arrange_discard_message">The photos go back to where they were.</string>
+    <string name="arrange_discard_confirm">Discard</string>
+    <string name="arrange_discard_keep">Keep arranging</string>
+    <string name="arrange_saved">Order saved</string>
+    <string name="albums_sort_newest_photo">Newest photo</string>
 </resources>

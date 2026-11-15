@@ -22,9 +22,11 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.data.albumorder.AlbumOrderSnapshot
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.usecase.PhotoArrangement
 import eu.akoos.photos.presentation.common.PhotoSortOrder
 
 /**
@@ -43,7 +45,18 @@ enum class AlbumPhotoSortMode {
     NewestFirst,
 
     /** Oldest photo first. */
-    OldestFirst;
+    OldestFirst,
+
+    /** The order the user arranged by hand, photos added since at the end. */
+    Custom;
+
+    /** The word the album-order file carries for this mode. */
+    val word: String
+        get() = when (this) {
+            NewestFirst -> AlbumOrderSnapshot.MODE_NEWEST
+            OldestFirst -> AlbumOrderSnapshot.MODE_OLDEST
+            Custom -> AlbumOrderSnapshot.MODE_CUSTOM
+        }
 
     companion object {
         /** What an album has always opened on, so an install that never picks a direction sees no
@@ -53,6 +66,9 @@ enum class AlbumPhotoSortMode {
         /** Read back a persisted ordinal, tolerating an absent or out-of-range value. */
         fun fromOrdinal(ordinal: Int?): AlbumPhotoSortMode =
             ordinal?.let { entries.getOrNull(it) } ?: Default
+
+        /** The mode an album-order word names, or null for none or an unknown one. */
+        fun fromWord(word: String?): AlbumPhotoSortMode? = entries.firstOrNull { it.word == word }
     }
 }
 
@@ -148,13 +164,20 @@ object AlbumPhotoItems {
      * A member whose Drive captureTime is sub-floor sorts on its twin's date and lands where the
      * timeline already puts it, instead of sinking to the tail. The key map is built once here so a
      * member's twin costs one hash lookup rather than a fresh resolve.
+     *
+     * [AlbumPhotoSortMode.Custom] follows [arrangement] instead, the photos it does not place at the
+     * end by their Drive capture time, so every device draws the same order without a twin.
      */
     fun ordered(
         photos: List<CloudPhoto>,
         twins: Map<String, LocalMediaItem>,
         mode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
+        arrangement: List<String> = emptyList(),
     ): List<CloudPhoto> {
         if (photos.size < 2) return photos
+        if (mode == AlbumPhotoSortMode.Custom) {
+            return PhotoArrangement.ordered(photos, arrangement, idOf = { it.linkId }, timeOf = { it.captureTimeMs })
+        }
         val keys = HashMap<String, Long>(photos.size)
         for (photo in photos) keys[photo.linkId] = captureTimeMs(photo, twins[photo.linkId])
         return PhotoSortOrder.ordered(

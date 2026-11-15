@@ -2660,4 +2660,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, kılık değiştirme simgesi, seçili</string>
     <string name="app_icon_a11y_disguise">%1$s, kılık değiştirme simgesi</string>
     <string name="app_icon_a11y_selected">%1$s, seçili</string>
+    <string name="album_arrange_photos">Fotoğrafları düzenle</string>
+    <string name="arrange_hint">Taşımak için bir fotoğrafı basılı tut. Birden fazla seçmek için fotoğraflara dokun.</string>
+    <string name="arrange_move_to_start">Başa taşı</string>
+    <string name="arrange_move_to_end">Sona taşı</string>
+    <string name="arrange_move_here">Buraya taşı</string>
+    <string name="arrange_pick_target">Seçimin yanına geleceği fotoğrafa dokun</string>
+    <string name="arrange_before">Önüne</string>
+    <string name="arrange_after">Arkasına</string>
+    <string name="arrange_done">Bitti</string>
+    <string name="arrange_selected_count">%1$d seçili</string>
+    <string name="arrange_discard_title">Yeni sıralama silinsin mi?</string>
+    <string name="arrange_discard_message">Fotoğraflar eski yerlerine döner.</string>
+    <string name="arrange_discard_confirm">Vazgeç</string>
+    <string name="arrange_discard_keep">Düzenlemeye devam et</string>
+    <string name="arrange_saved">Sıralama kaydedildi</string>
+    <string name="albums_sort_newest_photo">En yeni fotoğraf</string>
 </resources>

@@ -106,6 +106,8 @@ internal object SettingsSyncTimes {
             stamped = true
         }
 
+        carryLegacyStamps(prefs, stamps)
+
         for (setting in SettingsSyncRegistry.scalars) {
             val held = stamps[setting.id]
             when (val reading = setting.read(prefs)) {
@@ -132,6 +134,30 @@ internal object SettingsSyncTimes {
         val after = format(stamps)
         if (after != before.orEmpty()) prefs[SettingsKeys.SETTINGS_SYNC_TIMES] = after
         return stamped
+    }
+
+    /**
+     * A setting that moved to a new id keeps the time its old id was stamped with, while its value is the one that
+     * stamp was made for: an upgrade is not a change the user made, so it must not win over another device.
+     */
+    private fun carryLegacyStamps(prefs: Preferences, stamps: MutableMap<String, SettingsStamp>) {
+        for (alias in SettingsSyncRegistry.legacyAliases) {
+            val old = stamps.remove(alias.legacyId) ?: continue
+            if (alias.id in stamps) continue
+            val setting = SettingsSyncRegistry.scalar(alias.id) ?: continue
+            when (val reading = setting.read(prefs)) {
+                SettingReading.Unsyncable -> Unit
+                SettingReading.Unset -> if (old.fingerprint == RESET) stamps[alias.id] = SettingsStamp(old.at, RESET)
+                is SettingReading.Value -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val stored = prefs[setting.key as Preferences.Key<Any>]
+                    val before = stored?.let { SettingsSyncRegistry.legacyJson(alias.legacyId, it) }
+                    if (before != null && fingerprint(before) == old.fingerprint) {
+                        stamps[alias.id] = SettingsStamp(old.at, fingerprint(reading.json))
+                    }
+                }
+            }
+        }
     }
 
     /**

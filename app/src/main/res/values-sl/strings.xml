@@ -2874,4 +2874,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, ikona preobleke, izbrano</string>
     <string name="app_icon_a11y_disguise">%1$s, ikona preobleke</string>
     <string name="app_icon_a11y_selected">%1$s, izbrano</string>
+    <string name="album_arrange_photos">Razporedi fotografije</string>
+    <string name="arrange_hint">Pridržite fotografijo, da jo premaknete. Tapnite fotografije, da jih izberete več.</string>
+    <string name="arrange_move_to_start">Na začetek</string>
+    <string name="arrange_move_to_end">Na konec</string>
+    <string name="arrange_move_here">Premakni sem</string>
+    <string name="arrange_pick_target">Tapnite fotografijo, poleg katere naj bo izbor</string>
+    <string name="arrange_before">Pred njo</string>
+    <string name="arrange_after">Za njo</string>
+    <string name="arrange_done">Končano</string>
+    <string name="arrange_selected_count">Izbranih: %1$d</string>
+    <string name="arrange_discard_title">Zavržem novi vrstni red?</string>
+    <string name="arrange_discard_message">Fotografije se vrnejo tja, kjer so bile.</string>
+    <string name="arrange_discard_confirm">Zavrzi</string>
+    <string name="arrange_discard_keep">Nadaljuj razporejanje</string>
+    <string name="arrange_saved">Vrstni red shranjen</string>
+    <string name="albums_sort_newest_photo">Najnovejša fotografija</string>
 </resources>

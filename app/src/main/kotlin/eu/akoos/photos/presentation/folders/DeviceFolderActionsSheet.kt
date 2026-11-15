@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.GridOff
@@ -144,6 +145,8 @@ internal fun DeviceFolderActionsSheet(
      *  answered. Null drops the row: the vault's side of a folder has no device file to delete, and an
      *  empty folder has nothing in it. */
     onDeleteFolder: (() -> Unit)? = null,
+    /** Opens arrange mode for a hand-made order on this device. Null drops the row and the Custom chip. */
+    onArrangePhotos: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     // Slide the drawer away before the action lands, so a snackbar or system dialog never opens
@@ -186,10 +189,11 @@ internal fun DeviceFolderActionsSheet(
                 onSortSelected = onSortSelected,
                 grouping = grouping,
                 onGroupingSelected = onGroupingSelected,
+                offerCustom = onArrangePhotos != null,
             )
 
             // Backing up needs a Proton account, so its two rows are offered only when signed in.
-            val hasPhotoActions = (onBackUp != null && isSignedIn) || onSlideshow != null
+            val hasPhotoActions = (onBackUp != null && isSignedIn) || onSlideshow != null || onArrangePhotos != null
             if (hasPhotoActions) {
                 ActionSheetSectionHeading(stringResource(R.string.action_sheet_actions_heading))
                 if (onBackUp != null && isSignedIn) {
@@ -215,8 +219,16 @@ internal fun DeviceFolderActionsSheet(
                         busyFraction = backupFraction,
                     )
                 }
-                if (onSlideshow != null) {
+                if (onArrangePhotos != null) {
                     if (onBackUp != null && isSignedIn) Spacer(Modifier.height(8.dp))
+                    ActionSheetRow(
+                        icon = Icons.Default.DragHandle,
+                        title = stringResource(R.string.album_arrange_photos),
+                        onClick = { close(onArrangePhotos) },
+                    )
+                }
+                if (onSlideshow != null) {
+                    if ((onBackUp != null && isSignedIn) || onArrangePhotos != null) Spacer(Modifier.height(8.dp))
                     ActionSheetRow(
                         icon = Icons.Default.PlayArrow,
                         title = stringResource(R.string.viewer_play_slideshow),

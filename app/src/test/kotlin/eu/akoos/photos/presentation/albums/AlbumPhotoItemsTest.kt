@@ -253,6 +253,18 @@ class AlbumPhotoItemsTest {
             AlbumPhotoSortMode.OldestFirst,
             AlbumPhotoSortMode.fromOrdinal(AlbumPhotoSortMode.OldestFirst.ordinal),
         )
+        assertEquals(AlbumPhotoSortMode.Custom, AlbumPhotoSortMode.fromOrdinal(2))
+        assertEquals(AlbumPhotoSortMode.Custom, AlbumPhotoSortMode.fromWord("custom"))
+        assertNull(AlbumPhotoSortMode.fromWord("sideways"))
+    }
+
+    @Test
+    fun `a custom order lists the arranged photos first and the rest after them, oldest first`() {
+        val shuffled = datedTrio() + cloud(linkId = "d", captureTimeSec = (realMs + 60_000L) / 1000L)
+
+        val ordered = AlbumPhotoItems.ordered(shuffled, emptyMap(), AlbumPhotoSortMode.Custom, listOf("c", "gone", "a"))
+
+        assertEquals(listOf("c", "a", "b", "d"), ordered.map { it.linkId })
     }
 
     // endregion

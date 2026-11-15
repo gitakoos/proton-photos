@@ -148,6 +148,8 @@ class SharedBackupRulesTest {
             labels = mockk(relaxed = true),
             hidden = mockk(relaxed = true),
             settings = mockk(relaxed = true),
+            albumOrder = mockk(relaxed = true),
+            cloudAlbumDao = mockk(relaxed = true),
             appliedDao = appliedDao,
             store = mockk(relaxed = true),
             faceScanDao = faceScanDao,

@@ -181,7 +181,7 @@ class SettingsSyncTimesTest {
         assertTrue("a wiped setting is not reported as a reset", state.scalars.values.none { it.value == null })
         assertNull(state.scalars["albums.hidePhotosInAlbums"])
         assertNull(state.scalars["android.timeline.showScrollDate"])
-        assertNull(state.scalars["android.albums.customOrder"])
+        assertNull(state.scalars["albums.order"])
         assertTrue(state.members["timeline.excludedAlbums"].isNullOrEmpty())
         val copy = SettingsCopyMerge.forDrive(state, "11111111-2222-3333-4444-555555555555", "Phone", 3_000L)
         assertTrue("no tombstone leaves the phone", copy.scalars.none { it.value == null } && copy.members.none { it.present == false })
@@ -226,5 +226,41 @@ class SettingsSyncTimesTest {
         store.apply(SettingsCopyMerge.Changes(scalars = mapOf("albums.hidePhotosInAlbums" to SettingsScalarState(8_000L, JsonPrimitive(true)))))
         assertEquals(setOf("a1"), data.current[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS])
         assertEquals(true, data.current[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS])
+    }
+
+    @Test
+    fun `an album list sort and order stamped under the old ids keep their time under the shared ids`() = runBlocking {
+        data.edit {
+            it[SettingsKeys.ALBUMS_SORT_MODE] = 0
+            it[SettingsKeys.ALBUMS_CUSTOM_ORDER] = "a1|a2"
+            it[SettingsKeys.SETTINGS_SYNC_TIMES] = SettingsSyncTimes.format(
+                mapOf(
+                    "~seeded" to SettingsStamp(0L, "-"),
+                    "android.albums.sortMode" to SettingsStamp(500L, SettingsSyncTimes.fingerprint(JsonPrimitive(0))),
+                    "android.albums.customOrder" to SettingsStamp(600L, SettingsSyncTimes.fingerprint(JsonPrimitive("a1|a2"))),
+                ),
+            )
+        }
+        store.stampChanges(9_000L)
+        val state = store.load(9_000L)
+        assertEquals(SettingsScalarState(500L, JsonPrimitive("custom")), state.scalars["albums.sortMode"])
+        assertEquals(600L, state.scalars.getValue("albums.order").at)
+        assertNull(stamps()["android.albums.sortMode"])
+        assertNull(stamps()["android.albums.customOrder"])
+    }
+
+    @Test
+    fun `an old stamp made for another value is not carried, the value counts as a change made now`() = runBlocking {
+        data.edit {
+            it[SettingsKeys.ALBUMS_SORT_MODE] = 1
+            it[SettingsKeys.SETTINGS_SYNC_TIMES] = SettingsSyncTimes.format(
+                mapOf(
+                    "~seeded" to SettingsStamp(0L, "-"),
+                    "android.albums.sortMode" to SettingsStamp(500L, SettingsSyncTimes.fingerprint(JsonPrimitive(0))),
+                ),
+            )
+        }
+        store.stampChanges(9_000L)
+        assertEquals(9_000L, stamps().getValue("albums.sortMode").at)
     }
 }

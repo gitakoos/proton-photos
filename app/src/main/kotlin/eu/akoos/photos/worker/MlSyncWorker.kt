@@ -698,12 +698,16 @@ class MlSyncWorker @AssistedInject constructor(
         val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake)
         val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake)
         val settingsRead = sharedBackupRunner.takeInSettings(userId, listing, readsAs, ownDeviceId, retake)
-        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead && settingsRead) sharedBackupStore.markOwnCopyTaken()
+        val albumOrderRead = sharedBackupRunner.takeInAlbumOrder(userId, listing, readsAs, ownDeviceId, retake)
+        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead && settingsRead && albumOrderRead) {
+            sharedBackupStore.markOwnCopyTaken()
+        }
         val failedParts = ArrayList<String>()
         unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
         if (!labelsRead) failedParts += "read labels"
         if (!hiddenRead) failedParts += "read hidden"
         if (!settingsRead) failedParts += "read settings"
+        if (!albumOrderRead) failedParts += "read album order"
 
         val writes = mode == RoundMode.SAVE_NOW || (mode == RoundMode.AUTO && sharedBackupStore.isEnabled())
         if (writes) {
@@ -738,6 +742,7 @@ class MlSyncWorker @AssistedInject constructor(
             if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failedParts += "save labels"
             if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failedParts += "save hidden"
             if (settingsRead && sharedBackupRunner.saveSettings(userId, ownDeviceId, now) == null) failedParts += "save settings"
+            if (albumOrderRead && sharedBackupRunner.saveAlbumOrder(userId, ownDeviceId, now) == null) failedParts += "save album order"
         }
         val failed = failedParts.isNotEmpty()
         return endRound(

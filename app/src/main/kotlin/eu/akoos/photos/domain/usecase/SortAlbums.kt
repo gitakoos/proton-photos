@@ -42,7 +42,10 @@ enum class AlbumSortMode {
     LastActivity,
 
     /** Largest album first. */
-    PhotoCount;
+    PhotoCount,
+
+    /** The album holding the most recently taken photo first. */
+    NewestPhoto;
 
     companion object {
         /** The order the album cache is read in, so an install that never picks a mode keeps the
@@ -65,16 +68,26 @@ enum class AlbumSortMode {
  *
  * [customOrder] carries the user's own arrangement as album linkIds. While it is empty,
  * [AlbumSortMode.Custom] resolves to [AlbumSortMode.LastActivity]. The other modes ignore it.
+ *
+ * [newestPhoto] is each album's newest photo time, by linkId, read only by [AlbumSortMode.NewestPhoto]:
+ * the albums it knows come first, newest first, then the rest by last activity, the rule the desktop
+ * client sorts by too.
  */
 fun sortAlbums(
     albums: List<Album>,
     mode: AlbumSortMode,
     customOrder: List<String> = emptyList(),
+    newestPhoto: Map<String, Long> = emptyMap(),
 ): List<Album> = when (mode) {
     AlbumSortMode.Custom -> sortByCustomOrder(albums, customOrder)
     AlbumSortMode.NameAsc -> albums.sortedWith(byName())
     AlbumSortMode.LastActivity -> albums.sortedWith(byLastActivity)
     AlbumSortMode.PhotoCount -> albums.sortedWith(byPhotoCount)
+    AlbumSortMode.NewestPhoto -> albums.sortedWith(
+        compareBy<Album> { if (newestPhoto[it.linkId] == null) 1 else 0 }
+            .thenByDescending { newestPhoto[it.linkId] ?: Long.MIN_VALUE }
+            .then(byLastActivity)
+    )
 }
 
 /**
@@ -140,9 +153,9 @@ private fun byName(): Comparator<Album> {
 private fun sortByCustomOrder(albums: List<Album>, customOrder: List<String>): List<Album> {
     if (customOrder.isEmpty()) return albums.sortedWith(byLastActivity)
     val rank = customOrder.withIndex().associate { (index, linkId) -> linkId to index }
-    // Albums the arrangement does not mention trail the ones it does, in the default order, so an
-    // album created after the arrangement was saved lands somewhere predictable.
+    // Albums the arrangement does not mention come before the ones it does, in the default order, so
+    // an album created after the arrangement was saved shows up at the top, as on the desktop.
     return albums.sortedWith(
-        compareBy<Album> { rank[it.linkId] ?: Int.MAX_VALUE }.then(byLastActivity)
+        compareBy<Album> { rank[it.linkId] ?: -1 }.then(byLastActivity)
     )
 }

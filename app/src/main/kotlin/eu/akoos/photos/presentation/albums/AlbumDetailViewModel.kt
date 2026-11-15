@@ -268,6 +268,10 @@ data class AlbumDetailUiState(
     /** Photos queued to upload and then join this album, counted from the upload queue. Falls as each
      *  one lands; zero when nothing is on its way or no account is signed in. */
     val pendingJoinCount: Int = 0,
+    /** How this album lists its photos. */
+    val photoSortMode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
+    /** True once the album has a hand-made order, so picking Custom shows it rather than opening arrange mode. */
+    val hasArrangement: Boolean = false,
 ) {
     val isSelectionMode: Boolean get() = selectedPhotos.isNotEmpty()
     val selectedCount: Int get() = selectedPhotos.size
@@ -288,6 +292,7 @@ data class SaveToLibraryResult(
     val totalRequested: Int,
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AlbumDetailViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -309,6 +314,8 @@ class AlbumDetailViewModel @Inject constructor(
     private val favoriteWriter: FavoriteWriter,
     private val resolveCoverGifUseCase: eu.akoos.photos.domain.usecase.ResolveCoverGifUseCase,
     private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
+    private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
+    private val membershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -350,11 +357,27 @@ class AlbumDetailViewModel @Inject constructor(
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
 
-    /** Direction this album lists its members in, from the one global preference every album shares
-     *  (#85). Every place that builds the member list reads it: the list is rebuilt from a cache
-     *  read, a server list and a DB observe, and a direction applied to only some of them would be
+    /** The order this album lists its members in: its mode and, for a custom one, the hand-made
+     *  order. Every place that builds the member list reads it: the list is rebuilt from a cache
+     *  read, a server list and a DB observe, and an order applied to only some of them would be
      *  undone by the next paint. */
-    private val photoSortMode = MutableStateFlow(AlbumPhotoSortMode.Default)
+    private data class PhotoOrder(
+        val mode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
+        val arrangement: List<String> = emptyList(),
+    )
+
+    private val photoOrder = MutableStateFlow(PhotoOrder())
+
+    private fun ordered(photos: List<CloudPhoto>, twins: Map<String, eu.akoos.photos.domain.entity.LocalMediaItem>): List<CloudPhoto> =
+        photoOrder.value.let { AlbumPhotoItems.ordered(photos, twins, it.mode, it.arrangement) }
+
+    /** The arrange mode in progress, or null outside it. Held here so a rotation keeps the moves made so far. */
+    private val _arrange = MutableStateFlow<eu.akoos.photos.presentation.common.ArrangeSession?>(null)
+    val arrange: StateFlow<eu.akoos.photos.presentation.common.ArrangeSession?> = _arrange.asStateFlow()
+
+    /** Fires once each time an arrangement is saved, for the confirmation snackbar. */
+    private val _arrangeSaved = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val arrangeSaved: SharedFlow<Unit> = _arrangeSaved.asSharedFlow()
 
     /** One run of the device-twin lookup: the member list it ran over, the twins it paired, and the
      *  order those twins imply. [source] is kept so the result can be discarded if the member list
@@ -408,12 +431,12 @@ class AlbumDetailViewModel @Inject constructor(
                 // Re-reads only when the member list itself changes: a selection toggle or a progress
                 // tick copies the same list reference through, which this drops.
                 _uiState.map { it.photos }.distinctUntilChanged(),
-                // In the pass rather than read from the field, so a direction change mid-flight can
+                // In the pass rather than read from the field, so an order change mid-flight can
                 // never be overwritten by an order this pass computed before it.
-                photoSortMode,
-            ) { library, photos, mode ->
+                photoOrder,
+            ) { library, photos, order ->
                 val twins = AlbumPhotoItems.twinsFor(photos, library)
-                TwinPass(photos, twins, AlbumPhotoItems.ordered(photos, twins, mode))
+                TwinPass(photos, twins, AlbumPhotoItems.ordered(photos, twins, order.mode, order.arrangement))
             }
                 // A cold listing re-emits the merged library several times a second; an unchanged
                 // pass must not repaint the grid, so it never reaches the state at all.
@@ -433,19 +456,32 @@ class AlbumDetailViewModel @Inject constructor(
                     }
                 }
         }
-        // Newest-first or oldest-first, this album's own choice. Re-orders what is already on
-        // screen so the choice lands immediately instead of waiting for a reload, and holds the value
-        // the cache read, the server list and the DB observe each sort by.
+        // Newest first, oldest first or the hand-made order, this album's own choice, kept in the
+        // album-order store (which other devices write into too) over the older per-album setting.
+        // Re-orders what is already on screen so the choice lands immediately instead of waiting for
+        // a reload, and holds the value the cache read, the server list and the DB observe each sort by.
         viewModelScope.launch {
-            combine(
-                _uiState.map { it.albumLinkId }.distinctUntilChanged(),
-                context.settingsDataStore.data,
-            ) { linkId, prefs -> PhotoViewChoices.from(prefs).sortOfAlbum(linkId) }
+            val albumLinkIds = _uiState.map { it.albumLinkId }.distinctUntilChanged()
+            val stored = combine(albumLinkIds, accountManager.getPrimaryUserId()) { linkId, userId -> linkId to userId }
                 .distinctUntilChanged()
-                .collect { mode ->
-                    photoSortMode.value = mode
+                .flatMapLatest { (linkId, userId) ->
+                    if (linkId.isEmpty() || userId == null) flowOf(eu.akoos.photos.data.albumorder.StoredAlbumOrder())
+                    else albumOrder.observe(userId.id, linkId)
+                        .catch { emit(eu.akoos.photos.data.albumorder.StoredAlbumOrder()) }
+                }
+            combine(albumLinkIds, context.settingsDataStore.data, stored) { linkId, prefs, order ->
+                val mode = AlbumPhotoSortMode.fromWord(order.mode) ?: PhotoViewChoices.from(prefs).sortOfAlbum(linkId)
+                PhotoOrder(mode, order.arrangement)
+            }
+                .distinctUntilChanged()
+                .collect { order ->
+                    photoOrder.value = order
                     _uiState.update {
-                        it.copy(photos = AlbumPhotoItems.ordered(it.photos, it.localItemByLinkId, mode))
+                        it.copy(
+                            photos = AlbumPhotoItems.ordered(it.photos, it.localItemByLinkId, order.mode, order.arrangement),
+                            photoSortMode = order.mode,
+                            hasArrangement = order.arrangement.isNotEmpty(),
+                        )
                     }
                 }
         }
@@ -572,11 +608,7 @@ class AlbumDetailViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
-                        photos = AlbumPhotoItems.ordered(
-                            cached.filterNot { p -> p.linkId in hidden },
-                            state.localItemByLinkId,
-                            photoSortMode.value,
-                        ),
+                        photos = ordered(cached.filterNot { p -> p.linkId in hidden }, state.localItemByLinkId),
                     )
                 }
             }
@@ -620,7 +652,7 @@ class AlbumDetailViewModel @Inject constructor(
                                 isLoading = false,
                                 // Re-ordered here too: the server list is raw-captureTime order, so a
                                 // sub-floor member would jump back to the tail on the final paint.
-                                photos = AlbumPhotoItems.ordered(
+                                photos = ordered(
                                     photos.filterNot { it.linkId in hiddenNow }.map { server ->
                                         val cached = existingById[server.linkId] ?: return@map server
                                         server.copy(
@@ -628,7 +660,6 @@ class AlbumDetailViewModel @Inject constructor(
                                         )
                                     },
                                     state.localItemByLinkId,
-                                    photoSortMode.value,
                                 ),
                             )
                         }
@@ -706,10 +737,9 @@ class AlbumDetailViewModel @Inject constructor(
                 }
                 .collect { (dbRows, hidden) ->
                 val byId = dbRows.associateBy { it.linkId }
-                val ordered = AlbumPhotoItems.ordered(
+                val ordered = ordered(
                     linkIds.mapNotNull { byId[it] }.filterNot { it.linkId in hidden },
                     _uiState.value.localItemByLinkId,
-                    photoSortMode.value,
                 )
                 _uiState.update { state ->
                     val existingById = state.photos.associateBy { it.linkId }
@@ -882,6 +912,66 @@ class AlbumDetailViewModel @Inject constructor(
 
     /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
     fun setSelectedPhotos(linkIds: Set<String>) = _uiState.update { it.copy(selectedPhotos = linkIds) }
+
+    /** Picks how this album lists its photos, for this album alone; stored with its time so it reaches the other devices. */
+    fun setPhotoSortMode(mode: AlbumPhotoSortMode) {
+        val linkId = _uiState.value.albumLinkId
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { albumOrder.setMode(userId.id, linkId, mode.word) }
+        }
+    }
+
+    /** Opens arrange mode on the photos as they are shown now. */
+    fun startArrange() {
+        val photos = _uiState.value.photos
+        if (photos.isEmpty()) return
+        _uiState.update { it.copy(selectedPhotos = emptySet()) }
+        _arrange.value = eu.akoos.photos.presentation.common.ArrangeSession(photos.map { it.linkId })
+    }
+
+    fun arrangeToggle(linkId: String) = _arrange.update { it?.toggled(linkId) }
+
+    fun arrangeReorder(order: List<String>) = _arrange.update { it?.reordered(order) }
+
+    fun arrangeMoveToStart() = _arrange.update { it?.movedToStart() }
+
+    fun arrangeMoveToEnd() = _arrange.update { it?.movedToEnd() }
+
+    fun arrangeMoveNextTo(target: String, after: Boolean) = _arrange.update { it?.movedNextTo(target, after) }
+
+    fun cancelArrange() {
+        _arrange.value = null
+    }
+
+    /**
+     * Keeps the arranged order and switches the album to it. A stored photo the session did not show, a hidden one
+     * or one not listed here yet, keeps its slot; one that has left the album is dropped.
+     */
+    fun finishArrange() {
+        val session = _arrange.value ?: return
+        val linkId = _uiState.value.albumLinkId
+        _arrange.value = null
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val saved = runCatching {
+                val stored = albumOrder.arrangement(userId.id, linkId)
+                val members = membershipDao.getPhotoLinkIds(linkId).toHashSet().takeIf { it.isNotEmpty() }
+                val next = eu.akoos.photos.domain.usecase.PhotoArrangement.forSave(stored, session.order, members)
+                albumOrder.saveCustom(userId.id, linkId, next)
+                next
+            }.getOrNull() ?: return@launch
+            photoOrder.value = PhotoOrder(AlbumPhotoSortMode.Custom, saved)
+            _uiState.update {
+                it.copy(
+                    photos = AlbumPhotoItems.ordered(it.photos, it.localItemByLinkId, AlbumPhotoSortMode.Custom, saved),
+                    photoSortMode = AlbumPhotoSortMode.Custom,
+                    hasArrangement = saved.isNotEmpty(),
+                )
+            }
+            _arrangeSaved.tryEmit(Unit)
+        }
+    }
 
     /**
      * Puts every selected album photo into the state [favoriteTurnsOnForCloudPhotos] picks for it: on

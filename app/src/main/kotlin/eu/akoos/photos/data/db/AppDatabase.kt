@@ -30,9 +30,12 @@ import androidx.room.Database
 import androidx.room.TypeConverters
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import eu.akoos.photos.data.db.dao.LocalExifCheckDao
+import eu.akoos.photos.data.db.dao.AlbumOrderDao
 import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import eu.akoos.photos.data.db.entity.LocalExifCheckEntity
+import eu.akoos.photos.data.db.entity.AlbumOrderStateEntity
+import eu.akoos.photos.data.db.entity.AlbumPhotoOrderEntity
 import eu.akoos.photos.data.db.entity.PendingCloudCompressEntity
 import me.proton.core.account.data.db.AccountConverters
 import me.proton.core.account.data.db.AccountDatabase
@@ -223,6 +226,8 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         PersonNameChangeEntity::class,
         FaceCurationTimeEntity::class,
         LocalExifCheckEntity::class,
+        AlbumPhotoOrderEntity::class,
+        AlbumOrderStateEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -262,7 +267,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 57,
+    version = 58,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -312,6 +317,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun personHiddenDao(): PersonHiddenDao
     abstract fun faceCurationTimeDao(): FaceCurationTimeDao
     abstract fun localExifCheckDao(): LocalExifCheckDao
+    abstract fun albumOrderDao(): AlbumOrderDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

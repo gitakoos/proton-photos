@@ -1717,8 +1717,42 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrations_registerEveryStepUpToV57() {
-        for (from in 48..56) {
+    fun migrate_v57_to_v58_createsTheAlbumOrderTables() {
+        Migrations.MIGRATION_57_58.migrate(db)
+
+        db.execSQL("INSERT INTO album_photo_order (userId, albumKey, photoKey, position) VALUES ('u', 'a', 'p1', 1)")
+        db.execSQL("INSERT INTO album_photo_order (userId, albumKey, photoKey, position) VALUES ('u', 'a', 'p2', 0)")
+        db.execSQL("INSERT OR REPLACE INTO album_photo_order (userId, albumKey, photoKey, position) VALUES ('u', 'a', 'p1', 2)")
+        db.query("SELECT photoKey FROM album_photo_order WHERE userId = 'u' AND albumKey = 'a' ORDER BY position").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("p2", cur.getString(0))
+            assertTrue(cur.moveToNext())
+            assertEquals("one row per photo, the newer slot replacing the older", "p1", cur.getString(0))
+            assertTrue(!cur.moveToNext())
+        }
+        db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'album_photo_order' AND name NOT LIKE 'sqlite_%'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("index_album_photo_order_userId_albumKey_position", cur.getString(0))
+        }
+
+        db.execSQL("INSERT INTO album_order_state (userId, albumKey, mode, modeAt) VALUES ('u', 'a', 'custom', 10)")
+        db.query("SELECT mode, modeAt, orderAt FROM album_order_state").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("custom", cur.getString(0))
+            assertEquals(10L, cur.getLong(1))
+            assertTrue("an order never saved has no time", cur.isNull(2))
+        }
+
+        Migrations.MIGRATION_57_58.migrate(db)
+        db.query("SELECT COUNT(*) FROM album_photo_order").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("running the step again keeps the rows", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV58() {
+        for (from in 48..57) {
             assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }

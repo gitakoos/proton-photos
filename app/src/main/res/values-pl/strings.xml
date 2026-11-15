@@ -2874,4 +2874,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, ikona kamuflażu, wybrana</string>
     <string name="app_icon_a11y_disguise">%1$s, ikona kamuflażu</string>
     <string name="app_icon_a11y_selected">%1$s, wybrana</string>
+    <string name="album_arrange_photos">Uporządkuj zdjęcia</string>
+    <string name="arrange_hint">Przytrzymaj zdjęcie, aby je przenieść. Dotknij zdjęć, aby zaznaczyć kilka.</string>
+    <string name="arrange_move_to_start">Na początek</string>
+    <string name="arrange_move_to_end">Na koniec</string>
+    <string name="arrange_move_here">Przenieś tutaj</string>
+    <string name="arrange_pick_target">Dotknij zdjęcia, obok którego ma trafić zaznaczenie</string>
+    <string name="arrange_before">Przed nim</string>
+    <string name="arrange_after">Za nim</string>
+    <string name="arrange_done">Gotowe</string>
+    <string name="arrange_selected_count">Wybrano: %1$d</string>
+    <string name="arrange_discard_title">Odrzucić nową kolejność?</string>
+    <string name="arrange_discard_message">Zdjęcia wrócą na swoje miejsca.</string>
+    <string name="arrange_discard_confirm">Odrzuć</string>
+    <string name="arrange_discard_keep">Porządkuj dalej</string>
+    <string name="arrange_saved">Kolejność zapisana</string>
+    <string name="albums_sort_newest_photo">Najnowsze zdjęcie</string>
 </resources>

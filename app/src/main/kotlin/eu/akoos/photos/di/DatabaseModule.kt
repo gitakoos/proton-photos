@@ -33,6 +33,7 @@ import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.Multibinds
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import eu.akoos.photos.data.db.dao.LocalExifCheckDao
+import eu.akoos.photos.data.db.dao.AlbumOrderDao
 import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import me.proton.core.eventmanager.domain.EventListener
 import me.proton.core.account.data.db.AccountDatabase
@@ -260,6 +261,10 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun provideLocalExifCheckDao(db: AppDatabase): LocalExifCheckDao = db.localExifCheckDao()
+
+        @Provides
+        @Singleton
+        fun provideAlbumOrderDao(db: AppDatabase): AlbumOrderDao = db.albumOrderDao()
 
         @Provides
         @Singleton

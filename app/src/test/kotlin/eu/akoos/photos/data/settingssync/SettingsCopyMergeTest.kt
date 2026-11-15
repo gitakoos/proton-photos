@@ -256,4 +256,39 @@ class SettingsCopyMergeTest {
         assertTrue(tier.accepts(text("high")) && tier.accepts(text("balanced")) && tier.accepts(text("small")))
         assertTrue(!tier.accepts(text("tiny")) && !tier.accepts(JsonPrimitive(1)))
     }
+
+    @Test
+    fun `an old android album id is taken from this install's own earlier copy under the shared id`() {
+        val old = copy(
+            phone,
+            scalars = listOf(
+                SettingsScalarEntry("android.albums.sortMode", 50L, JsonPrimitive(0)),
+                SettingsScalarEntry("android.albums.customOrder", 50L, JsonPrimitive("b|a")),
+            ),
+        )
+        val state = SettingsSyncState()
+        val changes = takeIn(state, old, own = phone, readsAs = "earlier-install")
+        assertEquals(SettingsScalarState(50L, JsonPrimitive("custom")), changes.scalars["albums.sortMode"])
+        assertEquals(
+            SettingsScalarState(50L, kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive("b"), JsonPrimitive("a")))),
+            changes.scalars["albums.order"],
+        )
+        // Another phone's old copy carries a platform value, never taken.
+        val other = copy(phone2, scalars = listOf(SettingsScalarEntry("android.albums.sortMode", 90L, JsonPrimitive(1))))
+        assertTrue(takeIn(SettingsSyncState(), other).scalars.isEmpty())
+    }
+
+    @Test
+    fun `the album list sort and order come from any device, the desktop included`() {
+        val desk = copy(
+            pc, platform = "desktop",
+            scalars = listOf(
+                SettingsScalarEntry("albums.sortMode", 70L, JsonPrimitive("newest")),
+                SettingsScalarEntry("albums.order", 70L, kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive("x")))),
+            ),
+        )
+        val changes = takeIn(state("albums.sortMode" to SettingsScalarState(60L, JsonPrimitive("custom"))), desk)
+        assertEquals(JsonPrimitive("newest"), changes.scalars.getValue("albums.sortMode").value)
+        assertEquals(70L, changes.scalars.getValue("albums.order").at)
+    }
 }

@@ -164,7 +164,9 @@ internal object SettingsCopyMerge {
             at > held || (at == held && differs && copy.deviceId > ownDeviceId)
         }
         val scalars = HashMap<String, SettingsScalarState>()
-        for (entry in copy.scalars) {
+        val idsInCopy = copy.scalars.mapTo(HashSet()) { it.key }
+        for (raw in copy.scalars) {
+            val entry = asCurrentId(raw, idsInCopy, copy, ownDeviceId, ownPlatform) ?: continue
             val setting = SettingsSyncRegistry.scalar(entry.key) ?: continue
             if (!SettingsSyncRegistry.takes(setting.scope, copy.deviceId, copy.platform, ownDeviceId, ownPlatform)) continue
             if (entry.value != null && !setting.accepts(entry.value)) continue
@@ -190,6 +192,24 @@ internal object SettingsCopyMerge {
     }
 
     /** [state] as this install's copy: every setting and member with its time, ordered so equal state gives equal bytes. */
+    /**
+     * [raw] under the id this build keeps it: a value under an older id comes back under the new one, from this
+     * install's own earlier copy only and only when that copy carries nothing under the new id; null drops it.
+     */
+    private fun asCurrentId(
+        raw: SettingsScalarEntry,
+        idsInCopy: Set<String>,
+        copy: SettingsSnapshot,
+        ownDeviceId: String,
+        ownPlatform: String,
+    ): SettingsScalarEntry? {
+        val alias = SettingsSyncRegistry.legacyAlias(raw.key) ?: return raw
+        if (alias.id in idsInCopy) return null
+        if (!SettingsSyncRegistry.takes(SettingsScope.PLATFORM, copy.deviceId, copy.platform, ownDeviceId, ownPlatform)) return null
+        val value = raw.value ?: return raw.copy(key = alias.id)
+        return alias.convert(value)?.let { raw.copy(key = alias.id, value = it) }
+    }
+
     fun forDrive(
         state: SettingsSyncState,
         deviceId: String,

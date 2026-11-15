@@ -292,6 +292,7 @@ class SharedBackupScheduler @Inject constructor(
                 listOf(SharedBackupKind.LABELS), byUser = true,
                 "photo_label", "photo_label_name", "photo_label_state", "photo_label_deleted",
             ),
+            WatchedTables(listOf(SharedBackupKind.ALBUM_ORDER), byUser = true, "album_order_state", "album_photo_order"),
         )
 
         /** The settings behind the hidden list. */

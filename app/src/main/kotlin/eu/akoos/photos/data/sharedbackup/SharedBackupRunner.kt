@@ -25,6 +25,13 @@ package eu.akoos.photos.data.sharedbackup
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.albumorder.AlbumOrderCopyMerge
+import eu.akoos.photos.data.albumorder.AlbumOrderRepository
+import eu.akoos.photos.data.albumorder.AlbumOrderSnapshot
+import eu.akoos.photos.data.albumorder.AlbumOrderSnapshotCodec
+import eu.akoos.photos.data.albumorder.AlbumOrderSnapshotOpened
+import eu.akoos.photos.data.albumorder.AlbumOrderSnapshotSealing
+import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
 import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
@@ -42,6 +49,7 @@ import eu.akoos.photos.data.label.LabelSnapshotOpened
 import eu.akoos.photos.data.label.LabelSnapshotSealing
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.mlsync.AddressKeyEnvelopeCrypto
+import eu.akoos.photos.data.mlsync.AlbumOrderDriveNaming
 import eu.akoos.photos.data.mlsync.DriveDataFolder
 import eu.akoos.photos.data.mlsync.HiddenDriveNaming
 import eu.akoos.photos.data.mlsync.LabelDriveNaming
@@ -73,26 +81,28 @@ import java.io.FileOutputStream
 import java.io.IOException
 import javax.inject.Inject
 
-/** The four Drive folders of the shared backup as one round lists them. */
+/** The Drive folders of the shared backup as one round lists them. */
 data class SharedBackupListing(
     val ml: List<MlDriveFile>,
     val labels: List<MlDriveFile>,
     val hidden: List<MlDriveFile>,
     val settings: List<MlDriveFile> = emptyList(),
+    val albumOrder: List<MlDriveFile> = emptyList(),
 )
 
 /** One install's copies on Drive, as the list of the backups shows them: when it saved last, and its files. */
 data class DriveDeviceCopies(val deviceId: String, val name: String?, val lastSavedMs: Long, val nodeUids: List<String>)
 
 /**
- * The copies in [listing], by the install that wrote them: every file of the four folders whose name carries an
+ * The copies in [listing], by the install that wrote them: every file of the folders whose name carries an
  * install id, newest install first. Pure, so it is unit-tested directly.
  */
 internal fun copiesByDevice(listing: SharedBackupListing, names: Map<String, String>): List<DriveDeviceCopies> {
     val files = listing.ml.mapNotNull { f -> MlDriveNaming.parse(f.name)?.let { SharedBackupCopy(it.deviceId, f) } } +
         listing.labels.mapNotNull { f -> LabelDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } } +
         listing.hidden.mapNotNull { f -> HiddenDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } } +
-        listing.settings.mapNotNull { f -> SettingsDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } }
+        listing.settings.mapNotNull { f -> SettingsDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } } +
+        listing.albumOrder.mapNotNull { f -> AlbumOrderDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } }
     return files.groupBy { it.deviceId }
         .map { (id, copies) ->
             DriveDeviceCopies(id, names[id], copies.maxOf { it.madeAtMs }, copies.map { it.file.nodeUid })
@@ -136,6 +146,8 @@ class SharedBackupRunner @Inject constructor(
     private val labels: PhotoLabelRepository,
     private val hidden: HiddenSyncStore,
     private val settings: SettingsSyncStore,
+    private val albumOrder: AlbumOrderRepository,
+    private val cloudAlbumDao: CloudAlbumDao,
     private val appliedDao: DriveCopyAppliedDao,
     private val store: SharedBackupStore,
     private val faceScanDao: FaceScanDao,
@@ -143,7 +155,7 @@ class SharedBackupRunner @Inject constructor(
 ) {
 
     /**
-     * The four folders' files, read side by side, or null when any listing failed: a round that cannot read
+     * The folders' files, read side by side, or null when any listing failed: a round that cannot read
      * writes nothing.
      */
     suspend fun list(userId: UserId): SharedBackupListing? = coroutineScope {
@@ -151,11 +163,13 @@ class SharedBackupRunner @Inject constructor(
         val labels = async { listed(userId, DriveDataFolder.LABELS) }
         val hidden = async { listed(userId, DriveDataFolder.HIDDEN) }
         val settings = async { listed(userId, DriveDataFolder.SETTINGS) }
+        val albumOrder = async { listed(userId, DriveDataFolder.ALBUM_ORDER) }
         SharedBackupListing(
             ml.await() ?: return@coroutineScope null,
             labels.await() ?: return@coroutineScope null,
             hidden.await() ?: return@coroutineScope null,
             settings.await() ?: return@coroutineScope null,
+            albumOrder.await() ?: return@coroutineScope null,
         )
     }
 
@@ -303,6 +317,59 @@ class SharedBackupRunner @Inject constructor(
         return true
     }
 
+    /**
+     * Takes the other installs' album-order copies newer than the ones taken in last into this device's album
+     * orders, the later change to each album's mode and order winning. False when a copy could not be read, so the
+     * round does not write this device's copy over an unread one. [retake] takes every install's newest copy again.
+     */
+    suspend fun takeInAlbumOrder(
+        userId: UserId,
+        listing: SharedBackupListing,
+        readsAs: String,
+        ownDeviceId: String,
+        retake: Boolean = false,
+    ): Boolean {
+        val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.ALBUM_ORDER)
+        val copies = newerCopies(listing.albumOrder, AlbumOrderDriveNaming::parse, readsAs, applied)
+        if (copies.isEmpty()) return true
+        val read = ArrayList<Pair<SharedBackupCopy, AlbumOrderSnapshot>>()
+        for (copy in copies) {
+            when (val got = readAlbumOrder(userId, copy)) {
+                is CopyRead.Read -> read += copy to got.value
+                CopyRead.PassOver -> markApplied(userId, SharedBackupKind.ALBUM_ORDER, copy.deviceId, copy.madeAtMs)
+                CopyRead.Retry -> return false
+            }
+        }
+        store.rememberDeviceNames(read.associate { (copy, snapshot) -> copy.deviceId to snapshot.deviceLabel }.filterValues { it.isNotBlank() })
+        val state = albumOrder.loadSyncState(userId.id)
+        var changes = AlbumOrderCopyMerge.Changes()
+        for ((_, snapshot) in read) changes += AlbumOrderCopyMerge.takeIn(state, snapshot, readsAs, ownDeviceId)
+        val changed = albumOrder.apply(userId.id, changes)
+        for ((copy, snapshot) in read) {
+            markApplied(userId, SharedBackupKind.ALBUM_ORDER, copy.deviceId, maxOf(copy.madeAtMs, snapshot.createdAtMillis))
+        }
+        if (changed > 0) Log.i(TAG, "album order taken in: $changed album(s) changed")
+        return true
+    }
+
+    /**
+     * Writes this device's album orders to Drive unless the copy there already holds them, leaving out the albums
+     * the album list no longer holds. Nothing is written while no album has an order. Null when the write failed.
+     */
+    suspend fun saveAlbumOrder(userId: UserId, ownDeviceId: String, nowMs: Long): Boolean? {
+        val state = albumOrder.loadSyncState(userId.id)
+        if (state.isEmpty) return false
+        val albums = runCatching { cloudAlbumDao.getAllLinkIds() }.getOrNull()?.toHashSet()?.takeIf { it.isNotEmpty() }
+        val copy = AlbumOrderCopyMerge.forDrive(state, ownDeviceId, driveStore.deviceLabel, nowMs, albums)
+        if (copy.albums.isEmpty()) return false
+        val same = AlbumOrderSnapshotCodec.encode(copy.copy(createdAtMillis = 0L))
+        if (store.unchanged(SharedBackupKind.ALBUM_ORDER, same)) return false
+        val sealed = seal(userId, nowMs) { keys, out -> AlbumOrderSnapshotSealing.seal(copy, envelopeCrypto, keys, out) }
+            ?: return null
+        return upload(userId, AlbumOrderDriveNaming.fileName(ownDeviceId), sealed, AlbumOrderDriveNaming.MEDIA_TYPE, DriveDataFolder.ALBUM_ORDER)
+            ?.also { store.recordSaved(SharedBackupKind.ALBUM_ORDER, same) }
+    }
+
     /** Writes this device's labels to Drive unless the copy there already holds them. Null when the write failed. */
     suspend fun saveLabels(userId: UserId, ownDeviceId: String, nowMs: Long): Boolean? {
         val copy = LabelCopyMerge.forDrive(labels.loadSyncState(userId), ownDeviceId, driveStore.deviceLabel, nowMs)
@@ -358,8 +425,10 @@ class SharedBackupRunner @Inject constructor(
                 ?.let { (readLabels(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
             val name = label ?: listing.hidden.firstOrNull { HiddenDriveNaming.parse(it.name) == entry.deviceId }
                 ?.let { (readHidden(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
-            val named = name ?: listing.settings.firstOrNull { SettingsDriveNaming.parse(it.name) == entry.deviceId }
+            val fromSettings = name ?: listing.settings.firstOrNull { SettingsDriveNaming.parse(it.name) == entry.deviceId }
                 ?.let { (readSettings(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
+            val named = fromSettings ?: listing.albumOrder.firstOrNull { AlbumOrderDriveNaming.parse(it.name) == entry.deviceId }
+                ?.let { (readAlbumOrder(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
             if (!named.isNullOrBlank()) learned[entry.deviceId] = named
         }
         store.rememberDeviceNames(learned)
@@ -423,6 +492,19 @@ class SharedBackupRunner @Inject constructor(
                 when (val opened = SettingsSnapshotSealing.open(input, envelopeCrypto, keys)) {
                     is SettingsSnapshotOpened.Snapshot -> Opened.Value(opened.value)
                     SettingsSnapshotOpened.WrongKey -> Opened.WrongKey
+                    else -> Opened.Unreadable
+                }
+            }
+        }
+        return snapshot.ownedBy(copy.deviceId) { it.deviceId }
+    }
+
+    private suspend fun readAlbumOrder(userId: UserId, copy: SharedBackupCopy): CopyRead<AlbumOrderSnapshot> {
+        val snapshot = readOpened(userId, copy) { input, refresh ->
+            envelopeCrypto.openKeys(userId, refresh).use { keys ->
+                when (val opened = AlbumOrderSnapshotSealing.open(input, envelopeCrypto, keys)) {
+                    is AlbumOrderSnapshotOpened.Snapshot -> Opened.Value(opened.value)
+                    AlbumOrderSnapshotOpened.WrongKey -> Opened.WrongKey
                     else -> Opened.Unreadable
                 }
             }

@@ -133,6 +133,11 @@ internal object SettingsSyncRegistry {
     private const val MAX_TEXT = 16_384
     private const val MAX_LIST_ITEMS = 4_000
     private const val MAX_LIST_ITEM_LENGTH = 512
+    private const val MAX_ORDER_ITEMS = 20_000
+    private const val ORDER_SEPARATOR = '|'
+
+    /** The album list's sort modes as the shared words, in the order of their stored ordinals. */
+    private val ALBUM_SORT_WORDS = listOf("custom", "name", "activity", "count", "newest")
 
     private fun bool(id: String, scope: SettingsScope, key: Preferences.Key<Boolean>) = SyncScalar(
         id, scope, key,
@@ -175,6 +180,33 @@ internal object SettingsSyncRegistry {
         },
     )
 
+    /** A stored ordinal carried as the word at that position of [words]. */
+    private fun ordinalWord(id: String, scope: SettingsScope, key: Preferences.Key<Int>, words: List<String>) = SyncScalar(
+        id, scope, key,
+        toJson = { words.getOrNull(it as Int)?.let(::JsonPrimitive) },
+        fromJson = { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.let(words::indexOf)?.takeIf { v -> v >= 0 } },
+    )
+
+    /**
+     * An ordered list of ids stored as one '|'-joined string, carried as a JSON array in that order. Bounded by the
+     * number of ids, not by the length of the joined string.
+     */
+    private fun orderedIds(id: String, scope: SettingsScope, key: Preferences.Key<String>) = SyncScalar(
+        id, scope, key,
+        toJson = { value ->
+            val items = (value as String).split(ORDER_SEPARATOR).filter { it.isNotBlank() }
+            items.takeIf(::orderOk)?.let { list -> JsonArray(list.map(::JsonPrimitive)) }
+        },
+        fromJson = { json ->
+            val items = (json as? JsonArray)?.map { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+            if (items == null || null in items) null
+            else items.filterNotNull().takeIf(::orderOk)?.joinToString(ORDER_SEPARATOR.toString())
+        },
+    )
+
+    private fun orderOk(items: List<String>) =
+        items.size <= MAX_ORDER_ITEMS && items.all { it.isNotBlank() && it.length <= MAX_LIST_ITEM_LENGTH && ORDER_SEPARATOR !in it }
+
     private fun listOk(items: Set<String>) = items.size <= MAX_LIST_ITEMS && items.all { it.length <= MAX_LIST_ITEM_LENGTH }
 
     private fun members(
@@ -201,6 +233,8 @@ internal object SettingsSyncRegistry {
         word("appearance.palette", SettingsScope.SHARED, SettingsKeys.THEME_PALETTE, PALETTES),
         bool("appearance.amoled", SettingsScope.SHARED, SettingsKeys.AMOLED_BLACK),
         bool("albums.hidePhotosInAlbums", SettingsScope.SHARED, SettingsKeys.HIDE_PHOTOS_IN_ALBUMS),
+        ordinalWord("albums.sortMode", SettingsScope.SHARED, SettingsKeys.ALBUMS_SORT_MODE, ALBUM_SORT_WORDS),
+        orderedIds("albums.order", SettingsScope.SHARED, SettingsKeys.ALBUMS_CUSTOM_ORDER),
 
         // Restored from this install's own earlier copy only.
         text("appearance.language", SettingsScope.PLATFORM, SettingsKeys.LANGUAGE) { it == "system" || LANGUAGE_TAG.matches(it) },
@@ -229,7 +263,6 @@ internal object SettingsSyncRegistry {
         bool("android.timeline.seamless", SettingsScope.PLATFORM, SettingsKeys.SEAMLESS_GRID),
         int("android.albums.defaultFilter", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_DEFAULT_FILTER, 0..3),
         bool("android.albums.rememberLastFilter", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER),
-        int("android.albums.sortMode", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_SORT_MODE, 0..3),
         bool("android.albums.showCollection", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_SHOW_COLLECTION),
         int("android.albums.viewMode", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_VIEW_MODE, 0..1),
         bool("android.people.followAlbums", SettingsScope.PLATFORM, SettingsKeys.PEOPLE_FOLLOW_ALBUMS),
@@ -238,9 +271,7 @@ internal object SettingsSyncRegistry {
         int("android.albums.photoGrouping", SettingsScope.PLATFORM, SettingsKeys.ALBUM_PHOTO_GROUPING, 0..2),
         int("android.folders.photoSortMode", SettingsScope.PLATFORM, SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE, 0..1),
         int("android.folders.photoGrouping", SettingsScope.PLATFORM, SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING, 0..2),
-        list("android.albums.photoSortOverrides", SettingsScope.PLATFORM, SettingsKeys.ALBUM_PHOTO_SORT_OVERRIDES),
         list("android.albums.photoGroupingOverrides", SettingsScope.PLATFORM, SettingsKeys.ALBUM_PHOTO_GROUPING_OVERRIDES),
-        text("android.albums.customOrder", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_CUSTOM_ORDER) { it.length <= MAX_TEXT },
         text("android.rail.order", SettingsScope.PLATFORM, SettingsKeys.CATEGORY_RAIL_ORDER, ::csvOfNames),
         text("android.tiles.order", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_TILE_ORDER, ::csvOfNames),
 
@@ -266,6 +297,35 @@ internal object SettingsSyncRegistry {
         members("android.rail.hidden", SettingsScope.PLATFORM, SettingsKeys.CATEGORY_RAIL_HIDDEN, valid = ::enumName),
         members("android.tiles.hidden", SettingsScope.PLATFORM, SettingsKeys.ALBUMS_TILE_HIDDEN, valid = ::enumName),
     )
+
+    /**
+     * Ids an older build kept a setting under, before it moved to a shared id: the new id, and how the old payload
+     * value reads as the new one (null when it does not). Taken only from this install's own earlier copy, and only
+     * when that copy has no value under the new id.
+     */
+    internal class LegacyAlias(val legacyId: String, val id: String, val convert: (JsonElement) -> JsonElement?)
+
+    val legacyAliases: List<LegacyAlias> = listOf(
+        LegacyAlias("android.albums.sortMode", "albums.sortMode") { json ->
+            (json as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull?.let(ALBUM_SORT_WORDS::getOrNull)?.let(::JsonPrimitive)
+        },
+        LegacyAlias("android.albums.customOrder", "albums.order") { json ->
+            (json as? JsonPrimitive)?.takeIf { it.isString }?.content
+                ?.split(ORDER_SEPARATOR)?.filter { it.isNotBlank() }?.takeIf(::orderOk)
+                ?.let { list -> JsonArray(list.map(::JsonPrimitive)) }
+        },
+    )
+
+    private val aliasByLegacyId = legacyAliases.associateBy { it.legacyId }
+
+    fun legacyAlias(id: String): LegacyAlias? = aliasByLegacyId[id]
+
+    /** The payload value [legacyId] held for the stored [value] in the older build, to tell whether it changed since. */
+    fun legacyJson(legacyId: String, value: Any): JsonElement? = when (legacyId) {
+        "android.albums.sortMode" -> (value as? Int)?.let(::JsonPrimitive)
+        "android.albums.customOrder" -> (value as? String)?.let(::JsonPrimitive)
+        else -> null
+    }
 
     private val scalarById = scalars.associateBy { it.id }
     private val setById = sets.associateBy { it.id }

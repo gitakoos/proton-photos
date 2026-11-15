@@ -44,6 +44,9 @@ import eu.akoos.photos.presentation.gallery.FilterChip
  * can be made in one visit. The grouping row shows only where [onGroupingSelected] is given. Its
  * marked chip is the saved grouping, which a pinch on the grid can leave for the rest of a visit, so
  * a tap on the marked chip is passed on as well, for the screen to bring the grid back to it.
+ *
+ * The Custom chip shows where [offerCustom] is set, and always while it is the mode in force. A
+ * hand-made order has no dates to group by, so the grouping row hides while it is.
  */
 @Composable
 internal fun AlbumViewOptions(
@@ -51,18 +54,23 @@ internal fun AlbumViewOptions(
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
     grouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
     onGroupingSelected: ((AlbumPhotoGrouping) -> Unit)? = null,
+    offerCustom: Boolean = false,
 ) {
     Column {
         ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading), first = true)
+        val options = buildList {
+            add(AlbumPhotoSortMode.NewestFirst to stringResource(R.string.sort_newest_first))
+            add(AlbumPhotoSortMode.OldestFirst to stringResource(R.string.sort_oldest_first))
+            if (offerCustom || sortMode == AlbumPhotoSortMode.Custom) {
+                add(AlbumPhotoSortMode.Custom to stringResource(R.string.albums_sort_custom))
+            }
+        }
         ChoiceChipRow(
-            options = listOf(
-                AlbumPhotoSortMode.NewestFirst to stringResource(R.string.sort_newest_first),
-                AlbumPhotoSortMode.OldestFirst to stringResource(R.string.sort_oldest_first),
-            ),
+            options = options,
             current = sortMode,
             onSelected = onSortSelected,
         )
-        if (onGroupingSelected != null) {
+        if (onGroupingSelected != null && sortMode != AlbumPhotoSortMode.Custom) {
             ActionSheetSectionHeading(stringResource(R.string.album_group_heading))
             ChoiceChipRow(
                 options = listOf(

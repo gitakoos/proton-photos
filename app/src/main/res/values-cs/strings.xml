@@ -2880,4 +2880,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, ikona převleku, vybráno</string>
     <string name="app_icon_a11y_disguise">%1$s, ikona převleku</string>
     <string name="app_icon_a11y_selected">%1$s, vybráno</string>
+    <string name="album_arrange_photos">Uspořádat fotky</string>
+    <string name="arrange_hint">Podržením fotku přesunete. Klepnutím vyberete více fotek.</string>
+    <string name="arrange_move_to_start">Přesunout na začátek</string>
+    <string name="arrange_move_to_end">Přesunout na konec</string>
+    <string name="arrange_move_here">Přesunout sem</string>
+    <string name="arrange_pick_target">Klepněte na fotku, vedle které má výběr být</string>
+    <string name="arrange_before">Před ni</string>
+    <string name="arrange_after">Za ni</string>
+    <string name="arrange_done">Hotovo</string>
+    <string name="arrange_selected_count">Vybráno: %1$d</string>
+    <string name="arrange_discard_title">Zahodit nové pořadí?</string>
+    <string name="arrange_discard_message">Fotky se vrátí tam, kde byly.</string>
+    <string name="arrange_discard_confirm">Zahodit</string>
+    <string name="arrange_discard_keep">Pokračovat v řazení</string>
+    <string name="arrange_saved">Pořadí uloženo</string>
+    <string name="albums_sort_newest_photo">Nejnovější fotka</string>
 </resources>

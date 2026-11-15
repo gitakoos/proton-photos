@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -166,6 +168,7 @@ class AlbumsViewModel @Inject constructor(
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
     private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
+    private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
@@ -205,8 +208,11 @@ class AlbumsViewModel @Inject constructor(
     /** The user's own arrangement, read only by [AlbumSortMode.Custom]. */
     private val customOrder = MutableStateFlow<List<String>>(emptyList())
 
+    /** Each album's newest photo time, read only by [AlbumSortMode.NewestPhoto]. */
+    private val newestPhoto = MutableStateFlow<Map<String, Long>>(emptyMap())
+
     private fun applySort(albums: List<Album>): List<Album> =
-        sortAlbums(albums, sortMode.value, customOrder.value)
+        sortAlbums(albums, sortMode.value, customOrder.value, newestPhoto.value)
 
     init {
         observeSortMode()
@@ -239,6 +245,7 @@ class AlbumsViewModel @Inject constructor(
      * [kotlinx.coroutines.flow.distinctUntilChanged] keeps writes to unrelated settings, which the
      * store also emits on, from re-sorting the grid for nothing.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observeSortMode() {
         viewModelScope.launch {
             context.settingsDataStore.data
@@ -248,23 +255,47 @@ class AlbumsViewModel @Inject constructor(
                 }
                 .distinctUntilChanged()
                 .catch { emit(AlbumSortMode.Default to emptyList()) }
-                .collect { (mode, order) ->
+                .flatMapLatest { (mode, order) ->
+                    newestPhotoTimes(mode).map { newest -> Triple(mode, order, newest) }
+                }
+                .collect { (mode, order, newest) ->
                     sortMode.value = mode
                     customOrder.value = order
+                    newestPhoto.value = newest
                     _uiState.update { it.copy(albums = applySort(it.albums), albumSortMode = mode) }
                 }
         }
     }
+
+    /** The newest photo time of each album while the grid sorts by it; nothing in any other mode. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun newestPhotoTimes(mode: AlbumSortMode): Flow<Map<String, Long>> =
+        if (mode != AlbumSortMode.NewestPhoto) {
+            flowOf(emptyMap())
+        } else {
+            accountManager.getPrimaryUserId().flatMapLatest { userId ->
+                if (userId == null) flowOf(emptyMap())
+                else albumOrder.observeNewestPhotoTimes(userId.id).catch { emit(emptyMap()) }
+            }
+        }
 
     /**
      * Track how each album and folder lists its photos, so a card's drawer can tick the choice in
      * force for that card. Its own collector rather than a member of the pair above: that pair orders
      * the grid, this orders what is inside an album, and the two are set from different places.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observeViewChoices() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { PhotoViewChoices.from(it) }
+            val albumModes = accountManager.getPrimaryUserId().flatMapLatest { userId ->
+                if (userId == null) flowOf(emptyMap())
+                else albumOrder.observeModes(userId.id)
+                    .map { modes -> modes.mapNotNull { (album, word) -> AlbumPhotoSortMode.fromWord(word)?.let { album to it } }.toMap() }
+                    .catch { emit(emptyMap()) }
+            }
+            combine(context.settingsDataStore.data.map { PhotoViewChoices.from(it) }, albumModes) { choices, modes ->
+                choices.copy(albumModes = modes)
+            }
                 .distinctUntilChanged()
                 .catch { emit(PhotoViewChoices()) }
                 .collect { choices -> _uiState.update { it.copy(viewChoices = choices) } }
@@ -473,7 +504,10 @@ class AlbumsViewModel @Inject constructor(
     /** Persist the direction [albumLinkId] lists its photos in, the same choice the album's own screen
      *  writes, so a direction set from its card and one set inside it are one choice. */
     fun setAlbumPhotoSortMode(albumLinkId: String, mode: AlbumPhotoSortMode) {
-        viewModelScope.launch { PhotoViewChoiceStore.setAlbumSort(context, albumLinkId, mode) }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { albumOrder.setMode(userId.id, albumLinkId, mode.word) }
+        }
     }
 
     /** Persist the span of dates [albumLinkId]'s headers gather, the same choice the album's own

@@ -2742,4 +2742,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, álcázó ikon, kiválasztva</string>
     <string name="app_icon_a11y_disguise">%1$s, álcázó ikon</string>
     <string name="app_icon_a11y_selected">%1$s, kiválasztva</string>
+    <string name="album_arrange_photos">Fotók elrendezése</string>
+    <string name="arrange_hint">Tartsd lenyomva a fotót az áthelyezéshez. Koppintással többet is kijelölhetsz.</string>
+    <string name="arrange_move_to_start">Az elejére</string>
+    <string name="arrange_move_to_end">A végére</string>
+    <string name="arrange_move_here">Ide</string>
+    <string name="arrange_pick_target">Koppints arra a fotóra, amely mellé a kijelölés kerüljön</string>
+    <string name="arrange_before">Elé</string>
+    <string name="arrange_after">Mögé</string>
+    <string name="arrange_done">Kész</string>
+    <string name="arrange_selected_count">%1$d kijelölve</string>
+    <string name="arrange_discard_title">Elveted az új sorrendet?</string>
+    <string name="arrange_discard_message">A fotók visszakerülnek a helyükre.</string>
+    <string name="arrange_discard_confirm">Elvetés</string>
+    <string name="arrange_discard_keep">Tovább rendezem</string>
+    <string name="arrange_saved">Sorrend mentve</string>
+    <string name="albums_sort_newest_photo">Legújabb fotó</string>
 </resources>

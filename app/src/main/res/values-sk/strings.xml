@@ -2881,4 +2881,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, ikona prestrojenia, vybraté</string>
     <string name="app_icon_a11y_disguise">%1$s, ikona prestrojenia</string>
     <string name="app_icon_a11y_selected">%1$s, vybraté</string>
+    <string name="album_arrange_photos">Usporiadať fotky</string>
+    <string name="arrange_hint">Podržaním fotku presuniete. Ťuknutím vyberiete viac fotiek.</string>
+    <string name="arrange_move_to_start">Presunúť na začiatok</string>
+    <string name="arrange_move_to_end">Presunúť na koniec</string>
+    <string name="arrange_move_here">Presunúť sem</string>
+    <string name="arrange_pick_target">Ťuknite na fotku, vedľa ktorej má byť výber</string>
+    <string name="arrange_before">Pred ňu</string>
+    <string name="arrange_after">Za ňu</string>
+    <string name="arrange_done">Hotovo</string>
+    <string name="arrange_selected_count">Vybraných: %1$d</string>
+    <string name="arrange_discard_title">Zahodiť nové poradie?</string>
+    <string name="arrange_discard_message">Fotky sa vrátia tam, kde boli.</string>
+    <string name="arrange_discard_confirm">Zahodiť</string>
+    <string name="arrange_discard_keep">Pokračovať v usporiadaní</string>
+    <string name="arrange_saved">Poradie uložené</string>
+    <string name="albums_sort_newest_photo">Najnovšia fotka</string>
 </resources>

@@ -79,6 +79,9 @@ import eu.akoos.photos.presentation.common.addToAlbumOutcome
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.PhotoSortOrder
+import eu.akoos.photos.presentation.common.ArrangeSession
+import eu.akoos.photos.data.albumorder.AlbumOrderRepository
+import eu.akoos.photos.domain.usecase.PhotoArrangement
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.StripOutcome
 import eu.akoos.photos.presentation.common.message
@@ -131,6 +134,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val moveController: MoveToFolderController,
     private val folderDelete: DeviceFolderDeleteController,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val albumOrder: AlbumOrderRepository,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -288,6 +292,65 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun setSortMode(mode: AlbumPhotoSortMode) {
         val name = bucketName.value
         viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(context, name, mode) }
+    }
+
+    /** This folder's hand-made order, kept on this device only under the local user, whoever is signed in. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val arrangementFlow = bucketName
+        .flatMapLatest { name ->
+            albumOrder.observe(AlbumOrderRepository.LOCAL_USER, AlbumOrderRepository.folderKey(name))
+                .map { it.arrangement }
+                .catch { emit(emptyList()) }
+        }
+        .distinctUntilChanged()
+
+    /** True once this folder has a hand-made order, so picking Custom shows it instead of opening arrange mode. */
+    val hasArrangement: StateFlow<Boolean> = arrangementFlow.map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private val _arrange = MutableStateFlow<ArrangeSession?>(null)
+    val arrange: StateFlow<ArrangeSession?> = _arrange.asStateFlow()
+
+    private val _arrangeSaved = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val arrangeSaved: SharedFlow<Unit> = _arrangeSaved.asSharedFlow()
+
+    /** Opens arrange mode on the photos as they are shown now. */
+    fun startArrange() {
+        val shown = _items.value
+        if (shown.isEmpty()) return
+        clearSelection()
+        _arrange.value = ArrangeSession(shown.map(::arrangeKeyOf))
+    }
+
+    fun arrangeToggle(key: String) = _arrange.update { it?.toggled(key) }
+
+    fun arrangeReorder(order: List<String>) = _arrange.update { it?.reordered(order) }
+
+    fun arrangeMoveToStart() = _arrange.update { it?.movedToStart() }
+
+    fun arrangeMoveToEnd() = _arrange.update { it?.movedToEnd() }
+
+    fun arrangeMoveNextTo(target: String, after: Boolean) = _arrange.update { it?.movedNextTo(target, after) }
+
+    fun cancelArrange() {
+        _arrange.value = null
+    }
+
+    /** Keeps the arranged order for this folder and switches it to that order. */
+    fun finishArrange() {
+        val session = _arrange.value ?: return
+        val name = bucketName.value
+        _arrange.value = null
+        viewModelScope.launch {
+            val key = AlbumOrderRepository.folderKey(name)
+            val saved = runCatching {
+                val stored = albumOrder.arrangement(AlbumOrderRepository.LOCAL_USER, key)
+                val next = PhotoArrangement.forSave(stored, session.order)
+                albumOrder.saveCustom(AlbumOrderRepository.LOCAL_USER, key, next)
+                PhotoViewChoiceStore.setFolderSort(context, name, AlbumPhotoSortMode.Custom)
+            }.isSuccess
+            if (saved) _arrangeSaved.tryEmit(Unit)
+        }
     }
 
     /** The span of dates each header on this screen gathers. Held here rather than read by the
@@ -559,7 +622,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 itemsFlow,
                 vaultFlow,
                 sortModeFlow,
-            ) { all, vault, sort ->
+                arrangementFlow,
+            ) { all, vault, sort, arrangement ->
                 val visible = all.mapNotNull { item ->
                     val (uri, bucket) = when (item) {
                         is GalleryItem.LocalOnly -> item.local.uri to item.local.bucketName
@@ -577,10 +641,12 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // read. A synced photo's device DATE_TAKEN can differ from its Drive capture time —
                 // a downloaded file is dated at download — so ordering on the raw device date would
                 // file such a photo under a heading it sorts nowhere near.
-                val ordered = PhotoSortOrder.ordered(
-                    HiddenFolderRecords.folderPhotos(visible, vaulted, showsVault),
-                    newestFirst = sort == AlbumPhotoSortMode.NewestFirst,
-                )
+                val listed = HiddenFolderRecords.folderPhotos(visible, vaulted, showsVault)
+                val ordered = if (sort == AlbumPhotoSortMode.Custom) {
+                    PhotoArrangement.ordered(listed, arrangement, ::arrangeKeyOf) { it.captureTimeMs }
+                } else {
+                    PhotoSortOrder.ordered(listed, newestFirst = sort == AlbumPhotoSortMode.NewestFirst)
+                }
                 val vaultedUris = vaulted.mapTo(mutableSetOf()) { it.local.uri }
                 // Narrowed to what this screen lists, so the badge set stays the size of one folder
                 // rather than of the whole vault.
@@ -1524,3 +1590,10 @@ internal class BackupTargetEnd(
 
 /** How long the folder screen holds its photos after a rename while the device list catches up. */
 private const val RENAME_HOLD_MS = 10_000L
+
+/** The key a folder photo holds its slot in a hand-made order by: its device file, or its link id for a cloud-only one. */
+internal fun arrangeKeyOf(item: GalleryItem): String = when (item) {
+    is GalleryItem.LocalOnly -> item.local.uri
+    is GalleryItem.Synced -> item.local.uri
+    is GalleryItem.CloudOnly -> item.cloud.linkId
+}

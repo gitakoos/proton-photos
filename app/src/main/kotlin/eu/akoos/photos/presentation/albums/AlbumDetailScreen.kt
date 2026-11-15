@@ -60,6 +60,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
@@ -220,7 +221,12 @@ fun AlbumDetailScreen(
     LaunchedEffect(albumLinkId) { viewModel.load(albumLinkId, albumName, shareId, sharedByEmail, volumeId) }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val arrangeSession by viewModel.arrange.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val orderSavedMsg = stringResource(R.string.arrange_saved)
+    LaunchedEffect(viewModel) {
+        viewModel.arrangeSaved.collect { snackbarHostState.showSnackbar(orderSavedMsg) }
+    }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
     // rather than a flag is what lets the sheet describe the photos the tap was made on.
@@ -392,9 +398,15 @@ fun AlbumDetailScreen(
     // photo by: a member whose Drive captureTime is sub-floor reads its device twin's date. The twin
     // comes from the map the ViewModel already holds, so the lambda only does a hash lookup per row.
     // Each photo keeps its position so the viewer opens the right one.
-    val photoGroups = remember(state.photos, state.localItemByLinkId, shownGrouping) {
-        photoDateSections(state.photos, shownGrouping) {
-            AlbumPhotoItems.captureTimeMs(it, state.localItemByLinkId[it.linkId])
+    // A hand-made order has no date runs to head, so it is one section without a header.
+    val customOrder = state.photoSortMode == AlbumPhotoSortMode.Custom
+    val photoGroups = remember(state.photos, state.localItemByLinkId, shownGrouping, customOrder) {
+        if (customOrder) {
+            mapOf("" to state.photos.withIndex().toList())
+        } else {
+            photoDateSections(state.photos, shownGrouping) {
+                AlbumPhotoItems.captureTimeMs(it, state.localItemByLinkId[it.linkId])
+            }
         }
     }
     // Scrubber shares the timeline handle. The grid keys photos by raw linkId (see items() below),
@@ -409,12 +421,6 @@ fun AlbumDetailScreen(
     val showScrollDate by remember {
         shareCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
     }.collectAsState(initial = false)
-    // Which sort chip the drawer marks. The ViewModel reads the same preference for the order itself,
-    // so this only has to say which one is active.
-    val photoSortMode by remember(state.albumLinkId) {
-        val albumLinkId = state.albumLinkId
-        shareCtx.settingsDataStore.data.map { PhotoViewChoices.from(it).sortOfAlbum(albumLinkId) }
-    }.collectAsState(initial = AlbumPhotoSortMode.Default)
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
 
@@ -458,6 +464,7 @@ fun AlbumDetailScreen(
             showScrollTop = showScrollTop,
             onBack = onBack,
             onOverflowClick = { showAlbumOverflow = true },
+            customOrder = customOrder,
         )
 
         AlbumSelectionDrawer(
@@ -481,6 +488,8 @@ fun AlbumDetailScreen(
         )
 
         AlbumOperationOverlays(state = state, viewModel = viewModel)
+
+        arrangeSession?.let { AlbumArrangeMode(state = state, session = it, viewModel = viewModel) }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
@@ -535,7 +544,7 @@ fun AlbumDetailScreen(
             hasPhotos = state.photos.isNotEmpty(),
             copyBusy = copyBusy,
             copyFraction = copyFraction,
-            sortMode = photoSortMode,
+            sortMode = state.photoSortMode,
             grouping = photoGrouping,
             isHiddenFromTimeline = state.isHiddenFromTimeline,
             isExcludedFromGrid = state.isExcludedFromGrid,
@@ -554,8 +563,12 @@ fun AlbumDetailScreen(
             onDelete = if (state.isSharedWithMe) null else ({ showDeleteAlbumConfirm = true }),
             onSlideshow = { playSlideshow() },
             onSortSelected = { mode ->
-                scope.launch { PhotoViewChoiceStore.setAlbumSort(shareCtx, state.albumLinkId, mode) }
+                // Custom with nothing arranged yet starts the arranging: an empty hand-made order
+                // would only show the date order under another name.
+                if (mode == AlbumPhotoSortMode.Custom && !state.hasArrangement) viewModel.startArrange()
+                else viewModel.setPhotoSortMode(mode)
             },
+            onArrangePhotos = { viewModel.startArrange() },
             onGroupingSelected = { grouping ->
                 visitGrouping = grouping
                 scope.launch { PhotoViewChoiceStore.setAlbumGrouping(shareCtx, state.albumLinkId, grouping) }
@@ -851,10 +864,11 @@ private fun AlbumPhotoGrid(
     // photos, and each date section carries its own header. Photos open as Synced or CloudOnly,
     // and both report the cloud linkId back.
     val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
+    val customOrder = state.photoSortMode == AlbumPhotoSortMode.Custom
     ReturnToViewerPhoto(
         gridState = gridState,
         groups = returnGroups,
-        headerPerGroup = true,
+        headerPerGroup = !customOrder,
         leadingSlots = 1,
         keyOf = { it.value.linkId },
     )
@@ -881,7 +895,8 @@ private fun AlbumPhotoGrid(
         ),
         horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
         verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-        modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(groupingPinch),
+        modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier)
+            .then(if (customOrder) Modifier else groupingPinch),
     ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 AlbumHeroItem(
@@ -920,7 +935,7 @@ private fun AlbumPhotoGrid(
                 }
             }
             else -> photoGroups.forEach { (label, entries) ->
-                item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
+                if (label.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
                         AlbumSectionHeader(
                             label = label,
                             entries = entries,
@@ -1177,12 +1192,21 @@ private fun BoxScope.AlbumChrome(
     showScrollTop: Boolean,
     onBack: () -> Unit,
     onOverflowClick: () -> Unit,
+    customOrder: Boolean = false,
 ) {
     val appColors = AppColors.current
     val scope = rememberCoroutineScope()
     // Fast-scroll scrubber over the photo grid, the same handle as the timeline. The scrubber
     // groups by day, so the drag tooltip reads "d MMMM yyyy" whatever span the section headers gather.
-    if (state.photos.isNotEmpty()) {
+    // A hand-made order does not run by date, so it gets the plain position thumb and no date pill.
+    if (customOrder) {
+        ScrollScrubber(
+            gridState = gridState,
+            topPadding = scrubberTopInset,
+            bottomPadding = 24.dp,
+            minItemsToShow = 60,
+        )
+    } else if (state.photos.isNotEmpty()) {
         TimelineScrubber(
             gridState = gridState,
             items = scrubberItems,
@@ -1197,7 +1221,7 @@ private fun BoxScope.AlbumChrome(
     }
 
     // Opt-in floating day pill, top-centre while the grid scrolls, yielding while the scrubber drags.
-    if (showScrollDate) {
+    if (showScrollDate && !customOrder) {
         ScrollDateLabel(
             gridState = gridState,
             items = scrubberItems,

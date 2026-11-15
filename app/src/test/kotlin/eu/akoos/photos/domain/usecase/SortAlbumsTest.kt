@@ -127,16 +127,32 @@ class SortAlbumsTest {
     }
 
     @Test
-    fun `a stored arrangement leads, and albums it does not mention trail it`() {
+    fun `albums a stored arrangement does not mention come first, then the arrangement`() {
         val albums = listOf(
             album("a", lastActivityTimeMs = 100L),
             album("b", lastActivityTimeMs = 300L),
             album("c", lastActivityTimeMs = 200L),
+            album("d", lastActivityTimeMs = 400L),
         )
         assertEquals(
-            listOf("c", "a", "b"),
+            listOf("d", "b", "c", "a"),
             sortAlbums(albums, AlbumSortMode.Custom, customOrder = listOf("c", "a")).ids(),
         )
+    }
+
+    @Test
+    fun `newest photo puts the album with the latest photo first and the unknown ones after by activity`() {
+        val albums = listOf(
+            album("a", lastActivityTimeMs = 100L),
+            album("b", lastActivityTimeMs = 300L),
+            album("c", lastActivityTimeMs = 200L),
+            album("d", lastActivityTimeMs = 50L),
+        )
+        assertEquals(
+            listOf("d", "a", "b", "c"),
+            sortAlbums(albums, AlbumSortMode.NewestPhoto, newestPhoto = mapOf("a" to 10L, "d" to 20L)).ids(),
+        )
+        assertEquals(AlbumSortMode.NewestPhoto, AlbumSortMode.fromOrdinal(4))
     }
 
     @Test

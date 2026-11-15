@@ -2743,4 +2743,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, Tarnsymbol, ausgewählt</string>
     <string name="app_icon_a11y_disguise">%1$s, Tarnsymbol</string>
     <string name="app_icon_a11y_selected">%1$s, ausgewählt</string>
+    <string name="album_arrange_photos">Fotos anordnen</string>
+    <string name="arrange_hint">Foto gedrückt halten, um es zu verschieben. Tippen, um mehrere auszuwählen.</string>
+    <string name="arrange_move_to_start">An den Anfang</string>
+    <string name="arrange_move_to_end">Ans Ende</string>
+    <string name="arrange_move_here">Hierher verschieben</string>
+    <string name="arrange_pick_target">Tippe auf das Foto, neben das die Auswahl soll</string>
+    <string name="arrange_before">Davor</string>
+    <string name="arrange_after">Danach</string>
+    <string name="arrange_done">Fertig</string>
+    <string name="arrange_selected_count">%1$d ausgewählt</string>
+    <string name="arrange_discard_title">Neue Reihenfolge verwerfen?</string>
+    <string name="arrange_discard_message">Die Fotos kehren an ihren alten Platz zurück.</string>
+    <string name="arrange_discard_confirm">Verwerfen</string>
+    <string name="arrange_discard_keep">Weiter anordnen</string>
+    <string name="arrange_saved">Reihenfolge gespeichert</string>
+    <string name="albums_sort_newest_photo">Neuestes Foto</string>
 </resources>

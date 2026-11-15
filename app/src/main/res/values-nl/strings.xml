@@ -2767,4 +2767,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, vermommingspictogram, geselecteerd</string>
     <string name="app_icon_a11y_disguise">%1$s, vermommingspictogram</string>
     <string name="app_icon_a11y_selected">%1$s, geselecteerd</string>
+    <string name="album_arrange_photos">Foto\'s ordenen</string>
+    <string name="arrange_hint">Houd een foto ingedrukt om hem te verplaatsen. Tik op foto\'s om er meerdere te selecteren.</string>
+    <string name="arrange_move_to_start">Naar het begin</string>
+    <string name="arrange_move_to_end">Naar het einde</string>
+    <string name="arrange_move_here">Hierheen</string>
+    <string name="arrange_pick_target">Tik op de foto waarnaast de selectie moet komen</string>
+    <string name="arrange_before">Ervoor</string>
+    <string name="arrange_after">Erna</string>
+    <string name="arrange_done">Klaar</string>
+    <string name="arrange_selected_count">%1$d geselecteerd</string>
+    <string name="arrange_discard_title">Nieuwe volgorde verwerpen?</string>
+    <string name="arrange_discard_message">De foto\'s gaan terug naar hun plek.</string>
+    <string name="arrange_discard_confirm">Verwerpen</string>
+    <string name="arrange_discard_keep">Verder ordenen</string>
+    <string name="arrange_saved">Volgorde opgeslagen</string>
+    <string name="albums_sort_newest_photo">Nieuwste foto</string>
 </resources>

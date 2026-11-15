@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.launch
@@ -115,6 +116,7 @@ import eu.akoos.photos.presentation.albums.components.StickyAlbumHeader
 import eu.akoos.photos.presentation.albums.components.rememberHeroScrolledAway
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
+import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -232,6 +234,8 @@ fun DeviceFolderDetailScreen(
     // Which direction the drawer's sort entries tick. The ViewModel reads the same preference for
     // the order itself, so this only has to say which one is active.
     val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
+    val hasArrangement by viewModel.hasArrangement.collectAsStateWithLifecycle()
+    val arrangeSession by viewModel.arrange.collectAsStateWithLifecycle()
     // The span of dates each header gathers. The drawer's grouping entries tick and save the
     // ViewModel's copy; a pinch on the grid overrides it until the folder is left. Both outlive the
     // trip to the viewer, so a grid coming back lays out under the headers it scrolled with.
@@ -376,6 +380,7 @@ fun DeviceFolderDetailScreen(
             countLabel = countLabel,
             onOverflowClick = { showFolderOverflow = true },
             onPhotoClick = onPhotoClick,
+            customOrder = sortMode == AlbumPhotoSortMode.Custom,
         )
 
         DeviceFolderChrome(
@@ -392,6 +397,7 @@ fun DeviceFolderDetailScreen(
             viewModel = viewModel,
             onBack = onBack,
             onOverflowClick = { showFolderOverflow = true },
+            customOrder = sortMode == AlbumPhotoSortMode.Custom,
         )
 
         DeviceFolderSelectionDrawer(
@@ -456,10 +462,16 @@ fun DeviceFolderDetailScreen(
             onClick = { scope.launch { gridState.animateScrollToItem(0) } },
         )
 
+        arrangeSession?.let { DeviceFolderArrangeMode(items = items, session = it, viewModel = viewModel) }
+
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+    val orderSavedMsg = stringResource(R.string.arrange_saved)
+    LaunchedEffect(viewModel) {
+        viewModel.arrangeSaved.collect { snackbarHostState.showSnackbar(orderSavedMsg) }
     }
     // Folder drawer: back up (stream only, or also as an album) plus the per-folder preferences.
     // An empty folder keeps the drawer and loses only the two rows with nothing to run on: its
@@ -494,7 +506,12 @@ fun DeviceFolderDetailScreen(
             // Hands the folder to the viewer already playing, opening on the first photo of the
             // current sort order.
             onSlideshow = if (hasPhotos) ({ onSlideshowClick(items) }) else null,
-            onSortSelected = viewModel::setSortMode,
+            onSortSelected = { mode ->
+                // Custom with nothing arranged yet starts the arranging.
+                if (mode == AlbumPhotoSortMode.Custom && !hasArrangement) viewModel.startArrange()
+                else viewModel.setSortMode(mode)
+            },
+            onArrangePhotos = if (hasPhotos) viewModel::startArrange else null,
             // Saved and shown at once, so a tap on the marked chip also undoes a pinch.
             onGroupingSelected = { grouping ->
                 viewModel.setGrouping(grouping)
@@ -656,6 +673,7 @@ private fun DeviceFolderPhotoGrid(
     countLabel: String,
     onOverflowClick: () -> Unit,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
+    customOrder: Boolean = false,
 ) {
     val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
     val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
@@ -677,8 +695,10 @@ private fun DeviceFolderPhotoGrid(
     // Group under the date headers the folder's grouping picks, like the cloud album. Each item
     // keeps its original position so onPhotoClick still opens the right one and the drag-select
     // keys stay aligned.
-    val photoGroups = remember(items, photoGrouping) {
-        photoDateSections(items, photoGrouping) { it.captureTimeMs }
+    val photoGroups = remember(items, photoGrouping, customOrder) {
+        // A hand-made order has no date runs to head, so it is one section without a header.
+        if (customOrder) mapOf("" to items.withIndex().toList())
+        else photoDateSections(items, photoGrouping) { it.captureTimeMs }
     }
     val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
         gridState = gridState,
@@ -695,7 +715,7 @@ private fun DeviceFolderPhotoGrid(
     ReturnToViewerPhoto(
         gridState = gridState,
         groups = returnGroups,
-        headerPerGroup = true,
+        headerPerGroup = !customOrder,
         leadingSlots = 1,
         keyOf = { it.value.stableId },
     )
@@ -722,7 +742,8 @@ private fun DeviceFolderPhotoGrid(
         ),
         horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
         verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-        modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(pinchModifier),
+        modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier)
+            .then(if (customOrder) Modifier else pinchModifier),
     ) {
         // Hero header: cover, folder name and count, like the cloud-album detail page.
         item(span = { GridItemSpan(maxLineSpan) }) {
@@ -771,7 +792,7 @@ private fun DeviceFolderPhotoGrid(
         } else {
             photoGroups.forEach { (label, entries) ->
                 // Date section header, same styling as the cloud-album detail grid.
-                item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
+                if (label.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
                     Row(
                         // Keep the label clear of the screen edge in seamless mode, where the
                         // tiles below bleed to 0.
@@ -879,10 +900,19 @@ private fun BoxScope.DeviceFolderChrome(
     viewModel: DeviceFolderDetailViewModel,
     onBack: () -> Unit,
     onOverflowClick: () -> Unit,
+    customOrder: Boolean = false,
 ) {
     // Fast-scroll scrubber over the photo grid: the same handle as the timeline. The scrubber
     // groups by day, so the drag tooltip reads "d MMMM yyyy" whatever span the section headers gather.
-    if (items.isNotEmpty()) {
+    // A hand-made order does not run by date, so it gets the plain position thumb and no date pill.
+    if (customOrder) {
+        ScrollScrubber(
+            gridState = gridState,
+            topPadding = scrubberTopInset,
+            bottomPadding = 24.dp,
+            minItemsToShow = 60,
+        )
+    } else if (items.isNotEmpty()) {
         TimelineScrubber(
             gridState = gridState,
             items = items,
@@ -901,7 +931,7 @@ private fun BoxScope.DeviceFolderChrome(
     }
 
     // Opt-in floating day pill, top-centre while the grid scrolls, yielding while the scrubber drags.
-    if (showScrollDate) {
+    if (showScrollDate && !customOrder) {
         ScrollDateLabel(
             gridState = gridState,
             items = items,

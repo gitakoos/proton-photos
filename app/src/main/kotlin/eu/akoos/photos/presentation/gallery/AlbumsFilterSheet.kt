@@ -231,6 +231,7 @@ private fun AlbumSortChipRow(
         AlbumSortMode.NameAsc to stringResource(R.string.albums_sort_name),
         AlbumSortMode.LastActivity to stringResource(R.string.albums_sort_activity),
         AlbumSortMode.PhotoCount to stringResource(R.string.albums_sort_count),
+        AlbumSortMode.NewestPhoto to stringResource(R.string.albums_sort_newest_photo),
     )
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),

@@ -40,9 +40,15 @@ class SettingsSyncRegistryTest {
     private fun scalar(id: String) = SettingsSyncRegistry.scalar(id)!!
 
     @Test
-    fun `the shared settings are the four the contract names, every other one is scoped to a platform`() {
+    fun `the shared settings are the ones the contract names, every other one is scoped to a platform`() {
         val shared = SettingsSyncRegistry.scalars.filter { it.scope == SettingsScope.SHARED }.map { it.id }.toSet()
-        assertEquals(setOf("appearance.theme", "appearance.palette", "appearance.amoled", "albums.hidePhotosInAlbums"), shared)
+        assertEquals(
+            setOf(
+                "appearance.theme", "appearance.palette", "appearance.amoled", "albums.hidePhotosInAlbums",
+                "albums.sortMode", "albums.order",
+            ),
+            shared,
+        )
         assertTrue(SettingsSyncRegistry.sets.all { it.scope == SettingsScope.PLATFORM })
         val platform = SettingsSyncRegistry.scalars.filter { it.scope == SettingsScope.PLATFORM }.map { it.id }
         assertTrue(
@@ -135,12 +141,52 @@ class SettingsSyncRegistryTest {
 
     @Test
     fun `an overrides list is a whole array of strings, sorted on the way out`() {
-        val overrides = scalar("android.albums.photoSortOverrides")
-        val prefs = mutablePreferencesOf(SettingsKeys.ALBUM_PHOTO_SORT_OVERRIDES to setOf("1:b", "0:a"))
+        val overrides = scalar("android.albums.photoGroupingOverrides")
+        val prefs = mutablePreferencesOf(SettingsKeys.ALBUM_PHOTO_GROUPING_OVERRIDES to setOf("1:b", "0:a"))
         assertEquals(SettingReading.Value(JsonArray(listOf(JsonPrimitive("0:a"), JsonPrimitive("1:b")))), overrides.read(prefs))
         assertTrue(overrides.accepts(JsonArray(listOf(JsonPrimitive("0:a")))))
         assertFalse(overrides.accepts(JsonArray(listOf(JsonPrimitive(1)))))
         assertFalse(overrides.accepts(JsonPrimitive("0:a")))
+    }
+
+    @Test
+    fun `the album list sort travels as a shared word and the photo order choices stay out of the settings`() {
+        val sort = scalar("albums.sortMode")
+        assertEquals(SettingReading.Value(JsonPrimitive("newest")), sort.read(mutablePreferencesOf(SettingsKeys.ALBUMS_SORT_MODE to 4)))
+        assertEquals(SettingReading.Value(JsonPrimitive("custom")), sort.read(mutablePreferencesOf(SettingsKeys.ALBUMS_SORT_MODE to 0)))
+        val prefs = mutablePreferencesOf()
+        sort.write(prefs, JsonPrimitive("count"))
+        assertEquals(3, prefs[SettingsKeys.ALBUMS_SORT_MODE])
+        assertFalse(sort.accepts(JsonPrimitive("random")))
+        assertFalse(sort.accepts(JsonPrimitive(1)))
+        assertNull(SettingsSyncRegistry.scalar("android.albums.sortMode"))
+        assertNull(SettingsSyncRegistry.scalar("android.albums.photoSortOverrides"))
+    }
+
+    @Test
+    fun `the album list order is an ordered array with no cap on the joined length`() {
+        val order = scalar("albums.order")
+        val ids = (1..400).map { "album-link-id-$it-" + "x".repeat(80) }
+        val stored = ids.joinToString("|")
+        assertTrue(stored.length > 16_384)
+        val read = order.read(mutablePreferencesOf(SettingsKeys.ALBUMS_CUSTOM_ORDER to stored))
+        assertEquals(SettingReading.Value(JsonArray(ids.map(::JsonPrimitive))), read)
+        val prefs = mutablePreferencesOf()
+        order.write(prefs, JsonArray(listOf(JsonPrimitive("b"), JsonPrimitive("a"))))
+        assertEquals("b|a", prefs[SettingsKeys.ALBUMS_CUSTOM_ORDER])
+        assertFalse(order.accepts(JsonArray(listOf(JsonPrimitive("a|b")))))
+        assertFalse(order.accepts(JsonArray(listOf(JsonPrimitive(1)))))
+        assertFalse(order.accepts(JsonPrimitive("a|b")))
+    }
+
+    @Test
+    fun `the old android album ids read as the new shared ones`() {
+        val sort = SettingsSyncRegistry.legacyAlias("android.albums.sortMode")!!
+        assertEquals("albums.sortMode", sort.id)
+        assertEquals(JsonPrimitive("name"), sort.convert(JsonPrimitive(1)))
+        assertNull(sort.convert(JsonPrimitive(9)))
+        val order = SettingsSyncRegistry.legacyAlias("android.albums.customOrder")!!
+        assertEquals(JsonArray(listOf(JsonPrimitive("a"), JsonPrimitive("b"))), order.convert(JsonPrimitive("a|b")))
     }
 
     @Test

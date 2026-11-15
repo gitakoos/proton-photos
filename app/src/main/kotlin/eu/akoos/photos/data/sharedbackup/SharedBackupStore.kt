@@ -39,7 +39,8 @@ import javax.inject.Singleton
 
 /** The kinds of data the shared backup keeps a copy of, with the name each is recorded under. */
 enum class SharedBackupKind(val key: String) {
-    FACES("faces"), SEARCH("search"), LABELS("labels"), HIDDEN("hidden"), SETTINGS("settings")
+    FACES("faces"), SEARCH("search"), LABELS("labels"), HIDDEN("hidden"), SETTINGS("settings"),
+    ALBUM_ORDER("albumOrder")
 }
 
 /** How the shared backup stands, for the settings row. */

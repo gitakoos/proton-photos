@@ -70,6 +70,8 @@ internal object SearchAlbums {
         val excluded: Set<String> = emptySet(),
         val sortMode: AlbumSortMode = AlbumSortMode.Default,
         val customOrder: List<String> = emptyList(),
+        /** Each album's newest photo time, read only by [AlbumSortMode.NewestPhoto]. */
+        val newestPhoto: Map<String, Long> = emptyMap(),
     )
 
     /**
@@ -120,7 +122,7 @@ internal object SearchAlbums {
      *  as the grid sorts them, less the hidden ones, then the folders that still hold a photo. */
     private fun candidates(source: Source): List<SearchAlbum> {
         val own = source.cloudAlbums.filter { !it.isSharedWithMe && it.linkId !in source.hiddenAlbumIds }
-        return sortAlbums(own, source.sortMode, source.customOrder).map { SearchAlbum.Cloud(it) } +
+        return sortAlbums(own, source.sortMode, source.customOrder, source.newestPhoto).map { SearchAlbum.Cloud(it) } +
             DeviceFolderCards.visible(source.deviceFolders).map { SearchAlbum.Folder(it) }
     }
 }

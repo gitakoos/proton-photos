@@ -2780,4 +2780,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, icono de disfraz, seleccionado</string>
     <string name="app_icon_a11y_disguise">%1$s, icono de disfraz</string>
     <string name="app_icon_a11y_selected">%1$s, seleccionado</string>
+    <string name="album_arrange_photos">Ordenar fotos</string>
+    <string name="arrange_hint">Mantén pulsada una foto para moverla. Toca fotos para seleccionar varias.</string>
+    <string name="arrange_move_to_start">Mover al principio</string>
+    <string name="arrange_move_to_end">Mover al final</string>
+    <string name="arrange_move_here">Mover aquí</string>
+    <string name="arrange_pick_target">Toca la foto junto a la que quieres poner la selección</string>
+    <string name="arrange_before">Antes</string>
+    <string name="arrange_after">Después</string>
+    <string name="arrange_done">Hecho</string>
+    <string name="arrange_selected_count">%1$d seleccionadas</string>
+    <string name="arrange_discard_title">¿Descartar el nuevo orden?</string>
+    <string name="arrange_discard_message">Las fotos vuelven a donde estaban.</string>
+    <string name="arrange_discard_confirm">Descartar</string>
+    <string name="arrange_discard_keep">Seguir ordenando</string>
+    <string name="arrange_saved">Orden guardado</string>
+    <string name="albums_sort_newest_photo">Foto más reciente</string>
 </resources>

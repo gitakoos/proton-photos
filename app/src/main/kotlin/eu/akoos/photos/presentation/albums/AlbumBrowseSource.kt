@@ -65,6 +65,7 @@ class AlbumBrowseSource @Inject constructor(
     private val cloudAlbumDao: CloudAlbumDao,
     private val driveRepo: DrivePhotoRepository,
     private val localMediaRepo: LocalMediaRepository,
+    private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
 ) {
 
     /**
@@ -104,6 +105,7 @@ class AlbumBrowseSource @Inject constructor(
         .catch { emit(emptyList()) }
 
     /** What the album surfaces are drawn from. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     internal val source: Flow<SearchAlbums.Source> = combine(
         cachedCloudAlbums,
         deviceFolders,
@@ -116,9 +118,20 @@ class AlbumBrowseSource @Inject constructor(
                     customOrder = decodeAlbumOrder(prefs[SettingsKeys.ALBUMS_CUSTOM_ORDER]),
                 )
             }
-            .distinctUntilChanged(),
+            .distinctUntilChanged()
+            .flatMapLatest { settings ->
+                if (settings.sortMode != AlbumSortMode.NewestPhoto) flowOf(settings)
+                else newestPhotoTimes().map { settings.copy(newestPhoto = it) }
+            },
     ) { (cloudAlbums, sharedAlbums), folders, settings ->
         settings.copy(cloudAlbums = cloudAlbums, sharedAlbums = sharedAlbums, deviceFolders = folders)
     }
         .catch { emit(SearchAlbums.Source()) }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun newestPhotoTimes(): Flow<Map<String, Long>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyMap())
+            else albumOrder.observeNewestPhotoTimes(userId.id).catch { emit(emptyMap()) }
+        }
 }

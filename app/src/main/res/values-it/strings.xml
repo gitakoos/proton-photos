@@ -2782,4 +2782,20 @@
     <string name="app_icon_a11y_disguise_selected">%1$s, icona di camuffamento, selezionata</string>
     <string name="app_icon_a11y_disguise">%1$s, icona di camuffamento</string>
     <string name="app_icon_a11y_selected">%1$s, selezionata</string>
+    <string name="album_arrange_photos">Disponi foto</string>
+    <string name="arrange_hint">Tieni premuta una foto per spostarla. Tocca le foto per selezionarne più di una.</string>
+    <string name="arrange_move_to_start">Sposta all\'inizio</string>
+    <string name="arrange_move_to_end">Sposta alla fine</string>
+    <string name="arrange_move_here">Sposta qui</string>
+    <string name="arrange_pick_target">Tocca la foto accanto alla quale mettere la selezione</string>
+    <string name="arrange_before">Prima</string>
+    <string name="arrange_after">Dopo</string>
+    <string name="arrange_done">Fatto</string>
+    <string name="arrange_selected_count">%1$d selezionate</string>
+    <string name="arrange_discard_title">Scartare il nuovo ordine?</string>
+    <string name="arrange_discard_message">Le foto tornano dov\'erano.</string>
+    <string name="arrange_discard_confirm">Scarta</string>
+    <string name="arrange_discard_keep">Continua a disporre</string>
+    <string name="arrange_saved">Ordine salvato</string>
+    <string name="albums_sort_newest_photo">Foto più recente</string>
 </resources>
