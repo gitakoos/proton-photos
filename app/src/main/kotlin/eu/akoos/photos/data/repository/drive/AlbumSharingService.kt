@@ -2051,32 +2051,49 @@ class AlbumSharingService @Inject constructor(
     ): SaveSharedPhotosResult = withContext(Dispatchers.IO) {
         val ids = photoLinkIds.distinct()
         if (ids.isEmpty()) return@withContext SaveSharedPhotosResult(0, 0, 0)
-        val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
+        val started = System.nanoTime()
+        val sdkOn = sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.SAVE_TO_LIBRARY)
+        // The keys the app's own copy needs: worked out first, as always, when that copy does every photo,
+        // and only once a photo needs it when the SDK goes first. A failure there is kept, so the SDK path
+        // asks once and counts every photo left for the app's own copy as failed.
+        var prep: OwnLibraryCopyContext? =
+            if (sdkOn) null else prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
+        var prepFailure: Exception? = null
         val details = linkDetailHelpers.batchFetchLinkDetailsViaShare(userId, sharingShareId, ids)
         val contentHashOf = { linkId: String ->
             val d = details[linkId]
             d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
         }
         val held = sharedPhotosAlreadyHeld(ids, contentHashOf) { photoListingDao.findExistingContentHashes(userId.id, it) }
-        var copied = 0
-        var failed = 0
-        var skipped = 0
-        for (linkId in ids) {
-            val d = details[linkId]
-            if (linkId in held) {
-                skipped++
-                continue
-            }
+        val toCopy = ids.filter { it !in held }
+        val counts = eu.akoos.photos.data.sdk.saveSharedPhotosRouted(
+            linkIds = toCopy,
+            sdkOn = sdkOn,
+            viaSdk = { linkIds, onOutcome -> sdkSharedOps.saveToTimeline(userId, sourceVolumeId, linkIds, onOutcome) },
+        ) { linkId ->
             try {
-                copyPhotoToOwnLibrary(userId, sourceVolumeId, linkId, d, prep)
-                copied++
+                prepFailure?.let { throw it }
+                val copyContext = prep ?: try {
+                    prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId).also { prep = it }
+                } catch (e: Exception) {
+                    if (e !is kotlinx.coroutines.CancellationException) prepFailure = e
+                    throw e
+                }
+                copyPhotoToOwnLibrary(userId, sourceVolumeId, linkId, details[linkId], copyContext)
+                true
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "saveSharedPhotosToOwnLibrary: copy failed linkId=$linkId msg=${e.message}", e)
-                failed++
+                false
             }
         }
-        SaveSharedPhotosResult(copied, failed, skipped)
+        val skipped = ids.size - toCopy.size + counts.alreadyThere
+        Log.d(
+            TAG,
+            "saveSharedPhotosToOwnLibrary: copied=${counts.copied} failed=${counts.failed} skipped=$skipped " +
+                "sdk=$sdkOn ms=${(System.nanoTime() - started) / 1_000_000}",
+        )
+        SaveSharedPhotosResult(counts.copied, counts.failed, skipped)
     }
 
     data class SaveSharedAlbumResult(

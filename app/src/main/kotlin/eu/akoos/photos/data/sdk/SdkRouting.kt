@@ -57,6 +57,7 @@ enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>, val de
     EVENTS("events", SettingsKeys.SDK_ROUTE_EVENTS),
     SHARED("shared", SettingsKeys.SDK_ROUTE_SHARED),
     SHARED_BY_ME("shared-by-me", SettingsKeys.SDK_ROUTE_SHARED_BY_ME, defaultOn = false),
+    SAVE_TO_LIBRARY("save-to-library", SettingsKeys.SDK_ROUTE_SAVE_TO_LIBRARY, defaultOn = false),
 }
 
 /**

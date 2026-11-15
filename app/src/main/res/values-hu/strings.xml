@@ -1917,6 +1917,8 @@
     <string name="sdk_route_shared_desc">A mások által veled megosztott albumok listázása és elhagyása, fotók hozzáadása, és fotóik megnyitása teljes felbontásban</string>
     <string name="sdk_route_shared_by_me">Általad megosztott fotók</string>
     <string name="sdk_route_shared_by_me_desc">A nyilvános linkkel megosztott fotóid listázása</string>
+    <string name="sdk_route_save_to_library">Megosztott fotók mentése</string>
+    <string name="sdk_route_save_to_library_desc">Egy veled megosztott album fotójának mentése a saját könyvtáradba</string>
     <string name="sdk_route_activity">%1$s. Ebben a munkamenetben: %2$d a könyvtáron át, %3$d a megszokott módon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>

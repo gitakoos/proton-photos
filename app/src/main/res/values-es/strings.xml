@@ -1954,6 +1954,8 @@
     <string name="sdk_route_shared_desc">Listar y abandonar álbumes que otros compartieron contigo, añadirles fotos y abrir sus fotos a resolución completa</string>
     <string name="sdk_route_shared_by_me">Fotos que compartes</string>
     <string name="sdk_route_shared_by_me_desc">Listar las fotos que compartiste con un enlace público</string>
+    <string name="sdk_route_save_to_library">Guardar fotos compartidas</string>
+    <string name="sdk_route_save_to_library_desc">Guardar una foto de un álbum compartido contigo en tu biblioteca</string>
     <string name="sdk_route_activity">%1$s. En esta sesión: %2$d con la biblioteca, %3$d de la forma habitual.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <string name="settings_ai_grouping_progress">%1$d de %2$d rostros</string>

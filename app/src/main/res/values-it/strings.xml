@@ -1953,6 +1953,8 @@
     <string name="sdk_route_shared_desc">Elencare e abbandonare gli album che altri hanno condiviso con te, aggiungervi foto e aprirne le foto a piena risoluzione</string>
     <string name="sdk_route_shared_by_me">Foto che condividi</string>
     <string name="sdk_route_shared_by_me_desc">Elencare le foto che hai condiviso con un link pubblico</string>
+    <string name="sdk_route_save_to_library">Salvare foto condivise</string>
+    <string name="sdk_route_save_to_library_desc">Salvare una foto di un album condiviso con te nella tua libreria</string>
     <string name="sdk_route_activity">%1$s. In questa sessione: %2$d tramite la libreria, %3$d nel modo consueto.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <string name="settings_ai_grouping_progress">%1$d di %2$d volti</string>

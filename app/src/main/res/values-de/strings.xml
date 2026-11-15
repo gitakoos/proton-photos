@@ -1918,6 +1918,8 @@
     <string name="sdk_route_shared_desc">Von anderen geteilte Alben auflisten und verlassen, Fotos hinzufügen und ihre Fotos in voller Auflösung öffnen</string>
     <string name="sdk_route_shared_by_me">Von dir geteilte Fotos</string>
     <string name="sdk_route_shared_by_me_desc">Fotos auflisten, die du per öffentlichem Link geteilt hast</string>
+    <string name="sdk_route_save_to_library">Geteilte Fotos speichern</string>
+    <string name="sdk_route_save_to_library_desc">Ein Foto aus einem mit dir geteilten Album in deiner Bibliothek speichern</string>
     <string name="sdk_route_activity">%1$s. In dieser Sitzung: %2$d über die Bibliothek, %3$d auf dem üblichen Weg.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <string name="settings_ai_grouping_progress">%1$d von %2$d Gesichtern</string>
