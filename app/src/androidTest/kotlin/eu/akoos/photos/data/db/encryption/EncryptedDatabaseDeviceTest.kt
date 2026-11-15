@@ -243,6 +243,17 @@ class EncryptedDatabaseDeviceTest {
         }
     }
 
+    @Test
+    fun theLibraryEncryptsWithOpenSsl() {
+        writePlaintextDatabase(syncRows = 10, tagRows = 0, embeddingRows = 0)
+        val db = openThroughGate(gate())
+        db.openHelper.writableDatabase.query("PRAGMA cipher_provider").use {
+            it.moveToFirst()
+            assertEquals("openssl", it.getString(0))
+        }
+        db.close()
+    }
+
     private fun longPragma(db: androidx.sqlite.db.SupportSQLiteDatabase, name: String): Long =
         db.query("PRAGMA $name").use { it.moveToFirst(); it.getLong(0) }
 

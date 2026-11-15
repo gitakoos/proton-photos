@@ -36,8 +36,7 @@ import net.zetetic.database.sqlcipher.SQLiteGlobal
 /**
  * The sizes behind [SqlCipherTuning], kept free of Android calls so they run in a unit test.
  *
- * SQLCipher decrypts and checks every page it reads from storage, in software: its Android build carries no
- * hardware AES. A page read a second time costs a second decrypt, where the platform SQLite only copies it from
+ * SQLCipher decrypts and checks every page it reads from storage. A page read a second time costs a second decrypt, where the platform SQLite only copies it from
  * the kernel's file cache. Both libraries cap the page cache of the whole process at 8 MB (a soft heap limit
  * set when the library starts), so a query over a large table decrypts the same pages again and again. A larger
  * page cache keeps them decrypted. Pages are only allocated as they are read, so a small database never uses it.

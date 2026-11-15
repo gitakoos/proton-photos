@@ -32,7 +32,8 @@ osmdroid = "6.1.20"
 onnxruntime = "1.28.0"
 exifinterface = "1.4.2"
 zip4j = "2.11.6"
-sqlcipher = "4.20.0"
+sqlcipher = "4.20.0-openssl-3.5.9"
+androidx-sqlite = "2.7.0"
 
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
@@ -157,7 +158,9 @@ exifinterface = { module = "androidx.exifinterface:exifinterface", version.ref =
 zip4j = { module = "net.lingala.zip4j:zip4j", version.ref = "zip4j" }
 
 # Encrypted SQLite for the Room database
-sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
+sqlcipher-android = { module = "eu.akoos.sqlcipher:sqlcipher-android", version.ref = "sqlcipher" }
+# The AAR comes without its POM, so the support API it was built against is declared here
+androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-sqlite" }
 
 # Coroutines
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

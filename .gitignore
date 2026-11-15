@@ -33,3 +33,4 @@ temp*/
 # Local secrets of release tooling (a Nostr signing key, tokens). Never committed.
 .env
 .env.*
+/third_party/sqlcipher/
