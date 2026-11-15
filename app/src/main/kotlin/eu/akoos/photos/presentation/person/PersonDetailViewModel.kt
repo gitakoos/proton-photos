@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -247,9 +248,12 @@ class PersonDetailViewModel @Inject constructor(
                         val matched = items.filter { it.stableId in keys }
                             .sortedByDescending { it.captureTimeMs }
                         matched to faceFocusByPhoto(boxes)
-                    }.distinctUntilChanged().collect { (matched, focus) ->
-                        _uiState.update { it.copy(isLoading = false, items = matched, focus = focus) }
-                    }
+                    }.distinctUntilChanged()
+                        // The match walks the whole library on every change to it: off the main thread.
+                        .flowOn(Dispatchers.Default)
+                        .collect { (matched, focus) ->
+                            _uiState.update { it.copy(isLoading = false, items = matched, focus = focus) }
+                        }
                 }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

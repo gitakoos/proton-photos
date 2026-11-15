@@ -110,6 +110,8 @@ class MapViewModel @Inject constructor(
                         }
                 }
                 .distinctUntilChanged()
+                // A set of every device photo, built and compared on each library change: off the main thread.
+                .flowOn(Dispatchers.Default)
                 .collect { startLocalBackfill() }
         }
     }

@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -552,6 +553,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val itemsFlow = accountManager.getPrimaryUserId().flatMapLatest { userId ->
                 if (userId != null) getGalleryItems.invoke(userId) else getGalleryItems.invokeLocalOnly()
             }
+            // The folder is picked out of the whole library and sorted on every change to it, so that
+            // runs off the main thread; only the finished lists are set on it.
             combine(
                 itemsFlow,
                 vaultFlow,
@@ -582,7 +585,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // Narrowed to what this screen lists, so the badge set stays the size of one folder
                 // rather than of the whole vault.
                 Triple(ordered, vaultedUris, vaultedUris intersect vault.pairedUris)
-            }.collect { (ordered, vaultedUris, pairedUris) ->
+            }.flowOn(Dispatchers.Default).collect { (ordered, vaultedUris, pairedUris) ->
                 // Right after a rename the device list still files the moved photos under the old name for a
                 // few seconds; the photos already shown stay until the new folder lists them.
                 val renaming = android.os.SystemClock.elapsedRealtime() < renameHoldUntil

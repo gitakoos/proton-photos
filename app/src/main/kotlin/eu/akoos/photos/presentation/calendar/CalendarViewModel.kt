@@ -36,9 +36,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
@@ -133,6 +135,9 @@ class CalendarViewModel @Inject constructor(
                     // decrypt that lands after the grid built fills the tile. This is a cheap copy
                     // per day, not a rebuild of the grid.
                     .combine(thumbnailUrlStore.urls) { months, urls -> overlayCovers(months, urls) }
+                    // The month walk formats a date per photo, and the cover overlay runs on every
+                    // thumbnail that lands: both off the main thread, so a large library cannot stall it.
+                    .flowOn(Dispatchers.Default)
                     .collect { months ->
                         _uiState.update { it.copy(
                             isLoading = false,

@@ -121,6 +121,7 @@ import eu.akoos.photos.util.onThisDayWindowDays
 import eu.akoos.photos.util.isBatteryLow
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.SyncWorker
+import java.text.SimpleDateFormat
 import java.util.Date
 import javax.inject.Inject
 import eu.akoos.photos.presentation.people.PeopleVisibility
@@ -136,32 +137,59 @@ private data class GallerySources(
 )
 
 /**
- * Bucket [items] into ("MMMM yyyy", items) pairs in first-seen order. One [SimpleDateFormat] and one
- * reused [Date] (set via [Date.setTime]) for the whole list — at 52k items the previous
- * `Date(item.captureTimeMs)` per element churned the allocator on every recompute. Label format,
- * locale and first-seen order are identical to the prior inline grouping, so the timeline is
- * unchanged. groupBy yields a LinkedHashMap, preserving encounter order.
+ * Bucket [items] into ("MMMM yyyy", items) pairs in first-seen order. Label format, locale and
+ * first-seen order are identical to a per-photo `format`, so the timeline is unchanged; see
+ * [groupByLabel] for why each day is formatted only once.
  */
-internal fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
-    val fmt = monthYearFormat()
-    val scratch = Date()
-    return items
-        .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
-        .entries.map { it.key to it.value }
-}
+internal fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> =
+    groupByLabel(items, monthYearFormat())
 
 /**
- * Bucket [items] into ("d MMMM yyyy", items) pairs in first-seen order. Same one-format, one-Date
- * shape as [groupByMonth]; the "d MMMM yyyy" label matches the grid's prior inline Day format, so
- * the 3-column default headers are unchanged. groupBy yields a LinkedHashMap, preserving order.
+ * Bucket [items] into ("d MMMM yyyy", items) pairs in first-seen order. The "d MMMM yyyy" label
+ * matches the grid's Day format, so the 3-column default headers are unchanged.
  */
-internal fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
-    val fmt = dayMonthYearFormat()
+internal fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> =
+    groupByLabel(items, dayMonthYearFormat())
+
+/**
+ * Bucket [items] by [fmt]'s label in first-seen order, formatting each local calendar day once: both
+ * header patterns read only the day, month and year, so every instant of a day yields the same label.
+ * The day is taken in [fmt]'s own zone, with the offset that zone has at that instant, so it is
+ * exactly the day the formatter would print. A library of a hundred thousand photos spans a few
+ * thousand days, so this is a few thousand formats per pass instead of one per photo, on a pass that
+ * runs on every list change.
+ */
+private fun groupByLabel(items: List<GalleryItem>, fmt: SimpleDateFormat): List<Pair<String, List<GalleryItem>>> {
+    if (items.isEmpty()) return emptyList()
+    val zone = fmt.timeZone
     val scratch = Date()
-    return items
-        .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
-        .entries.map { it.key to it.value }
+    val labelByDay = HashMap<Long, String>()
+    val groups = LinkedHashMap<String, MutableList<GalleryItem>>()
+    for (item in items) {
+        val ms = item.captureTimeMs
+        val localDay = Math.floorDiv(ms + zone.getOffset(ms), DAY_MS)
+        val label = labelByDay.getOrPut(localDay) { scratch.time = ms; fmt.format(scratch) }
+        groups.getOrPut(label) { ArrayList() }.add(item)
+    }
+    return groups.map { (label, members) -> label to members }
 }
+
+private const val DAY_MS = 24L * 60 * 60 * 1000
+
+/**
+ * Whether [dir] holds at least one decrypted thumbnail (`thumb_<id>.jpg`). Stops at the first one: the
+ * cache of a large library holds tens of thousands of files, and listing them all built an object per
+ * file on every gallery start just to learn whether the list was empty. A folder that is missing or
+ * cannot be read holds none.
+ */
+internal fun holdsCachedThumbnail(dir: java.io.File): Boolean = runCatching {
+    java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+        stream.any { path ->
+            val name = path.fileName.toString()
+            name.startsWith("thumb_") && name.endsWith(".jpg")
+        }
+    }
+}.getOrDefault(false)
 
 /** Output of the off-main gallery computation: the hidden/bucket-filtered list (→ items), the
  *  tab/content-filtered list (→ filteredItems), the local-only pending count, and the month + day +
@@ -827,9 +855,7 @@ class GalleryViewModel @Inject constructor(
      */
     private suspend fun reconcileThumbnailCacheThenSeed(userId: me.proton.core.domain.entity.UserId) {
         val thumbsDir = java.io.File(context.cacheDir, "thumbnails")
-        val cacheEmpty = thumbsDir.listFiles { f ->
-            f.name.startsWith("thumb_") && f.name.endsWith(".jpg")
-        }?.isEmpty() ?: true // null = dir missing/unreadable, treat as empty
+        val cacheEmpty = !holdsCachedThumbnail(thumbsDir)
         if (cacheEmpty) {
             val hasSeedRows = runCatching { photoListingDao.getThumbnailUrlSeed(userId.id).isNotEmpty() }
                 .getOrDefault(false)
@@ -2867,7 +2893,8 @@ class GalleryViewModel @Inject constructor(
         // category, they want every matching item, regardless of whether the photo is also
         // in an album. The set is empty when the "Hide photos in albums" toggle is off,
         // so this is a no-op for users who don't enable the feature.
-        val baseItems = if (filter == GalleryFilter.All) {
+        // With nothing to hide the list is handed on as it is, rather than copied photo by photo.
+        val baseItems = if (filter == GalleryFilter.All && albumHideCloudIds.isNotEmpty()) {
             items.filter { item ->
                 val cloudLinkId = when (item) {
                     is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -2952,8 +2979,11 @@ class GalleryViewModel @Inject constructor(
 
         // Date
         if (filter.year != null || filter.month != null || filter.day != null) {
+            // One calendar for the pass, moved to each photo's time: a new one per photo of the library
+            // was the cost of this filter, on the main thread when a date is picked.
+            val cal = java.util.Calendar.getInstance()
             result = result.filter { item ->
-                val cal = java.util.Calendar.getInstance().apply { timeInMillis = item.captureTimeMs }
+                cal.timeInMillis = item.captureTimeMs
                 val dom = cal.get(java.util.Calendar.DAY_OF_MONTH)
                 val yearMatch  = filter.year  == null || cal.get(java.util.Calendar.YEAR) == filter.year
                 val monthMatch = filter.month == null || (cal.get(java.util.Calendar.MONTH) + 1) == filter.month
