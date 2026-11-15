@@ -26,6 +26,9 @@ import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import eu.akoos.photos.data.mlsync.AlbumOrderDriveNaming
 import eu.akoos.photos.data.mlsync.LabelDriveNaming
@@ -38,6 +41,7 @@ import eu.akoos.photos.data.sdk.SdkGate
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.WorkManagerTestSetup
 import eu.akoos.photos.worker.MlSyncWorker
+import eu.akoos.photos.worker.SharedBackupTriggerWorker
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -57,6 +61,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -66,6 +71,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /** The quicker shared backup as the scheduler runs it: when it lists the folders, when it asks for a round. */
 @RunWith(RobolectricTestRunner::class)
@@ -159,6 +165,88 @@ class SharedBackupSchedulerFastSyncTest {
     )
 
     private suspend fun turnOn() = store.setEnabled(true, System.currentTimeMillis())
+
+    private suspend fun seenAll() {
+        store.recordSeen(seenRevisions(listing))
+        store.markOwnCopyTaken()
+    }
+
+    private fun planned(name: String): List<WorkInfo> =
+        WorkManager.getInstance(context).getWorkInfosForUniqueWork(name).get()
+            .filter { it.state == WorkInfo.State.ENQUEUED }
+
+    /** A round queued and waiting, as the ML sync job holds it. */
+    private fun roundQueued() {
+        val request = OneTimeWorkRequestBuilder<SharedBackupTriggerWorker>().setInitialDelay(1, TimeUnit.HOURS).build()
+        WorkManager.getInstance(context)
+            .enqueueUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE, request).result.get()
+    }
+
+    @Test
+    fun `a pull with a change of the user's waiting sends the round at once, and pulling again starts no other`() =
+        runBlocking {
+            turnOn()
+            val scheduler = scheduler()
+            scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+            scheduler.refreshNow()
+            assertEquals(listOf(true), enqueued)
+
+            scheduler.refreshNow()
+            scheduler.refreshNow()
+            assertEquals(1, enqueued.size)
+            coVerify(exactly = 0) { runner.list(any()) }
+        }
+
+    @Test
+    fun `a pull finding another device's newer file starts a round, and pulls while it is queued start none`() =
+        runBlocking {
+            turnOn()
+            val scheduler = scheduler()
+            scheduler.refreshNow()
+            scheduler.refreshNow()
+            assertEquals(listOf(false), enqueued)
+            coVerify(exactly = 1) { runner.list(user) }
+
+            // Past the once-a-minute gap, the queued round still keeps another pull from listing or asking again.
+            roundQueued()
+            scheduler().refreshNow()
+            assertEquals(1, enqueued.size)
+            coVerify(exactly = 1) { runner.list(user) }
+            assertTrue(planned(SharedBackupScheduler.NEXT_WORK).isEmpty())
+        }
+
+    @Test
+    fun `a pull finding nothing new plans the next round as a round ending now would`() = runBlocking {
+        turnOn()
+        seenAll()
+        val scheduler = scheduler()
+        scheduler.scheduleNext()
+        val before = planned(SharedBackupScheduler.NEXT_WORK).single().id
+
+        scheduler.refreshNow()
+        assertTrue(enqueued.isEmpty())
+        val after = planned(SharedBackupScheduler.NEXT_WORK).single().id
+        assertNotEquals(before, after)
+
+        // Pulling again within the minute lists nothing and leaves the plan as it is.
+        scheduler.refreshNow()
+        coVerify(exactly = 1) { runner.list(user) }
+        assertEquals(after, planned(SharedBackupScheduler.NEXT_WORK).single().id)
+    }
+
+    @Test
+    fun `a pull does nothing for a guest or with the backup off`() = runBlocking {
+        val scheduler = scheduler()
+        scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+        scheduler.refreshNow()
+        turnOn()
+        primary.value = null
+        scheduler.changed(listOf(SharedBackupKind.LABELS), byUser = true)
+        scheduler.refreshNow()
+        coVerify(exactly = 0) { runner.list(any()) }
+        assertTrue(enqueued.isEmpty())
+        assertTrue(planned(SharedBackupScheduler.NEXT_WORK).isEmpty())
+    }
 
     @Test
     fun `another device's newer file starts a round, and the same file again does not`() = runBlocking {

@@ -85,7 +85,7 @@ import javax.inject.Singleton
  * left, and the backup folders are listed on coming back to the app and every [CHECK_EVERY_MS] while it stays open
  * (at most once per [CHECK_AT_MOST_EVERY_MS]), a round running only when another device's file there is new since
  * the last round that went through saw the folders. Nothing of this runs in the background, for a guest, while
- * signed out or signing out, offline, or with the backup off.
+ * signed out or signing out, offline, or with the backup off. A pull to refresh does the same at once ([refresh]).
  */
 /** How long a round after a change the user made waits: [SharedBackupScheduler.SAVE_AFTER_MS], or less once the
  *  first change still waiting came [SharedBackupScheduler.SAVE_AT_MOST_AFTER_MS] ago. */
@@ -271,7 +271,7 @@ class SharedBackupScheduler @Inject constructor(
      */
     internal suspend fun appLeft() {
         try {
-            flushIfWaiting()
+            flushIfWaiting("app left")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -279,19 +279,45 @@ class SharedBackupScheduler @Inject constructor(
         }
     }
 
-    private suspend fun flushIfWaiting() {
+    /**
+     * The user's pull to refresh, in the background so the list's own refresh never waits for it: a change still
+     * waiting goes out now as on leaving the app, otherwise the backup folders are listed as on coming back to it.
+     * When that listing finds nothing new, the next round and the next look are planned as after a round ending now.
+     * The throttles and the one-round-at-a-time rule of the foreground check hold, so repeated pulls start nothing
+     * more while a round is queued or running. Nothing for a guest or with the backup off.
+     */
+    fun refresh() {
+        appScope.launch { refreshNow() }
+    }
+
+    internal suspend fun refreshNow() {
+        try {
+            if (flushIfWaiting("refresh")) return
+            if (checkForNewer() != CheckOutcome.NOTHING_NEW) return
+            scheduleNext()
+            foregroundLoop.restart()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "refresh failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /** Sends a change the user made that still waits for its round, as expedited work; whether it did. */
+    private suspend fun flushIfWaiting(reason: String): Boolean {
         val status = store.status.first()
-        if (!status.enabled) return
-        if (!flushOnBackground(firstWaitingChangeMs, status.lastFailed, status.lastAtMs, System.currentTimeMillis())) return
-        val userId = accountManager.getPrimaryUserId().first() ?: return
-        if (signOut.get().isSigningOut(userId)) return
+        if (!status.enabled) return false
+        if (!flushOnBackground(firstWaitingChangeMs, status.lastFailed, status.lastAtMs, System.currentTimeMillis())) return false
+        val userId = accountManager.getPrimaryUserId().first() ?: return false
+        if (signOut.get().isSigningOut(userId)) return false
         val running = withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.RUNNING) }
         enqueueRound(userId, userAsked = false, expedited = true)
         // The round now queued takes the change in. One already running may have read before it, so then the planned
         // check after the change stays.
         if (!running) workManager.cancelUniqueWork(SOON_WORK)
-        Log.i(TAG, "app left with a change waiting: round now")
-        SyncDiagnostics.log("shared backup: app left with a change waiting, round now")
+        Log.i(TAG, "$reason with a change waiting: round now")
+        SyncDiagnostics.log("shared backup: $reason with a change waiting, round now")
+        return true
     }
 
     /**
@@ -301,9 +327,9 @@ class SharedBackupScheduler @Inject constructor(
      * or on a connection the round may not use, after a failed round (its next one is planned already), or while
      * another Drive job runs.
      */
-    internal suspend fun checkForNewer() {
+    internal suspend fun checkForNewer(): CheckOutcome {
         val now = System.currentTimeMillis()
-        if (checkTooSoon(now, lastCheckMs)) return
+        if (checkTooSoon(now, lastCheckMs)) return CheckOutcome.SKIPPED
         val userId = accountManager.getPrimaryUserId().first()
         val status = store.status.first()
         val conditions = CheckConditions(
@@ -314,26 +340,28 @@ class SharedBackupScheduler @Inject constructor(
             networkAllowed = network.isUnmetered.value || anyNetworkAllowed(),
             lastFailed = status.lastFailed,
         )
-        if (userId == null || !checkAllowed(conditions) || !sdkGate.get().isCapable) return
-        if (withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING) }) return
-        if (!DriveJobLock.mutex.tryLock()) return
+        if (userId == null || !checkAllowed(conditions) || !sdkGate.get().isCapable) return CheckOutcome.SKIPPED
+        if (withContext(Dispatchers.IO) { mlSyncJob(WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING) }) return CheckOutcome.SKIPPED
+        if (!DriveJobLock.mutex.tryLock()) return CheckOutcome.SKIPPED
         lastCheckMs = now
         val newer = try {
-            val listing = runner.get().list(userId) ?: return
+            val listing = runner.get().list(userId) ?: return CheckOutcome.SKIPPED
             newerFiles(listing, driveStore.get().deviceId(), store.ownCopyTaken(), store.seen())
         } finally {
             DriveJobLock.mutex.unlock()
         }
         if (newer.isEmpty()) {
             Log.i(TAG, "check: nothing new")
-            return
+            return CheckOutcome.NOTHING_NEW
         }
         val where = newer.keys.joinToString(",") { it.name.lowercase() }
         Log.i(TAG, "check: another device wrote $where, round now")
         SyncDiagnostics.log("shared backup check: another device wrote $where, round now")
         // Asked for in full: the round takes in only the copies newer than the ones taken in last and writes only
         // what changed here, so the kinds with nothing new cost a listing each.
-        if (store.isEnabled()) enqueueRound(userId, userAsked = false, expedited = false)
+        if (!store.isEnabled()) return CheckOutcome.SKIPPED
+        enqueueRound(userId, userAsked = false, expedited = false)
+        return CheckOutcome.ROUND
     }
 
     /** Whether an ML sync job is in one of [states]. */

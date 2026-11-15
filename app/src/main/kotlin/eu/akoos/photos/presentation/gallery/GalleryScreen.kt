@@ -1197,7 +1197,7 @@ fun GalleryScreen(
                 val pullState = rememberPullToRefreshState()
                 PullToRefreshBox(
                     isRefreshing = state.isRefreshing,
-                    onRefresh = { viewModel.refresh() },
+                    onRefresh = { viewModel.pullRefresh() },
                     state = pullState,
                     modifier = Modifier.fillMaxSize(),
                     indicator = {}

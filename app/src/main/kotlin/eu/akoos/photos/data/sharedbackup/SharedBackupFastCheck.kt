@@ -53,6 +53,9 @@ internal fun flushOnBackground(firstWaitingChangeMs: Long, lastFailed: Boolean, 
 private fun failedRoundWaiting(lastFailed: Boolean, lastAtMs: Long, nowMs: Long): Boolean =
     lastFailed && nowMs - lastAtMs < SharedBackupScheduler.SAVE_AFTER_MS
 
+/** What a look at the backup folders came to: not made, made with nothing new, or a round asked for. */
+internal enum class CheckOutcome { SKIPPED, NOTHING_NEW, ROUND }
+
 /** What decides whether the backup folders may be looked at now. */
 internal data class CheckConditions(
     val enabled: Boolean,
@@ -120,7 +123,20 @@ internal class ForegroundCheckLoop(
     @Synchronized
     fun foreground() {
         if (job?.isActive == true) return
-        job = scope.launch {
+        job = loop(waitFirst = false)
+    }
+
+    /** Starts the [CHECK_EVERY_MS] wait for the next check again, while the app is in the foreground. */
+    @Synchronized
+    fun restart() {
+        if (job?.isActive != true) return
+        job?.cancel()
+        job = loop(waitFirst = true)
+    }
+
+    private fun loop(waitFirst: Boolean): Job =
+        scope.launch {
+            if (waitFirst) delay(CHECK_EVERY_MS)
             while (isActive) {
                 try {
                     check()
@@ -132,7 +148,6 @@ internal class ForegroundCheckLoop(
                 delay(CHECK_EVERY_MS)
             }
         }
-    }
 
     @Synchronized
     fun background() {

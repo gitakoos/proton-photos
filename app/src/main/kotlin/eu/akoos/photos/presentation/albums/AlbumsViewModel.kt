@@ -169,6 +169,7 @@ class AlbumsViewModel @Inject constructor(
     private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
     private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
     private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
+    private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
@@ -517,6 +518,12 @@ class AlbumsViewModel @Inject constructor(
     }
 
     fun refresh() = loadAlbums()
+
+    /** The user's pull: the shared backup is brought up to date as well, in the background. */
+    fun pullRefresh() {
+        sharedBackup.refresh()
+        refresh()
+    }
 
     fun loadAlbums() {
         viewModelScope.launch {

@@ -152,6 +152,7 @@ class SharedViewModel @Inject constructor(
     private val driveRepo: DrivePhotoRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SharedUiState())
@@ -168,6 +169,12 @@ class SharedViewModel @Inject constructor(
     }
 
     fun refresh() = loadSharedAlbums()
+
+    /** The user's pull: the shared backup is brought up to date as well, in the background. */
+    fun pullRefresh() {
+        sharedBackup.refresh()
+        refresh()
+    }
 
     fun setFilter(filter: SharedFilter) {
         // Switching tabs leaves selection mode — the shared-by-me photos that drive it

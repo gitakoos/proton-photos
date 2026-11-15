@@ -298,6 +298,7 @@ class GalleryViewModel @Inject constructor(
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val moveToFolder: MoveToFolderUseCase,
     private val folderDelete: eu.akoos.photos.presentation.folders.DeviceFolderDeleteController,
+    private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -1367,6 +1368,12 @@ class GalleryViewModel @Inject constructor(
                 doSync(userId)
             }
         }
+    }
+
+    /** The user's pull: the shared backup is brought up to date as well, in the background. */
+    fun pullRefresh() {
+        sharedBackup.refresh()
+        refresh()
     }
 
     fun refresh(force: Boolean = true) {

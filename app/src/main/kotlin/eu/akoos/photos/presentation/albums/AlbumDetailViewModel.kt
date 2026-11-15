@@ -316,6 +316,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
     private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
     private val membershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
+    private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -766,6 +767,12 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     private val pullRefresh = PullRefreshTracker()
+
+    /** The user's pull: [refresh], and the shared backup is brought up to date as well, in the background. */
+    fun pullRefresh() {
+        sharedBackup.refresh()
+        refresh()
+    }
 
     /** User pull-to-refresh. Only this path drives [AlbumDetailUiState.isRefreshing]; background
      *  reloads call [load] directly and never show the indicator. */

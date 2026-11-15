@@ -430,7 +430,7 @@ fun AlbumDetailScreen(
     Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = state.isRefreshing,
-            onRefresh = { viewModel.refresh() },
+            onRefresh = { viewModel.pullRefresh() },
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize(),
         ) {

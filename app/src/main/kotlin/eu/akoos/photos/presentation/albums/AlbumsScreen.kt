@@ -736,7 +736,7 @@ fun AlbumsScreen(
     ) {
         PullToRefreshBox(
             isRefreshing = state.isLoading,
-            onRefresh = { viewModel.refresh() },
+            onRefresh = { viewModel.pullRefresh() },
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize(),
             indicator = {},

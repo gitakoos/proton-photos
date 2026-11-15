@@ -169,7 +169,7 @@ fun SharedScreen(
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
         PullToRefreshBox(
             isRefreshing = state.isLoading,
-            onRefresh = { viewModel.refresh() },
+            onRefresh = { viewModel.pullRefresh() },
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize(),
             indicator = {},
