@@ -602,8 +602,10 @@ class CloudTrashService @Inject constructor(
                     val deletedList = deleted.toList()
                     runCatching {
                         facePhotoRemoval.dropPhotos(userId.id, deleted)
-                        perceptualHashDao.deleteByKeys(deletedList)
-                        photoLocationDao.deleteByIds(userId.id, deletedList)
+                        // Sliced under SQLite's host-variable cap: emptying a trash of more than 999 photos
+                        // otherwise failed both statements and left every row in place.
+                        deletedList.forEachSqlChunk { perceptualHashDao.deleteByKeys(it) }
+                        deletedList.forEachSqlChunk { photoLocationDao.deleteByIds(userId.id, it) }
                     }.onFailure { Log.w(TAG, "deleteFromCloudForever: per-photo data prune failed: ${it.message}") }
                 }
                 CloudDeleteOutcome(deleted, failed)

@@ -111,6 +111,22 @@ private const val SNAPSHOT_SMALL_HEAP_ITEMS = 40_000
 /** How long a file the app removed stays out of the device list while scans still list it. */
 private const val REMOVED_HOLD_MS = 60_000L
 
+/**
+ * The entries of [removed] (uri to when the app removed it) still held out of the device list: those
+ * [items] still lists, for less than [holdMs] before [now]. One pass over the scan with a lookup per
+ * file, so a delete of thousands of photos costs no more than one of a single photo.
+ */
+internal fun heldRemovals(
+    items: List<LocalMediaItem>,
+    removed: Map<String, Long>,
+    now: Long,
+    holdMs: Long,
+): Map<String, Long> {
+    val listed = HashSet<String>()
+    for (item in items) if (item.uri in removed) listed += item.uri
+    return removed.filter { (uri, at) -> uri in listed && now - at < holdMs }
+}
+
 /** How long the shared list outlives its last collector, so moving between screens reuses it
  *  instead of re-scanning. After that it is dropped. The gallery feed keeps the same window. */
 private const val SHARE_STOP_TIMEOUT_MS = 5_000L
@@ -531,9 +547,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> =
         kotlinx.coroutines.flow.combine(deviceMedia.shared, removedUris) { scan, removed ->
             if (removed.isEmpty()) return@combine scan.items
-            val now = android.os.SystemClock.elapsedRealtime()
-            val listed = removed.keys.filterTo(HashSet()) { uri -> scan.items.any { it.uri == uri } }
-            val held = removed.filter { (uri, at) -> uri in listed && now - at < REMOVED_HOLD_MS }
+            val held = heldRemovals(scan.items, removed, android.os.SystemClock.elapsedRealtime(), REMOVED_HOLD_MS)
             if (held.size != removed.size) removedUris.update { current -> current.filterKeys { it in held } }
             if (held.isEmpty()) scan.items else scan.items.filterNot { it.uri in held }
         }.distinctUntilChanged()

@@ -474,7 +474,9 @@ fun PhotoViewerScreen(
     val visible = remember(reconciled, removedIds.size) {
         // Hand back the same instance while nothing is removed, preserving the stable list identity
         // reconcileViewerItems goes out of its way to keep.
-        if (removedIds.isEmpty()) reconciled else reconciled.filterNot { it.stableId in removedIds }
+        // A hash set for the walk: a lookup in the removed list itself scans it for every photo of the library.
+        if (removedIds.isEmpty()) reconciled
+        else removedIds.toHashSet().let { removed -> reconciled.filterNot { it.stableId in removed } }
     }
     // Render off the reconciled list; every per-page lookup below reads from `items` so alias it.
     @Suppress("NAME_SHADOWING") val items = visible
@@ -521,6 +523,8 @@ fun PhotoViewerScreen(
         // change still re-anchors on the next settled frame.
         if (pagerState.isScrollInProgress) return@LaunchedEffect
         val key = anchorKey ?: return@LaunchedEffect
+        // The usual case, the photo still on its page, needs no walk of the whole list.
+        if (items.getOrNull(pagerState.currentPage)?.stableId == key) return@LaunchedEffect
         val newIndex = items.indexOfFirst { it.stableId == key }
         if (newIndex >= 0 && newIndex != pagerState.currentPage) {
             pagerState.scrollToPage(newIndex)

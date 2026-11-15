@@ -57,6 +57,7 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.PdqHash
+import eu.akoos.photos.util.forEachSqlChunk
 import eu.akoos.photos.util.retryOnDbTear
 import javax.inject.Inject
 
@@ -741,7 +742,7 @@ class DuplicateFinderViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> item.cloud.linkId
             }
         }
-        runCatching { perceptualHashDao.deleteByKeys(keys) }
+        runCatching { keys.forEachSqlChunk { perceptualHashDao.deleteByKeys(it) } }
             .onFailure { Log.w(TAG, "perceptual-hash evict failed: ${it.message}") }
     }
 }

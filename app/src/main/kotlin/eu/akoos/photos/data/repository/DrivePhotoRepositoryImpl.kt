@@ -64,6 +64,7 @@ import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.VaultWipe
 import eu.akoos.photos.util.combineSqlChunks
+import eu.akoos.photos.util.flatMapSqlChunks
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -670,7 +671,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {
-            val entities = runCatching { photoListingDao.getByLinkIds(linkIds) }.getOrElse { emptyList() }
+            val entities = runCatching { linkIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) } }
+                .getOrElse { emptyList() }
             if (entities.isNotEmpty()) thumbnailScheduler.prefetch(userId, entities)
         }
     }
@@ -678,7 +680,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {
-            val entities = runCatching { photoListingDao.getByLinkIds(linkIds) }.getOrElse { emptyList() }
+            // Sliced: an import run's detail warms the whole run, which can pass SQLite's host-variable cap.
+            val entities = runCatching { linkIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) } }
+                .getOrElse { emptyList() }
             entities.forEach { thumbnailScheduler.request(userId, it) }
         }
     }
