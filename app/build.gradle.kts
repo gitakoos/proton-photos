@@ -138,6 +138,11 @@ android {
         aidl = true
     }
 
+    // The device tests build databases at the versions earlier releases shipped from the exported schemas.
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
