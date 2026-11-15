@@ -555,6 +555,8 @@ fun PhotoViewerScreen(
     val peopleInPhoto by viewModel.peopleInPhoto.collectAsStateWithLifecycle()
     // The photo that list was read for, so the details panel shows only the settled photo's people.
     val peopleInPhotoKey by viewModel.peopleInPhotoKey.collectAsStateWithLifecycle()
+    // The people the photo was added to by hand, shown in the details panel beside the faces found.
+    val manualPeopleInPhoto by viewModel.manualPeopleInPhoto.collectAsStateWithLifecycle()
     var facesMode by remember { mutableStateOf(false) }
     // The nameless face or group a face tag or a People pill was tapped for, or null while the naming
     // sheet is closed.
@@ -3279,7 +3281,7 @@ fun PhotoViewerScreen(
                 peopleBox = {
                     if (showPeopleBox) {
                         DetailsPeopleBox(
-                            people = peopleInPhoto,
+                            people = DetailsPeopleRow.withManual(peopleInPhoto, manualPeopleInPhoto),
                             faceSource = faceSource,
                             onPersonClick = { person ->
                                 // The details sheet goes first, so the naming sheet never opens over it.

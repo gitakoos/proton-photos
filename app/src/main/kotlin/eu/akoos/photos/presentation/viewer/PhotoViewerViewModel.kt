@@ -244,6 +244,41 @@ internal fun isLoneFace(personId: Long?, otherId: Long?): Boolean = personId == 
 /** The person id a lone face's chip carries when there is no Unsorted bucket yet; never looked up. */
 private const val NO_PERSON = -1L
 
+/**
+ * The named people [photoKey] was added to by hand for [account], the way "Add to person" attaches a
+ * photo with no face to choose, for the details panel's People row. Each manual name resolves to the
+ * account's person of that name (the exact spelling first, else the same name by [samePersonName], the
+ * most photographed when several match); a name no live person holds, a hidden group's reserved name
+ * and the Unsorted bucket are left out. An entry carries no face, so its pill shows the person glyph.
+ */
+internal suspend fun manualPeopleOnPhoto(
+    personDao: eu.akoos.photos.data.db.dao.PersonDao,
+    manualDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
+    account: String,
+    photoKey: String,
+): List<PhotoViewerViewModel.ViewerPerson> {
+    val names = manualDao.namesForPhoto(account, photoKey)
+    if (names.isEmpty()) return emptyList()
+    val named = personDao.namedPeopleForUser(account)
+        .filter { !it.isOther && eu.akoos.photos.domain.usecase.HiddenPersonToken.visibleName(it.displayName) != null }
+    val seen = HashSet<Long>()
+    return names.mapNotNull { name ->
+        val person = named.firstOrNull { it.displayName == name }
+            ?: named.filter { eu.akoos.photos.domain.usecase.samePersonName(it.displayName, name) }
+                .maxByOrNull { it.faceCount }
+        person?.takeIf { seen.add(it.id) }
+    }.map { person ->
+        PhotoViewerViewModel.ViewerPerson(
+            personId = person.id,
+            name = person.displayName,
+            faceBox = PhotoViewerViewModel.ViewerPerson.NO_FACE,
+            faceId = "",
+            isOther = false,
+            photoCount = person.faceCount,
+        )
+    }.sortedBy { it.name?.lowercase() }
+}
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -269,6 +304,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
+    private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val notThisPerson: eu.akoos.photos.domain.usecase.NotThisPersonUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
@@ -773,7 +809,13 @@ class PhotoViewerViewModel @Inject constructor(
         val isOther: Boolean,
         /** How many photos the person holds, the count the People page shows; 0 for an Unsorted face. */
         val photoCount: Int = 0,
-    )
+    ) {
+        companion object {
+            /** The box of an entry for a photo added to the person by hand, which has no face to crop; its
+             *  [faceId] is empty. */
+            val NO_FACE = eu.akoos.photos.presentation.gallery.FaceBox(0f, 0f, 0f, 0f)
+        }
+    }
 
     private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
     /** The people found on the settled photo, named first; empty when AI is off or none are grouped. */
@@ -793,8 +835,14 @@ class PhotoViewerViewModel @Inject constructor(
      *  scan that finishes after a swipe checks it before touching the list. Main thread only. */
     private var peopleRequestedFor: String? = null
 
-    private fun publishPeople(photoKey: String, people: List<ViewerPerson>) {
+    private val _manualPeopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
+    /** The named people the settled photo was added to by hand, with no face of theirs on it, for the
+     *  details panel's People row only; read with [peopleInPhoto] and keyed by [peopleInPhotoKey]. */
+    val manualPeopleInPhoto: StateFlow<List<ViewerPerson>> = _manualPeopleInPhoto.asStateFlow()
+
+    private fun publishPeople(photoKey: String, people: List<ViewerPerson>, manual: List<ViewerPerson>? = null) {
         _peopleInPhoto.value = people
+        if (manual != null) _manualPeopleInPhoto.value = manual
         _peopleInPhotoKey.value = photoKey
     }
 
@@ -813,10 +861,17 @@ class PhotoViewerViewModel @Inject constructor(
             val aiOn = peopleVisibility.visible().first()
             val people: List<ViewerPerson> =
                 if (!aiOn) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
+            val manual: List<ViewerPerson> = if (!aiOn) emptyList() else try {
+                manualPeopleOnPhoto(personDao, personManualPhotoDao, userId?.id ?: PhotoLocationEntity.LOCAL_USER, photoKey)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
             // resolvePeople turns a failed read into an empty list, a cancelled one included, so a read
             // cancelled by the next photo's is stopped here before it can publish.
             ensureActive()
-            publishPeople(photoKey, people)
+            publishPeople(photoKey, people, manual)
         }
     }
 

@@ -233,6 +233,21 @@ class NameOrMergeViewModel @Inject constructor(
             }
         }
 
+    /**
+     * Adds a selection with no face chosen to every one of [personIds] at once, the way a plain add
+     * attaches a photo: each live named person of the account takes all its photos, and anyone else is
+     * passed over. Done when at least one person took them, reporting the first.
+     */
+    fun addToPeople(subject: NameOrMergeSubject.Faces, personIds: List<Long>) = launchAction(subject) {
+        val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+        val photoKeys = NameOrMergeRules.manualPhotoKeys(subject, facesAssigned = false)
+        if (photoKeys.isEmpty()) return@launchAction failed(subject)
+        val added = personIds.distinct().filter { takesPhotos(account, it) }
+        if (added.isEmpty()) return@launchAction failed(subject)
+        for (personId in added) addPhotosToPerson(personId, photoKeys)
+        Outcome.Done(subject.key, added.first(), R.string.person_msg_added)
+    }
+
     /** Whether [personId] is a live named person of [account], the only kind a plain add attaches to. */
     private suspend fun takesPhotos(account: String, personId: Long): Boolean {
         val person = personDao.personById(personId) ?: return false
@@ -338,6 +353,11 @@ internal object NameOrMergeRules {
      *  for a selection only while it holds a chosen face, since a person with no face shows up nowhere. */
     fun canCreate(subject: NameOrMergeSubject): Boolean =
         subject !is NameOrMergeSubject.Faces || subject.faces.isNotEmpty()
+
+    /** Whether the picker may choose several people for [subject]: a selection with photos but no face
+     *  chosen, since a face belongs to one person while a photo can show many. */
+    fun picksSeveral(subject: NameOrMergeSubject.Faces): Boolean =
+        subject.faces.isEmpty() && subject.manualPhotoKeys.isNotEmpty()
 
     /** The person a selection ends up on, given what the face assignment returned ([assignedPersonId],
      *  below zero when nothing was written): that person, else a picked person, who still takes the

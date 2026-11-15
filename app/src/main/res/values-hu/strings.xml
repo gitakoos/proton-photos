@@ -1985,6 +1985,7 @@
     <string name="person_not_a_person_title">Nem ember?</string>
     <string name="person_picker_create">\"%1$s\" létrehozása</string>
     <string name="person_picker_empty">Még nincsenek elnevezett emberek. Írj be fent egy nevet egy létrehozásához.</string>
+    <string name="person_picker_add_count">Hozzáadás (%1$d)</string>
     <string name="person_picker_search">Keress vagy írj be egy új nevet</string>
     <string name="person_remove_confirm">Nem ő</string>
     <string name="person_remove_confirm_body">A kijelölt fotók lekerülnek erről az emberről, de az arcuk megmarad az arcfelismerésben, így később a megfelelő emberhez sorolhatók. Maguk a fotók nem törlődnek.</string>

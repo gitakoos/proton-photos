@@ -1469,6 +1469,7 @@
     <string name="person_picker_search">Ara veya yeni bir ad yaz</string>
     <string name="person_picker_create">Oluştur: \"%1$s\"</string>
     <string name="person_picker_empty">Henüz adlandırılmış kişi yok. Oluşturmak için yukarıya bir ad yaz.</string>
+    <string name="person_picker_add_count">Ekle (%1$d)</string>
     <string name="person_merge_name_title">Bir kişiyle birleştir</string>
     <string name="name_or_merge_title">Bu kim?</string>
     <string name="name_or_merge_see_photos">Fotoğrafları gör</string>

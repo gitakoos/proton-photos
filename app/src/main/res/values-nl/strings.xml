@@ -2010,6 +2010,7 @@
     <string name="person_not_a_person_title">Geen persoon?</string>
     <string name="person_picker_create">\"%1$s\" aanmaken</string>
     <string name="person_picker_empty">Nog geen personen met een naam. Typ hierboven een naam om er een aan te maken.</string>
+    <string name="person_picker_add_count">Toevoegen (%1$d)</string>
     <string name="person_picker_search">Zoek of typ een nieuwe naam</string>
     <string name="person_remove_confirm">Niet deze persoon</string>
     <string name="person_remove_confirm_body">De geselecteerde foto\'s worden bij deze persoon weggehaald, maar hun gezichten blijven in de gezichtsherkenning zodat ze later bij de juiste persoon gegroepeerd kunnen worden. De foto\'s zelf worden niet verwijderd.</string>

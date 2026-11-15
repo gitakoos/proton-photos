@@ -2083,6 +2083,7 @@
     <string name="person_not_a_person_title">To nie osoba?</string>
     <string name="person_picker_create">Utwórz \"%1$s\"</string>
     <string name="person_picker_empty">Brak nazwanych osób. Wpisz powyżej imię, aby utworzyć nową.</string>
+    <string name="person_picker_add_count">Dodaj (%1$d)</string>
     <string name="person_picker_search">Szukaj lub wpisz nowe imię</string>
     <string name="person_remove_confirm">To nie ta osoba</string>
     <string name="person_remove_confirm_body">Wybrane zdjęcia zostają usunięte z tej osoby, ale ich twarze pozostają w rozpoznawaniu twarzy, dzięki czemu można je później przypisać do właściwej osoby. Same zdjęcia nie są usuwane.</string>

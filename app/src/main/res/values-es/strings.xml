@@ -2022,6 +2022,7 @@
     <string name="person_not_a_person_title">¿No es una persona?</string>
     <string name="person_picker_create">Crear \"%1$s\"</string>
     <string name="person_picker_empty">Aún no hay personas con nombre. Escribe un nombre arriba para crear una.</string>
+    <string name="person_picker_add_count">Añadir (%1$d)</string>
     <string name="person_picker_search">Busca o escribe un nombre nuevo</string>
     <string name="person_remove_confirm">No es esta persona</string>
     <string name="person_remove_confirm_body">Las fotos seleccionadas dejan de estar en esta persona, pero sus rostros permanecen en el reconocimiento facial para poder agruparlos con la persona correcta más adelante. Las fotos en sí no se eliminan.</string>

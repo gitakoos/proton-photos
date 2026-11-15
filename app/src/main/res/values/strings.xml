@@ -1551,6 +1551,7 @@
     <string name="person_picker_search">Search or type a new name</string>
     <string name="person_picker_create">Create \"%1$s\"</string>
     <string name="person_picker_empty">No named people yet. Type a name above to create one.</string>
+    <string name="person_picker_add_count">Add (%1$d)</string>
     <string name="person_merge_name_title">Merge into a person</string>
     <string name="name_or_merge_title">Who is this?</string>
     <string name="name_or_merge_see_photos">See photos</string>

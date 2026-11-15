@@ -1986,6 +1986,7 @@
     <string name="person_not_a_person_title">Keine Person?</string>
     <string name="person_picker_create">\"%1$s\" erstellen</string>
     <string name="person_picker_empty">Noch keine benannten Personen. Gib oben einen Namen ein, um eine zu erstellen.</string>
+    <string name="person_picker_add_count">Hinzufügen (%1$d)</string>
     <string name="person_picker_search">Suchen oder neuen Namen eingeben</string>
     <string name="person_remove_confirm">Nicht diese Person</string>
     <string name="person_remove_confirm_body">Die ausgewählten Fotos werden von dieser Person entfernt, aber ihre Gesichter bleiben in der Gesichtserkennung, sodass sie später der richtigen Person zugeordnet werden können. Die Fotos selbst werden nicht gelöscht.</string>

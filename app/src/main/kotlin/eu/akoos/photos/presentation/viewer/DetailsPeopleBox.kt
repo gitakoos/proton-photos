@@ -83,7 +83,8 @@ import kotlin.math.roundToInt
 
 /**
  * The People box at the head of the details panel: one scrolling row of pills, one per person the face
- * index found on the photo, each with the person's round face crop at its start and the name beside it.
+ * index found on the photo or the photo was added to by hand, each with the person's round face crop (the
+ * person glyph for a hand-added one) at its start and the name beside it.
  * A person without a name, whether an unnamed group or a single Unsorted face, reads as Unnamed in the
  * muted colour, so the named people stand out. While the row can scroll on, its trailing edge fades the
  * last visible pill out as the hint. A tap hands the person back to the caller. Emits nothing for a
@@ -323,6 +324,20 @@ internal object DetailsPeopleRow {
         if (left.isNaN() || right.isNaN() || top.isNaN() || bottom.isNaN()) return null
         if (right <= left || bottom <= top) return null
         return FaceBox(left, top, right, bottom)
+    }
+
+    /**
+     * The row's entries: the people found by face on the photo, then those it was added to by hand
+     * ([manual]) who are not already among them, so a person shows once.
+     */
+    fun withManual(
+        faced: List<PhotoViewerViewModel.ViewerPerson>,
+        manual: List<PhotoViewerViewModel.ViewerPerson>,
+    ): List<PhotoViewerViewModel.ViewerPerson> {
+        if (manual.isEmpty()) return faced
+        val shown = faced.mapTo(HashSet()) { it.personId }
+        val extra = manual.filter { shown.add(it.personId) }
+        return if (extra.isEmpty()) faced else faced + extra
     }
 
     /**

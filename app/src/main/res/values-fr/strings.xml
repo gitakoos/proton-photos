@@ -1991,6 +1991,7 @@
     <string name="person_not_a_person_title">Pas une personne ?</string>
     <string name="person_picker_create">Créer \"%1$s\"</string>
     <string name="person_picker_empty">Aucune personne nommée pour l\'instant. Saisissez un nom ci-dessus pour en créer une.</string>
+    <string name="person_picker_add_count">Ajouter (%1$d)</string>
     <string name="person_picker_search">Rechercher ou saisir un nouveau nom</string>
     <string name="person_remove_confirm">Pas cette personne</string>
     <string name="person_remove_confirm_body">Les photos sélectionnées quittent cette personne, mais leurs visages restent dans la reconnaissance faciale afin de pouvoir être regroupés avec la bonne personne plus tard. Les photos elles-mêmes ne sont pas supprimées.</string>

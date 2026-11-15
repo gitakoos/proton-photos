@@ -2091,6 +2091,7 @@
     <string name="person_not_a_person_title">Není osoba?</string>
     <string name="person_picker_create">Vytvořit \"%1$s\"</string>
     <string name="person_picker_empty">Zatím žádné pojmenované osoby. Napište výše jméno a vytvořte novou.</string>
+    <string name="person_picker_add_count">Přidat (%1$d)</string>
     <string name="person_picker_search">Hledejte nebo napište nové jméno</string>
     <string name="person_remove_confirm">Není to tato osoba</string>
     <string name="person_remove_confirm_body">Vybrané fotky se z této osoby odeberou, ale jejich obličeje zůstanou v rozpoznávání obličejů, takže je lze později přiřadit ke správné osobě. Samotné fotky se nesmažou.</string>

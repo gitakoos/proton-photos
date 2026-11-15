@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.AppSearchField
+import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.domain.usecase.samePersonName
@@ -83,6 +84,10 @@ import eu.akoos.photos.presentation.theme.AppColors
  *
  * [header], when given, is drawn in the title line's place above the search field, for a sheet that opens
  * with more than a title (the face it asks about); it then shows the title itself.
+ *
+ * With [onPickSeveral] the picker chooses one or more people instead: a tile, or the name typed in full,
+ * ticks the person, a second tap clears them, and the Add button under the grid hands over everyone
+ * ticked, in the list's order. [onPick] is then not used.
  */
 @Composable
 fun PersonPickerSheet(
@@ -94,6 +99,7 @@ fun PersonPickerSheet(
     searchPlaceholder: String? = null,
     emptyText: String? = null,
     header: (@Composable () -> Unit)? = null,
+    onPickSeveral: ((List<PersonUi>) -> Unit)? = null,
 ) {
     val colors = AppColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -108,9 +114,19 @@ fun PersonPickerSheet(
     val q = query.trim()
     val filtered = remember(people, q) { PersonPickerSearch.filter(people, q) }
     val namedAlready = remember(people, q) { PersonPickerSearch.personNamed(people, q) }
+    var ticked by remember { mutableStateOf(emptySet<Long>()) }
+    val chosen = remember(people, ticked) { PersonPickerSearch.chosen(people, ticked) }
     val commitTyped: () -> Unit = {
         if (q.isNotEmpty()) {
-            if (namedAlready != null) onPick(namedAlready) else onCreateNew?.invoke(q)
+            when {
+                namedAlready == null -> onCreateNew?.invoke(q)
+                onPickSeveral != null -> {
+                    // Ticks the person named and clears the field for the next name.
+                    ticked = ticked + namedAlready.personId
+                    query = ""
+                }
+                else -> onPick(namedAlready)
+            }
         }
     }
 
@@ -198,10 +214,22 @@ fun PersonPickerSheet(
                     items(items = filtered, key = { it.personId }) { person ->
                         PersonTile(
                             person = person,
-                            selected = false,
-                            onClick = { onPick(person) },
+                            selected = onPickSeveral != null && person.personId in ticked,
+                            onClick = {
+                                if (onPickSeveral != null) ticked = PersonPickerSearch.toggle(ticked, person.personId)
+                                else onPick(person)
+                            },
                         )
                     }
+                }
+                if (onPickSeveral != null) {
+                    Spacer(Modifier.height(12.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.person_picker_add_count, chosen.size),
+                        onClick = { onPickSeveral(chosen) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = chosen.isNotEmpty(),
+                    )
                 }
             }
         }
@@ -232,4 +260,12 @@ internal object PersonPickerSearch {
         named.filter { it.displayName?.trim() == name }.maxByOrNull { it.faceCount }?.let { return it }
         return named.filter { samePersonName(it.displayName, name) }.maxByOrNull { it.faceCount }
     }
+
+    /** [ticked] with [personId] added, or taken out when it was already there. */
+    fun toggle(ticked: Set<Long>, personId: Long): Set<Long> =
+        if (personId in ticked) ticked - personId else ticked + personId
+
+    /** The ticked people still in [people], in its order, so someone gone from the list is never handed over. */
+    fun chosen(people: List<PersonUi>, ticked: Set<Long>): List<PersonUi> =
+        if (ticked.isEmpty()) emptyList() else people.filter { it.personId in ticked }
 }
