@@ -130,6 +130,65 @@ internal class SqlCipherEngine(
         return ExportReport(tables = before.rowCounts.size, rows = before.rowCounts.values.sum())
     }
 
+    override fun restoreTables(
+        live: File,
+        liveKeySpec: String,
+        old: File,
+        oldKeySpec: String,
+        tables: List<String>,
+        accountHash: String?,
+        hashOf: (String) -> String,
+    ): RestoreResult {
+        SqlCipherLibrary.ensureLoaded()
+        open(live, liveKeySpec, SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING).use { db ->
+            db.rawExecSQL("ATTACH DATABASE ? AS old KEY ?", old.path, oldKeySpec)
+            try {
+                val oldVersion = firstColumn(db, "PRAGMA old.user_version").firstOrNull()?.toIntOrNull()
+                if (oldVersion != db.version) return RestoreResult.Skipped("version $oldVersion, live ${db.version}")
+                if (accountHash != null) {
+                    val accounts = firstColumn(db, "SELECT userId FROM main.AccountEntity").map(hashOf)
+                    if (accountHash !in accounts) return RestoreResult.Skipped("another account")
+                }
+                val oldTables = firstColumn(db, "SELECT name FROM old.sqlite_master WHERE type = 'table'").toSet()
+                val liveTables = firstColumn(db, "SELECT name FROM main.sqlite_master WHERE type = 'table'").toSet()
+                var rows = 0L
+                var copied = 0
+                db.rawExecSQL("PRAGMA foreign_keys = OFF")
+                db.beginTransaction()
+                try {
+                    for (table in tables) {
+                        if (table !in oldTables || table !in liveTables) continue
+                        val quoted = quote(table)
+                        val oldColumns = columnsOf(db, "old", table).toSet()
+                        val columns = columnsOf(db, "main", table).filter { it in oldColumns }
+                        if (columns.isEmpty()) continue
+                        val list = columns.joinToString(",") { quote(it) }
+                        db.execSQL("DELETE FROM main.$quoted")
+                        db.execSQL("INSERT INTO main.$quoted ($list) SELECT $list FROM old.$quoted")
+                        rows += db.rawQuery("SELECT count(*) FROM main.$quoted").use { c -> c.moveToFirst(); c.getLong(0) }
+                        copied++
+                    }
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+                return RestoreResult.Restored(copied, rows)
+            } finally {
+                runCatching { db.rawExecSQL("DETACH DATABASE old") }
+            }
+        }
+    }
+
+    private fun columnsOf(db: SQLiteDatabase, schema: String, table: String): List<String> =
+        db.rawQuery("PRAGMA $schema.table_info(${quote(table)})").use { c ->
+            val out = ArrayList<String>()
+            val nameIndex = c.getColumnIndexOrThrow("name")
+            while (c.moveToNext()) out += c.getString(nameIndex)
+            out
+        }
+
+    private fun quote(name: String): String = "\"" + name.replace("\"", "\"\"") + "\""
+
     private fun open(file: File, keySpec: String, flags: Int): SQLiteDatabase =
         SQLiteDatabase.openDatabase(file.path, keySpec.toByteArray(Charsets.US_ASCII), null, flags, handler, null)
 

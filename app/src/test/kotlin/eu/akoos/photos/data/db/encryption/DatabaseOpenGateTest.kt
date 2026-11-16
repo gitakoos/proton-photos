@@ -72,6 +72,24 @@ class DatabaseOpenGateTest {
             failExport?.let { throw it }
             return ExportReport(tables = 1, rows = 12_345)
         }
+
+        var restoreResult: RestoreResult = RestoreResult.Restored(tables = 3, rows = 10)
+        var restoreFailure: Exception? = null
+        val restores = mutableListOf<Triple<File, String?, List<String>>>()
+
+        override fun restoreTables(
+            live: File,
+            liveKeySpec: String,
+            old: File,
+            oldKeySpec: String,
+            tables: List<String>,
+            accountHash: String?,
+            hashOf: (String) -> String,
+        ): RestoreResult {
+            restores += Triple(old, accountHash, tables)
+            restoreFailure?.let { throw it }
+            return restoreResult
+        }
     }
 
     @Before
@@ -85,6 +103,8 @@ class DatabaseOpenGateTest {
         keys = DatabaseKeyStore(state, wrapper)
     }
 
+    private val recoveredKeys = mutableMapOf<File, ByteArray>()
+
     private fun gate() = DatabaseOpenGate(
         databasesDir = databases,
         stateDir = state,
@@ -95,7 +115,20 @@ class DatabaseOpenGateTest {
         freeBytes = { free },
         clock = { now },
         log = { lines += it },
+        recoveredKey = { dir -> recoveredKeys[dir] },
+        appTables = listOf("labels", "face"),
+        hashOf = { "h-$it" },
     )
+
+    /** A set-aside copy a recovery copy opened: its key kept under `recovered/`, with the account it belongs to. */
+    private fun recoveredSetAside(name: String, owner: String = "abc"): File {
+        val dir = File(aside, name).apply { mkdirs() }
+        File(dir, DatabaseOpenGate.ENCRYPTED_NAME).writeText("ENC|old|rows")
+        val recovered = File(dir, DatabaseOpenGate.RECOVERED_DIR).apply { mkdirs() }
+        File(recovered, DatabaseOpenGate.RECOVERED_OWNER).writeText(owner)
+        recoveredKeys[recovered] = ByteArray(32) { 1 }
+        return dir
+    }
 
     private val plain get() = File(databases, DatabaseOpenGate.PLAIN_NAME)
     private val encrypted get() = File(databases, DatabaseOpenGate.ENCRYPTED_NAME)
@@ -383,6 +416,51 @@ class DatabaseOpenGateTest {
         now += 15L * 24 * 60 * 60 * 1000
         launch()
         assertTrue(aside.listFiles()!!.isEmpty())
+    }
+
+    @Test
+    fun `a lost key carries the recovery copies along with the set-aside file`() {
+        installEncrypted()
+        File(state, "${DatabaseKeyStore.RECOVERY_DIR}/db.acct.h1").apply { parentFile!!.mkdirs(); writeText("copy") }
+        wrapper.key = null
+        launch()
+        val kept = aside.listFiles()!!.single()
+        assertEquals("copy", File(kept, "${DatabaseKeyStore.RECOVERY_DIR}/db.acct.h1").readText())
+    }
+
+    @Test
+    fun `a recovered set-aside copy is restored into the live database on the next start`() {
+        installEncrypted()
+        val dir = recoveredSetAside("${now - 5000}")
+        launch()
+        val (old, owner, tables) = engine.restores.single()
+        assertEquals(File(dir, DatabaseOpenGate.ENCRYPTED_NAME), old)
+        assertEquals("abc", owner)
+        assertEquals(listOf("labels", "face"), tables)
+        assertFalse("restored, so it goes", dir.exists())
+    }
+
+    @Test
+    fun `a restore the engine skips or fails keeps both copies`() {
+        installEncrypted()
+        engine.restoreResult = RestoreResult.Skipped("schema 57 vs 58")
+        val dir = recoveredSetAside("${now - 5000}")
+        launch()
+        assertTrue(dir.exists())
+        engine.restoreFailure = IOException("disk")
+        launch()
+        assertTrue(dir.exists())
+        assertTrue(encrypted.exists())
+    }
+
+    @Test
+    fun `set-aside copies a recovery copy may still open outlive the two weeks`() {
+        aside.mkdirs()
+        val waiting = File(aside, "${now - 1000}").apply { mkdirs() }
+        File(waiting, "${DatabaseKeyStore.RECOVERY_DIR}/db.pwd").apply { parentFile!!.mkdirs(); writeText("copy") }
+        now += 60L * 24 * 60 * 60 * 1000
+        launch()
+        assertTrue(waiting.exists())
     }
 
     @Test

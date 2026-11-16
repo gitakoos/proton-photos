@@ -66,6 +66,7 @@ class EncryptedOpenHelperFactory(context: Context) : SupportSQLiteOpenHelper.Fac
                     Log.i(TAG, line)
                     SyncDiagnostics.log(line)
                 },
+                recoveredKey = { dir -> (DatabaseKeyStore(dir, AndroidKeystoreWrapper()).load() as? DatabaseKeyState.Ready)?.key },
             )
         }
     }

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.db.encryption
 
+import eu.akoos.photos.data.localcrypto.LocalKeyOwner
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
@@ -52,6 +53,28 @@ interface CipherEngine {
      * user version and the row count of every table. Throws when any of it fails; [plain] is only read.
      */
     fun export(plain: File, partial: File, keySpec: String): ExportReport
+
+    /**
+     * Copies [tables] from the set-aside database [old] into the live database [live] in one transaction: every
+     * row of each table is replaced, columns matched by name. Skips (changing nothing) when the two schema
+     * versions differ, or when [accountHash] is given and the live database does not hold that account.
+     */
+    fun restoreTables(
+        live: File,
+        liveKeySpec: String,
+        old: File,
+        oldKeySpec: String,
+        tables: List<String>,
+        accountHash: String?,
+        hashOf: (String) -> String,
+    ): RestoreResult
+}
+
+/** What restoring a set-aside database's own tables did. */
+sealed interface RestoreResult {
+    data class Restored(val tables: Int, val rows: Long) : RestoreResult
+
+    data class Skipped(val reason: String) : RestoreResult
 }
 
 data class ExportReport(val tables: Int, val rows: Long)
@@ -87,6 +110,9 @@ class DatabaseOpenGate(
     private val freeBytes: (File) -> Long?,
     private val clock: () -> Long,
     private val log: (String) -> Unit,
+    private val recoveredKey: (File) -> ByteArray? = { null },
+    private val appTables: List<String> = AppOwnedTables.NAMES,
+    private val hashOf: (String) -> String = LocalKeyOwner::userHash,
 ) {
     val plain = File(databasesDir, PLAIN_NAME)
     val encrypted = File(databasesDir, ENCRYPTED_NAME)
@@ -101,6 +127,7 @@ class DatabaseOpenGate(
             deleteDatabase(partial)
             log("db: unfinished copy removed")
         }
+        if (encrypted.exists()) restoreRecovered()
         pruneSetAside()
         if (encrypted.exists()) openExisting()?.let { return@withLocks it }
         withoutEncrypted()
@@ -219,14 +246,61 @@ class DatabaseOpenGate(
         log("db: encrypted file set aside ($reason)")
     }
 
+    /**
+     * Copies the app's own tables back from every set-aside database whose key a recovery copy gave back, into
+     * the live database, and removes that set-aside folder once done. Anything that does not fit (another
+     * account, another schema version, an error) leaves both databases as they were.
+     */
+    private fun restoreRecovered() {
+        val dirs = setAsideDir.listFiles()?.filter { File(it, RECOVERED_DIR).isDirectory } ?: return
+        if (dirs.isEmpty()) return
+        val live = keys.load() as? DatabaseKeyState.Ready ?: return
+        for (dir in dirs) {
+            val old = File(dir, ENCRYPTED_NAME)
+            val oldKey = if (old.exists()) recoveredKey(File(dir, RECOVERED_DIR)) else null
+            if (oldKey == null) {
+                log("db: recovered key or database missing, kept")
+                continue
+            }
+            val owner = runCatching { File(File(dir, RECOVERED_DIR), RECOVERED_OWNER).readText().trim() }
+                .getOrNull()?.takeIf { it.isNotEmpty() }
+            try {
+                when (val result = engine.restoreTables(encrypted, rawKeySpec(live.key), old, rawKeySpec(oldKey), appTables, owner, hashOf)) {
+                    is RestoreResult.Restored -> {
+                        dir.deleteRecursively()
+                        log("db: restored ${result.tables} tables, ${result.rows} rows from the set-aside copy")
+                    }
+                    is RestoreResult.Skipped -> log("db: set-aside copy not restored (${result.reason}), kept")
+                }
+            } catch (e: Exception) {
+                log("db: restore failed (${e.javaClass.simpleName}), both copies kept")
+            }
+        }
+    }
+
+    /**
+     * Keeps the newest set-aside database for [SET_ASIDE_KEEP_MS], and every one that a recovery copy may still open
+     * (up to [MAX_WAITING_SET_ASIDE]) until it is restored.
+     */
     private fun pruneSetAside() {
         val kept = setAsideDir.listFiles()?.sortedByDescending { it.name.toLongOrNull() ?: 0L } ?: return
         val now = clock()
-        kept.forEachIndexed { index, dir ->
+        var plain = 0
+        var waiting = 0
+        for (dir in kept) {
+            if (isWaiting(dir)) {
+                waiting++
+                if (waiting > MAX_WAITING_SET_ASIDE) dir.deleteRecursively()
+                continue
+            }
             val age = now - (dir.name.toLongOrNull() ?: 0L)
-            if (index > 0 || age > SET_ASIDE_KEEP_MS || age < 0) dir.deleteRecursively()
+            if (plain++ > 0 || age > SET_ASIDE_KEEP_MS || age < 0) dir.deleteRecursively()
         }
     }
+
+    private fun isWaiting(dir: File): Boolean =
+        File(dir, RECOVERED_DIR).isDirectory ||
+            (File(dir, DatabaseKeyStore.RECOVERY_DIR).listFiles()?.isNotEmpty() ?: false)
 
     private fun attemptsLeft(): Boolean {
         val (version, count) = readPair(attemptsFile)
@@ -269,6 +343,9 @@ class DatabaseOpenGate(
         const val ENCRYPTED_NAME = "proton_photos_encrypted.db"
         const val PARTIAL_NAME = "proton_photos_encrypting.db"
         const val REBUILT_MARKER = "rebuilt"
+        const val RECOVERED_DIR = "recovered"
+        const val RECOVERED_OWNER = "owner"
+        private const val MAX_WAITING_SET_ASIDE = 3
         private const val CORRUPT_MARKER = "corrupt"
         private const val ATTEMPTS_FILE = "copy_attempts"
         private const val UNAVAILABLE_FILE = "key_unavailable"
