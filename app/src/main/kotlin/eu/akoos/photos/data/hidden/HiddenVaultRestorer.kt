@@ -180,11 +180,11 @@ class HiddenVaultRestorer @Inject constructor(
      * Detached for the same reason a reveal is: the bytes go first, so a caller that goes away
      * mid-delete would otherwise leave the index entry and the folder record standing over nothing.
      */
-    suspend fun deletePhoto(uri: String): Boolean = runs.detached {
+    suspend fun deletePhoto(uri: String, shownAt: Long? = null): Boolean = runs.detached {
         if (!hiddenStorage.isHiddenUri(uri)) return@detached false
         val buckets = recordedBucketsOf(listOf(uri))
         val cloudLinkId = recordedCloudLinkId(uri)
-        journal.discard(listOf(uri))
+        journal.discard(listOf(uri), shownAt)
         context.settingsDataStore.edit { p ->
             p[SettingsKeys.HIDDEN_PHOTO_URIS] = (p[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) - uri
         }

@@ -97,6 +97,9 @@ class HiddenVaultJournal @Inject constructor(
      *  sign-out shuts so that no hide deletes an original while the vault is being emptied. */
     private val gate = VaultHideGate()
 
+    /** Which run is moving each device photo, shared by every hide surface so a photo moves once. */
+    private val claims = HideSourceClaims()
+
     /** [reconcile] repairs a durable state, so once per process is enough; running it again on every
      *  vault open would re-walk the directory for nothing. */
     private val reconciled = AtomicBoolean(false)
@@ -141,8 +144,12 @@ class HiddenVaultJournal @Inject constructor(
             val albumsBySource = albumTargetsFor(entries)
             val userTagsBySource = userTagsFor(entries)
             context.settingsDataStore.edit { prefs ->
+                // A vault copy an earlier run left pending can be journalled again by the run that takes it
+                // over, so its old records give way to the new ones rather than standing beside them.
+                val keys = entries.mapTo(HashSet(entries.size)) { it.privateUri }
+                pruneMaps(prefs, keys)
                 prefs[SettingsKeys.HIDDEN_PENDING_HIDES] =
-                    (prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet()) +
+                    HiddenVaultRecords.dropped(prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet(), keys) +
                         entries.map { HiddenVaultLeftovers.journalEntry(it.privateUri, it.sourceUri) }
                 val folders = entries.mapNotNull { e ->
                     e.sourceFolder?.takeIf { it.isNotBlank() }?.let { "${e.privateUri}|$it" }
@@ -422,15 +429,36 @@ class HiddenVaultJournal @Inject constructor(
 
     /** Undoes a hide that never reached its delete: drops the vault copies and everything recorded
      *  for them. The originals are untouched, so the photos stay exactly where the user sees them. */
-    suspend fun discard(privateUris: List<String>) {
+    suspend fun discard(privateUris: List<String>, shownAt: Long? = null) {
         if (privateUris.isEmpty()) return
         try {
             withContext(Dispatchers.IO) { privateUris.forEach { hiddenStorage.delete(it) } }
-            forget(privateUris)
+            forget(privateUris, shownAt)
             HiddenVaultDiagnostics.discarded(privateUris.size)
         } finally {
             gate.release(privateUris)
         }
+    }
+
+    /**
+     * Undoes a hide whose delete was declined or never asked for. A copy whose original is still on the device is
+     * dropped, as [discard] does. A copy whose original has gone after all, through a delete prompt of an earlier
+     * run answered late, is now the photo's only copy, so it is published as [confirm] does rather than dropped.
+     * A copy whose original cannot be checked stays journalled with its file, for the next run of the same photo
+     * to take over or the next start to resolve.
+     */
+    suspend fun undoHide(privateUris: List<String>) {
+        if (privateUris.isEmpty()) return
+        val sourceByVaultUri = HiddenVaultLeftovers.parseJournal(
+            context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet(),
+        )
+        val split = withContext(Dispatchers.IO) {
+            HiddenVaultDecisions.undoSplit(privateUris, sourceByVaultUri) { sourceExists(it) }
+        }
+        if (split.publish.isNotEmpty()) Log.w(TAG, "undo: ${split.publish.size} original(s) already gone, publishing")
+        discard(split.drop)
+        confirm(split.publish)
+        gate.release(split.keep)
     }
 
     /**
@@ -446,6 +474,52 @@ class HiddenVaultJournal @Inject constructor(
 
     /** Whether a sign-out is running, so a hide still copying can stop rather than copy for nothing. */
     fun signingOut(): Boolean = gate.signingOut()
+
+    /**
+     * Claims the device photos of [sources] for the hide run of [owner] and returns the ones it holds now. A
+     * photo another run holds is left out: that run copies it and asks for its delete, so this one must not.
+     */
+    fun claimSources(owner: Any, sources: Collection<String>): Set<String> = claims.claim(owner, sources)
+
+    /** Ends [owner]'s claim on [sources], once its hide of them has been published or undone. */
+    fun releaseSources(owner: Any, sources: Collection<String>) = claims.release(owner, sources)
+
+    /** Ends every claim of [owner], whose screen is going away. */
+    fun releaseAllSources(owner: Any) = claims.releaseAll(owner)
+
+    /**
+     * Leaves the journalled copies of [privateUris] to the next run of the same photos: their screen went away
+     * before the delete prompt answered, so no run is moving them any more. They keep their files and records.
+     */
+    fun leaveForNextRun(privateUris: Collection<String>) = gate.release(privateUris)
+
+    /**
+     * The vault copy an earlier hide left pending for each of [sources] whose file is still in the vault, so
+     * the run that takes the photo over moves that copy instead of making another. A copy some run is still
+     * moving is never handed over.
+     */
+    suspend fun pendingCopiesOf(sources: Collection<String>): Map<String, String> {
+        if (sources.isEmpty()) return emptyMap()
+        val busy = gate.inFlight()
+        val journal = HiddenVaultLeftovers.parseJournal(
+            context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet(),
+        ).filterKeys { it !in busy }
+        if (journal.isEmpty()) return emptyMap()
+        val blobs = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+        return HiddenVaultDecisions.pendingCopyBySource(journal, blobs, sources.toSet())
+    }
+
+    /** The Drive link ids whose photo the vault already holds as hidden. */
+    suspend fun vaultedLinks(): Set<String> {
+        val prefs = context.settingsDataStore.data.first()
+        return HiddenVaultDecisions.vaultedLinks(
+            prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet(),
+            prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
+        )
+    }
+
+    /** The vault uris a hide is moving right now. */
+    fun hidesInFlight(): Set<String> = gate.inFlight()
 
     /**
      * Runs [reconcile] again even though this process already ran it: a sign-out changes the vault's

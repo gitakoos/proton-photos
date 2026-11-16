@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -1800,6 +1801,9 @@ class GalleryViewModel @Inject constructor(
      *  confirms reverses the whole hide rather than only the photos that were vaulted. */
     private var pendingHideCloudLinkIds: List<String> = emptyList()
 
+    /** The device photos the running hide claimed, released once it is published or undone. */
+    private var pendingHideSources: Set<String> = emptySet()
+
     /**
      * The two halves the current selection's hide would act on, for the confirmation that fronts it.
      *
@@ -1849,7 +1853,14 @@ class GalleryViewModel @Inject constructor(
      * after the stop is left untouched on the device.
      */
     private suspend fun runHide(split: HiddenFolderRecords.HideSplit, reportProgress: Boolean) {
-        val vaultable = split.vaultable
+        // One run per photo across every live screen: a photo another run is already moving into the vault
+        // is left to it, so the photo is copied once and its original is asked for once.
+        val owned = hiddenVaultJournal.claimSources(this, split.vaultable.map { it.local.uri })
+        pendingHideSources = owned
+        val vaultable = split.vaultable.filter { it.local.uri in owned }
+        // A copy an earlier run of the same photo left pending, its screen gone before the delete answered,
+        // is moved as it is instead of copied again.
+        val reusable = hiddenVaultJournal.pendingCopiesOf(owned)
         HiddenVaultDiagnostics.hideStarted(split)
         // Client-side hide for the cloud-only members: add their linkIds to the hidden set so the
         // shared merge filter drops them from every listing. They have no device file at all, so
@@ -1863,6 +1874,8 @@ class GalleryViewModel @Inject constructor(
             // stays reversible whichever kind of photo it was pressed on.
             pendingHideCloudLinkIds = emptyList()
             pendingHideFolderName = null
+            pendingHideSources = emptySet()
+            remoteHideBatch = emptySet()
             buildHideUndoAction(emptyList(), split.cloudLinkIds)?.let { undoController.offer(it) }
             _uiState.update { it.copy(
                 selectedItems          = emptySet(),
@@ -1874,7 +1887,9 @@ class GalleryViewModel @Inject constructor(
         // Step 1: refuse up front when the copies cannot fit. A hide holds both the originals and
         // the vault copies at once, so a volume that runs out mid-batch fails per file with
         // nothing the user can act on.
-        val shortfall = hiddenVaultJournal.spaceShortfallBytes(vaultable.sumOf { it.sizeBytes })
+        val shortfall = hiddenVaultJournal.spaceShortfallBytes(
+            vaultable.filter { it.local.uri !in reusable }.sumOf { it.sizeBytes },
+        )
         if (shortfall > 0L) {
             rollbackPendingHide()
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(
@@ -1896,7 +1911,7 @@ class GalleryViewModel @Inject constructor(
             if (hiddenVaultJournal.signingOut()) break
             val local = target.local
             val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
-            val privateUri = hiddenStorage.store(
+            val privateUri = reusable[local.uri] ?: hiddenStorage.store(
                 local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
                 sourceFolder = sourceFolder, cloudLinkId = target.cloudLinkId,
             )
@@ -1926,7 +1941,9 @@ class GalleryViewModel @Inject constructor(
         // Step 3: record the intent BEFORE anything is deleted, so an interruption during the
         // delete leaves a recoverable state rather than orphaned bytes.
         if (!hiddenVaultJournal.journal(collected)) {
-            hiddenVaultJournal.discard(collected.map { it.privateUri })
+            // A taken-over copy keeps the journal entry its own run wrote, so only the copies made here go.
+            val reused = reusable.values.toSet()
+            hiddenVaultJournal.discard(collected.map { it.privateUri }.filter { it !in reused })
             rollbackPendingHide()
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_move_to_hidden_failed))) }
             return
@@ -2159,12 +2176,38 @@ class GalleryViewModel @Inject constructor(
 
     private fun commitPendingHide() {
         val uris = pendingHidePrivateUris
+        val sources = pendingHideSources
         pendingHidePrivateUris = emptyList()
+        pendingHideSources = emptySet()
         remoteHideBatch = emptySet()
         // The hide landed, so the folder keeps the flag this run wrote.
         pendingHideFolderName = null
-        if (uris.isEmpty()) return
-        viewModelScope.launch { hiddenVaultJournal.confirm(uris) }
+        // The claim holds until the journal has published, so no other run reads these copies as left over.
+        settleThenRelease(sources) { hiddenVaultJournal.confirm(uris) }
+    }
+
+    /**
+     * Runs [settle] to the end even when this screen goes away meanwhile, then ends the claim on [sources]. Half a
+     * settle would leave copies another run could take over while their records still change underneath it.
+     */
+    private fun settleThenRelease(sources: Set<String>, settle: suspend () -> Unit) {
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                try {
+                    settle()
+                } finally {
+                    hiddenVaultJournal.releaseSources(this@GalleryViewModel, sources)
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        // A hide still waiting on its delete prompt keeps its journalled copies; the next run of the same photo,
+        // from any screen, takes them over instead of copying again.
+        hiddenVaultJournal.leaveForNextRun(pendingHidePrivateUris)
+        hiddenVaultJournal.releaseAllSources(this)
+        super.onCleared()
     }
 
     /** The photos another device hid that the hide now running moves into the vault, by link id. */
@@ -2201,7 +2244,17 @@ class GalleryViewModel @Inject constructor(
                     if (cloudOnly.isNotEmpty()) context.settingsDataStore.edit { prefs ->
                         HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - cloudOnly.toSet())
                     }
-                    val synced = waiting.filterIsInstance<GalleryItem.Synced>()
+                    // A photo the vault already holds is hidden here already, and one another screen's run is moving
+                    // belongs to that run: neither is copied again.
+                    val vaulted = hiddenVaultJournal.vaultedLinks()
+                    val waitingSynced = waiting.filterIsInstance<GalleryItem.Synced>()
+                    val alreadyVaulted = waitingSynced.map { it.cloud.linkId }.filterTo(HashSet()) { it in vaulted }
+                    if (alreadyVaulted.isNotEmpty()) context.settingsDataStore.edit { prefs ->
+                        HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - alreadyVaulted)
+                    }
+                    val candidates = waitingSynced.filter { it.cloud.linkId !in alreadyVaulted }
+                    val owned = hiddenVaultJournal.claimSources(this@GalleryViewModel, candidates.map { it.local.uri })
+                    val synced = candidates.filter { it.local.uri in owned }
                     if (synced.isEmpty()) return@collect
                     remoteHideBatch = synced.mapTo(HashSet()) { it.cloud.linkId }
                     _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
@@ -2219,9 +2272,11 @@ class GalleryViewModel @Inject constructor(
         val cloudIds = pendingHideCloudLinkIds
         val folderName = pendingHideFolderName
         val declinedRemote = remoteHideBatch
+        val sources = pendingHideSources
         pendingHidePrivateUris = emptyList()
         pendingHideCloudLinkIds = emptyList()
         pendingHideFolderName = null
+        pendingHideSources = emptySet()
         remoteHideBatch = emptySet()
         // A hide another device asked for that did not land here, the system prompt declined or the copy refused,
         // leaves the queue: asking again at every opening would be a prompt the user has already answered.
@@ -2230,9 +2285,10 @@ class GalleryViewModel @Inject constructor(
                 HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - declinedRemote)
             }
         }
-        if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
+        // The copies go before the claim ends, so no other run can take over a copy this undo is dropping.
+        settleThenRelease(sources) { hiddenVaultJournal.undoHide(uris) }
+        if (cloudIds.isEmpty() && folderName == null) return
         viewModelScope.launch {
-            if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
             HiddenCloudPhotos.reveal(context, cloudIds)
             // Nothing was vaulted, so a folder left flagged would list in the vault holding no
             // photos while its card is gone from Albums, with no way back except revealing it.

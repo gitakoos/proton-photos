@@ -911,4 +911,53 @@ class HiddenVaultDecisionsTest {
 
         assertEquals(1, rows.size)
     }
+
+    @Test
+    fun `an unhide brings one copy back and drops the other copies of the same photo`() {
+        val copies = HiddenVaultDecisions.revealCopies(
+            listOf("v/b", "v/a", "v/c"),
+            published = setOf("v/c"),
+            busy = setOf("v/b"),
+        )
+
+        // The published copy goes back; the copy a running hide holds is left to that hide.
+        assertEquals("v/c", copies.restore)
+        assertEquals(listOf("v/a"), copies.extras)
+    }
+
+    @Test
+    fun `an unhide with nothing it may touch restores nothing`() {
+        val copies = HiddenVaultDecisions.revealCopies(listOf("v/a"), published = setOf("v/a"), busy = setOf("v/a"))
+
+        assertNull(copies.restore)
+        assertTrue(copies.extras.isEmpty())
+    }
+
+    @Test
+    fun `a pending copy is taken over only while its file is still in the vault`() {
+        val journal = mapOf("v/2" to "src/1", "v/1" to "src/1", "v/3" to "src/3", "v/4" to "src/4")
+
+        val reuse = HiddenVaultDecisions.pendingCopyBySource(journal, blobs = setOf("v/1", "v/2", "v/4"), sources = setOf("src/1", "src/3"))
+
+        assertEquals(mapOf("src/1" to "v/1"), reuse)
+    }
+
+    @Test
+    fun `a declined hide drops a copy only while its original is on the device`() {
+        val journal = mapOf("v/here" to "src/here", "v/gone" to "src/gone", "v/unknown" to "src/unknown")
+        val exists = mapOf("src/here" to true, "src/gone" to false)
+
+        val split = HiddenVaultDecisions.undoSplit(listOf("v/here", "v/gone", "v/unknown", "v/norecord"), journal) { exists[it] }
+
+        assertEquals(listOf("v/here"), split.drop)
+        assertEquals(listOf("v/gone"), split.publish)
+        assertEquals(listOf("v/unknown", "v/norecord"), split.keep)
+    }
+
+    @Test
+    fun `only published vault copies count as a photo the vault already holds`() {
+        val links = HiddenVaultDecisions.vaultedLinks(setOf("v/a|L1", "v/b|L2", "v/c|"), published = setOf("v/a", "v/c"))
+
+        assertEquals(setOf("L1"), links)
+    }
 }

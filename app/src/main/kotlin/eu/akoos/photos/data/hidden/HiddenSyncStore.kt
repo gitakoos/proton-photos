@@ -52,6 +52,7 @@ import javax.inject.Singleton
 class HiddenSyncStore @Inject constructor(
     @ApplicationContext private val context: Context,
     private val restorer: HiddenVaultRestorer,
+    private val journal: HiddenVaultJournal,
 ) {
 
     /** This device's hidden list with the times of each hide and unhide. */
@@ -78,7 +79,7 @@ class HiddenSyncStore @Inject constructor(
             queue.remove(link)
             when {
                 link in cloudHidden -> HiddenCloudPhotos.reveal(context, listOf(link), at)
-                link in vaultUriByLink -> reveal(vaultUriByLink.getValue(link), at)
+                link in vaultUriByLink -> reveal(vaultUrisOf(prefs, link), prefs, at)
                 else -> shownTimeOnly[link] = at
             }
         }
@@ -92,10 +93,25 @@ class HiddenSyncStore @Inject constructor(
         return queue.size
     }
 
-    /** Brings a vaulted photo back through the ordinary reveal, as of the other device's unhide. */
-    private suspend fun reveal(vaultUri: String, at: Long) {
+    /**
+     * Brings a vaulted photo back through the ordinary reveal, as of the other device's unhide. [vaultUris] are
+     * every vault copy recorded with its Drive link id: one comes back, and only once it has, the others, copies
+     * of the same photo, leave the vault, so the unhide puts one device file back however many the vault held.
+     */
+    private suspend fun reveal(vaultUris: List<String>, prefs: Preferences, at: Long) {
+        val copies = HiddenVaultDecisions.revealCopies(
+            vaultUris,
+            published = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
+            busy = journal.hidesInFlight(),
+        )
+        val restore = copies.restore ?: return
         try {
-            if (!restorer.restorePhoto(vaultUri, shownAt = at)) Log.w(TAG, "a vaulted photo did not come back")
+            if (!restorer.restorePhoto(restore, shownAt = at)) {
+                Log.w(TAG, "a vaulted photo did not come back")
+                return
+            }
+            if (copies.extras.isNotEmpty()) Log.i(TAG, "dropping ${copies.extras.size} extra vault copy(ies) of a shown photo")
+            for (extra in copies.extras) restorer.deletePhoto(extra, shownAt = at)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -105,6 +121,12 @@ class HiddenSyncStore @Inject constructor(
 
     companion object {
         private const val TAG = "HiddenSyncStore"
+
+        /** Every vault file the vault recorded with the Drive link id [link]. */
+        internal fun vaultUrisOf(prefs: Preferences, link: String): List<String> =
+            (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+                .filter { it.substringAfter('|', "") == link }
+                .map { it.substringBefore('|') }
 
         /** The vault file of each Drive link id the vault recorded. */
         internal fun vaultUriByLink(prefs: Preferences): Map<String, String> =

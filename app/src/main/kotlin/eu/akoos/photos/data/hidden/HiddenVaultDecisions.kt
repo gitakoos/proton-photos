@@ -196,6 +196,63 @@ object HiddenVaultDecisions {
     }
 
     /**
+     * How a hide that did not land undoes its vault copies: [drop] the ones whose original is still on the device,
+     * [publish] the ones whose original is gone (each is the photo's only copy now), [keep] the ones whose original
+     * cannot be checked. [exists] answers for a source uri, null when it cannot tell.
+     */
+    data class UndoSplit(val drop: List<String>, val publish: List<String>, val keep: List<String>)
+
+    fun undoSplit(
+        privateUris: List<String>,
+        sourceByVaultUri: Map<String, String>,
+        exists: (String) -> Boolean?,
+    ): UndoSplit {
+        val drop = mutableListOf<String>()
+        val publish = mutableListOf<String>()
+        val keep = mutableListOf<String>()
+        for (uri in privateUris.distinct()) {
+            val source = sourceByVaultUri[uri]?.takeIf { it.isNotBlank() }
+            when (source?.let(exists)) {
+                true -> drop += uri
+                false -> publish += uri
+                null -> keep += uri
+            }
+        }
+        return UndoSplit(drop, publish, keep)
+    }
+
+    /**
+     * The pending vault copy of each of [sources], from the journal ([journal], vault uri to source uri) and the
+     * vault files on disk ([blobs]). A journal entry whose file is gone names nothing to move. With more than one
+     * copy left for a source the first in uri order is taken, so every caller picks the same one.
+     */
+    fun pendingCopyBySource(journal: Map<String, String>, blobs: Set<String>, sources: Set<String>): Map<String, String> {
+        val out = HashMap<String, String>()
+        for ((vaultUri, source) in journal.entries.sortedBy { it.key }) {
+            if (source in sources && vaultUri in blobs && source !in out) out[source] = vaultUri
+        }
+        return out
+    }
+
+    /** The Drive link ids of the vault photos [published] holds, from the stored `"uri|linkId"` [cloudIdEntries]. */
+    fun vaultedLinks(cloudIdEntries: Set<String>, published: Set<String>): Set<String> =
+        cloudIdsByUri(cloudIdEntries).filterKeys { it in published }.values.toSet()
+
+    /**
+     * What showing again one photo the vault holds more than once does: [restore] is the copy that goes back to
+     * the device, [extras] the copies of the same photo that go with it, so only one device file comes back.
+     * [copies] are the vault uris recorded with the photo's Drive link id; a copy a hide is moving now ([busy])
+     * is left to that hide. A published copy is preferred, then the first in uri order.
+     */
+    data class RevealCopies(val restore: String?, val extras: List<String>)
+
+    fun revealCopies(copies: Collection<String>, published: Set<String>, busy: Set<String>): RevealCopies {
+        val free = copies.filter { it !in busy }.distinct().sorted()
+        val restore = free.firstOrNull { it in published } ?: free.firstOrNull()
+        return RevealCopies(restore, free.filter { it != restore })
+    }
+
+    /**
      * The originals a hide may delete: exactly the ones a vault copy was written for.
      *
      * The delete is permanent — it bypasses the device trash — so a photo whose copy failed, and
