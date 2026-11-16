@@ -62,7 +62,8 @@ class LocalKeyring(
     private val dir: File,
     private val wrapper: KeyWrapper,
     private val random: SecureRandom = SecureRandom(),
-    private val clock: () -> Long = System::currentTimeMillis,
+    /** The time since boot, which the wait for a silent Keystore is measured on. */
+    private val clock: () -> Long = eu.akoos.photos.data.db.encryption.RealTime::elapsed,
 ) : MasterKeys {
 
     class Current(val keyId: String, val key: ByteArray, val owner: String)
@@ -159,20 +160,25 @@ class LocalKeyring(
 
     /**
      * Counts a launch on which the Keystore did not answer and answers whether it has stayed that way long
-     * enough (three launches over at least an hour) to stop waiting for it. Bounds a crash loop on a phone whose
-     * Keystore is broken for good; whatever is then set aside is kept, never deleted.
+     * enough (three launches over at least an hour of real time, measured on the time since boot) to stop waiting
+     * for it. Bounds a crash loop on a phone whose Keystore is broken for good; whatever is then set aside is kept,
+     * never deleted.
      */
     fun unavailableTooLong(): Boolean {
         val now = clock()
-        val (first, count) = readPair(unavailableFile)
-        val since = if (count == 0L || first <= 0L) now else first
-        val next = if (unavailableNotedThisProcess) count else count + 1
+        val parts = runCatching { unavailableFile.readText().trim().split(' ').map { it.toLong() } }.getOrNull()
+            ?.takeIf { it.size == 3 }
+        var span = parts?.get(0) ?: 0L
+        val last = parts?.get(1) ?: now
+        var count = parts?.get(2) ?: 0L
         if (!unavailableNotedThisProcess) {
             unavailableNotedThisProcess = true
+            if (count > 0) span = eu.akoos.photos.data.db.encryption.RealTime.advance(span, last, now)
+            count++
             dir.mkdirs()
-            runCatching { writeWhole(unavailableFile, "$since $next".toByteArray()) }
+            runCatching { writeWhole(unavailableFile, "$span $now $count".toByteArray()) }
         }
-        return next >= UNAVAILABLE_LAUNCHES && now - since >= UNAVAILABLE_SPAN_MS
+        return count >= UNAVAILABLE_LAUNCHES && span >= UNAVAILABLE_SPAN_MS
     }
 
     private fun clearUnavailable() {
@@ -207,11 +213,6 @@ class LocalKeyring(
         val bytes = "$id $owner".toByteArray()
         writeWhole(currentFile, bytes)
         runCatching { writeWhole(currentBackup, bytes) }
-    }
-
-    private fun readPair(file: File): Pair<Long, Long> {
-        val parts = runCatching { file.readText().trim().split(' ') }.getOrNull() ?: return 0L to 0L
-        return (parts.getOrNull(0)?.toLongOrNull() ?: 0L) to (parts.getOrNull(1)?.toLongOrNull() ?: 0L)
     }
 
     /** Runs [block] under this process's lock and a file lock, so two processes never make a key at once. */

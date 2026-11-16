@@ -193,6 +193,28 @@ class DatabaseKeyStoreTest {
     }
 
     @Test
+    fun `real time is counted on the time since boot, a reboot adding only the time since it`() {
+        assertEquals(10 * 60_000L, RealTime.advance(4 * 60_000L, 60_000L, 7 * 60_000L))
+        assertEquals("rebooted: only the two minutes since boot count", 6 * 60_000L, RealTime.advance(4 * 60_000L, 50 * 60_000L, 2 * 60_000L))
+    }
+
+    @Test
+    fun `three starts across reboots count only the real time they can prove`() {
+        val wrapper = FakeWrapper(null)
+        DatabaseKeyStore(tmp.root, wrapper).create()
+        wrapper.failure = java.security.UnrecoverableKeyException("broken entry")
+        clockMs = 50 * 60_000L
+        assertTrue(DatabaseKeyStore(tmp.root, wrapper).load() is DatabaseKeyState.Unavailable)
+        // Rebooted twice: one minute after the first boot, then three minutes after the second.
+        start++
+        clockMs = 60_000L
+        assertTrue(DatabaseKeyStore(tmp.root, wrapper).load() is DatabaseKeyState.Unavailable)
+        start++
+        clockMs = 3 * 60_000L
+        assertTrue("four minutes proven, not ten", DatabaseKeyStore(tmp.root, wrapper).load() is DatabaseKeyState.Unavailable)
+    }
+
+    @Test
     fun `three quick starts in a row are not enough`() {
         val wrapper = FakeWrapper(null)
         DatabaseKeyStore(tmp.root, wrapper).create()

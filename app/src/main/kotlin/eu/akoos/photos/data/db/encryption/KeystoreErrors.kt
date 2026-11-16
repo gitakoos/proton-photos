@@ -84,8 +84,22 @@ object KeystoreErrors {
 }
 
 /**
+ * Real time across process starts, measured on the time since boot, so a change of the wall clock never moves it.
+ * A reboot between two starts counts only the time since the new boot: the total is never more than the real time.
+ */
+object RealTime {
+    /** The time since boot now. */
+    fun elapsed(): Long = android.os.SystemClock.elapsedRealtime()
+
+    /** [spanSoFar] grown by the time from a start at [lastElapsed] to one at [now] (both times since boot). */
+    fun advance(spanSoFar: Long, lastElapsed: Long, now: Long): Long =
+        spanSoFar + if (now >= lastElapsed) now - lastElapsed else now
+}
+
+/**
  * Counts a [KeystoreFailure.SUSPECT] error across process starts in [file]: it counts as broken for good only once
- * the same error was seen on [STARTS] different starts spread over at least [SPAN_MS]. A key that opens clears it.
+ * the same error was seen on [STARTS] different starts spread over at least [SPAN_MS] of real time ([RealTime]). A
+ * key that opens clears it.
  */
 class KeystoreStrikes(private val file: File) {
 
@@ -96,32 +110,40 @@ class KeystoreStrikes(private val file: File) {
         val signature = signatureOf(error)
         val record = read()
         val next = when {
-            record == null || record.signature != signature -> Record(signature, now, 1, start)
-            record.lastStart != start -> record.copy(count = record.count + 1, lastStart = start)
+            record == null || record.signature != signature -> Record(signature, 0L, 1, start, now)
+            record.lastStart != start -> record.copy(
+                span = RealTime.advance(record.span, record.lastElapsed, now),
+                count = record.count + 1,
+                lastStart = start,
+                lastElapsed = now,
+            )
             else -> record
         }
         if (next != record) write(next)
-        return next.count >= STARTS && now - next.firstAt >= SPAN_MS
+        return next.count >= STARTS && next.span >= SPAN_MS
     }
 
     fun clear() {
         if (file.exists()) file.delete()
     }
 
-    private data class Record(val signature: String, val firstAt: Long, val count: Int, val lastStart: String)
+    private data class Record(val signature: String, val span: Long, val count: Int, val lastStart: String, val lastElapsed: Long)
 
+    /** A record written before the span was measured on the time since boot reads as none, so counting starts over. */
     private fun read(): Record? {
         val lines = runCatching { file.readLines() }.getOrNull() ?: return null
-        if (lines.size < 4) return null
-        val firstAt = lines[1].toLongOrNull() ?: return null
+        if (lines.size < 5) return null
+        val span = lines[1].toLongOrNull() ?: return null
         val count = lines[2].toIntOrNull() ?: return null
-        return Record(lines[0], firstAt, count, lines[3])
+        val lastElapsed = lines[4].toLongOrNull() ?: return null
+        return Record(lines[0], span, count, lines[3], lastElapsed)
     }
 
     private fun write(record: Record) {
         runCatching {
             file.parentFile?.mkdirs()
-            writeWhole(file, listOf(record.signature, record.firstAt, record.count, record.lastStart).joinToString("\n").toByteArray())
+            val lines = listOf(record.signature, record.span, record.count, record.lastStart, record.lastElapsed)
+            writeWhole(file, lines.joinToString("\n").toByteArray())
         }
     }
 
@@ -137,6 +159,7 @@ class KeystoreStrikes(private val file: File) {
         private val PROCESS_START: String = UUID.randomUUID().toString()
 
         @VisibleForTesting internal var currentStart: () -> String = { PROCESS_START }
-        @VisibleForTesting internal var clock: () -> Long = System::currentTimeMillis
+        /** The time since boot ([RealTime.elapsed]). */
+        @VisibleForTesting internal var clock: () -> Long = RealTime::elapsed
     }
 }

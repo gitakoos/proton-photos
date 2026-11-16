@@ -134,6 +134,7 @@ class DatabaseOpenGateTest {
         freeBytes = { free },
         clock = { now },
         log = { lines += it },
+        elapsed = { now },
         recoveredKey = { dir -> recoveredKeys[dir] },
         appTables = listOf("labels", "face"),
         hashOf = { "h-$it" },

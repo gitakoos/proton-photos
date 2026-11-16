@@ -122,6 +122,8 @@ class DatabaseOpenGate(
     private val appTables: List<String> = AppOwnedTables.NAMES,
     private val hashOf: (String) -> String = LocalKeyOwner::userHash,
     private val userWork: Map<String, String> = AppOwnedTables.USER_WORK,
+    /** The time since boot, which the wait for a silent Keystore is measured on. */
+    private val elapsed: () -> Long = RealTime::elapsed,
 ) {
     val plain = File(databasesDir, PLAIN_NAME)
     val encrypted = File(databasesDir, ENCRYPTED_NAME)
@@ -377,12 +379,16 @@ class DatabaseOpenGate(
         writePair(attemptsFile, versionCode.toLong(), next)
     }
 
+    /** Three launches over at least an hour of real time ([RealTime]); a wall-clock change does not count. */
     private fun unavailableLongEnough(): Boolean {
-        val now = clock()
-        val (first, count) = readPair(unavailableFile)
-        val since = if (count == 0L || first <= 0L) now else first
-        writePair(unavailableFile, since, count + 1)
-        return count + 1 >= UNAVAILABLE_LAUNCHES && now - since >= UNAVAILABLE_SPAN_MS
+        val now = elapsed()
+        val parts = runCatching { unavailableFile.readText().trim().split(' ').map { it.toLong() } }.getOrNull()
+            ?.takeIf { it.size == 3 }
+        val count = (parts?.get(2) ?: 0L) + 1
+        val span = if (parts == null) 0L else RealTime.advance(parts[0], parts[1], now)
+        stateDir.mkdirs()
+        runCatching { writeWhole(unavailableFile, "$span $now $count".toByteArray()) }
+        return count >= UNAVAILABLE_LAUNCHES && span >= UNAVAILABLE_SPAN_MS
     }
 
     private fun readPair(file: File): Pair<Long, Long> {
