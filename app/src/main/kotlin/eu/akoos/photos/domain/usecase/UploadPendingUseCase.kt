@@ -1193,12 +1193,16 @@ class UploadPendingUseCase @Inject constructor(
             )
             // The device file is read once more right before the removal: it may have changed since the
             // upload read it, and then the only copy of those bytes is the device file. A file that no
-            // longer holds what the upload read, or cannot be read, is kept and queued to be backed up again.
+            // longer holds what the upload read is kept and queued to be backed up again. One that cannot be
+            // read now is kept with its backup stamp and pairing, as free-up does: a passing read error must
+            // not lead to a second Drive copy.
             val recheck = if (removal != Removal.NONE) {
                 val currentHash = withContext(Dispatchers.IO) { deviceFiles.computeSha1(state.localUri) }
                 deleteAfterBackupRecheck(expectedDeviceHash, currentHash).also { verdict ->
                     if (verdict != DeleteRecheck.DELETE) {
                         Log.w(UPLOAD_TAG, "Delete after backup: kept $logRef, device file ${verdict.name.lowercase()}")
+                    }
+                    if (verdict == DeleteRecheck.CHANGED && currentHash != null) {
                         withContext(NonCancellable) {
                             try {
                                 syncStateRepo.requeueChangedDeviceCopy(

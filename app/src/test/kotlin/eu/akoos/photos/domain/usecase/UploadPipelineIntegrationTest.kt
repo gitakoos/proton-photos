@@ -323,18 +323,22 @@ class UploadPipelineIntegrationTest {
     }
 
     @Test
-    fun `delete after backup keeps a device file it cannot read again and queues it again`() = runTest {
+    fun `delete after backup keeps a device file it cannot read again with its backup as it is`() = runTest {
         val uri = "content://media/42"
         uploadWithDeleteAfterBackup(uri) { unreadable }
 
-        assertEquals(0, trashRequestsFor(uri))
+        assertEquals("never trashed", 0, trashRequestsFor(uri))
         row(uri)!!.let {
-            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
-            assertNull(it.cloudFileId)
-            assertNull(it.backedUpAtMs)
-            assertEquals("the hash it was read with stays", sha1Of("original bytes".toByteArray()), it.localHash)
-            assertTrue(it.queued)
+            assertEquals("still backed up", SyncStatus.SYNCED, it.status)
+            assertEquals("the pairing stays", cloud.photos.value.single().linkId, it.cloudFileId)
+            assertNotNull("the backup stamp stays", it.backedUpAtMs)
+            assertEquals(sha1Of("original bytes".toByteArray()), it.localHash)
+            assertEquals("the recorded original stays for free-up", sha1Of("original bytes".toByteArray()), it.originalHash)
+            assertEquals("not queued, so no second Drive copy", false, it.queued)
         }
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        assertTrue("not left for the consent dialog either", uri !in pending)
+        assertEquals(1, cloud.photos.value.size)
     }
 
     @Test

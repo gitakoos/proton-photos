@@ -30,13 +30,13 @@ import me.proton.core.domain.entity.UserId
 
 /**
  * Takes [row]'s backup stamp and Drive pairing off and queues its device file to be backed up again,
- * for a device file that no longer holds what its backup read. [sha1] is the file's hash as it is now,
- * or null when it could not be read (the stored hash then stays). The Drive copy stays as it is.
+ * for a device file that no longer holds what its backup read. [sha1] is the file's hash as it is now.
+ * The Drive copy stays as it is.
  */
 internal suspend fun SyncStateRepository.requeueChangedDeviceCopy(
     userId: UserId,
     row: SyncState,
-    sha1: String?,
+    sha1: String,
     sizeBytes: Long,
 ) {
     upsert(
@@ -44,7 +44,7 @@ internal suspend fun SyncStateRepository.requeueChangedDeviceCopy(
             status = SyncStatus.LOCAL_ONLY,
             cloudFileId = null,
             cloudHash = null,
-            localHash = sha1 ?: row.localHash,
+            localHash = sha1,
             backedUpAtMs = null,
             lastSyncSuccessMs = null,
             sizeBytes = sizeBytes.takeIf { it > 0L } ?: row.sizeBytes,
