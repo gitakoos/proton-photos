@@ -198,6 +198,28 @@ class VaultSignOutPolicyTest {
     }
 
     @Test
+    fun `a forced logout whose marker was not saved neither rescues nor wipes anything`() = runTest {
+        val policy = policy { HiddenRescue(moved = 2, stillInVault = emptySet(), wipeable = setOf("file:///v/a")) }
+
+        val wipe = policy.afterSignOut("u-unmarked", markerSaved = false)
+
+        assertEquals(VaultWipe.None, wipe)
+        assertEquals("no rescue runs, so no photo leaves the vault", 0, rescues)
+        assertTrue(notices.isEmpty())
+    }
+
+    @Test
+    fun `an unsaved marker still takes the user mark, so a later forced logout is rescued`() = runTest {
+        val policy = policy { HiddenRescue(moved = 1, stillInVault = emptySet()) }
+        UserSignOut.mark("user-unmarked")
+
+        assertEquals(VaultWipe.None, policy.afterSignOut("user-unmarked", markerSaved = false))
+        assertFalse(UserSignOut.isMarked("user-unmarked"))
+        assertEquals(VaultWipe.Only(emptySet()), policy.afterSignOut("user-unmarked"))
+        assertEquals(1, rescues)
+    }
+
+    @Test
     fun `a cancelled rescue is not mistaken for a failed one`() = runTest {
         val policy = policy { throw CancellationException("screen gone") }
 

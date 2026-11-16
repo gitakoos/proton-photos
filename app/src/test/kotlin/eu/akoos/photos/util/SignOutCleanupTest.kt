@@ -23,12 +23,17 @@
 package eu.akoos.photos.util
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.WorkManager
+import eu.akoos.photos.data.localcrypto.SettingsWriteRefusedException
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.worker.CloudCompressWorker
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -44,6 +49,21 @@ import java.io.File
 class SignOutCleanupTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
+
+    @After
+    fun tearDown() {
+        SignOutCleanup.markerStoreOverride = null
+    }
+
+    /** The marker store answering reads as it is, while every write is refused, as with a silent Keystore. */
+    private fun markerWritesRefused() {
+        val real = context.settingsDataStore
+        SignOutCleanup.markerStoreOverride = object : DataStore<Preferences> {
+            override val data = real.data
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
+                throw SettingsWriteRefusedException("settings: key not available, change not written", null)
+        }
+    }
 
     @Test
     fun `stopping the account's work also stops the re-compression of its Drive photos`() {
@@ -86,6 +106,54 @@ class SignOutCleanupTest {
         assertEquals(setOf("b"), SignOutCleanup.userSignOutsPending(context))
         SignOutCleanup.clearUserSignOutPending(context, "b")
         assertTrue(SignOutCleanup.userSignOutsPending(context).isEmpty())
+    }
+
+    @Test
+    fun `a Settings sign-out runs behind its marker and clears it at the end`() = runBlocking {
+        var pendingDuring: Set<String>? = null
+        var notStarted = 0
+
+        val started = SignOutCleanup.startUserSignOut(context, "d", onNotStarted = { notStarted++ }) {
+            pendingDuring = SignOutCleanup.userSignOutsPending(context)
+        }
+
+        assertTrue(started)
+        assertEquals(setOf("d"), pendingDuring)
+        assertEquals(0, notStarted)
+        assertTrue(SignOutCleanup.userSignOutsPending(context).isEmpty())
+        assertTrue("the claim is free again", SignOutCleanup.claimUserSignOut("d"))
+        SignOutCleanup.releaseUserSignOut("d")
+    }
+
+    @Test
+    fun `a Settings sign-out whose marker is refused starts nothing, says so and does not throw`() = runBlocking {
+        markerWritesRefused()
+        var signOutRan = false
+        var notStarted = 0
+
+        val started = SignOutCleanup.startUserSignOut(context, "e", onNotStarted = { notStarted++ }) {
+            signOutRan = true
+        }
+
+        assertFalse(started)
+        assertFalse("no step of the sign-out runs, so nothing is deleted", signOutRan)
+        assertEquals("the user is told once", 1, notStarted)
+        assertTrue(SignOutCleanup.userSignOutsPending(context).isEmpty())
+        assertTrue("a second try is not blocked", SignOutCleanup.claimUserSignOut("e"))
+        SignOutCleanup.releaseUserSignOut("e")
+    }
+
+    @Test
+    fun `a cleanup marker that is refused answers false instead of throwing`() = runBlocking {
+        markerWritesRefused()
+
+        assertFalse(SignOutCleanup.tryMarkPending(context, "f"))
+        assertTrue(SignOutCleanup.pending(context).isEmpty())
+
+        SignOutCleanup.markerStoreOverride = null
+        assertTrue(SignOutCleanup.tryMarkPending(context, "f"))
+        assertEquals(setOf("f"), SignOutCleanup.pending(context))
+        SignOutCleanup.clearPending(context, "f")
     }
 
     @Test

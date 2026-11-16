@@ -52,13 +52,19 @@ class VaultSignOutPolicy(
      * vault files a hide was moving when the sign-out began; they are neither rescued nor destroyed.
      *
      * A rescue that fails outright answers [VaultWipe.None]: nothing is known about which files are
-     * safe to destroy, so none is.
+     * safe to destroy, so none is. So does a sign-out whose cleanup marker could not be saved
+     * ([markerSaved] false), without a rescue: no later launch could finish a run cut short, so the
+     * vault stays whole and keeps its records.
      */
-    suspend fun afterSignOut(userId: String, busy: Set<String> = emptySet()): VaultWipe {
+    suspend fun afterSignOut(userId: String, busy: Set<String> = emptySet(), markerSaved: Boolean = true): VaultWipe {
         // The deliberate sign-out has dealt with the vault itself, and logged what it did.
         if (UserSignOut.consume(userId)) return VaultWipe.None
         if (unfinishedSignIns.remove(userId)) {
             SyncDiagnostics.log("sign-out: sign-in gave up, vault left alone")
+            return VaultWipe.None
+        }
+        if (!markerSaved) {
+            SyncDiagnostics.log("sign-out: session ended, marker not saved, vault left alone")
             return VaultWipe.None
         }
         val rescued = try {

@@ -203,7 +203,9 @@ class MainHostActivity : AppCompatActivity() {
      * vault's device-only photos are rescued, then its rows, keys, preferences and decrypted caches are
      * wiped. It runs on the app scope, so a recreated or finished Activity does not cut it short, and
      * [persist] keeps a marker until the end, so a process killed part way finishes it on the next
-     * launch (see [replayUnfinishedSignOutCleanups]).
+     * launch (see [replayUnfinishedSignOutCleanups]). A marker that cannot be saved leaves the vault
+     * whole; the rest of the cleanup still runs, and a session the server ended tries the marker again
+     * at the end, so a later launch with nobody signed in deals with the vault.
      */
     private suspend fun cleanUpAfterSignOut(
         app: android.content.Context,
@@ -218,16 +220,17 @@ class MainHostActivity : AppCompatActivity() {
         // the only copy.
         val busy = hiddenVaultJournal.beginSignOut()
         try {
-            if (persist) signOutStep { cleanup.markPending(app, userId.id) }
+            val endedByServer = persist && !eu.akoos.photos.data.hidden.UserSignOut.isMarked(userId.id)
+            val marked = !persist || cleanup.tryMarkPending(app, userId.id)
             cleanup.stopBackgroundWork(app, workManager)
             // A session the server ended leaves behind the same diagnostics a sign-out from Settings empties. That
             // one has emptied them already and opened the next log with its own line, which stays. Emptied before
             // the vault step below, whose line about what it did opens the next log.
-            if (persist && !eu.akoos.photos.data.hidden.UserSignOut.isMarked(userId.id)) signOutStep {
+            if (endedByServer) signOutStep {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cleanup.clearDiagnostics(app) }
             }
             val vault = try {
-                policy.afterSignOut(userId.id, busy)
+                policy.afterSignOut(userId.id, busy, markerSaved = marked)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 eu.akoos.photos.domain.repository.VaultWipe.None
@@ -251,7 +254,13 @@ class MainHostActivity : AppCompatActivity() {
             // New files stop being written with the key of the account that left; the key itself stays, so what
             // it encrypted stays readable.
             signOutStep { localEncryption.onSignedOut(userId.id) }
-            signOutStep { cleanup.clearPending(app, userId.id) }
+            if (marked) {
+                signOutStep { cleanup.clearPending(app, userId.id) }
+            } else if (endedByServer) {
+                // The vault was left whole for want of a marker; one saved now has a later launch with nobody
+                // signed in run this cleanup again, rescue included.
+                signOutStep { cleanup.markPending(app, userId.id) }
+            }
         } finally {
             hiddenVaultJournal.endSignOut()
             cleanup.release(userId.id)

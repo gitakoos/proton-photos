@@ -2984,4 +2984,5 @@
     <string name="settings_held_back_confirm_body">La app se inicia con los ajustes predeterminados. Las fotos que ocultaste en la nube pueden volver a verse hasta que se abran los ajustes conservados, lo que aún puede ocurrir más tarde. El bloqueo de la app sigue activado.</string>
     <string name="settings_held_back_confirm_action">Continuar</string>
     <string name="settings_change_not_saved">No se ha podido guardar un cambio de los ajustes. Vuelve a intentarlo en un momento.</string>
+    <string name="sign_out_not_started">No se ha podido iniciar el cierre de sesión. Vuelve a intentarlo en un momento.</string>
 </resources>

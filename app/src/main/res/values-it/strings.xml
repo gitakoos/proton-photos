@@ -2986,4 +2986,5 @@
     <string name="settings_held_back_confirm_body">L\'app si avvia con le impostazioni predefinite. Le foto nascoste nel cloud potrebbero riapparire finché le impostazioni conservate non si aprono, cosa che può ancora avvenire più tardi. Il blocco app resta attivo.</string>
     <string name="settings_held_back_confirm_action">Continua</string>
     <string name="settings_change_not_saved">Non è stato possibile salvare una modifica alle impostazioni. Riprova tra poco.</string>
+    <string name="sign_out_not_started">Non è stato possibile avviare l\'uscita. Riprova tra poco.</string>
 </resources>

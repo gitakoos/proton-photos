@@ -2984,4 +2984,5 @@
     <string name="settings_held_back_confirm_body">The app starts with default settings. Photos you hid in the cloud may show again until the kept settings open, which can still happen later. The app lock stays on.</string>
     <string name="settings_held_back_confirm_action">Continue</string>
     <string name="settings_change_not_saved">A settings change could not be saved. Try again in a moment.</string>
+    <string name="sign_out_not_started">Signing out could not be started. Try again in a moment.</string>
 </resources>

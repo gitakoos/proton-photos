@@ -3084,4 +3084,5 @@
     <string name="settings_held_back_confirm_body">Aplikace se spustí s výchozím nastavením. Fotky skryté v cloudu se mohou znovu zobrazit, dokud se uložené nastavení neotevře, což se může stát i později. Zámek aplikace zůstane zapnutý.</string>
     <string name="settings_held_back_confirm_action">Pokračovat</string>
     <string name="settings_change_not_saved">Změnu nastavení se nepodařilo uložit. Zkuste to za chvíli znovu.</string>
+    <string name="sign_out_not_started">Odhlášení se nepodařilo zahájit. Zkuste to za chvíli znovu.</string>
 </resources>

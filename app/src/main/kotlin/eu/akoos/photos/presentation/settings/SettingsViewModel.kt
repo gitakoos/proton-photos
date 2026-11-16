@@ -2178,7 +2178,9 @@ class SettingsViewModel @Inject constructor(
      * Signs the current account out, dealing with the vault as [vault] says. Runs on the app scope, so leaving
      * Settings never stops it half way, and keeps a marker from its first step to its last, so a process that
      * dies part way has the next launch finish the sign-out rather than leave the account signed in with its
-     * vault and caches already partly emptied (see [SignOutCleanup.userSignOutReplayPlan]).
+     * vault and caches already partly emptied (see [SignOutCleanup.userSignOutReplayPlan]). A marker that cannot
+     * be saved starts nothing: the account, the vault and the caches stay as they are, and a short message asks
+     * the user to try again.
      */
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun signOut(vault: eu.akoos.photos.data.hidden.SignOutVaultChoice = eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE) {
@@ -2186,14 +2188,16 @@ class SettingsViewModel @Inject constructor(
         val confirmedVault = countedVaultUris
         appScope.launch {
             val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
-            if (!SignOutCleanup.claimUserSignOut(userId.id)) return@launch
-            try {
-                SignOutCleanup.markUserSignOutPending(context, userId.id)
+            SignOutCleanup.startUserSignOut(context, userId.id, onNotStarted = ::showSignOutNotStarted) {
                 runUserSignOut(userId, vault, confirmedVault)
-                SignOutCleanup.clearUserSignOutPending(context, userId.id)
-            } finally {
-                SignOutCleanup.releaseUserSignOut(userId.id)
             }
+        }
+    }
+
+    /** Posted to the main thread, since the sign-out runs on the app scope and Settings may be gone by then. */
+    private fun showSignOutNotStarted() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, R.string.sign_out_not_started, android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

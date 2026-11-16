@@ -23,13 +23,14 @@
 package eu.akoos.photos.util
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.work.WorkManager
 import coil.imageLoader
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.data.localcrypto.VaultFiles
 import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
@@ -40,6 +41,7 @@ import eu.akoos.photos.worker.MetadataEditWorker
 import eu.akoos.photos.worker.SyncWorker
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 /**
@@ -120,14 +122,32 @@ object SignOutCleanup {
 
     fun consumeUnfinishedSignIn(userId: String): Boolean = unfinishedSignIns.remove(userId)
 
+    /** Where the markers are written; a test puts a store here that refuses every write. */
+    @androidx.annotation.VisibleForTesting
+    internal var markerStoreOverride: DataStore<Preferences>? = null
+
+    /** The markers go through the strict store: a marker that is not saved is reported, never taken as stored. */
+    private fun markers(context: Context): DataStore<Preferences> =
+        markerStoreOverride ?: context.settingsDataStoreStrict
+
     suspend fun markPending(context: Context, userId: String) {
-        context.settingsDataStoreStrict.edit { p ->
+        markers(context).edit { p ->
             p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() + userId
         }
     }
 
+    /** Writes the cleanup marker of [userId]; false, without throwing, when it could not be saved. */
+    suspend fun tryMarkPending(context: Context, userId: String): Boolean =
+        try {
+            markPending(context, userId)
+            true
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            false
+        }
+
     suspend fun clearPending(context: Context, userId: String) {
-        context.settingsDataStoreStrict.edit { p ->
+        markers(context).edit { p ->
             val left = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() - userId
             if (left.isEmpty()) p.remove(SettingsKeys.SIGN_OUT_CLEANUP_PENDING)
             else p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = left
@@ -135,7 +155,7 @@ object SignOutCleanup {
     }
 
     suspend fun pending(context: Context): Set<String> =
-        context.settingsDataStore.data.first()[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty()
+        markers(context).data.first()[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty()
 
     fun runningNow(): Set<String> = running.toSet()
 
@@ -149,13 +169,13 @@ object SignOutCleanup {
     fun userSignOutsRunningNow(): Set<String> = userSignOutsRunning.toSet()
 
     suspend fun markUserSignOutPending(context: Context, userId: String) {
-        context.settingsDataStore.edit { p ->
+        markers(context).edit { p ->
             p[SettingsKeys.USER_SIGN_OUT_PENDING] = p[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty() + userId
         }
     }
 
     suspend fun clearUserSignOutPending(context: Context, userId: String) {
-        context.settingsDataStore.edit { p ->
+        markers(context).edit { p ->
             val left = p[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty() - userId
             if (left.isEmpty()) p.remove(SettingsKeys.USER_SIGN_OUT_PENDING)
             else p[SettingsKeys.USER_SIGN_OUT_PENDING] = left
@@ -163,7 +183,42 @@ object SignOutCleanup {
     }
 
     suspend fun userSignOutsPending(context: Context): Set<String> =
-        context.settingsDataStore.data.first()[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty()
+        markers(context).data.first()[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty()
+
+    /**
+     * Runs the Settings sign-out of [userId] ([signOut]) behind its marker. The marker is written first and nothing
+     * of the sign-out runs until it is stored, so a sign-out cut short always leaves the next launch something to
+     * finish. A marker that cannot be saved starts nothing: everything stays as it was, [onNotStarted] tells the
+     * user, and the answer is false. A marker that cannot be cleared at the end is dropped by the next launch,
+     * which finds the account disabled. One sign-out of an account runs at a time; a second one answers false.
+     */
+    suspend fun startUserSignOut(
+        context: Context,
+        userId: String,
+        onNotStarted: () -> Unit,
+        signOut: suspend () -> Unit,
+    ): Boolean {
+        if (!claimUserSignOut(userId)) return false
+        try {
+            try {
+                markUserSignOutPending(context, userId)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                runCatching { SyncDiagnostics.log("sign-out: by user, marker not saved, not started") }
+                onNotStarted()
+                return false
+            }
+            signOut()
+            try {
+                clearUserSignOutPending(context, userId)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
+            return true
+        } finally {
+            releaseUserSignOut(userId)
+        }
+    }
 
     /**
      * What a launch does with each Settings sign-out an earlier process started and never finished. The user
