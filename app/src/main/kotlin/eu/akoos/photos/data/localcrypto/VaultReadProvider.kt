@@ -177,11 +177,16 @@ class VaultReadProvider : ContentProvider() {
         /** Whether the open [descriptor] holds a plaintext file, read from its first bytes without moving it. */
         private fun plainAt(descriptor: ParcelFileDescriptor, length: Long): Boolean {
             if (length < LocalCryptoFormat.META_OFFSET) return true
-            // Not closed: the stream does not own the descriptor, which stays open for the reader.
-            val channel = java.io.FileInputStream(descriptor.fileDescriptor).channel
-            val head = java.nio.ByteBuffer.allocate(5)
-            while (head.hasRemaining()) if (channel.read(head, head.position().toLong()) < 0) throw java.io.EOFException()
-            return !LocalCryptoFormat.looksEncrypted(head.array())
+            // A positioned read straight on the descriptor: nothing else is opened on it, so nothing is left to
+            // close while the descriptor stays open for the reader.
+            val head = ByteArray(5)
+            var read = 0
+            while (read < head.size) {
+                val n = android.system.Os.pread(descriptor.fileDescriptor, head, read, head.size - read, read.toLong())
+                if (n <= 0) throw java.io.EOFException()
+                read += n
+            }
+            return !LocalCryptoFormat.looksEncrypted(head)
         }
 
         fun setDisplayName(fileName: String, name: String) {

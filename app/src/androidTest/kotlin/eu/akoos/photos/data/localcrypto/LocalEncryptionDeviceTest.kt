@@ -192,6 +192,24 @@ class LocalEncryptionDeviceTest {
     }
 
     @Test
+    fun aPlainFileIsHandedOutAsItIsAndASealedOneIsNot() {
+        val bytes = photo()
+        val plain = File(root, "plain.jpg").apply { writeBytes(bytes) }
+        val current = keyring().current()
+        val sealed = File(root, "sealed.jpg").apply {
+            writeBytes(LocalCryptoFormat.encryptBytes(bytes, LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.VAULT)))
+        }
+        repeat(3) {
+            VaultReadProvider.openDecrypted(ctx, plain).use { pfd ->
+                assertEquals(bytes.size.toLong(), pfd.statSize)
+                assertArrayEquals(sha(bytes), sha(FileInputStream(pfd.fileDescriptor).readBytes()))
+            }
+            // Sealed by a test key the app does not hold: read as encrypted, so never handed out as its raw bytes.
+            assertTrue(runCatching { VaultReadProvider.openDecrypted(ctx, sealed).close() }.exceptionOrNull() is java.io.FileNotFoundException)
+        }
+    }
+
+    @Test
     fun settingsFileMovesAndReadsBack() {
         val prefs = preferencesOf(stringPreferencesKey("theme") to "dark", stringSetPreferencesKey("hidden") to setOf("a", "b"))
         val plain = Buffer().also { runBlocking { PreferencesSerializer.writeTo(prefs, it) } }.readByteArray()
