@@ -28,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -40,6 +41,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -198,20 +201,27 @@ fun SharedScreen(
                     }
 
                 isEmpty ->
-                    EmptyState(
-                        title = if (filter == SharedFilter.SharedWithMe)
-                            stringResource(R.string.shared_empty_with_me_title)
-                        else
-                            stringResource(R.string.shared_empty_by_me_title),
-                        subtitle = if (filter == SharedFilter.SharedWithMe)
-                            stringResource(R.string.shared_empty_with_me_body)
-                        else
-                            stringResource(R.string.shared_empty_by_me_body),
-                        icon = Icons.Default.People,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = topPadding),
-                    )
+                    // Scrollable at the page's own height, so a pull on the empty page still refreshes.
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val pageHeight = maxHeight
+                        Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            EmptyState(
+                                title = if (filter == SharedFilter.SharedWithMe)
+                                    stringResource(R.string.shared_empty_with_me_title)
+                                else
+                                    stringResource(R.string.shared_empty_by_me_title),
+                                subtitle = if (filter == SharedFilter.SharedWithMe)
+                                    stringResource(R.string.shared_empty_with_me_body)
+                                else
+                                    stringResource(R.string.shared_empty_by_me_body),
+                                icon = Icons.Default.People,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(pageHeight)
+                                    .padding(top = topPadding),
+                            )
+                        }
+                    }
 
                 else ->
                     LazyVerticalGrid(
