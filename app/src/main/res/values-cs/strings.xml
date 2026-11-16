@@ -3063,4 +3063,12 @@
     <string name="local_encryption_unlock">Odemknout</string>
     <string name="local_encryption_unlocked">Odemčeno</string>
     <string name="local_encryption_unlocked_restart">Odemčeno. Knihovna se vrátí při příštím spuštění aplikace.</string>
+    <string name="settings_held_back_title">Nastavení je uzamčeno</string>
+    <string name="settings_held_back_body">Nastavení tohoto telefonu se nepodařilo otevřít. Zůstává beze změny a vaše fotky jsou skryté, dokud se znovu neotevře, což se stane samo, jakmile bude jeho klíč opět k dispozici. Můžete také pokračovat bez něj a otevřít ho později v Místním šifrování pomocí hesla ke Skrytým.</string>
+    <string name="settings_held_back_body_unreadable">Nastavení tohoto telefonu teď nelze přečíst. Vaše fotky zůstávají skryté, zatímco to aplikace zkouší znovu.</string>
+    <string name="settings_held_back_retry">Zkusit znovu</string>
+    <string name="settings_held_back_continue">Pokračovat bez něj</string>
+    <string name="settings_held_back_confirm_title">Pokračovat bez nastavení?</string>
+    <string name="settings_held_back_confirm_body">Aplikace se spustí s výchozím nastavením. Fotky skryté v cloudu se mohou znovu zobrazit, dokud se uložené nastavení neotevře, což se může stát i později. Zámek aplikace zůstane zapnutý.</string>
+    <string name="settings_held_back_confirm_action">Pokračovat</string>
 </resources>

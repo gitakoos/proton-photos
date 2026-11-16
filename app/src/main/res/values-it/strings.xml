@@ -2965,4 +2965,12 @@
     <string name="local_encryption_unlock">Sblocca</string>
     <string name="local_encryption_unlocked">Sbloccato</string>
     <string name="local_encryption_unlocked_restart">Sbloccato. La libreria torna al prossimo avvio dell\'app.</string>
+    <string name="settings_held_back_title">Le impostazioni sono bloccate</string>
+    <string name="settings_held_back_body">Non è stato possibile aprire le impostazioni di questo telefono. Restano conservate senza modifiche e le tue foto rimangono coperte finché non si riaprono, cosa che avviene da sola appena la loro chiave torna disponibile. Puoi anche continuare senza e aprirle più tardi da Crittografia locale con la password di Nascoste.</string>
+    <string name="settings_held_back_body_unreadable">Al momento non è possibile leggere le impostazioni di questo telefono. Le tue foto restano coperte mentre l\'app riprova.</string>
+    <string name="settings_held_back_retry">Riprova</string>
+    <string name="settings_held_back_continue">Continua senza</string>
+    <string name="settings_held_back_confirm_title">Continuare senza le tue impostazioni?</string>
+    <string name="settings_held_back_confirm_body">L\'app si avvia con le impostazioni predefinite. Le foto nascoste nel cloud potrebbero riapparire finché le impostazioni conservate non si aprono, cosa che può ancora avvenire più tardi. Il blocco app resta attivo.</string>
+    <string name="settings_held_back_confirm_action">Continua</string>
 </resources>

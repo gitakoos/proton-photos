@@ -2843,4 +2843,12 @@
     <string name="local_encryption_unlock">Kilidi aç</string>
     <string name="local_encryption_unlocked">Kilit açıldı</string>
     <string name="local_encryption_unlocked_restart">Kilit açıldı. Kitaplığın uygulamanın bir sonraki açılışında geri gelir.</string>
+    <string name="settings_held_back_title">Ayarlar kilitli</string>
+    <string name="settings_held_back_body">Bu telefonun ayarları açılamadı. Değiştirilmeden saklanıyorlar ve fotoğraflarınız yeniden açılana kadar örtülü kalıyor; anahtarları geri geldiğinde bu kendiliğinden olur. Ayrıca onlarsız devam edip daha sonra Yerel şifreleme bölümünden Gizli parolanızla açabilirsiniz.</string>
+    <string name="settings_held_back_body_unreadable">Bu telefonun ayarları şu anda okunamıyor. Uygulama yeniden denerken fotoğraflarınız örtülü kalıyor.</string>
+    <string name="settings_held_back_retry">Yeniden dene</string>
+    <string name="settings_held_back_continue">Onlarsız devam et</string>
+    <string name="settings_held_back_confirm_title">Ayarlarınız olmadan devam edilsin mi?</string>
+    <string name="settings_held_back_confirm_body">Uygulama varsayılan ayarlarla başlar. Bulutta gizlediğiniz fotoğraflar, saklanan ayarlar açılana kadar yeniden görünebilir; bu daha sonra da olabilir. Uygulama kilidi açık kalır.</string>
+    <string name="settings_held_back_confirm_action">Devam et</string>
 </resources>

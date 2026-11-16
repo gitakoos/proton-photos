@@ -2963,4 +2963,12 @@
     <string name="local_encryption_unlock">Unlock</string>
     <string name="local_encryption_unlocked">Unlocked</string>
     <string name="local_encryption_unlocked_restart">Unlocked. Your library comes back the next time the app starts.</string>
+    <string name="settings_held_back_title">Settings are locked</string>
+    <string name="settings_held_back_body">This phone\'s settings could not be opened. They are kept unchanged, and your photos stay covered until they open again, which happens on its own once their key is back. You can also continue without them and open them later from Local encryption with your Hidden password.</string>
+    <string name="settings_held_back_body_unreadable">This phone\'s settings could not be read right now. Your photos stay covered while the app tries again.</string>
+    <string name="settings_held_back_retry">Try again</string>
+    <string name="settings_held_back_continue">Continue without them</string>
+    <string name="settings_held_back_confirm_title">Continue without your settings?</string>
+    <string name="settings_held_back_confirm_body">The app starts with default settings. Photos you hid in the cloud may show again until the kept settings open, which can still happen later. The app lock stays on.</string>
+    <string name="settings_held_back_confirm_action">Continue</string>
 </resources>

@@ -133,6 +133,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // The :crypto process shares this Application but must skip the main-process init below
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
+        // Before any screen reads the settings: whether they are held back, so the lock and the cover fail closed.
+        eu.akoos.photos.data.localcrypto.SettingsLock.attach(this)
         // First: clears scratch plaintext of an earlier process, then encrypts what an earlier version left plain.
         localEncryption.start()
         delegatingFactory.addFactory(workerFactory)

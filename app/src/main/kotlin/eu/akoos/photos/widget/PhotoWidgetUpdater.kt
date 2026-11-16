@@ -115,6 +115,12 @@ object PhotoWidgetUpdater {
                 clearBitmapState(context, glanceId, appWidgetId)
                 return@withContext
             }
+            // Settings held back read as an empty file, with no hidden list: the widget draws nothing until they read.
+            eu.akoos.photos.data.localcrypto.SettingsLock.attach(context)
+            if (eu.akoos.photos.data.localcrypto.SettingsLock.isHeldBack) {
+                clearBitmapState(context, glanceId, appWidgetId)
+                return@withContext
+            }
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             // Deliberately not caught on its own: an update that cannot tell what is hidden draws
             // nothing new and leaves it to the next cycle.

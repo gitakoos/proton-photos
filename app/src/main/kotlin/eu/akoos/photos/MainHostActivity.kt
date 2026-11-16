@@ -590,6 +590,19 @@ class MainHostActivity : AppCompatActivity() {
                             // dialog and sheet, the content under it stays covered and inert, and back
                             // leaves the app instead of reaching it.
                             AppLockGate(state = lockGate, onLeave = { leaveWhileLocked() }) {
+                              // Settings held back read as an empty file, which would show hidden photos again:
+                              // the app stays covered (under the lock) until they read or the user goes on.
+                              val settingsHold by eu.akoos.photos.data.localcrypto.SettingsLock.state
+                                  .collectAsStateWithLifecycle()
+                              if (settingsHold != eu.akoos.photos.data.localcrypto.SettingsHold.NONE) {
+                                  val holdScope = rememberCoroutineScope()
+                                  eu.akoos.photos.presentation.lock.SettingsHeldBackScreen(
+                                      hold = settingsHold,
+                                      onRetry = { holdScope.launch { localEncryption.retryHeldBackSettings() } },
+                                      onContinue = { holdScope.launch { localEncryption.continueWithoutHeldBackSettings() } },
+                                  )
+                                  return@AppLockGate
+                              }
                               // The whole app as the sheets frost it, when the frosted pills are on.
                               val rootGlass = rememberGlassBackdrop(AppColors.current.bg0)
                               Box(Modifier.fillMaxSize().glassSource(rootGlass)) {

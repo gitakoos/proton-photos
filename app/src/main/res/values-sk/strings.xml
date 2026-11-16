@@ -3064,4 +3064,12 @@
     <string name="local_encryption_unlock">Odomknúť</string>
     <string name="local_encryption_unlocked">Odomknuté</string>
     <string name="local_encryption_unlocked_restart">Odomknuté. Knižnica sa vráti pri ďalšom spustení aplikácie.</string>
+    <string name="settings_held_back_title">Nastavenia sú uzamknuté</string>
+    <string name="settings_held_back_body">Nastavenia tohto telefónu sa nepodarilo otvoriť. Zostávajú nezmenené a vaše fotky sú zakryté, kým sa znova neotvoria, čo sa stane samo, keď bude ich kľúč opäť k dispozícii. Môžete tiež pokračovať bez nich a otvoriť ich neskôr v Miestnom šifrovaní heslom k Skrytým.</string>
+    <string name="settings_held_back_body_unreadable">Nastavenia tohto telefónu teraz nie je možné prečítať. Vaše fotky zostávajú zakryté, kým to aplikácia skúša znova.</string>
+    <string name="settings_held_back_retry">Skúsiť znova</string>
+    <string name="settings_held_back_continue">Pokračovať bez nich</string>
+    <string name="settings_held_back_confirm_title">Pokračovať bez nastavení?</string>
+    <string name="settings_held_back_confirm_body">Aplikácia sa spustí s predvolenými nastaveniami. Fotky skryté v cloude sa môžu znova zobraziť, kým sa uložené nastavenia neotvoria, čo sa môže stať aj neskôr. Zámok aplikácie zostane zapnutý.</string>
+    <string name="settings_held_back_confirm_action">Pokračovať</string>
 </resources>

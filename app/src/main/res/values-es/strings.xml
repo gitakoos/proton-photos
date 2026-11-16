@@ -2963,4 +2963,12 @@
     <string name="local_encryption_unlock">Desbloquear</string>
     <string name="local_encryption_unlocked">Desbloqueado</string>
     <string name="local_encryption_unlocked_restart">Desbloqueado. Tu biblioteca vuelve la próxima vez que se inicie la app.</string>
+    <string name="settings_held_back_title">Los ajustes están bloqueados</string>
+    <string name="settings_held_back_body">No se han podido abrir los ajustes de este teléfono. Se conservan sin cambios y tus fotos siguen ocultas hasta que vuelvan a abrirse, lo que ocurre solo en cuanto su clave vuelva a estar disponible. También puedes continuar sin ellos y abrirlos más tarde desde Cifrado local con tu contraseña de Ocultas.</string>
+    <string name="settings_held_back_body_unreadable">Ahora no se pueden leer los ajustes de este teléfono. Tus fotos siguen ocultas mientras la app lo vuelve a intentar.</string>
+    <string name="settings_held_back_retry">Reintentar</string>
+    <string name="settings_held_back_continue">Continuar sin ellos</string>
+    <string name="settings_held_back_confirm_title">¿Continuar sin tus ajustes?</string>
+    <string name="settings_held_back_confirm_body">La app se inicia con los ajustes predeterminados. Las fotos que ocultaste en la nube pueden volver a verse hasta que se abran los ajustes conservados, lo que aún puede ocurrir más tarde. El bloqueo de la app sigue activado.</string>
+    <string name="settings_held_back_confirm_action">Continuar</string>
 </resources>

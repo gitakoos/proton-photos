@@ -3057,4 +3057,12 @@
     <string name="local_encryption_unlock">Odblokuj</string>
     <string name="local_encryption_unlocked">Odblokowano</string>
     <string name="local_encryption_unlocked_restart">Odblokowano. Biblioteka wróci przy następnym uruchomieniu aplikacji.</string>
+    <string name="settings_held_back_title">Ustawienia są zablokowane</string>
+    <string name="settings_held_back_body">Nie udało się otworzyć ustawień tego telefonu. Pozostają bez zmian, a Twoje zdjęcia są zakryte, dopóki nie otworzą się ponownie, co nastąpi samo, gdy ich klucz znów będzie dostępny. Możesz też kontynuować bez nich i otworzyć je później w Szyfrowaniu lokalnym hasłem do Ukrytych.</string>
+    <string name="settings_held_back_body_unreadable">Nie można teraz odczytać ustawień tego telefonu. Twoje zdjęcia pozostają zakryte, gdy aplikacja próbuje ponownie.</string>
+    <string name="settings_held_back_retry">Spróbuj ponownie</string>
+    <string name="settings_held_back_continue">Kontynuuj bez nich</string>
+    <string name="settings_held_back_confirm_title">Kontynuować bez ustawień?</string>
+    <string name="settings_held_back_confirm_body">Aplikacja uruchomi się z ustawieniami domyślnymi. Zdjęcia ukryte w chmurze mogą znów być widoczne, dopóki zachowane ustawienia się nie otworzą, co może jeszcze nastąpić później. Blokada aplikacji pozostaje włączona.</string>
+    <string name="settings_held_back_confirm_action">Kontynuuj</string>
 </resources>

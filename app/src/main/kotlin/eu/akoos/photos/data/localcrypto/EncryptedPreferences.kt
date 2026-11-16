@@ -64,7 +64,10 @@ class LockedStoreFiles(private val dir: File, private val clock: () -> Long = Sy
 
     fun setAside(storeName: String, bytes: ByteArray) {
         dir.mkdirs()
-        writeWhole(File(dir, "$storeName-${clock()}$SUFFIX"), bytes)
+        // A copy already kept under the same time is never written over: the next free time takes this one.
+        var at = clock()
+        while (File(dir, "$storeName-$at$SUFFIX").exists()) at++
+        writeWhole(File(dir, "$storeName-$at$SUFFIX"), bytes)
     }
 
     /** The copies of [storeName], newest first, by the time each was set aside (in its name). */
@@ -81,8 +84,25 @@ class LockedStoreFiles(private val dir: File, private val clock: () -> Long = Sy
 
     fun all(): List<File> = dir.listFiles()?.filter { it.name.endsWith(SUFFIX) } ?: emptyList()
 
+    /** The copies of [storeName] the user has not chosen to go on without ([acknowledge]), newest first. */
+    fun unacknowledged(storeName: String): List<File> {
+        val seen = acknowledged()
+        return pending(storeName).filter { it.name !in seen }
+    }
+
+    /** Notes every copy of [storeName] set aside so far as seen. The copies themselves stay, to merge back later. */
+    fun acknowledge(storeName: String) {
+        val names = acknowledged() + pending(storeName).map { it.name }
+        dir.mkdirs()
+        writeWhole(File(dir, ACKNOWLEDGED), names.joinToString("\n").toByteArray())
+    }
+
+    private fun acknowledged(): Set<String> =
+        runCatching { File(dir, ACKNOWLEDGED).readLines().filter { it.isNotBlank() }.toSet() }.getOrNull().orEmpty()
+
     private companion object {
         const val SUFFIX = ".pfle"
+        const val ACKNOWLEDGED = "acknowledged"
     }
 }
 
@@ -93,7 +113,11 @@ class LockedStoreFiles(private val dir: File, private val clock: () -> Long = Sy
  *
  * Never answers empty for a file it could not read unless the file's bytes were first kept in [locked]: a
  * locked or damaged file is copied there and then answered as empty; a Keystore that does not answer is waited
- * for and then reported as an error, unless it has stayed silent for launches on end.
+ * for and then reported as an error, unless it has stayed silent for launches on end. Either way the settings
+ * file is then held back ([SettingsLock]) until it reads again or the copy merges back.
+ *
+ * With a keyring a file is only ever written encrypted: a write the key cannot seal is refused with an error,
+ * so the file on disk stays as it was. Only a platform without a Keystore writes plaintext.
  */
 class EncryptedPreferencesSerializer(
     private val storeName: String,
@@ -107,17 +131,20 @@ class EncryptedPreferencesSerializer(
 
     override suspend fun readFrom(source: BufferedSource): Preferences {
         val bytes = source.readByteArray()
-        if (keyring == null || !LocalCryptoFormat.looksEncrypted(bytes)) return parse(bytes)
+        if (keyring == null || !LocalCryptoFormat.looksEncrypted(bytes)) return parse(bytes).also { readable() }
         var attempt = 0
         while (true) {
             try {
-                return parse(LocalCryptoFormat.decryptBytes(bytes, keyring))
+                return parse(LocalCryptoFormat.decryptBytes(bytes, keyring)).also { readable() }
             } catch (e: LocalKeyUnavailableException) {
                 if (++attempt < READ_ATTEMPTS) {
                     pause(RETRY_MS)
                     continue
                 }
-                if (!keyring.unavailableTooLong()) throw IOException("$storeName: key not available", e)
+                if (!keyring.unavailableTooLong()) {
+                    SettingsLock.readOutcome(storeName, readable = false)
+                    throw IOException("$storeName: key not available", e)
+                }
                 return setAsideAndStartEmpty(bytes, "key unavailable")
             } catch (_: LocalKeyLockedException) {
                 return setAsideAndStartEmpty(bytes, "key locked")
@@ -129,11 +156,11 @@ class EncryptedPreferencesSerializer(
 
     override suspend fun writeTo(t: Preferences, sink: BufferedSink) {
         val plain = Buffer().also { PreferencesSerializer.writeTo(t, it) }.readByteArray()
-        val sealed = if (keyring == null) null else encryptVerified(keyring, plain)
-        sink.write(sealed ?: plain)
+        sink.write(if (keyring == null) plain else encryptVerified(keyring, plain))
     }
 
-    private suspend fun encryptVerified(keyring: LocalKeyring, plain: ByteArray): ByteArray? {
+    /** [plain] sealed with the current key; throws rather than hand back bytes that are not encrypted. */
+    private suspend fun encryptVerified(keyring: LocalKeyring, plain: ByteArray): ByteArray {
         var attempt = 0
         while (true) {
             try {
@@ -143,14 +170,16 @@ class EncryptedPreferencesSerializer(
                     pause(RETRY_MS)
                     continue
                 }
-                log("$storeName: key not available, written as before this once")
-                return null
+                log("$storeName: key not available, change not written")
+                throw IOException("$storeName: key not available, change not written", e)
             } catch (e: Exception) {
-                log("$storeName: not encrypted this once (${e.javaClass.simpleName})")
-                return null
+                log("$storeName: change not written (${e.javaClass.simpleName})")
+                throw IOException("$storeName: could not encrypt, change not written", e)
             }
         }
     }
+
+    private fun readable() = SettingsLock.readOutcome(storeName, readable = true)
 
     private suspend fun setAsideAndStartEmpty(bytes: ByteArray, reason: String): Preferences {
         try {
@@ -159,6 +188,7 @@ class EncryptedPreferencesSerializer(
             throw IOException("$storeName: could not keep the unreadable file", e)
         }
         log("$storeName: kept aside ($reason), starting empty")
+        SettingsLock.readOutcome(storeName, readable = true)
         return emptyPreferences()
     }
 
@@ -166,7 +196,7 @@ class EncryptedPreferencesSerializer(
 
     companion object {
         private const val READ_ATTEMPTS = 6
-        private const val WRITE_ATTEMPTS = 3
+        private const val WRITE_ATTEMPTS = 6
         private const val RETRY_MS = 500L
     }
 }
@@ -294,6 +324,7 @@ object LocalStores {
             merged++
         }
         if (merged > 0) log("$storeName: $merged locked copies merged back")
+        SettingsLock.refresh()
         return merged
     }
 
@@ -339,6 +370,7 @@ private class EncryptedStoreDelegate(private val name: String) : ReadOnlyPropert
         }
 
     private fun create(context: Context): DataStore<Preferences> {
+        if (name == SettingsLock.STORE_NAME) SettingsLock.attach(context)
         val keyring = LocalCrypto.keyringOrNull(context)
         val serializer = EncryptedPreferencesSerializer(name, keyring, LocalCrypto.lockedStores(context), LocalCrypto::log)
         return PreferenceDataStoreFactory.create(

@@ -2950,4 +2950,12 @@
     <string name="local_encryption_unlock">Ontgrendelen</string>
     <string name="local_encryption_unlocked">Ontgrendeld</string>
     <string name="local_encryption_unlocked_restart">Ontgrendeld. Je bibliotheek komt terug bij de volgende start van de app.</string>
+    <string name="settings_held_back_title">Instellingen zijn vergrendeld</string>
+    <string name="settings_held_back_body">De instellingen van deze telefoon konden niet worden geopend. Ze blijven ongewijzigd bewaard en je foto\'s blijven bedekt tot ze weer opengaan, wat vanzelf gebeurt zodra hun sleutel terug is. Je kunt ook zonder ze doorgaan en ze later openen via Lokale versleuteling met je wachtwoord voor Verborgen.</string>
+    <string name="settings_held_back_body_unreadable">De instellingen van deze telefoon kunnen nu niet worden gelezen. Je foto\'s blijven bedekt terwijl de app het opnieuw probeert.</string>
+    <string name="settings_held_back_retry">Opnieuw proberen</string>
+    <string name="settings_held_back_continue">Doorgaan zonder</string>
+    <string name="settings_held_back_confirm_title">Doorgaan zonder je instellingen?</string>
+    <string name="settings_held_back_confirm_body">De app start met de standaardinstellingen. Foto\'s die je in de cloud hebt verborgen, kunnen weer zichtbaar worden tot de bewaarde instellingen opengaan, wat later nog kan gebeuren. De app-vergrendeling blijft aan.</string>
+    <string name="settings_held_back_confirm_action">Doorgaan</string>
 </resources>

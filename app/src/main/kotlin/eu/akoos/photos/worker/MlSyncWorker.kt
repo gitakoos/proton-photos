@@ -196,7 +196,15 @@ class MlSyncWorker @AssistedInject constructor(
      * Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. Held under the
      * Drive job lock, so it never runs beside a label save or restore.
      */
-    override suspend fun doWork(): Result = signOut.track {
+    override suspend fun doWork(): Result {
+        // While the settings are held back they read as an empty file: no hidden list, no settings of this
+        // device. Nothing is saved to or merged from Drive on that; the run waits until they read again.
+        eu.akoos.photos.data.localcrypto.SettingsLock.attach(applicationContext)
+        if (eu.akoos.photos.data.localcrypto.SettingsLock.isHeldBack) return Result.retry()
+        return runTracked()
+    }
+
+    private suspend fun runTracked(): Result = signOut.track {
         DriveJobLock.mutex.withLock {
             runStartedMs = System.currentTimeMillis()
             try {

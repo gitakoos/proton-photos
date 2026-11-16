@@ -36,6 +36,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -69,6 +70,13 @@ class EncryptedPreferencesTest {
         wrapper = FakeWrapper(KeyGenerator.getInstance("AES").apply { init(256) }.generateKey())
         keyring = LocalKeyring(File(tmp.root, "keys"), wrapper, clock = { 0L })
         locked = LockedStoreFiles(File(tmp.root, "keys/locked"), clock = { 42L })
+        SettingsLock.resetForTest()
+        SettingsLock.attach(locked)
+    }
+
+    @After
+    fun tearDown() {
+        SettingsLock.resetForTest()
     }
 
     private fun serializer(ring: LocalKeyring? = keyring) =
@@ -131,14 +139,83 @@ class EncryptedPreferencesTest {
     }
 
     @Test
-    fun `a write while the Keystore is silent stays plaintext and reads later`() {
+    fun `a write while the Keystore is silent is refused, never written in plaintext`() {
         keyring.current()
         wrapper.failure = ProviderException("busy")
         val fresh = LocalKeyring(File(tmp.root, "keys"), wrapper)
-        val bytes = write(sample, fresh)
-        assertFalse(LocalCryptoFormat.looksEncrypted(bytes))
+        val sink = Buffer()
+        val failure = runCatching { runBlocking { serializer(fresh).writeTo(sample, sink) } }.exceptionOrNull()
+        assertTrue(failure is IOException)
+        assertEquals("nothing reaches the file", 0L, sink.size)
+    }
+
+    @Test
+    fun `a settings copy set aside holds the settings back until it merges back`() {
+        val old = keyring.current()
+        val bytes = write(sample)
+        assertEquals(SettingsHold.NONE, SettingsLock.state.value)
+        wrapper.key = null
+        val fresh = LocalKeyring(File(tmp.root, "keys"), wrapper)
+        read(bytes, fresh)
+        assertEquals(SettingsHold.SET_ASIDE, SettingsLock.state.value)
+
+        fresh.restore(old.keyId, old.key)
+        runBlocking { LocalStores.restoreLocked("settings", InMemoryStore(preferencesOf()), fresh, locked) {} }
+        assertEquals(SettingsHold.NONE, SettingsLock.state.value)
+    }
+
+    @Test
+    fun `going on without a set-aside copy lifts the hold and keeps the copy to merge back later`() {
+        val old = keyring.current()
+        val bytes = write(sample)
+        wrapper.key = null
+        val fresh = LocalKeyring(File(tmp.root, "keys"), wrapper)
+        read(bytes, fresh)
+
+        SettingsLock.continueWithout()
+
+        assertEquals(SettingsHold.NONE, SettingsLock.state.value)
+        assertEquals("the copy itself stays", 1, locked.pending("settings").size)
+        // A copy set aside after that holds the settings back again.
+        LockedStoreFiles(File(tmp.root, "keys/locked"), clock = { 43L }).setAside("settings", bytes)
+        SettingsLock.refresh()
+        assertEquals(SettingsHold.SET_ASIDE, SettingsLock.state.value)
+        // The key comes back: both copies merge back.
+        fresh.restore(old.keyId, old.key)
+        val store = InMemoryStore(preferencesOf())
+        assertEquals(2, runBlocking { LocalStores.restoreLocked("settings", store, fresh, locked) {} })
+        assertEquals("Ada", store.value[name])
+        assertEquals(SettingsHold.NONE, SettingsLock.state.value)
+    }
+
+    @Test
+    fun `a settings file that cannot be read holds the settings back until it reads`() {
+        val bytes = write(sample)
+        wrapper.failure = ProviderException("busy")
+        assertTrue(runCatching { read(bytes, LocalKeyring(File(tmp.root, "keys"), wrapper, clock = { 0L })) }.isFailure)
+        assertEquals(SettingsHold.UNREADABLE, SettingsLock.state.value)
+
         wrapper.failure = null
-        assertEquals(sample, read(bytes, LocalKeyring(File(tmp.root, "keys"), wrapper)))
+        assertEquals(sample, read(bytes, LocalKeyring(File(tmp.root, "keys"), wrapper, clock = { 0L })))
+        assertEquals(SettingsHold.NONE, SettingsLock.state.value)
+    }
+
+    @Test
+    fun `a second copy set aside at the same moment never writes over the first`() {
+        locked.setAside("settings", byteArrayOf(1))
+        locked.setAside("settings", byteArrayOf(2))
+        val kept = locked.pending("settings").map { it.readBytes().single() }.toSet()
+        assertEquals(setOf<Byte>(1, 2), kept)
+    }
+
+    @Test
+    fun `another settings file never holds the app's settings back`() {
+        val other = EncryptedPreferencesSerializer("transfer_history", keyring, locked, {}, pause = {})
+        val bytes = Buffer().also { runBlocking { other.writeTo(sample, it) } }.readByteArray()
+        wrapper.key = null
+        val fresh = LocalKeyring(File(tmp.root, "keys"), wrapper)
+        runBlocking { EncryptedPreferencesSerializer("transfer_history", fresh, locked, {}, pause = {}).readFrom(Buffer().write(bytes)) }
+        assertEquals(SettingsHold.NONE, SettingsLock.state.value)
     }
 
     @Test

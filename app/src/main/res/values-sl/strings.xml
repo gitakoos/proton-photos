@@ -3057,4 +3057,12 @@
     <string name="local_encryption_unlock">Odkleni</string>
     <string name="local_encryption_unlocked">Odklenjeno</string>
     <string name="local_encryption_unlocked_restart">Odklenjeno. Knjižnica se vrne ob naslednjem zagonu aplikacije.</string>
+    <string name="settings_held_back_title">Nastavitve so zaklenjene</string>
+    <string name="settings_held_back_body">Nastavitev tega telefona ni bilo mogoče odpreti. Ostanejo nespremenjene, vaše fotografije pa so prekrite, dokler se znova ne odprejo, kar se zgodi samo, ko je njihov ključ spet na voljo. Lahko tudi nadaljujete brez njih in jih pozneje odprete v Lokalnem šifriranju z geslom za Skrite.</string>
+    <string name="settings_held_back_body_unreadable">Nastavitev tega telefona trenutno ni mogoče prebrati. Vaše fotografije ostanejo prekrite, medtem ko aplikacija poskuša znova.</string>
+    <string name="settings_held_back_retry">Poskusi znova</string>
+    <string name="settings_held_back_continue">Nadaljuj brez njih</string>
+    <string name="settings_held_back_confirm_title">Želite nadaljevati brez nastavitev?</string>
+    <string name="settings_held_back_confirm_body">Aplikacija se zažene s privzetimi nastavitvami. Fotografije, ki ste jih skrili v oblaku, so lahko spet vidne, dokler se shranjene nastavitve ne odprejo, kar se lahko zgodi tudi pozneje. Zaklep aplikacije ostane vklopljen.</string>
+    <string name="settings_held_back_confirm_action">Nadaljuj</string>
 </resources>

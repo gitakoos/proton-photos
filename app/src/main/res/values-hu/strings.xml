@@ -2925,4 +2925,12 @@
     <string name="local_encryption_unlock">Feloldás</string>
     <string name="local_encryption_unlocked">Feloldva</string>
     <string name="local_encryption_unlocked_restart">Feloldva. A könyvtárad az app következő indításakor tér vissza.</string>
+    <string name="settings_held_back_title">A beállítások zárolva vannak</string>
+    <string name="settings_held_back_body">A telefon beállításait nem sikerült megnyitni. Változatlanul megmaradnak, a fotóid pedig takarva maradnak, amíg újra meg nem nyílnak, ami magától megtörténik, amint a kulcsuk visszatér. Folytathatod nélkülük is, és később a Helyi titkosításban a Rejtett jelszavaddal nyithatod meg őket.</string>
+    <string name="settings_held_back_body_unreadable">A telefon beállításai most nem olvashatók. A fotóid takarva maradnak, amíg az alkalmazás újra próbálkozik.</string>
+    <string name="settings_held_back_retry">Újrapróbálás</string>
+    <string name="settings_held_back_continue">Folytatás nélkülük</string>
+    <string name="settings_held_back_confirm_title">Folytatod a beállításaid nélkül?</string>
+    <string name="settings_held_back_confirm_body">Az alkalmazás alapbeállításokkal indul. A felhőben elrejtett fotók újra látszhatnak, amíg a megőrzött beállítások meg nem nyílnak, ami később is megtörténhet. Az alkalmazászár bekapcsolva marad.</string>
+    <string name="settings_held_back_confirm_action">Folytatás</string>
 </resources>

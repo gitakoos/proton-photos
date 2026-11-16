@@ -2928,4 +2928,12 @@
     <string name="local_encryption_unlock">Déverrouiller</string>
     <string name="local_encryption_unlocked">Déverrouillé</string>
     <string name="local_encryption_unlocked_restart">Déverrouillé. Votre bibliothèque revient au prochain démarrage de l\'app.</string>
+    <string name="settings_held_back_title">Les réglages sont verrouillés</string>
+    <string name="settings_held_back_body">Les réglages de ce téléphone n\'ont pas pu être ouverts. Ils sont conservés tels quels et vos photos restent masquées jusqu\'à ce qu\'ils s\'ouvrent à nouveau, ce qui se fait tout seul dès que leur clé est de retour. Vous pouvez aussi continuer sans eux et les ouvrir plus tard depuis Chiffrement local avec votre mot de passe des photos masquées.</string>
+    <string name="settings_held_back_body_unreadable">Les réglages de ce téléphone ne peuvent pas être lus pour le moment. Vos photos restent masquées pendant que l\'app réessaie.</string>
+    <string name="settings_held_back_retry">Réessayer</string>
+    <string name="settings_held_back_continue">Continuer sans eux</string>
+    <string name="settings_held_back_confirm_title">Continuer sans vos réglages ?</string>
+    <string name="settings_held_back_confirm_body">L\'app démarre avec les réglages par défaut. Les photos masquées dans le cloud peuvent réapparaître jusqu\'à ce que les réglages conservés s\'ouvrent, ce qui peut encore se produire plus tard. Le verrouillage de l\'app reste activé.</string>
+    <string name="settings_held_back_confirm_action">Continuer</string>
 </resources>

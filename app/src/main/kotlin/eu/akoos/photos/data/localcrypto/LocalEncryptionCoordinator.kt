@@ -26,6 +26,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.hidden.StoredVaultPassword
 import eu.akoos.photos.data.hidden.VaultPasswordStore
@@ -211,6 +212,24 @@ class LocalEncryptionCoordinator @Inject constructor(
             keysLock.withLock { LocalCrypto.custody(context)?.syncPasswordCopies(password, rewrite = false) }
         }.onFailure { logFailure("password copies", it) }
         refresh()
+    }
+
+    /** The settings held back ([SettingsLock]): read the file again and merge back every copy whose key opens now. */
+    suspend fun retryHeldBackSettings() = withContext(Dispatchers.IO) {
+        runCatching { context.settingsDataStore.data.first() }
+        runCatching { restoreLockedStores() }.onFailure { logFailure("locked settings", it) }
+        SettingsLock.refresh()
+    }
+
+    /**
+     * The user chose to go on without the settings set aside. Whether the app lock was on is among what was set
+     * aside, so it is kept on; the copies stay and still merge back once their key opens.
+     */
+    suspend fun continueWithoutHeldBackSettings() = withContext(Dispatchers.IO) {
+        runCatching {
+            context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_ENABLED] = true }
+        }.onFailure { logFailure("app lock", it) }
+        SettingsLock.continueWithout()
     }
 
     /** The user set the Hidden password to [password], or removed it (null): the password copies follow it. */
