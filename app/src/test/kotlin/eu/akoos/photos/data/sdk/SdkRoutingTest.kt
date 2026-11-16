@@ -124,6 +124,21 @@ class SdkRoutingTest {
     }
 
     @Test
+    fun `the log form of an SDK failure carries codes and classes only`() {
+        val sdkError = me.proton.drive.sdk.ProtonSdkError(
+            "Album Summer at Anna's place is full", "Proton.Api",
+            me.proton.drive.sdk.ProtonSdkError.ErrorDomain.Api, 2011L, null, null, null, null,
+        )
+        val http = me.proton.drive.sdk.SdkHttpClientException.Http(422, 2011, null, "photo my cat.dng refused")
+        val error = me.proton.drive.sdk.ProtonDriveSdkException(null, http, sdkError)
+
+        assertEquals(
+            "ProtonDriveSdkException domain=Api code=2011 <- Http http=422 code=2011",
+            describeSdkFailure(error, withMessages = false),
+        )
+    }
+
+    @Test
     fun `a failure of the app's own path after a fallback still reaches the caller`() = runTest {
         try {
             runRouted<String>("tags", on = true, viaSdk = { error("sdk") }, fallback = { throw java.io.IOException("offline") })

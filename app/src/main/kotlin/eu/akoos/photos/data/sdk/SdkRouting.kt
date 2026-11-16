@@ -148,9 +148,11 @@ internal suspend fun <T> runRouted(
         SdkDiagnostics.recordFallback(label, describeSdkFailure(e))
         throw e
     } catch (e: Throwable) {
-        val cause = describeSdkFailure(e)
-        SdkDiagnostics.recordFallback(label, cause)
-        runCatching { Log.w("SdkRouting", "$label through the SDK failed, using the app's own path: $cause") }
+        SdkDiagnostics.recordFallback(label, describeSdkFailure(e))
+        // The log carries codes only: no message text, which can hold what a user named.
+        runCatching {
+            Log.w("SdkRouting", "$label through the SDK failed, using the app's own path: ${describeSdkFailure(e, withMessages = false)}")
+        }
         return fallback()
     }
     SdkDiagnostics.recordSdk(label)
@@ -158,12 +160,12 @@ internal suspend fun <T> runRouted(
 }
 
 /**
- * Why an SDK call failed, for the diagnostics: each exception of the cause chain (at most [MAX_CAUSES]) by
- * class, with the HTTP status and Proton code of an HTTP failure, the domain and codes of an SDK error, and a
- * short redacted message ([sanitizeErrorMessage] takes out names, paths, addresses and ids), so a fallback's
- * cause shows in a release build without anything personal.
+ * Why an SDK call failed: each exception of the cause chain (at most [MAX_CAUSES]) by class, with the HTTP
+ * status and Proton code of an HTTP failure and the domain and codes of an SDK error. [withMessages] adds a
+ * short redacted message ([sanitizeErrorMessage] takes out names, paths, addresses and ids) for the
+ * diagnostics text in Settings; the log line goes without it.
  */
-internal fun describeSdkFailure(error: Throwable): String = buildString {
+internal fun describeSdkFailure(error: Throwable, withMessages: Boolean = true): String = buildString {
     var current: Throwable? = error
     var depth = 0
     val seen = HashSet<Throwable>()
@@ -183,7 +185,7 @@ internal fun describeSdkFailure(error: Throwable): String = buildString {
                 if (message.isNullOrBlank()) message = sdk.message
             }
         }
-        if (!message.isNullOrBlank()) append(": ").append(sanitizeErrorMessage(message).take(MAX_MESSAGE_CHARS))
+        if (withMessages && !message.isNullOrBlank()) append(": ").append(sanitizeErrorMessage(message).take(MAX_MESSAGE_CHARS))
         current = current.cause
         depth++
     }

@@ -165,4 +165,38 @@ class ErrorMessageSanitizerTest {
         assertFalse(out.contains("Nagy"))
         assertTrue(out.contains("not found"))
     }
+
+    @Test
+    fun `a file name with any media extension is redacted, lowercase words of the name included`() {
+        for (ext in listOf("dng", "avif", "tif", "tiff", "heif", "cr2", "nef", "arw", "jxl", "mts", "zip")) {
+            val out = sanitizeErrorMessage("upload of my cat sasha.$ext failed")
+            assertFalse(out, out.contains("cat"))
+            assertFalse(out, out.contains("sasha"))
+            assertFalse(out, out.contains(" my "))
+            assertTrue(out, out.contains("upload of"))
+            assertTrue(out, out.contains("failed"))
+        }
+    }
+
+    @Test
+    fun `an unquoted name after a naming key is dropped with the rest of the message`() {
+        val album = sanitizeErrorMessage("cannot add to album Summer at Anna Kovacs house")
+        assertFalse(album, album.contains("Summer"))
+        assertFalse(album, album.contains("Kovacs"))
+        assertTrue(album, album.contains("cannot add to album"))
+
+        val person = sanitizeErrorMessage("merge failed for person Anna Nagy")
+        assertFalse(person, person.contains("Nagy"))
+
+        val keyed = sanitizeErrorMessage("conflict: name=holiday at the lake, file: beach day")
+        assertFalse(keyed, keyed.contains("holiday"))
+        assertFalse(keyed, keyed.contains("beach"))
+        assertTrue(keyed, keyed.contains("conflict"))
+    }
+
+    @Test
+    fun `a naming key followed by plain words keeps the message readable`() {
+        assertEquals("album not found", sanitizeErrorMessage("album not found"))
+        assertEquals("A file with the same name already exists", sanitizeErrorMessage("A file with the same name already exists"))
+    }
 }
