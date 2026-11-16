@@ -231,6 +231,44 @@ class CacheFilesTest {
     }
 
     @Test
+    fun `plain cache files an earlier version left are encrypted in place and read the same`() {
+        val started = 1_800_000_000_000L
+        val fullres = LocalFiles.dir(context, LocalFiles.Area.FULLRES).apply { mkdirs() }
+        val photo = Random(20).nextBytes(150_000)
+        val thumb = Random(21).nextBytes(5_000)
+        fun file(dir: File, name: String, bytes: ByteArray, modified: Long = started - 60_000) =
+            File(dir, name).apply { writeBytes(bytes); setLastModified(modified) }
+        val oldPhoto = file(fullres, "link1.jpg", photo)
+        val oldThumb = file(thumbs, "thumb_link1.jpg", thumb)
+        val hashes = file(fullres, "link1.hashes", byteArrayOf(9, 9))
+        val scratch = file(fullres, "enc_link2_0", byteArrayOf(7))
+        val writing = file(fullres, "link3.jpg", byteArrayOf(1, 2), modified = started + 1_000)
+
+        assertTrue(CacheFiles.encryptPlainLeftovers(context, before = started))
+
+        for ((f, bytes) in listOf(oldPhoto to photo, oldThumb to thumb)) {
+            assertTrue(f.name, LocalFiles.isEncrypted(f))
+            assertArrayEquals(bytes, LocalFiles.readBytes(context, f))
+            assertEquals("its time is kept for the cache's age sweep", started - 60_000, f.lastModified() / 1000 * 1000)
+        }
+        assertFalse(LocalFiles.isEncrypted(hashes))
+        assertFalse(LocalFiles.isEncrypted(scratch))
+        assertFalse("a file of this process is left to its writer", LocalFiles.isEncrypted(writing))
+        assertTrue("no temp left", fullres.listFiles()!!.none { it.name.endsWith(".tmp") })
+        listOf(oldPhoto, hashes, scratch, writing).forEach { it.delete() }
+    }
+
+    @Test
+    fun `plain cache files stay as they are while there is no room, and the run is not done`() {
+        val started = 1_800_000_000_000L
+        val old = File(thumbs, "thumb_room.jpg").apply { writeBytes(ByteArray(1_000)); setLastModified(started - 60_000) }
+
+        assertFalse(CacheFiles.encryptPlainLeftovers(context, before = started, freeBytes = { 1L }))
+
+        assertFalse(LocalFiles.isEncrypted(old))
+    }
+
+    @Test
     fun `a vault file that does not open is never deleted by a reader`() {
         val vault = VaultFiles.vaultDir(context).apply { mkdirs() }
         val file = File(vault, "kept.jpg")

@@ -124,6 +124,7 @@ class LocalEncryptionCoordinator @Inject constructor(
                 .onFailure { logFailure("temp sweep", it) }
             runCatching { sweepLegacyShareCopies(context, before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS) }
                 .onFailure { logFailure("share copy sweep", it) }
+            runCatching { encryptPlainCaches() }.onFailure { logFailure("plain cache encryption", it) }
         }
         scope.launch {
             // The settings file is encrypted the first time it is opened, before any vault file is: an older
@@ -355,6 +356,17 @@ class LocalEncryptionCoordinator @Inject constructor(
         offlineMigration(context, keyring).run()
     }
 
+    /** Encrypts the plain cache files an earlier version left, until a run finds none (then never again). */
+    private fun encryptPlainCaches() {
+        val marker = File(LocalCrypto.root(context), PLAIN_CACHES_DONE_MARKER)
+        if (marker.exists()) return
+        val before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS
+        if (CacheFiles.encryptPlainLeftovers(context, before)) {
+            runCatching { eu.akoos.photos.data.db.encryption.writeWhole(marker, byteArrayOf(1)) }
+            LocalCrypto.log("plain cache files encrypted")
+        }
+    }
+
     private fun logFailure(what: String, e: Throwable) {
         if (e is CancellationException) throw e
         LocalCrypto.log("local encryption: $what failed (${e.javaClass.simpleName})")
@@ -365,6 +377,7 @@ class LocalEncryptionCoordinator @Inject constructor(
         val STORE_NAMES = listOf("settings", "transfer_history")
 
         private const val TEMP_SWEEP_MARGIN_MS = 2_000L
+        private const val PLAIN_CACHES_DONE_MARKER = "plain_caches_encrypted"
     }
 }
 

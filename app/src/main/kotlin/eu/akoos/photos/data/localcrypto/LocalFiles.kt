@@ -368,6 +368,51 @@ object CacheFiles {
         }
     }
 
+    /**
+     * Encrypts in place the plain thumbnails and full-size copies an earlier version cached, written before
+     * [before] (the start of this process): each through a temp in its folder, keeping its time, then one rename
+     * over it, so the file is whole at every moment. Leaves temps, hash lists and download scratch alone. Returns
+     * true once no such file is left; false when it stopped (no key now, not enough room), to go on next start.
+     */
+    fun encryptPlainLeftovers(context: Context, before: Long, freeBytes: (File) -> Long = { it.usableSpace }): Boolean {
+        val sealing = sealing(context) ?: return true
+        var complete = true
+        for (area in listOf(LocalFiles.Area.THUMBNAILS, LocalFiles.Area.FULLRES)) {
+            val dir = LocalFiles.dir(context, area)
+            for (file in dir.listFiles().orEmpty()) {
+                val name = file.name
+                if (!file.isFile || name.startsWith(".") || name.endsWith(".tmp") || name.endsWith(".hashes")) continue
+                if (name.startsWith("enc_") || file.length() <= 0L || file.lastModified() >= before) continue
+                if (LocalCryptoFormat.formOf(file) != LocalFileForm.PLAIN) continue
+                if (freeBytes(dir) < file.length() + LocalCryptoFormat.overheadFor(file.length()) + LEFTOVER_MARGIN_BYTES) {
+                    return false
+                }
+                if (!runCatching { encryptInPlace(file, sealing) }.isSuccess) complete = false
+            }
+        }
+        return complete
+    }
+
+    private fun encryptInPlace(file: File, sealing: LocalCryptoFormat.Sealing) {
+        val temp = File.createTempFile(".cache_", ".tmp", file.parentFile)
+        try {
+            FileOutputStream(temp).use { out ->
+                LocalCryptoFormat.encryptingStream(out, sealing).use { enc -> FileInputStream(file).use { it.copyTo(enc) } }
+            }
+            temp.setLastModified(file.lastModified())
+            java.nio.file.Files.move(
+                temp.toPath(),
+                file.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            temp.delete()
+        }
+    }
+
+    private const val LEFTOVER_MARGIN_BYTES = 50L * 1024 * 1024
+
     /** Deletes a cache file whose key is gone or whose bytes are damaged. A Keystore that is only slow to answer
      *  leaves it in place. */
     fun dropIfUnreadable(file: File, error: Throwable) {
