@@ -2003,6 +2003,8 @@ class AlbumService @Inject constructor(
             renameAlbumOwnPath(userId, albumLinkId, trimmed)
         }
         Log.d(TAG, "renameAlbum: renamed $albumLinkId to '$trimmed'")
+        runCatching { cloudAlbumDao.rename(albumLinkId, trimmed) }
+            .onFailure { Log.w(TAG, "renameAlbum: cache row not updated (${it.message})") }
         invalidateMembershipCache()
     }
 

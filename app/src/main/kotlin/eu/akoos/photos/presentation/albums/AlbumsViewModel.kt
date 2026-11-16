@@ -225,6 +225,14 @@ class AlbumsViewModel @Inject constructor(
         viewModelScope.launch {
             albumListEvents.changes.collect { loadAlbums() }
         }
+        // A rename made inside an album patches that card's name, so the grid never shows the old one.
+        viewModelScope.launch {
+            albumListEvents.renames.collect { (albumId, name) ->
+                _uiState.update { st ->
+                    st.copy(albums = applySort(st.albums.map { if (it.linkId == albumId) it.copy(name = name) else it }))
+                }
+            }
+        }
         // A cover change patches only that album's thumbnail in place, so the grid card flips without
         // reloading and flashing the whole list.
         viewModelScope.launch {

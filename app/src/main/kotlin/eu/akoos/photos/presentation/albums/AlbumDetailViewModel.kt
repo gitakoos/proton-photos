@@ -1712,7 +1712,10 @@ class AlbumDetailViewModel @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching { driveRepo.renameAlbum(userId, albumLinkId, trimmed) }
                 .fold(
-                    onSuccess = { _uiState.update { it.copy(albumName = trimmed, error = null) } },
+                    onSuccess = {
+                        _uiState.update { it.copy(albumName = trimmed, error = null) }
+                        albumListEvents.notifyRenamed(albumLinkId, trimmed)
+                    },
                     onFailure = { e ->
                         Log.e("AlbumDetailVM", "renameAlbum failed", e)
                         val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
