@@ -29,6 +29,8 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import androidx.datastore.preferences.core.PreferencesSerializer
 import androidx.datastore.preferences.core.preferencesOf
@@ -175,9 +177,12 @@ class LocalEncryptionDeviceTest {
                 // Read whole, then seek like an EXIF reader or a player does.
                 val all = FileInputStream(it.fileDescriptor).readBytes()
                 assertArrayEquals(sha(bytes), sha(all))
+                // A reader given this descriptor starts where the last one stopped, so each goes back to the start.
+                Os.lseek(it.fileDescriptor, 0L, OsConstants.SEEK_SET)
                 val exif = ExifInterface(it.fileDescriptor)
                 assertEquals("TestMake", exif.getAttribute(ExifInterface.TAG_MAKE))
                 assertNotNull(exif.latLong)
+                Os.lseek(it.fileDescriptor, 0L, OsConstants.SEEK_SET)
                 val decoded = BitmapFactory.decodeFileDescriptor(it.fileDescriptor)
                 assertEquals(640, decoded.width)
             }
