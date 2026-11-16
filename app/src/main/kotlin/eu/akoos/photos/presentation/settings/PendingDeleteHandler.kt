@@ -49,15 +49,47 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import javax.inject.Inject
+
+/**
+ * Checks the stored delete queue again right before the system trash dialog is asked for. The queue
+ * can wait for days, and in that time the Drive copy may have been trashed elsewhere or the device
+ * file edited by another app, which would leave the trash dialog removing the only copy.
+ */
+class PendingDeleteVerifier @Inject constructor(
+    private val syncStateRepo: SyncStateRepository,
+    private val freeUpSpace: FreeUpSpaceUseCase,
+) {
+    /** [confirmed] may go into the trash request; [failed] no longer may and leave the queue. */
+    data class Outcome(val confirmed: Set<String>, val failed: Set<String>)
+
+    /**
+     * Splits [uris] into the ones whose device copy is still backed up and unchanged under [userId]
+     * (a SYNCED row of that account with a backup stamp, an active Drive link, and the device file
+     * as backed up; [FreeUpSpaceUseCase.confirmForDeletion]) and the rest. A Drive lookup that fails
+     * throws, so the caller asks for nothing on an unconfirmed answer.
+     */
+    suspend fun verify(userId: UserId, uris: Set<String>): Outcome {
+        if (uris.isEmpty()) return Outcome(emptySet(), emptySet())
+        val paired = syncStateRepo.cloudPairedLinkIds(userId, uris.toList()).keys
+        val rows = syncStateRepo.getByUris(paired.toList())
+            .filter { it.status == SyncStatus.SYNCED && it.backedUpAtMs != null && it.localUri in uris }
+        val confirmed = freeUpSpace.confirmForDeletion(userId, rows).mapTo(HashSet()) { it.localUri }
+        return Outcome(confirmed, uris - confirmed)
+    }
+}
 
 /**
  * Drains the upload pipeline's pending delete queue through a foreground OS consent
@@ -78,6 +110,8 @@ import javax.inject.Inject
 class PendingDeleteViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncStateRepo: SyncStateRepository,
+    private val verifier: PendingDeleteVerifier,
+    private val accountManager: AccountManager,
 ) : ViewModel() {
 
     val pendingUris: StateFlow<Set<String>> = context.settingsDataStore.data
@@ -85,10 +119,37 @@ class PendingDeleteViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptySet())
 
     /**
-     * The user accepted the OS consent dialog for [uris]. The system has already moved the
-     * files to the trash at this point, which takes them out of MediaStore's normal
-     * queries, so all we do here is collapse the SyncState rows to CLOUD_ONLY and pop the
-     * URIs from the pending queue so the handler doesn't re-prompt.
+     * [uris] checked again right now ([PendingDeleteVerifier]); null when there is no account or Drive
+     * could not answer, and then nothing is asked for and the queue stays as it is.
+     */
+    suspend fun verify(uris: Set<String>): PendingDeleteVerifier.Outcome? {
+        val userId = accountManager.getPrimaryUserId().first() ?: return null
+        return try {
+            verifier.verify(userId, uris)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Takes [uris], which no longer passed the check, out of the queue so they are never asked for. */
+    fun dropFromQueue(uris: Set<String>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { p ->
+                    p[SettingsKeys.PENDING_DELETE_URIS] = (p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()) - uris
+                }
+            }
+        }
+    }
+
+    /**
+     * The user accepted the OS consent dialog for [uris], the URIs that passed [verify] just before it.
+     * The system has already moved the files to the trash at this point, which takes them out of
+     * MediaStore's normal queries, so all we do here is collapse the SyncState rows to CLOUD_ONLY and
+     * pop the URIs from the pending queue so the handler doesn't re-prompt.
      */
     fun onConsentGranted(uris: Set<String>) {
         viewModelScope.launch {
@@ -147,19 +208,26 @@ fun PendingDeleteHandler(
         // popping a dialog after every file. The LaunchedEffect re launches on size
         // change, which cancels this delay — meaning each new item resets the timer.
         delay(3_000L)
-        // The batch is read once the lock is open, and launched in the same turn as that check.
+        // The batch is read once the lock is open, checked against Drive and the device files right then,
+        // and launched in the same turn as a second look at the lock. Only what passed goes into the request.
+        appLock.runWhenOpen {}
+        val snapshot = viewModel.pendingUris.value
+        if (snapshot.isEmpty()) return@LaunchedEffect
+        val outcome = viewModel.verify(snapshot) ?: return@LaunchedEffect
         appLock.runWhenOpen {
-            val snapshot = viewModel.pendingUris.value
-            if (snapshot.isEmpty()) return@runWhenOpen
-            val uris: List<Uri> = snapshot.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
-            if (uris.isEmpty()) return@runWhenOpen
-            inFlight = true
-            lastBatch = snapshot
-            lastPromptedSize = snapshot.size
-            runCatching {
-                val pi = MediaStore.createTrashRequest(context.contentResolver, uris, true)
-                launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-            }.onFailure { inFlight = false }
+            val verified = outcome.confirmed
+            val uris: List<Uri> = verified.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+            if (uris.isNotEmpty()) {
+                inFlight = true
+                lastBatch = verified
+                lastPromptedSize = snapshot.size - outcome.failed.size
+                runCatching {
+                    val pi = MediaStore.createTrashRequest(context.contentResolver, uris, true)
+                    launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+                }.onFailure { inFlight = false }
+            }
+            // After the launch, so the queue shrinking does not cancel this effect before it.
+            viewModel.dropFromQueue(outcome.failed)
         }
     }
 }
