@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -54,6 +55,7 @@ class VaultFilesTest {
         VaultFiles.vaultDir(context).deleteRecursively()
         VaultFiles.stagingDir(context).deleteRecursively()
         File(context.cacheDir, "vt").deleteRecursively()
+        VaultFiles.editedStoreOverride = null
     }
 
     @Test
@@ -73,6 +75,32 @@ class VaultFilesTest {
         }
         assertTrue(uri in context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_EDITED].orEmpty())
         assertTrue(VaultFiles.openPlain(context, vault).use { it.readBytes() }.contentEquals(ByteArray(900) { 4 }))
+    }
+
+    @Test
+    fun `an edit whose edited mark is not saved fails and leaves the vault photo as it was`() = runBlocking {
+        val real = context.settingsDataStore
+        real.edit { it.remove(SettingsKeys.HIDDEN_URI_EDITED) }
+        val refusal = SettingsWriteRefusedException("settings: key not available, change not written", null)
+        VaultFiles.editedStoreOverride = object : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+            override val data = real.data
+            override suspend fun updateData(
+                transform: suspend (t: androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences,
+            ): androidx.datastore.preferences.core.Preferences = throw refusal
+        }
+        val work = File(context.cacheDir, "vt").apply { mkdirs() }
+        val plain = File(work, "p.bin").apply { writeBytes(ByteArray(1_000) { 3 }) }
+        val vault = VaultFiles.sealInto(context, plain, "refused.jpg", LocalFileMeta(cloudLinkId = "L-2"))
+        val uri = Uri.fromFile(vault).toString()
+
+        val error = VaultFiles.editingInPlace<Any?>(context, uri, changed = { it == true }, onError = { it }) { target ->
+            File(Uri.parse(target).path!!).writeBytes(ByteArray(900) { 4 })
+            true
+        }
+
+        assertSame(refusal, error)
+        assertTrue(real.data.first()[SettingsKeys.HIDDEN_URI_EDITED].orEmpty().isEmpty())
+        assertTrue(VaultFiles.openPlain(context, vault).use { it.readBytes() }.contentEquals(ByteArray(1_000) { 3 }))
     }
 
     @Test

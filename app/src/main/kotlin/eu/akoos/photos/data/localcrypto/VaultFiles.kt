@@ -28,7 +28,7 @@ import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.encryption.DatabaseKeyState
 import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -240,10 +240,18 @@ object VaultFiles {
         }
     }
 
-    /** Records [uris] as changed since their photo was hidden. Blocking, as every caller of [editingInPlace] is. */
+    /** Where the edited marks are written; a test stands in a store that refuses writes. */
+    @androidx.annotation.VisibleForTesting
+    internal var editedStoreOverride: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>? = null
+
+    /**
+     * Records [uris] as changed since their photo was hidden. Blocking, as every caller of [editingInPlace] is.
+     * Strict: sign-out trusts this mark to keep an edited photo as its only copy, so a mark that is not saved
+     * throws before the edit is sealed and the edit fails instead.
+     */
     private fun markEdited(context: Context, uris: Set<String>) {
         kotlinx.coroutines.runBlocking {
-            context.settingsDataStore.edit { p ->
+            (editedStoreOverride ?: context.settingsDataStoreStrict).edit { p ->
                 p[SettingsKeys.HIDDEN_URI_EDITED] = (p[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet()) + uris
             }
         }
