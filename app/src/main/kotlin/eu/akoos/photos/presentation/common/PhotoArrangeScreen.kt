@@ -322,32 +322,6 @@ fun PhotoArrangeScreen(
             }
             ScrollScrubber(gridState = gridState, topPadding = 12.dp, bottomPadding = 140.dp, minItemsToShow = 60)
 
-            // The photo, or the block, riding on the finger.
-            val lifted = anchor
-            if (lifted != null && liftSize != IntSize.Zero) {
-                val widthDp = with(density) { liftSize.width.toDp() }
-                Box(
-                    Modifier
-                        .offset { IntOffset((finger.x - grabOffset.x).roundToInt(), (finger.y - grabOffset.y).roundToInt()) }
-                        .size(widthDp * 1.08f)
-                        .shadow(12.dp, RoundedCornerShape(8.dp))
-                        .clip(RoundedCornerShape(8.dp)),
-                ) {
-                    cell(lifted, false) {}
-                    if (moving.size > 1) {
-                        Box(
-                            Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(6.dp)
-                                .clip(CircleShape)
-                                .background(Accent)
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                        ) {
-                            Text(moving.size.toString(), color = colors.bg0, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
         }
 
         ArrangeTopBar(
@@ -381,6 +355,34 @@ fun PhotoArrangeScreen(
             },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        // The photo, or the block, riding on the finger. Drawn after both bars, so a photo held at the
+        // bottom edge stays on top of the hint bar; the grid sits below the top bar, hence the shift.
+        val lifted = anchor
+        if (lifted != null && liftSize != IntSize.Zero) {
+            val widthDp = with(density) { liftSize.width.toDp() }
+            Box(
+                Modifier
+                    .offset { IntOffset((finger.x - grabOffset.x).roundToInt(), (finger.y - grabOffset.y).roundToInt() + topBar.roundToPx()) }
+                    .size(widthDp * 1.08f)
+                    .shadow(12.dp, RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(8.dp)),
+            ) {
+                cell(lifted, false) {}
+                if (moving.size > 1) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .clip(CircleShape)
+                            .background(Accent)
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Text(moving.size.toString(), color = colors.bg0, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 
     if (confirmDiscard) {
