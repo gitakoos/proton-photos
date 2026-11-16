@@ -506,8 +506,8 @@ class DuplicateFinderViewModel @Inject constructor(
             val info = runCatching {
                 val file = cloudRepo.downloadFullResPhoto(userId, photo)
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(file.absolutePath, bounds)
-                CloudFullRes(Uri.fromFile(file).toString(), file.length(), bounds.outWidth, bounds.outHeight)
+                eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(null, file.storedFile, bounds)
+                CloudFullRes(file.fileUri.toString(), file.plainLength, bounds.outWidth, bounds.outHeight)
             }.getOrNull()
             if (info != null) _cloudFullRes.update { it + (linkId to info) }
             fullResInFlight.remove(linkId)

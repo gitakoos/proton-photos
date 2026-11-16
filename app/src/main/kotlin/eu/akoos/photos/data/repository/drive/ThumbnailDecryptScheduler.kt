@@ -1110,21 +1110,18 @@ internal fun <T> evictionOrder(
 
 /**
  * The file:// url of [fileName] in [cacheDir], fetching its bytes with [fetch] only when the file is missing
- * or empty. The bytes go through a `thumb_dec_` work temp, which the temp sweep covers, so a reader never
- * sees a half-written thumbnail.
+ * or empty. The bytes are written encrypted through a `thumb_dec_` work temp, which the temp sweep covers, so a
+ * reader never sees a half-written thumbnail.
  */
 internal suspend fun cachedThumbnailFile(cacheDir: File, fileName: String, linkId: String, fetch: suspend () -> ByteArray): String {
     val target = File(cacheDir, fileName)
     if (target.exists() && target.length() > 0) return "file://${target.absolutePath}"
     val bytes = fetch()
-    val temp = File.createTempFile("thumb_dec_${safeFileId(linkId)}_", ".tmp", cacheDir)
     try {
-        temp.writeBytes(bytes)
-        if (!temp.renameTo(target) && !(target.exists() && target.length() > 0)) {
-            throw SdkListingException("the thumbnail could not be written")
-        }
-    } finally {
-        temp.delete()
+        eu.akoos.photos.data.localcrypto.CacheFiles.write(target, bytes, tempPrefix = "thumb_dec_${safeFileId(linkId)}_")
+    } catch (e: java.io.IOException) {
+        // Another writer of the same thumbnail may have published it first.
+        if (!(target.exists() && target.length() > 0)) throw SdkListingException("the thumbnail could not be written")
     }
     return "file://${target.absolutePath}"
 }

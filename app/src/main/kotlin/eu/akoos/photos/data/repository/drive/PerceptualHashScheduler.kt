@@ -262,7 +262,7 @@ class PerceptualHashScheduler @Inject constructor(
      *  already confirmed the file exists (see [enqueue]). */
     private fun hashCloud(linkId: String): PdqHash.Fingerprint? = runCatching {
         val file = cloudThumbFile(linkId)
-        BitmapFactory.decodeFile(file.absolutePath)?.let { bmp ->
+        eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(context, file)?.let { bmp ->
             val fp = PdqHash.fingerprint(bmp)
             bmp.recycle()
             fp

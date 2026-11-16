@@ -1087,7 +1087,7 @@ class AlbumDetailViewModel @Inject constructor(
                     try {
                         val uid = userId ?: error("Not signed in")
                         val file = driveRepo.downloadFullResPhoto(uid, photo)
-                        val stored = offlineStore.store(photo.linkId, file)
+                        val stored = offlineStore.store(photo.linkId, file.storedFile)
                         savedPaths += "file://${stored.absolutePath}"
                         succeeded++
                     } catch (e: Exception) {
@@ -2076,7 +2076,7 @@ class AlbumDetailViewModel @Inject constructor(
                         val uid = userId ?: error("Not signed in")
                         val file = driveRepo.downloadFullResPhoto(uid, photo)
                         androidx.core.content.FileProvider.getUriForFile(
-                            context, "${context.packageName}.share.fileprovider", file,
+                            context, "${context.packageName}.share.fileprovider", file.storedFile,
                         ).also {
                             // Report the real filename to the receiver, not the linkId.
                             eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, photo.displayName)

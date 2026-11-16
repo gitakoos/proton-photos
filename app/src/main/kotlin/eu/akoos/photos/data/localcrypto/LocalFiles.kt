@@ -1,0 +1,307 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.data.localcrypto
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.FilterOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+
+/**
+ * The app folders whose files are kept encrypted: the hidden vault, the full-size and thumbnail caches, the
+ * offline copies and the motion photo clips. A file keeps its name and `file://` uri; only its bytes are
+ * encrypted. Every reader here takes both forms, so a file written by an earlier version still reads.
+ */
+object LocalFiles {
+    const val FULLRES_DIR = "fullres"
+    const val THUMBNAILS_DIR = "thumbnails"
+    const val OFFLINE_DIR = "offline"
+    const val MOTION_DIR = "motion"
+
+    /** A folder of encrypted files. [code] names it in a [VaultReadProvider] uri; [regenerable] files may be
+     *  dropped when they no longer open, since they are fetched or made again. */
+    enum class Area(val code: String, val regenerable: Boolean) {
+        VAULT("v", false),
+        FULLRES("f", true),
+        THUMBNAILS("t", true),
+        OFFLINE("o", false),
+        MOTION("m", true),
+        ;
+
+        companion object {
+            fun of(code: String): Area? = entries.firstOrNull { it.code == code }
+        }
+    }
+
+    fun dir(context: Context, area: Area): File {
+        val app = context.applicationContext ?: context
+        return when (area) {
+            Area.VAULT -> VaultFiles.vaultDir(app)
+            Area.FULLRES -> File(app.cacheDir, FULLRES_DIR)
+            Area.THUMBNAILS -> File(app.cacheDir, THUMBNAILS_DIR)
+            Area.OFFLINE -> File(app.filesDir, OFFLINE_DIR)
+            Area.MOTION -> File(app.cacheDir, MOTION_DIR)
+        }
+    }
+
+    /** The folder [file] sits directly in, or null when it is in none of them. */
+    fun areaOf(context: Context, file: File): Area? {
+        val parent = file.absoluteFile.parentFile?.absolutePath ?: return null
+        return Area.entries.firstOrNull { dir(context, it).absolutePath == parent }
+    }
+
+    /** The file a `file://` [uri] names inside one of the folders, or null. */
+    fun fileOf(context: Context, uri: Uri): File? {
+        if (uri.scheme != "file") return null
+        val file = File(uri.path ?: return null)
+        return file.takeIf { areaOf(context, it) != null }
+    }
+
+    fun fileOf(context: Context, uri: String): File? = runCatching { Uri.parse(uri) }.getOrNull()?.let { fileOf(context, it) }
+
+    /**
+     * The uri a reader should open for [uri]: a file in one of the folders is served decrypted by
+     * [VaultReadProvider]; any other uri comes back as it is.
+     */
+    fun readableUri(context: Context, uri: Uri): Uri {
+        val file = runCatching { fileOf(context, uri) }.getOrNull() ?: return uri
+        val area = areaOf(context, file) ?: return uri
+        return VaultReadProvider.uriFor(area, file.name)
+    }
+
+    fun isEncrypted(file: File): Boolean = LocalCryptoFormat.isEncrypted(file)
+
+    /** The plaintext of [file], decrypting it when it is encrypted. Throws when it cannot be read. */
+    fun openPlain(context: Context?, file: File): InputStream {
+        if (VaultFiles.plainForm(file)) return FileInputStream(file)
+        val ctx = CacheFiles.contextOf(context) ?: throw LocalKeyUnavailableException(null)
+        val keyring = LocalCrypto.keyringOrNull(ctx) ?: throw LocalKeyUnavailableException(null)
+        return LocalCryptoFormat.openFile(file, keyring).inputStream()
+    }
+
+    fun readBytes(context: Context?, file: File): ByteArray = openPlain(context, file).use { it.readBytes() }
+
+    /**
+     * The plaintext of [file] for a reader that can do without it: null when the file is missing, empty, cannot
+     * be read now or does not open. A regenerable cache file that does not open any more is deleted, so it is
+     * fetched or made again.
+     */
+    fun openForRead(context: Context?, file: File): InputStream? {
+        if (!file.isFile || file.length() <= 0L) return null
+        return when (LocalCryptoFormat.formOf(file)) {
+            LocalFileForm.PLAIN -> runCatching { FileInputStream(file) }.getOrNull()
+            LocalFileForm.UNKNOWN -> null
+            LocalFileForm.ENCRYPTED -> {
+                val ctx = CacheFiles.contextOf(context) ?: return null
+                try {
+                    openPlain(ctx, file)
+                } catch (e: Exception) {
+                    if (areaOf(ctx, file)?.regenerable == true) CacheFiles.dropIfUnreadable(file, e)
+                    null
+                }
+            }
+        }
+    }
+
+    /** [BitmapFactory.decodeFile] for a file that may be encrypted: null where [openForRead] has no stream. */
+    fun decodeBitmap(context: Context?, file: File, options: BitmapFactory.Options? = null): Bitmap? =
+        openForRead(context, file)?.use { BitmapFactory.decodeStream(BufferedInputStream(it, DECODE_BUFFER), null, options) }
+
+    /**
+     * A seekable stream of [file]'s plaintext, for readers such as [ExifInterface] that need to seek (HEIF): the file
+     * itself when it is plain, else the decrypting provider's seekable descriptor. Null as for [openForRead].
+     */
+    fun openSeekable(context: Context?, file: File): InputStream? {
+        if (!file.isFile || file.length() <= 0L) return null
+        return when (LocalCryptoFormat.formOf(file)) {
+            LocalFileForm.PLAIN -> runCatching { FileInputStream(file) }.getOrNull()
+            LocalFileForm.UNKNOWN -> null
+            LocalFileForm.ENCRYPTED -> {
+                val ctx = CacheFiles.contextOf(context) ?: return null
+                if (areaOf(ctx, file) == null) return null
+                runCatching { ctx.contentResolver.openInputStream(readableUri(ctx, Uri.fromFile(file))) }.getOrNull()
+            }
+        }
+    }
+
+    /** The EXIF of a file that may be encrypted, or null when it cannot be read. */
+    fun readExif(context: Context?, file: File): ExifInterface? =
+        runCatching { openSeekable(context, file)?.use { ExifInterface(it) } }.getOrNull()
+
+    /** The EXIF orientation of a file that may be encrypted, [ExifInterface.ORIENTATION_NORMAL] when unknown. */
+    fun exifOrientation(context: Context?, file: File): Int =
+        readExif(context, file)?.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            ?: ExifInterface.ORIENTATION_NORMAL
+
+    private const val DECODE_BUFFER = 64 * 1024
+
+    /** The size of [file]'s plaintext, from its header when it is encrypted. */
+    fun plainLength(file: File): Long = if (isEncrypted(file)) LocalCryptoFormat.plainSize(file) ?: 0L else file.length()
+}
+
+/**
+ * Writing and reading the regenerable caches (thumbnails, full-size copies, motion clips). A cache file is
+ * encrypted with the current local key and written through a temp in its own folder, so a reader never sees half
+ * of one. With no key (no Keystore, or it does not answer) the bytes are written as they are, as before. A cache
+ * file that does not open any more is deleted and reads as missing, so it is fetched or made again; reading one is
+ * never an error for the user.
+ */
+object CacheFiles {
+    @Volatile private var appContext: Context? = null
+
+    /** Lets writers without a context of their own reach the keyring. */
+    fun init(context: Context) {
+        appContext = context.applicationContext ?: context
+    }
+
+    @PublishedApi
+    internal fun contextOf(context: Context?): Context? = context?.applicationContext ?: context ?: appContext
+
+    /** The sealing new cache files get, or null to write plaintext. Never throws. */
+    fun sealing(context: Context? = null): LocalCryptoFormat.Sealing? {
+        val ctx = contextOf(context) ?: return null
+        val keyring = LocalCrypto.keyringOrNull(ctx) ?: return null
+        return runCatching { keyring.current() }.getOrNull()
+            ?.let { LocalCryptoFormat.Sealing(it.keyId, it.key, LocalFileKind.CACHE) }
+    }
+
+    /**
+     * Writes [bytes] as [target], replacing it in one step through a temp in the same folder named with
+     * [tempPrefix] (a prefix the folder's own sweep already removes).
+     */
+    fun write(target: File, bytes: ByteArray, tempPrefix: String = ".cache_", context: Context? = null) {
+        val dir = target.absoluteFile.parentFile ?: throw IOException("no folder")
+        dir.mkdirs()
+        val temp = File.createTempFile(tempPrefix, ".tmp", dir)
+        try {
+            FileOutputStream(temp).use { out ->
+                val sealing = sealing(context)
+                if (sealing == null) out.write(bytes)
+                else LocalCryptoFormat.encryptingStream(out, sealing).use { it.write(bytes) }
+            }
+            if (!temp.renameTo(target)) throw IOException("cache file not published")
+        } finally {
+            temp.delete()
+        }
+    }
+
+    /**
+     * A stream writing into [out] encrypted (or as it is, with no key). Closing it finishes the file and closes
+     * [out]. [PlainCountingStream.plainBytes] counts what was written to it.
+     */
+    fun encryptingStream(out: OutputStream, context: Context? = null): PlainCountingStream {
+        val sealing = sealing(context)
+        val inner = if (sealing == null) out else LocalCryptoFormat.encryptingStream(out, sealing)
+        return PlainCountingStream(inner)
+    }
+
+    /** The plaintext of the cache file [file], or null when it is missing, empty or no longer opens (then it is
+     *  deleted, so the next look finds it missing and makes it again). */
+    fun readBytesOrNull(file: File, context: Context? = null): ByteArray? {
+        if (!file.isFile || file.length() <= 0L) return null
+        if (!LocalCryptoFormat.isEncrypted(file)) return runCatching { file.readBytes() }.getOrNull()
+        val ctx = contextOf(context) ?: return null
+        return try {
+            LocalFiles.readBytes(ctx, file)
+        } catch (e: Exception) {
+            dropIfUnreadable(file, e)
+            null
+        }
+    }
+
+    /** Opens the cache file [file] decrypted, or null as for [readBytesOrNull]. */
+    fun openOrNull(file: File, context: Context? = null): InputStream? {
+        if (!file.isFile || file.length() <= 0L) return null
+        if (!LocalCryptoFormat.isEncrypted(file)) return runCatching { FileInputStream(file) }.getOrNull()
+        val ctx = contextOf(context) ?: return null
+        return try {
+            LocalFiles.openPlain(ctx, file)
+        } catch (e: Exception) {
+            dropIfUnreadable(file, e)
+            null
+        }
+    }
+
+    /** Deletes a cache file whose key is gone or whose bytes are damaged. A Keystore that is only slow to answer
+     *  leaves it in place. */
+    fun dropIfUnreadable(file: File, error: Throwable) {
+        if (error is LocalKeyLockedException || error is LocalFileDamagedException) {
+            runCatching { file.delete() }
+        }
+    }
+
+    /**
+     * Empties the regenerable folders once after keys went missing (the Keystore lost them), so no screen keeps
+     * finding cache files it cannot open. Runs again only when the set of missing keys changes.
+     */
+    fun dropAfterKeyLoss(context: Context, keyring: LocalKeyring, log: (String) -> Unit) {
+        val locked = keyring.lockedKeyIds().sorted().joinToString(",")
+        val marker = File(LocalCrypto.root(context), CACHE_DROPPED_MARKER)
+        if (locked.isEmpty()) {
+            marker.delete()
+            return
+        }
+        if (runCatching { marker.readText() }.getOrNull() == locked) return
+        for (area in LocalFiles.Area.entries.filter { it.regenerable }) {
+            runCatching { LocalFiles.dir(context, area).deleteRecursively() }
+        }
+        runCatching { marker.parentFile?.mkdirs(); marker.writeText(locked) }
+        log("caches emptied after a key loss")
+    }
+
+    private const val CACHE_DROPPED_MARKER = "cache_dropped_for"
+}
+
+/** Passes writes through to [out], counting them. */
+class PlainCountingStream internal constructor(out: OutputStream) : FilterOutputStream(out) {
+    var plainBytes: Long = 0L
+        private set
+
+    override fun write(b: Int) {
+        out.write(b)
+        plainBytes++
+    }
+
+    override fun write(b: ByteArray, off: Int, len: Int) {
+        out.write(b, off, len)
+        plainBytes += len
+    }
+
+    private var closed = false
+
+    /** Closes once: a channel wrapped around it may close it before its owner does. */
+    override fun close() {
+        if (closed) return
+        closed = true
+        super.close()
+    }
+}

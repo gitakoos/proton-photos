@@ -749,8 +749,10 @@ class CloudTrashService @Inject constructor(
         photo: CloudPhoto,
         newName: String,
     ): String = withContext(Dispatchers.IO) {
-        val fullResFile = downloadService.downloadFullResPhoto(userId, photo)
-        if (!fullResFile.exists() || fullResFile.length() == 0L) error("Full-res download failed for ${photo.linkId}")
+        val original = downloadService.downloadFullResPhoto(userId, photo)
+        if (!original.exists() || original.plainLength == 0L) error("Full-res download failed for ${photo.linkId}")
+        // The cached original is kept encrypted: the upload reads a plaintext scratch copy of it, deleted after.
+        original.withPlainFile { fullResFile ->
 
         // SHA-1 hex of the plaintext file. Drive Android pins
         // ConfigurationProvider.contentDigestAlgorithm to SHA-1 and Drive web's
@@ -783,6 +785,7 @@ class CloudTrashService @Inject constructor(
             duration    = 0L,
         )
         uploadService.uploadFile(userId, item, hash, fileUri)
+        }
     }
 }
 

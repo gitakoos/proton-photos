@@ -2372,7 +2372,7 @@ class GalleryViewModel @Inject constructor(
                     try {
                         val uid = userId ?: error("Not signed in")
                         val file = cloudRepo.downloadFullResPhoto(uid, item.cloud)
-                        val stored = offlineStore.store(linkId, file)
+                        val stored = offlineStore.store(linkId, file.storedFile)
                         savedPaths += "file://${stored.absolutePath}"
                         succeeded++
                     } catch (e: Exception) {
@@ -2431,7 +2431,7 @@ class GalleryViewModel @Inject constructor(
                             val uid = userId ?: error("Not signed in")
                             val file = cloudRepo.downloadFullResPhoto(uid, item.cloud)
                             androidx.core.content.FileProvider.getUriForFile(
-                                context, "${context.packageName}.share.fileprovider", file,
+                                context, "${context.packageName}.share.fileprovider", file.storedFile,
                             ).also {
                                 // Report the real filename to the receiver instead of the linkId.
                                 eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, item.cloud.displayName)

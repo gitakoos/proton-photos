@@ -104,10 +104,11 @@ sealed class ViewerPixels {
             if (scheme == "http" || scheme == "https") return NoFullResolution
             val rawPath = if (scheme == null || scheme == "file") uri.path else null
             if (rawPath == null && scheme != "content") return NotAnImage
-            // An encrypted vault file is read through the resolver, which decrypts it.
+            // An encrypted file (vault, full-size cache, offline copy) is read through the resolver, which
+            // decrypts it.
             val path = rawPath?.takeUnless {
-                eu.akoos.photos.data.localcrypto.VaultFiles.fileOf(context, uri)?.let(
-                    eu.akoos.photos.data.localcrypto.VaultFiles::isEncrypted,
+                eu.akoos.photos.data.localcrypto.LocalFiles.fileOf(context, uri)?.let(
+                    eu.akoos.photos.data.localcrypto.LocalFiles::isEncrypted,
                 ) == true
             }
 

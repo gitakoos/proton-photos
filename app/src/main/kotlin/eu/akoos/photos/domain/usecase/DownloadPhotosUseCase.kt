@@ -167,11 +167,16 @@ class DownloadPhotosUseCase @Inject constructor(
                                 userId, photo,
                                 preResolvedLinkDetail = prefetch.linkDetailByLinkId[photo.linkId],
                             )
-                            val savedUri = saveFileToMediaStore(
-                                file, photo.displayName, photo.mimeType, folder,
-                                captureTimeSeconds = photo.captureTime,
-                                gps = resolveGpsForExif(userId, photo),
-                            )
+                            // The cache keeps the original encrypted; the save stamps and copies a plaintext
+                            // scratch copy of it, deleted after.
+                            val gps = resolveGpsForExif(userId, photo)
+                            val savedUri = file.withPlainFile(context) { plain ->
+                                saveFileToMediaStore(
+                                    plain, photo.displayName, photo.mimeType, folder,
+                                    captureTimeSeconds = photo.captureTime,
+                                    gps = gps,
+                                )
+                            }
                             file.delete()
                             // A null uri means the file was never written: MediaStore refused the
                             // insert, or the copy failed part-way, which on a full volume is the
@@ -246,11 +251,16 @@ class DownloadPhotosUseCase @Inject constructor(
                                 userId, photo,
                                 preResolvedLinkDetail = prefetch.linkDetailByLinkId[photo.linkId],
                             )
-                            val savedUri = saveFileToMediaStore(
-                                file, photo.displayName, photo.mimeType, folder,
-                                captureTimeSeconds = photo.captureTime,
-                                gps = resolveGpsForExif(userId, photo),
-                            )
+                            // The cache keeps the original encrypted; the save stamps and copies a plaintext
+                            // scratch copy of it, deleted after.
+                            val gps = resolveGpsForExif(userId, photo)
+                            val savedUri = file.withPlainFile(context) { plain ->
+                                saveFileToMediaStore(
+                                    plain, photo.displayName, photo.mimeType, folder,
+                                    captureTimeSeconds = photo.captureTime,
+                                    gps = gps,
+                                )
+                            }
                             file.delete()
                             // A null uri means the file was never written: MediaStore refused the
                             // insert, or the copy failed part-way, which on a full volume is the

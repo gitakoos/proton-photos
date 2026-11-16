@@ -146,7 +146,7 @@ interface DrivePhotoRepository {
      * to ~250 ms by the implementation, plus a guaranteed final emission at 100%. Used by the
      * photo viewer to render a percentage instead of an opaque spinner on multi-MB videos.
      *
-     * Cached output lives in `cacheDir/fullres/` and survives across screens. Eviction is
+     * Cached output lives in `cacheDir/fullres/`, encrypted, and survives across screens. Eviction is
      * handled by a TTL sweeper ([PhotoDownloadService.pruneStaleFullResCache]) — files older
      * than the TTL are reclaimed when the device is online. The sweeper holds off while
      * offline so cached photos stay viewable until the network returns.
@@ -156,7 +156,7 @@ interface DrivePhotoRepository {
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
-    ): File
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal
     /**
      * [uploadUri] overrides [item].uri — used when metadata has been stripped to a temp file.
      *

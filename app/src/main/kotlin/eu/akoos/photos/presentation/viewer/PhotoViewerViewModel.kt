@@ -1130,10 +1130,11 @@ class PhotoViewerViewModel @Inject constructor(
         return lat to lng
     }
 
-    private fun readVideoMeta(file: File): CloudVideoMeta? {
+    /** [uri] is a `file://` uri of the full-size cache or the offline copies, both kept encrypted. */
+    private fun readVideoMeta(uri: Uri): CloudVideoMeta? {
         val retriever = android.media.MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(file.absolutePath)
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))
             val w = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             val d = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
@@ -1162,9 +1163,11 @@ class PhotoViewerViewModel @Inject constructor(
                 "file" -> {
                     val file = parsed.path?.let { File(it) }?.takeIf { it.isFile } ?: return@launch
                     val vault = eu.akoos.photos.data.localcrypto.VaultFiles
-                    if (vault.isInVault(context, file) && vault.isEncrypted(file)) {
-                        // An encrypted vault file is screened from its decrypting stream and, when flagged,
-                        // decrypted to the vault's scratch folder, which is cleared on every start.
+                    val local = eu.akoos.photos.data.localcrypto.LocalFiles
+                    if (local.areaOf(context, file) != null && local.isEncrypted(file)) {
+                        // An encrypted file (vault, full-size cache, offline copy) is screened from its
+                        // decrypting stream and, when flagged, decrypted to the vault's scratch folder, which is
+                        // deleted on page change and cleared on every start.
                         val flagged = runCatching {
                             vault.openPlain(context, file).use { MotionPhotoUtil.hasMotionXmp(it) }
                         }.getOrNull() ?: false
@@ -1208,7 +1211,12 @@ class PhotoViewerViewModel @Inject constructor(
             val dest = withContext(Dispatchers.IO) {
                 val safe = linkIdOrName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80)
                 val out = File(motionTempDir(), "motion_play_$safe.mp4")
-                val ok = runCatching { MotionPhotoUtil.extractVideo(source, out) }.getOrDefault(false)
+                // Kept encrypted in the motion folder; the player reads it through the decrypting provider.
+                val ok = runCatching {
+                    MotionPhotoUtil.extractVideo(source, out) {
+                        eu.akoos.photos.data.localcrypto.CacheFiles.encryptingStream(java.io.FileOutputStream(it), context)
+                    }
+                }.getOrDefault(false)
                 if (ok && out.isFile) out else { runCatching { out.delete() }; null }
             }
             _isExtractingMotion.value = false
@@ -1682,7 +1690,7 @@ class PhotoViewerViewModel @Inject constructor(
                 val userId = accountManager.getPrimaryUserId().first()
                     ?: error("not logged in")
                 val file = cloudRepo.downloadFullResPhoto(userId, cloud)
-                offlineStore.store(linkId, file)
+                offlineStore.store(linkId, file.storedFile)
                 // If the photo was un-pinned (or the user signed out) while this was downloading,
                 // the blob would outlive its pin — drop it so the disk never drifts from the set.
                 val stillPinned = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS]
@@ -2573,14 +2581,14 @@ class PhotoViewerViewModel @Inject constructor(
             val pinned = offlineStore.findBlob(photo.linkId)
             if (pinned != null && pinned.length() > 0) {
                 val pinnedUri = Uri.fromFile(pinned)
-                _cloudFullResSize.value = pinned.length()
+                _cloudFullResSize.value = eu.akoos.photos.data.localcrypto.LocalFiles.plainLength(pinned)
                 if (!cloudLoadStillCurrent(_state.value, itemKey)) return@launch
                 _state.value = if (isVideo)
                     ViewerState.ShowVideo(pinnedUri, itemKey = itemKey, isFullRes = true)
                 else
                     ViewerState.ShowImage(pinnedUri, itemKey = itemKey, isFullRes = true)
                 if (!isVideo) loadMetadata(pinnedUri.toString())
-                else _cloudVideoMeta.value = readVideoMeta(pinned)
+                else _cloudVideoMeta.value = readVideoMeta(pinnedUri)
                 return@launch
             }
             // Wi-Fi-only-for-fullres gate: on a metered network hold the auto-download and let the
@@ -2611,10 +2619,10 @@ class PhotoViewerViewModel @Inject constructor(
             _downloadProgress.value = null
             result.fold(
                 onSuccess = { file ->
-                    val fileUri = Uri.fromFile(file)
+                    val fileUri = file.fileUri
                     // Publish the resolved on-disk size so the details sheet can fall back
                     // to it when CloudPhoto.sizeBytes is 0 (server-side gap for videos).
-                    _cloudFullResSize.value = file.length()
+                    _cloudFullResSize.value = file.plainLength
                     // Drop a late blob if the user swiped away. A null itemKey during a swap must NOT
                     // pass the guard and flash the old photo.
                     if (!cloudLoadStillCurrent(_state.value, itemKey)) return@fold
@@ -2627,7 +2635,7 @@ class PhotoViewerViewModel @Inject constructor(
                     if (!isVideo) loadMetadata(fileUri.toString())
                     // A video's resolution + length live in the container, not EXIF — read them off
                     // the decrypted blob so a cloud-only video's details fill in like a local one's.
-                    else _cloudVideoMeta.value = readVideoMeta(file)
+                    else _cloudVideoMeta.value = readVideoMeta(fileUri)
                 },
                 onFailure = { e ->
                     if (thumbUrl == null && cloudLoadStillCurrent(_state.value, itemKey)) {

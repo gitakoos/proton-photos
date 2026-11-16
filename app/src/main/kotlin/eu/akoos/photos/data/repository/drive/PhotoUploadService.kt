@@ -1111,7 +1111,7 @@ class PhotoUploadService @Inject constructor(
             runCatching {
                 val thumbCacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
                 val thumbFile = File(thumbCacheDir, "thumb_${safeFileId(fileId)}.jpg")
-                thumbFile.writeBytes(thumbnailBytes)
+                eu.akoos.photos.data.localcrypto.CacheFiles.write(thumbFile, thumbnailBytes, tempPrefix = "thumb_dec_")
                 "file://${thumbFile.absolutePath}"
             }.getOrElse { e ->
                 Log.w(TAG, "uploadFile: failed to cache thumbnail: ${e.message}")

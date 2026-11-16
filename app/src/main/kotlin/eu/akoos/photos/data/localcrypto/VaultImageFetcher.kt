@@ -39,21 +39,27 @@ import okio.source
 import java.io.File
 
 /**
- * Loads an encrypted vault file for Coil from a decrypting stream, so every grid, reel, viewer and drawer that
- * hands Coil a vault `file://` uri keeps working unchanged. The source carries the decrypting provider's uri as
- * its content metadata, which is what a video frame grab and the Ultra HDR decoder reopen it by. A plaintext
- * vault file is left to Coil's own file fetcher.
+ * Loads an encrypted file of one of the encrypted folders ([LocalFiles.Area]: the vault, the thumbnail and
+ * full-size caches, the offline copies) for Coil from a decrypting stream, so every grid, reel, viewer and drawer
+ * that hands Coil such a `file://` uri keeps working unchanged. The source carries the decrypting provider's uri
+ * as its content metadata, which is what a video frame grab and the Ultra HDR decoder reopen it by. A plaintext
+ * file is left to Coil's own file fetcher. A cache file that no longer opens is deleted, so it is fetched again.
  */
-class VaultImageFetcher(private val file: File, private val options: Options) : Fetcher {
+class VaultImageFetcher(private val file: File, private val area: LocalFiles.Area, private val options: Options) : Fetcher {
 
     @OptIn(ExperimentalCoilApi::class)
     override suspend fun fetch(): FetchResult = withContext(Dispatchers.IO) {
-        val reader = VaultFiles.openReader(options.context, file)
+        val reader = try {
+            VaultFiles.openReader(options.context, file)
+        } catch (e: Exception) {
+            if (area.regenerable) CacheFiles.dropIfUnreadable(file, e)
+            throw e
+        }
         SourceResult(
             source = ImageSource(
                 source = reader.inputStream().source().buffer(),
                 context = options.context,
-                metadata = ContentMetadata(VaultReadProvider.uriFor(file.name)),
+                metadata = ContentMetadata(VaultReadProvider.uriFor(area, file.name)),
             ),
             mimeType = mimeFromPath(file.name),
             dataSource = DataSource.DISK,
@@ -62,9 +68,9 @@ class VaultImageFetcher(private val file: File, private val options: Options) : 
 
     class Factory : Fetcher.Factory<File> {
         override fun create(data: File, options: Options, imageLoader: ImageLoader): Fetcher? {
-            if (!VaultFiles.isInVault(options.context, data)) return null
-            if (!VaultFiles.isEncrypted(data)) return null
-            return VaultImageFetcher(data, options)
+            val area = LocalFiles.areaOf(options.context, data) ?: return null
+            if (!LocalFiles.isEncrypted(data)) return null
+            return VaultImageFetcher(data, area, options)
         }
     }
 }

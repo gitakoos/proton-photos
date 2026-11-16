@@ -151,7 +151,8 @@ class ThumbnailHelpers @Inject constructor(
                 Log.w(TAG, "thumbnail decrypt returned null for linkId=$linkId (sessionKey=${sessionKey != null})")
                 return null
             }
-            decFile.writeBytes(decrypted)
+            // Kept encrypted on disk; Coil and every other reader decrypt it through LocalFiles.
+            eu.akoos.photos.data.localcrypto.CacheFiles.write(decFile, decrypted, tempPrefix = "thumb_dec_${safeFileId(linkId)}_")
             "file://${decFile.absolutePath}"
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e

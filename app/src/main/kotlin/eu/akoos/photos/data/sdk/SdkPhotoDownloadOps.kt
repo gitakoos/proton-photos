@@ -31,7 +31,9 @@ import me.proton.drive.sdk.DownloadAbortedException
 import me.proton.drive.sdk.entity.LegacyNodeUid
 import me.proton.drive.sdk.entity.PhotosDownloaderRequest
 import java.io.File
+import eu.akoos.photos.data.localcrypto.CacheFiles
 import java.io.FileOutputStream
+import java.nio.channels.Channels
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,15 +59,16 @@ class SdkPhotoDownloadOps @Inject constructor(
         tempFile: File,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
         fallbackTotal: Long,
-    ) {
+    ): Long =
         clientProvider.withPhotosClient(userId) { client ->
             val downloader = client.downloader(
                 PhotosDownloaderRequest(nodeUid = LegacyNodeUid(volumeId = volumeId, linkId = linkId), noWaiting = false),
             )
             try {
                 coroutineScope {
-                    FileOutputStream(tempFile).use { out ->
-                        val controller = downloader.downloadToStream(coroutineScope = this, channel = out.channel)
+                    // Encrypted as it is written. The channel cannot seek, so the SDK writes it in order.
+                    CacheFiles.encryptingStream(FileOutputStream(tempFile)).use { out ->
+                        val controller = downloader.downloadToStream(coroutineScope = this, channel = Channels.newChannel(out))
                         try {
                             val progress = controller.progressFlow
                                 .filterNotNull()
@@ -82,13 +85,13 @@ class SdkPhotoDownloadOps @Inject constructor(
                         } finally {
                             controller.close()
                         }
-                    }
+                        out
+                    }.plainBytes
                 }
             } finally {
                 downloader.close()
             }
         } ?: throw SdkDownloadException("the SDK cannot run on this device")
-    }
 }
 
 /**

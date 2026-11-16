@@ -88,7 +88,7 @@ class OutgoingPhotoUris @Inject constructor(
         } ?: run {
             val userId = accountManager.getPrimaryUserId().first()
                 ?: error(context.getString(R.string.viewer_not_signed_in))
-            cloudRepo.downloadFullResPhoto(userId, photo)
+            cloudRepo.downloadFullResPhoto(userId, photo).storedFile
         }
         return providerUri(file, photo.displayName)
     }

@@ -164,13 +164,15 @@ class CloudPhotoReplacement(
             val toAdd: Set<String>
             val copyLink: String
             if (resume == null) {
-                val original = cloudRepo.downloadFullResPhoto(userId, photo)
+                val cachedOriginal = cloudRepo.downloadFullResPhoto(userId, photo)
+                val original = cachedOriginal.storedFile
                 // A preparation that writes gets a private copy: the download cache file is shared with the
-                // viewer and swept by age, so nothing here may change it in place.
-                val source = if (prepareWrites) {
+                // viewer and swept by age, so nothing here may change it in place. The cache file is kept
+                // encrypted, so a preparation that only reads gets a plaintext private copy of it too.
+                val source = if (prepareWrites || !cachedOriginal.isPlain) {
                     File(workDir, "cloud_${photo.linkId.take(24)}_${System.currentTimeMillis()}").also { file ->
                         working = file
-                        original.inputStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+                        cachedOriginal.copyPlainTo(file, context)
                     }
                 } else {
                     original

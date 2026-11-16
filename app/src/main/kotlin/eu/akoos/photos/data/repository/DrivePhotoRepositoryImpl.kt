@@ -272,7 +272,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = downloadService.downloadFullResPhoto(
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal = downloadService.downloadFullResPhoto(
         userId, photo, preResolvedLinkDetail, onProgress,
     )
 

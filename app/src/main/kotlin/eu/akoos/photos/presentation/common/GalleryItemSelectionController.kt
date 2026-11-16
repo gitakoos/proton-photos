@@ -268,7 +268,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                             val uid = userId ?: error("Not signed in")
                             val file = driveRepo.downloadFullResPhoto(uid, item.cloud)
                             FileProvider.getUriForFile(
-                                context, "${context.packageName}.share.fileprovider", file,
+                                context, "${context.packageName}.share.fileprovider", file.storedFile,
                             ).also {
                                 ShareFileProvider.putDisplayName(it, item.cloud.displayName)
                             }
@@ -476,7 +476,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                     try {
                         val uid = userId ?: error("Not signed in")
                         val file = driveRepo.downloadFullResPhoto(uid, item.cloud)
-                        val stored = offlineStore.store(linkId, file)
+                        val stored = offlineStore.store(linkId, file.storedFile)
                         savedPaths += "file://${stored.absolutePath}"
                         succeeded++
                     } catch (e: Exception) {

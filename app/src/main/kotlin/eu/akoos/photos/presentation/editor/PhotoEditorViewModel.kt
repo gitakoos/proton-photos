@@ -85,6 +85,7 @@ import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
 import androidx.exifinterface.media.ExifInterface
+import eu.akoos.photos.data.localcrypto.LocalFiles
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -794,15 +795,15 @@ class PhotoEditorViewModel @Inject constructor(
         return context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, opts) }
     }
 
-    /** File variant of [decodeDownsampled] for the downloaded cloud full-res. */
-    private fun decodeDownsampled(path: String): Bitmap? {
+    /** File variant of [decodeDownsampled] for the downloaded cloud full-res, which the cache keeps encrypted. */
+    private fun decodeDownsampled(file: File): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return BitmapFactory.decodeFile(path)
+        LocalFiles.decodeBitmap(context, file, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return LocalFiles.decodeBitmap(context, file)
         val opts = BitmapFactory.Options().apply {
             inSampleSize = editorSampleSize(bounds.outWidth, bounds.outHeight)
         }
-        return BitmapFactory.decodeFile(path, opts)
+        return LocalFiles.decodeBitmap(context, file, opts)
     }
 
     /** Outcome of a guarded source decode: an oriented bitmap, a plain failure (the caller keeps its
@@ -933,12 +934,12 @@ class PhotoEditorViewModel @Inject constructor(
             }
             // Keep the full-res original on hand so the save path can re-inject its EXIF (capture time,
             // camera, GPS) into the edited cloud copy, which Bitmap.compress would otherwise drop.
-            cloudOriginalFilePath = file.absolutePath
+            cloudOriginalFilePath = file.storedFile.absolutePath
             // Honour EXIF orientation off the downloaded full-res file; see loadLocal. This full-res
             // decode + bake is the editor's largest allocation, so it runs behind the OOM guard.
             val outcome = guardedDecode {
-                decodeDownsampled(file.absolutePath)?.let {
-                    ExifHelper.applyOrientation(it, ExifHelper.readOrientation(file))
+                decodeDownsampled(file.storedFile)?.let {
+                    ExifHelper.applyOrientation(it, ExifHelper.readOrientation(file.storedFile))
                 }
             }
             val oriented = when (outcome) {

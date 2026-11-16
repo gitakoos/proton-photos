@@ -236,7 +236,7 @@ class GifMakerViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val uri = Uri.fromFile(file)
+            val uri = file.fileUri
             val retriever = MediaMetadataRetriever()
             val meta = try {
                 retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))

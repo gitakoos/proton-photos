@@ -94,8 +94,15 @@ class LocalEncryptionCoordinator @Inject constructor(
     fun start() {
         // Leftover scratch plaintext of an earlier process goes before any reader can make new scratch copies.
         runCatching { VaultFiles.clearScratch(context) }
+        CacheFiles.init(context)
+        // Motion photo clips and probe copies are only ever needed while one viewer page is open.
+        runCatching { LocalFiles.dir(context, LocalFiles.Area.MOTION).deleteRecursively() }
         val keyring = LocalCrypto.keyringOrNull(context) ?: return
         keyring.onMinted = { scope.launch { afterMint() } }
+        scope.launch {
+            runCatching { CacheFiles.dropAfterKeyLoss(context, keyring, LocalCrypto::log) }
+                .onFailure { logFailure("cache drop", it) }
+        }
         scope.launch {
             // The settings file is encrypted the first time it is opened, before any vault file is: an older
             // version installed over this one then stops at the settings rather than run with a vault it can

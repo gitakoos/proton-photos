@@ -96,6 +96,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.localcrypto.LocalFiles
+import java.io.BufferedInputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -886,7 +888,7 @@ class SemanticIndexingScheduler @Inject constructor(
         } ?: return miss.giveUp(sourceMissForDownloadFailure(downloadError.get()))
         val unreadable = AtomicBoolean(false)
         return try {
-            decodeFileBounded(file, timedOut, unreadable)
+            decodeFileBounded(file.storedFile, timedOut, unreadable)
                 ?: miss.giveUp(sourceMissForUndecodedDownload(unreadable.get()))
         } finally {
             runCatching { file.delete() }
@@ -939,8 +941,11 @@ class SemanticIndexingScheduler @Inject constructor(
      *  not support, or corrupt bytes), as opposed to a decode that threw (out of memory) or a file gone. */
     private fun decodeFileBlocking(file: File, unreadable: AtomicBoolean? = null): Bitmap? = runCatching {
         if (!file.exists() || file.length() <= 0L) return@runCatching null
+        // The cache files are encrypted: read through LocalFiles. A file that does not open now is not
+        // unreadable (a cache file whose key is gone is deleted there, so it is fetched again).
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        LocalFiles.openForRead(context, file)?.use { BitmapFactory.decodeStream(BufferedInputStream(it), null, bounds) }
+            ?: return@runCatching null
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             if (file.exists()) unreadable?.set(true)
             return@runCatching null
@@ -949,15 +954,12 @@ class SemanticIndexingScheduler @Inject constructor(
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: run {
+        val stream = LocalFiles.openForRead(context, file) ?: return@runCatching null
+        val bmp = stream.use { BitmapFactory.decodeStream(BufferedInputStream(it), null, opts) } ?: run {
             if (file.exists()) unreadable?.set(true)
             return@runCatching null
         }
-        val orientation = runCatching {
-            ExifInterface(file.absolutePath)
-                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-        orientedBitmap(bmp, orientation)
+        orientedBitmap(bmp, LocalFiles.exifOrientation(context, file))
     }.getOrNull()
 
     /**

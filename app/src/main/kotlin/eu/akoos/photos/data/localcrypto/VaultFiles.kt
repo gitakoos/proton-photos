@@ -86,13 +86,11 @@ object VaultFiles {
     }
 
     /**
-     * The uri a reader should open for [uri]: a vault file's is served decrypted by [VaultReadProvider]; any
-     * other uri comes back as it is. For readers that open what they are given through the content resolver.
+     * The uri a reader should open for [uri]: a file in an encrypted folder (the vault, the full-size and
+     * thumbnail caches, the offline copies) is served decrypted by [VaultReadProvider]; any other uri comes back
+     * as it is. For readers that open what they are given through the content resolver.
      */
-    fun readableUri(context: Context, uri: Uri): Uri {
-        val file = runCatching { fileOf(context, uri) }.getOrNull() ?: return uri
-        return VaultReadProvider.uriFor(file.name)
-    }
+    fun readableUri(context: Context, uri: Uri): Uri = LocalFiles.readableUri(context, uri)
 
     fun readableUri(context: Context, uri: String): String = readableUri(context, Uri.parse(uri)).toString()
 

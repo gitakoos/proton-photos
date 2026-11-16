@@ -24,6 +24,7 @@ package eu.akoos.photos.data.localcrypto
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -42,7 +43,8 @@ import java.io.File
 import java.io.FileNotFoundException
 
 /**
- * Serves vault files decrypted, read-only, as `content://<app>.vaultread/v/<file name>`. Not exported; another app
+ * Serves the files of the encrypted folders ([LocalFiles.Area]) decrypted, read-only, as
+ * `content://<app>.vaultread/<folder code>/<file name>`. Not exported; another app
  * reads a file only through a uri permission the app grants it (share, set as). The descriptor it hands out is
  * seekable ([StorageManager.openProxyFileDescriptor]), so video players, frame grabs and EXIF readers work on it
  * as on a plain file, decrypting one segment at a time and never writing plaintext to disk.
@@ -66,7 +68,7 @@ class VaultReadProvider : ContentProvider() {
         val row = columns.map { column ->
             when (column) {
                 OpenableColumns.DISPLAY_NAME -> synchronized(displayNames) { displayNames[file.name] } ?: HiddenCaptureTime.strip(file.name)
-                else -> VaultFiles.plainLength(file)
+                else -> LocalFiles.plainLength(file)
             }
         }
         return MatrixCursor(columns, 1).apply { addRow(row) }
@@ -76,19 +78,7 @@ class VaultReadProvider : ContentProvider() {
         if (mode != "r") throw SecurityException("read only")
         val context = context ?: throw FileNotFoundException()
         val file = fileFor(uri) ?: throw FileNotFoundException()
-        val plain = try {
-            VaultFiles.plainForm(file)
-        } catch (e: LocalFileUnreadableException) {
-            throw FileNotFoundException("file cannot be read now")
-        }
-        if (plain) return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        val reader = try {
-            VaultFiles.openReader(context, file)
-        } catch (e: Exception) {
-            throw FileNotFoundException("vault file does not open: ${e.javaClass.simpleName}")
-        }
-        val storage = context.getSystemService(StorageManager::class.java)
-        return storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, ReaderCallback(reader), handler)
+        return openDecrypted(context, file)
     }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
@@ -100,10 +90,11 @@ class VaultReadProvider : ContentProvider() {
     private fun fileFor(uri: Uri): File? {
         val context = context ?: return null
         val segments = uri.pathSegments
-        if (segments.size != 2 || segments[0] != PATH) return null
+        if (segments.size != 2) return null
+        val area = LocalFiles.Area.of(segments[0]) ?: return null
         val name = segments[1]
         if (name.isBlank() || name.contains('/') || name == "." || name == "..") return null
-        val file = File(VaultFiles.vaultDir(context), name)
+        val file = File(LocalFiles.dir(context, area), name)
         return file.takeIf { it.isFile }
     }
 
@@ -130,7 +121,6 @@ class VaultReadProvider : ContentProvider() {
     }
 
     companion object {
-        private const val PATH = "v"
         val AUTHORITY: String get() = "${BuildConfig.APPLICATION_ID}.vaultread"
 
         private val handler: Handler by lazy {
@@ -142,12 +132,37 @@ class VaultReadProvider : ContentProvider() {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 200
         }
 
-        fun uriFor(fileName: String): Uri = Uri.Builder()
+        /** The uri of the vault file named [fileName]. */
+        fun uriFor(fileName: String): Uri = uriFor(LocalFiles.Area.VAULT, fileName)
+
+        fun uriFor(area: LocalFiles.Area, fileName: String): Uri = Uri.Builder()
             .scheme("content")
             .authority(AUTHORITY)
-            .appendPath(PATH)
+            .appendPath(area.code)
             .appendPath(fileName)
             .build()
+
+        /**
+         * A read-only descriptor of [file]'s plaintext: the file itself when it is not encrypted, else a seekable
+         * descriptor that decrypts one segment at a time. A regenerable cache file that no longer opens is
+         * deleted, so it is fetched again.
+         */
+        fun openDecrypted(context: Context, file: File): ParcelFileDescriptor {
+            val plain = try {
+                VaultFiles.plainForm(file)
+            } catch (e: LocalFileUnreadableException) {
+                throw FileNotFoundException("file cannot be read now")
+            }
+            if (plain) return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val reader = try {
+                VaultFiles.openReader(context, file)
+            } catch (e: Exception) {
+                if (LocalFiles.areaOf(context, file)?.regenerable == true) CacheFiles.dropIfUnreadable(file, e)
+                throw FileNotFoundException("file does not open: ${e.javaClass.simpleName}")
+            }
+            val storage = context.getSystemService(StorageManager::class.java)
+            return storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, ReaderCallback(reader), handler)
+        }
 
         fun setDisplayName(fileName: String, name: String) {
             synchronized(displayNames) { displayNames[fileName] = name }

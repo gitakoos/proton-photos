@@ -25,8 +25,13 @@ package eu.akoos.photos.util
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
+import eu.akoos.photos.data.localcrypto.LocalFiles
+import eu.akoos.photos.data.localcrypto.VaultReadProvider
+import java.io.File
+import java.io.FileNotFoundException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -44,6 +49,28 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class ShareFileProvider : FileProvider() {
 
+    /**
+     * A full-size copy in the cache is kept encrypted, so the receiver is handed a descriptor that decrypts as it
+     * reads (seekable, nothing written in plaintext). A file written by an earlier version opens as it is.
+     */
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        val file = cacheFileOf(uri) ?: return super.openFile(uri, mode)
+        if (!LocalFiles.isEncrypted(file)) return super.openFile(uri, mode)
+        if (mode != "r") throw SecurityException("read only")
+        val context = context ?: throw FileNotFoundException()
+        return VaultReadProvider.openDecrypted(context, file)
+    }
+
+    /** The full-size cache file a share uri names (`content://<authority>/shared/<name>`), or null. */
+    private fun cacheFileOf(uri: Uri): File? {
+        val context = context ?: return null
+        val segments = uri.pathSegments
+        if (segments.size != 2 || segments[0] != SHARED_ROOT) return null
+        val name = segments[1]
+        if (name.isBlank() || name == "." || name == "..") return null
+        return File(LocalFiles.dir(context, LocalFiles.Area.FULLRES), name).takeIf { it.isFile }
+    }
+
     override fun query(
         uri: Uri,
         projection: Array<out String>?,
@@ -52,17 +79,21 @@ class ShareFileProvider : FileProvider() {
         sortOrder: String?,
     ): Cursor {
         val base = super.query(uri, projection, selection, selectionArgs, sortOrder)
-        val override = displayNames[uri.toString()] ?: return base
-        // Rebuild the row, swapping only DISPLAY_NAME. Every other column (notably SIZE) is
-        // copied through verbatim so the receiver still sees the correct byte count.
+        val override = displayNames[uri.toString()]
+        val plainSize = cacheFileOf(uri)?.takeIf { LocalFiles.isEncrypted(it) }?.let { LocalFiles.plainLength(it) }
+        if (override == null && plainSize == null) return base
+        // Rebuild the row, swapping DISPLAY_NAME and, for an encrypted file, SIZE for the plaintext's,
+        // so the receiver sees the byte count it will read. Every other column is copied through.
         return base.use { c ->
             val cols = c.columnNames
             val out = MatrixCursor(cols)
             if (c.moveToFirst()) {
                 val row = arrayOfNulls<Any?>(cols.size)
                 for (i in cols.indices) {
-                    row[i] = if (cols[i] == OpenableColumns.DISPLAY_NAME) {
+                    row[i] = if (cols[i] == OpenableColumns.DISPLAY_NAME && override != null) {
                         override
+                    } else if (cols[i] == OpenableColumns.SIZE && plainSize != null) {
+                        plainSize
                     } else when (c.getType(i)) {
                         Cursor.FIELD_TYPE_INTEGER -> c.getLong(i)
                         Cursor.FIELD_TYPE_FLOAT -> c.getDouble(i)
@@ -81,6 +112,8 @@ class ShareFileProvider : FileProvider() {
         // shares can't grow it without limit — sharing is infrequent and the receiver reads
         // the name immediately, so old entries are safe to drop.
         private const val MAX_ENTRIES = 256
+        /** The `name` of the `cache-path` entry in share_paths.xml. */
+        private const val SHARED_ROOT = "shared"
         private val displayNames = ConcurrentHashMap<String, String>()
 
         /** Register the real filename to report for a just-created share URI. A blank name is

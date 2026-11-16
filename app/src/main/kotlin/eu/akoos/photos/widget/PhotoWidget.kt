@@ -24,7 +24,6 @@ package eu.akoos.photos.widget
 
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -158,7 +157,7 @@ class PhotoWidget : GlanceAppWidget() {
             if (!file.exists()) return null
             val key = "$path|${file.lastModified()}"
             bitmapCache.get(key)?.let { return it }
-            val decoded = runCatching { BitmapFactory.decodeFile(path) }.getOrNull() ?: return null
+            val decoded = runCatching { eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(null, file) }.getOrNull() ?: return null
             bitmapCache.put(key, decoded)
             return decoded
         }

@@ -50,7 +50,6 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Central helper that advances the widget to its next photo, loads + caches the
@@ -382,9 +381,11 @@ object PhotoWidgetUpdater {
         }
     } catch (_: Exception) { null }
 
+    /** Kept encrypted like the other image caches; [PhotoWidget.loadCachedBitmap] decrypts it. */
     private fun saveBitmapToCache(context: Context, id: Int, bitmap: Bitmap): String {
         val file = File(context.cacheDir, cacheFileName(id))
-        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        val jpeg = java.io.ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+        eu.akoos.photos.data.localcrypto.CacheFiles.write(file, jpeg, tempPrefix = ".widget_tmp_", context = context)
         return file.absolutePath
     }
 
@@ -433,13 +434,13 @@ object PhotoWidgetUpdater {
         // First pass: read dimensions only — the cached thumbnail's native size
         // varies (Drive picks ~500-1000 px depending on aspect ratio).
         val opts1 = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(thumbnailFile.absolutePath, opts1)
+        eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(context, thumbnailFile, opts1)
         val longest = maxOf(opts1.outWidth, opts1.outHeight).coerceAtLeast(1)
         val sample  = Integer.highestOneBit((longest / MAX_BITMAP_PX).coerceAtLeast(1))
         val opts2 = BitmapFactory.Options().apply {
             inSampleSize      = sample
             inPreferredConfig = Bitmap.Config.RGB_565
         }
-        return runCatching { BitmapFactory.decodeFile(thumbnailFile.absolutePath, opts2) }.getOrNull()
+        return runCatching { eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(context, thumbnailFile, opts2) }.getOrNull()
     }
 }

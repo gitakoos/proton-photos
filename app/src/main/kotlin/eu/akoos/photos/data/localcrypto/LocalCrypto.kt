@@ -64,6 +64,13 @@ object LocalCrypto {
         }
     }
 
+    /** Puts [keyring] in place of the Keystore one, for tests on the JVM, where there is no Keystore. */
+    @androidx.annotation.VisibleForTesting
+    internal fun useKeyringForTest(keyring: LocalKeyring?) {
+        this.keyring = keyring
+        supported = if (keyring != null) true else null
+    }
+
     fun lockedStores(context: Context) = LockedStoreFiles(File(root(context), "locked"))
 
     fun masterCopies(context: Context) = KeyRecoveryCopies(File(root(context), "recovery"))

@@ -1022,7 +1022,7 @@ class VideoEditorViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val parsed = Uri.fromFile(file)
+            val parsed = file.fileUri
             val retriever = MediaMetadataRetriever()
             val meta = runCatching {
                 retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
@@ -1318,7 +1318,7 @@ class VideoEditorViewModel @Inject constructor(
                 }
                 return@launch
             }
-            addVideoSource(Uri.fromFile(file).toString(), photo.displayName, galleryKey = photo.linkId)
+            addVideoSource(file.fileUri.toString(), photo.displayName, galleryKey = photo.linkId)
         }
     }
 

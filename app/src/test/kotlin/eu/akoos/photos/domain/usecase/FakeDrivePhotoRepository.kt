@@ -249,12 +249,14 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = (fullResCacheDir?.let { dir ->
-        File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
-    } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
-        writeBytes(downloadBytes)
-        deleteOnExit()
-    }
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal = eu.akoos.photos.data.localcrypto.CachedOriginal(
+        (fullResCacheDir?.let { dir ->
+            File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
+        } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
+            writeBytes(downloadBytes)
+            deleteOnExit()
+        },
+    )
 
     /** When set, downloads land where the real full-res cache keeps them (`<dir>/<linkId>.<ext>`). */
     var fullResCacheDir: File? = null

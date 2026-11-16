@@ -289,14 +289,8 @@ object ExifHelper {
     }
 
     /** Same as [readOrientation] but for a local [file] (used for the cloud full-res
-     *  download, which lands on disk before decoding). */
-    fun readOrientation(file: File): Int = try {
-        ExifInterface(file.absolutePath).getAttributeInt(
-            ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL,
-        )
-    } catch (_: Exception) {
-        ExifInterface.ORIENTATION_NORMAL
-    }
+     *  download, which lands on disk before decoding). A file of the encrypted caches is read decrypted. */
+    fun readOrientation(file: File): Int = eu.akoos.photos.data.localcrypto.LocalFiles.exifOrientation(null, file)
 
     /**
      * Rotates / flips [bitmap] so its pixels match the EXIF [orientation]. BitmapFactory
@@ -762,9 +756,7 @@ object ExifHelper {
      * Reads the source EXIF from a local [file] into a snapshot (see the [Context]/URI overload).
      * Returns null on any parse/read failure.
      */
-    fun readExifSnapshot(file: File): ExifInterface? = runCatching {
-        ExifInterface(file.absolutePath)
-    }.getOrNull()
+    fun readExifSnapshot(file: File): ExifInterface? = eu.akoos.photos.data.localcrypto.LocalFiles.readExif(null, file)
 
     /**
      * Fill DateTimeOriginal (and DateTime) with [captureEpochMs] ONLY when the file has no original
