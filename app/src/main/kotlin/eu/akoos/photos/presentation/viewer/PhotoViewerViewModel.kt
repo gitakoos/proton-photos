@@ -95,7 +95,8 @@ import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.SyncStateSnapshot
-import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.presentation.common.GalleryDownloads
+import eu.akoos.photos.presentation.common.awaitUnlessStopped
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.util.ExifHelper
@@ -286,8 +287,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
     private val deletePhotoUseCase: DeletePhotoUseCase,
-    private val downloadPhotos: DownloadPhotosUseCase,
-    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    private val galleryDownloads: eu.akoos.photos.presentation.common.GalleryDownloads,
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val hiddenVaultRestorer: HiddenVaultRestorer,
@@ -1679,35 +1679,16 @@ class PhotoViewerViewModel @Inject constructor(
             }
             return
         }
-        // Pin: optimistically mark on, then download the full-res blob into offline storage.
+        // Pin: optimistically mark on, then download the full-res blob into offline storage. The
+        // download runs on [GalleryDownloads], so swiping on or closing the viewer does not drop it.
         _isOffline.value = true
+        val pinning = galleryDownloads.pinOffline(listOf(cloud))
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkId
-            }
-            try {
-                val userId = accountManager.getPrimaryUserId().first()
-                    ?: error("not logged in")
-                val file = cloudRepo.downloadFullResPhoto(userId, cloud)
-                offlineStore.store(linkId, file.storedFile)
-                // If the photo was un-pinned (or the user signed out) while this was downloading,
-                // the blob would outlive its pin — drop it so the disk never drifts from the set.
-                val stillPinned = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS]
-                    ?.contains(linkId) == true
-                if (!stillPinned) {
-                    offlineStore.delete(linkId)
-                    return@launch
-                }
+            val pinned = pinning.awaitUnlessStopped() ?: return@launch
+            if (pinned > 0) {
                 _offlineMessage.emit(context.getString(R.string.offline_available))
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                // Revert the optimistic pin so the button doesn't claim an offline copy exists.
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkId
-                }
-                offlineStore.delete(linkId)
+            } else {
+                // The pin was taken back with the failed download, so the button follows it.
                 _isOffline.value = false
                 _offlineMessage.emit(context.getString(R.string.offline_failed))
             }
@@ -2418,45 +2399,30 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /** Saves the item to the device gallery. A cloud photo in an album lands in
-     *  `DCIM/<AlbumName>/`, otherwise `DCIM/Camera`. */
+     *  `DCIM/<AlbumName>/`, otherwise `DCIM/Camera`. The save runs on [GalleryDownloads], so closing
+     *  the viewer right after the tap does not drop it; only the spinner and the error wait here. */
     fun downloadToDevice(item: GalleryItem) {
+        val batch = galleryDownloads.saveToDevice(listOf(item))
+        _isSavingToDevice.value = true
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _isSavingToDevice.value = true
-            // Album membership → DCIM/<AlbumName>/ routing. Usually a cache hit (20-min TTL).
-            val cloudLinkId = when (item) {
-                is GalleryItem.CloudOnly -> item.cloud.linkId
-                is GalleryItem.Synced -> item.cloud.linkId
-                else -> null
-            }
-            val folder = if (cloudLinkId != null) {
-                runCatching { cloudRepo.getAlbumMemberships(userId)[cloudLinkId] }
-                    .getOrNull()
-                    ?.let { eu.akoos.photos.util.ProtonPhotosStorage.sanitize(it) }
-                    .orEmpty()
-            } else ""
-            val transferId = transferCenter.start(
-                eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD, 1,
-            )
             try {
                 // A per-photo failure is COUNTED, not thrown: the use case catches it and returns a
-                // normal snapshot, so a catch alone never fired and a save that wrote nothing finished
-                // in silence. The count is the only thing that says whether the photo reached the
-                // device, which is why it is read here rather than only the exception.
-                val outcome = runCatching {
-                    downloadPhotos.downloadGalleryItems(userId, listOf(item), folderName = folder)
+                // normal snapshot, so the count is the only thing that says whether the photo reached
+                // the device.
+                val reason = when (val outcome = batch.await()) {
+                    is GalleryDownloads.Outcome.Finished ->
+                        if (outcome.progress.failed > 0) context.getString(R.string.viewer_unknown_error) else null
+                    is GalleryDownloads.Outcome.Failed ->
+                        outcome.reason?.takeIf { it.isNotBlank() }?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) }
+                            ?: context.getString(R.string.viewer_unknown_error)
+                    GalleryDownloads.Outcome.NotSignedIn, null -> null
                 }
-                val reason = outcome.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }
-                if (outcome.isFailure || (outcome.getOrNull()?.failed ?: 0) > 0) {
-                    _transientError.value = context.getString(
-                        R.string.viewer_save_to_device_failed,
-                        reason?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
-                    )
+                if (reason != null) {
+                    _transientError.value = context.getString(R.string.viewer_save_to_device_failed, reason)
                 }
             } finally {
-                transferCenter.finish(transferId)
+                _isSavingToDevice.value = false
             }
-            _isSavingToDevice.value = false
         }
     }
 

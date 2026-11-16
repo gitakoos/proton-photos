@@ -102,7 +102,8 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
-import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.presentation.common.GalleryDownloads
+import eu.akoos.photos.presentation.common.awaitUnlessStopped
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
@@ -274,7 +275,7 @@ class GalleryViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val observeUser: ObserveUser,
     private val deletePhotoUseCase: DeletePhotoUseCase,
-    private val downloadPhotos: DownloadPhotosUseCase,
+    private val galleryDownloads: GalleryDownloads,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
@@ -2303,67 +2304,32 @@ class GalleryViewModel @Inject constructor(
     fun downloadSelected() {
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) return
-        var job: kotlinx.coroutines.Job? = null
-        job = viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
-            // One thumbnail URI per selected photo so the Activity screen lists them individually.
-            val thumbUris = items.map { thumbUriFor(it) }
-            val transfer = eu.akoos.photos.presentation.common.GalleryDownloadTransfer(
-                transferCenter, context, items, thumbUris,
-            ) { job?.cancel() }
-            // Resolve per-photo album folder so cloud-album photos go to DCIM/<AlbumName>/
-            // instead of bunching in a generic Proton Photos folder. AlbumService caches the
-            // membership map for 20 min so repeated downloads don't re-fetch.
-            val memberships: Map<String, String> = runCatching { cloudRepo.getAlbumMemberships(userId) }
-                .getOrElse {
-                    android.util.Log.w("GalleryVM", "getAlbumMemberships failed: ${it.message}")
-                    emptyMap()
+        // The batch runs on [GalleryDownloads], the same one every screen uses, so this ViewModel
+        // only mirrors its progress and reports how it ended.
+        val batch = galleryDownloads.saveToDevice(items)
+        _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
+        viewModelScope.launch {
+            val progress = launch {
+                batch.progress.filterNotNull().collect { p ->
+                    _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(p.done, p.total)) }
                 }
-                .mapValues { (_, name) -> eu.akoos.photos.util.ProtonPhotosStorage.sanitize(name) }
-            val savedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
-            val result = try {
-                downloadPhotos.downloadGalleryItems(
-                    userId, items,
-                    folderName = "", // empty = save non-album photos directly into DCIM/Camera
-                    folderByLinkId = memberships,
-                    onSaved = { savedUris.add(it) },
-                    cancels = transfer.cancels,
-                    onItemState = transfer::onItemState,
-                ) { progress ->
-                    _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(progress.done, progress.total)) }
-                    transfer.onProgress(progress)
+            }
+            val outcome = batch.await()
+            progress.cancel()
+            val next = when (outcome) {
+                // Every photo cancelled one by one: nothing was downloaded, so no "0 downloaded" message.
+                is GalleryDownloads.Outcome.Finished -> outcome.progress.let { r ->
+                    if (r.done == 0 && r.cancelled > 0) MultiDownloadState.Idle
+                    else MultiDownloadState.Done(r.done - r.failed, r.failed)
                 }
-            } finally {
-                transfer.finish()
+                is GalleryDownloads.Outcome.Failed ->
+                    MultiDownloadState.Done(0, items.count { it is GalleryItem.CloudOnly })
+                // Stopped from the Activity screen or by a sign-out: clear the in-progress indicator
+                // so it does not stay spinning.
+                GalleryDownloads.Outcome.NotSignedIn, null -> MultiDownloadState.Idle
             }
-            transferCenter.log(
-                TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),
-            )
-            // Every photo cancelled one by one: nothing was downloaded, so no "0 downloaded" message.
-            val allCancelled = result.done == 0 && result.cancelled > 0
-            _uiState.update { it.copy(
-                multiDownloadState = if (allCancelled) MultiDownloadState.Idle
-                    else MultiDownloadState.Done(result.done - result.failed, result.failed),
-                selectedItems = emptySet(),
-            ) }
+            _uiState.update { it.copy(multiDownloadState = next, selectedItems = emptySet()) }
         }
-        // Stopping the batch from the Activity screen cancels this job; clear the gallery's
-        // in-progress download indicator so it does not stay spinning.
-        job?.invokeOnCompletion { cause ->
-            if (cause is kotlinx.coroutines.CancellationException) {
-                _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Idle, selectedItems = emptySet()) }
-            }
-        }
-    }
-
-    /** Thumbnail URI for one gallery item: the on-device file for local/synced photos, the cached
-     *  cloud thumbnail (which may not exist yet) for cloud-only ones. */
-    private fun thumbUriFor(item: GalleryItem): String = when (item) {
-        is GalleryItem.LocalOnly -> item.local.uri
-        is GalleryItem.Synced -> item.local.uri
-        is GalleryItem.CloudOnly ->
-            "file://" + java.io.File(context.cacheDir, "thumbnails/thumb_${item.cloud.linkId}.jpg").absolutePath
     }
 
     fun resetMultiDownloadState() {
@@ -2413,58 +2379,14 @@ class GalleryViewModel @Inject constructor(
             return
         }
 
-        // Pin only the ones not already offline.
+        // Pin only the ones not already offline. The pins download on [GalleryDownloads], so a
+        // batch that is still running when the app moves on is neither dropped nor left half-pinned.
         val toPin = cloudItems.filter { it.cloud.linkId !in pinned }
-        val linkIds = toPin.map { it.cloud.linkId }
+        val pinning = galleryDownloads.pinOffline(toPin.map { it.cloud })
+        _uiState.update { it.copy(selectedItems = emptySet()) }
         viewModelScope.launch {
-            // Optimistic pin: add every linkId in one edit so the badges light up before any byte is
-            // fetched; failures below remove the ones that didn't land.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
-            }
-            _uiState.update { it.copy(selectedItems = emptySet()) }
-            val userId = accountManager.getPrimaryUserId().first()
-            var succeeded = 0
-            val failedLinkIds = mutableListOf<String>()
-            val savedPaths = mutableListOf<String>()
-            val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, toPin.size)
-            try {
-                for (item in toPin) {
-                    val linkId = item.cloud.linkId
-                    try {
-                        val uid = userId ?: error("Not signed in")
-                        val file = cloudRepo.downloadFullResPhoto(uid, item.cloud)
-                        val stored = offlineStore.store(linkId, file.storedFile)
-                        savedPaths += "file://${stored.absolutePath}"
-                        succeeded++
-                    } catch (e: Exception) {
-                        if (e is kotlinx.coroutines.CancellationException) throw e
-                        android.util.Log.w("GalleryVM", "offline pin failed: ${e.message}")
-                        failedLinkIds += linkId
-                    }
-                    transferCenter.progress(transferId, succeeded + failedLinkIds.size)
-                }
-            } finally {
-                transferCenter.finish(transferId)
-            }
-            // Revert the optimistic pin for anything that didn't download, so a failed item never
-            // looks pinned with no blob behind it.
-            if (failedLinkIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
-                }
-                failedLinkIds.forEach { offlineStore.delete(it) }
-            }
-            // Drop any blob whose pin was removed (un-pinned, or a sign-out) while its download was
-            // in flight, so a blob never outlives its pin.
-            val finalPins = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-            (linkIds - failedLinkIds.toSet()).forEach { id ->
-                if (id !in finalPins) offlineStore.delete(id)
-            }
-            transferCenter.log(TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths)
-            _offlineBatchResult.emit(succeeded)
+            val pinnedCount = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineBatchResult.emit(pinnedCount)
         }
     }
 

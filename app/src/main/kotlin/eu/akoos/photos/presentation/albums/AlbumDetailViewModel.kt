@@ -77,6 +77,7 @@ import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.data.repository.drive.AlbumSharingService
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
+import eu.akoos.photos.presentation.common.awaitUnlessStopped
 import eu.akoos.photos.presentation.common.buildDeleteUndoAction
 import eu.akoos.photos.presentation.common.buildHideUndoAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
@@ -307,7 +308,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val getGalleryItems: eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val offlineStore: eu.akoos.photos.data.offline.OfflineStorageManager,
-    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    private val galleryDownloads: eu.akoos.photos.presentation.common.GalleryDownloads,
     private val undoController: eu.akoos.photos.presentation.common.UndoController,
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
@@ -1065,55 +1066,15 @@ class AlbumDetailViewModel @Inject constructor(
             return
         }
 
-        // Pin only the ones not already offline.
+        // Pin only the ones not already offline. The pins download on [GalleryDownloads], so
+        // leaving the album while they run neither drops them nor leaves them half-pinned.
         val toPin = selected.filter { it.linkId !in pinned }
-        val linkIds = toPin.map { it.linkId }
+        val pinning = galleryDownloads.pinOffline(toPin)
+        _uiState.update { it.copy(selectedPhotos = emptySet()) }
+        _offlineStarted.tryEmit(Unit)
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
-            }
-            _uiState.update { it.copy(selectedPhotos = emptySet()) }
-            _offlineStarted.emit(Unit)
-            val userId = primaryUserId ?: accountManager.getPrimaryUserId().first()
-            var succeeded = 0
-            val failedLinkIds = mutableListOf<String>()
-            val savedPaths = mutableListOf<String>()
-            val transferId = transferCenter.start(
-                eu.akoos.photos.data.transfer.TransferCenter.Kind.OFFLINE, toPin.size,
-            )
-            try {
-                for (photo in toPin) {
-                    try {
-                        val uid = userId ?: error("Not signed in")
-                        val file = driveRepo.downloadFullResPhoto(uid, photo)
-                        val stored = offlineStore.store(photo.linkId, file.storedFile)
-                        savedPaths += "file://${stored.absolutePath}"
-                        succeeded++
-                    } catch (e: Exception) {
-                        if (e is kotlinx.coroutines.CancellationException) throw e
-                        Log.w("AlbumDetailVM", "offline pin failed: ${e.message}")
-                        failedLinkIds += photo.linkId
-                    }
-                    // Advance once per attempt so the Activity screen's row fills to the total
-                    // either way.
-                    transferCenter.progress(transferId, succeeded + failedLinkIds.size)
-                }
-            } finally {
-                transferCenter.finish(transferId)
-            }
-            // Revert the optimistic pin for anything that didn't download.
-            if (failedLinkIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
-                }
-                failedLinkIds.forEach { offlineStore.delete(it) }
-            }
-            transferCenter.log(
-                eu.akoos.photos.data.transfer.TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths,
-            )
-            _offlineResult.emit(succeeded)
+            val pinnedCount = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineResult.emit(pinnedCount)
         }
     }
 
@@ -2492,28 +2453,20 @@ class AlbumDetailViewModel @Inject constructor(
         awaitClose { liveData.removeObserver(observer) }
     }.flowOn(Dispatchers.Main)
 
-    /** Hand the download off to [AlbumDownloadWorker] and set [AlbumDownloadState.Enqueued] once for the snackbar. */
+    /** Hand the download off to [AlbumDownloadWorker] and set [AlbumDownloadState.Enqueued] once for the snackbar.
+     *  The hand-off runs on [GalleryDownloads], so leaving the album right after the tap still queues it. */
     private fun enqueueAlbumDownload(
         folderName: String,
         photoLinkIds: List<String>,
         clearSelectionOnEnqueue: Boolean,
     ) {
+        val albumLinkId = _uiState.value.albumLinkId
+        // Record the requested count before enqueuing so the progress observer reads it the
+        // instant WorkManager reports the work enqueued, never flashing the whole-album size.
+        _uiState.update { it.copy(downloadRequestedTotal = photoLinkIds.size) }
+        val enqueued = galleryDownloads.enqueueAlbumDownload(albumLinkId, folderName, photoLinkIds)
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val albumLinkId = _uiState.value.albumLinkId
-            // Record the requested count before enqueuing so the progress observer reads it the
-            // instant WorkManager reports the work enqueued, never flashing the whole-album size.
-            _uiState.update { it.copy(downloadRequestedTotal = photoLinkIds.size) }
-            // enqueue() spills the id list to a cache file, so run it off the main thread.
-            withContext(Dispatchers.IO) {
-                AlbumDownloadWorker.enqueue(
-                    context = context,
-                    albumLinkId = albumLinkId,
-                    albumName = folderName,
-                    photoLinkIds = photoLinkIds,
-                    userIdString = userId.id,
-                )
-            }
+            if (enqueued.awaitUnlessStopped() != true) return@launch
             _uiState.update {
                 it.copy(
                     downloadState = AlbumDownloadState.Enqueued,
