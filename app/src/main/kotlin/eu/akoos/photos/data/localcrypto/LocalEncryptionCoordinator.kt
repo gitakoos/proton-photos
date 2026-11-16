@@ -92,6 +92,8 @@ class LocalEncryptionCoordinator @Inject constructor(
 
     /** Called once from the main process's start, before anything reads the vault. */
     fun start() {
+        // Before anything here or elsewhere encrypts: whether this install held data from an earlier version.
+        LocalCrypto.recordLegacyData(context)
         // Leftover scratch plaintext of an earlier process goes before any reader can make new scratch copies.
         runCatching { VaultFiles.clearScratch(context) }
         CacheFiles.init(context)

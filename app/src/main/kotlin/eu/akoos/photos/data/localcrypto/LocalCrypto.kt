@@ -45,6 +45,7 @@ object LocalCrypto {
     private const val ROOT = "local_keys"
     private const val MIGRATED_MARKER = "migrated"
     private const val NOTICE_MARKER = "notice_due"
+    private const val LEGACY_MARKER = "legacy_data"
 
     @Volatile private var keyring: LocalKeyring? = null
     @Volatile private var supported: Boolean? = null
@@ -83,15 +84,45 @@ object LocalCrypto {
     /** Whether every vault file was found encrypted once (the one-time notice follows this). */
     fun isMigrated(context: Context): Boolean = File(root(context), MIGRATED_MARKER).exists()
 
+    /** Marks every vault file found encrypted. The one-time notice is due only on an install that held data from
+     *  a version without local encryption ([hadLegacyData]); a fresh install starts encrypted and is not told. */
     fun markMigrated(context: Context) {
         val marker = File(root(context), MIGRATED_MARKER)
         if (marker.exists()) return
         root(context).mkdirs()
         runCatching {
             writeWhole(marker, System.currentTimeMillis().toString().toByteArray())
-            writeWhole(File(root(context), NOTICE_MARKER), byteArrayOf(1))
+            if (hadLegacyData(context)) writeWhole(File(root(context), NOTICE_MARKER), byteArrayOf(1))
         }
     }
+
+    /**
+     * Records, once, at the first start of a version with local encryption, whether the install already held data
+     * from an earlier version: a plaintext database, a database from before this process started, a settings file
+     * not yet encrypted, or files in the vault. Later starts keep the first answer.
+     */
+    fun recordLegacyData(context: Context) {
+        val marker = File(root(context), LEGACY_MARKER)
+        if (marker.exists()) return
+        val app = context.applicationContext ?: context
+        val processStartedAt = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime() +
+            android.os.Process.getStartElapsedRealtime()
+        val found = runCatching {
+            legacyDataIn(
+                filesDir = app.filesDir,
+                databasesDir = app.getDatabasePath(DatabaseOpenGate.PLAIN_NAME).parentFile ?: File(app.dataDir, "databases"),
+                vaultDir = VaultFiles.vaultDir(app),
+                processStartedAt = processStartedAt,
+            )
+        }.getOrDefault(false)
+        runCatching {
+            root(context).mkdirs()
+            writeWhole(marker, byteArrayOf(if (found) 1 else 0))
+        }
+    }
+
+    fun hadLegacyData(context: Context): Boolean =
+        runCatching { File(root(context), LEGACY_MARKER).readBytes().firstOrNull() == 1.toByte() }.getOrDefault(false)
 
     fun isNoticeDue(context: Context): Boolean = File(root(context), NOTICE_MARKER).exists()
 
@@ -135,4 +166,19 @@ internal class AndroidDatabaseKeys(private val context: Context) : DatabaseKeyAc
         DatabaseKeyStore(target, AndroidKeystoreWrapper()).store(key)
         writeWhole(File(target, DatabaseOpenGate.RECOVERED_OWNER), (ownerHash ?: "").toByteArray())
     }
+}
+
+/**
+ * Whether an install holds data from a version without local encryption: the plaintext database in [databasesDir],
+ * an encrypted one written before [processStartedAt] (a version that encrypted only the database), a settings file
+ * under [filesDir] that is not encrypted yet, or any file in [vaultDir].
+ */
+internal fun legacyDataIn(filesDir: File, databasesDir: File, vaultDir: File, processStartedAt: Long): Boolean {
+    val plain = File(databasesDir, DatabaseOpenGate.PLAIN_NAME)
+    if (plain.isFile && plain.length() > 0L) return true
+    val encrypted = File(databasesDir, DatabaseOpenGate.ENCRYPTED_NAME)
+    if (encrypted.isFile && encrypted.length() > 0L && encrypted.lastModified() < processStartedAt) return true
+    val settings = File(filesDir, "datastore/settings.preferences_pb")
+    if (settings.isFile && settings.length() > 0L && LocalCryptoFormat.formOf(settings) == LocalFileForm.PLAIN) return true
+    return vaultDir.listFiles()?.any { it.isFile && !it.name.startsWith(".") } == true
 }
