@@ -66,6 +66,13 @@ object LocalCrypto {
         }
     }
 
+    /** The keyring when it was made already, for a caller without a context. */
+    fun loadedKeyring(): LocalKeyring? = keyring
+
+    /** Whether the platform has an Android Keystore, so files are encrypted at all. */
+    fun platformHasKeystore(): Boolean =
+        supported ?: (Security.getProvider("AndroidKeyStore") != null).also { supported = it }
+
     /** Puts [keyring] in place of the Keystore one, for tests on the JVM, where there is no Keystore. */
     @androidx.annotation.VisibleForTesting
     internal fun useKeyringForTest(keyring: LocalKeyring?) {

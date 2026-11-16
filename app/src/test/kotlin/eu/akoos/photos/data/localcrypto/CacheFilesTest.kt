@@ -131,7 +131,7 @@ class CacheFilesTest {
     }
 
     @Test
-    fun `with no key a cache file is written as it is`() {
+    fun `where the platform has no Keystore a cache file is written as it is`() {
         LocalCrypto.useKeyringForTest(null)
         val bytes = Random(5).nextBytes(2_000)
         val file = File(thumbs, "thumb_plain.jpg")
@@ -139,6 +139,26 @@ class CacheFilesTest {
         CacheFiles.write(file, bytes)
 
         assertArrayEquals(bytes, file.readBytes())
+    }
+
+    @Test
+    fun `a Keystore that does not answer leaves nothing cached rather than a plaintext file`() {
+        val broken = LocalKeyring(
+            File(context.noBackupFilesDir, "other_keys"),
+            FakeWrapper(null, failure = java.security.ProviderException("keystore busy")),
+        )
+        LocalCrypto.useKeyringForTest(broken)
+        val file = File(thumbs, "thumb_nokey.jpg")
+
+        val writeFailure = runCatching { CacheFiles.write(file, Random(7).nextBytes(2_000), context = context) }.exceptionOrNull()
+        val streamFailure = runCatching {
+            CacheFiles.encryptingStream(FileOutputStream(File(thumbs, "stream_nokey.bin")), context)
+        }.exceptionOrNull()
+
+        assertTrue(writeFailure is LocalKeyUnavailableException)
+        assertTrue(streamFailure is LocalKeyUnavailableException)
+        assertFalse(file.exists())
+        assertTrue("no temp or partial file is left", thumbs.listFiles()!!.none { it.length() > 0L })
     }
 
     @Test

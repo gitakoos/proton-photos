@@ -171,7 +171,9 @@ object PhotoWidgetUpdater {
             // With no bitmap this cycle the previous one is deleted rather than left on disk, since
             // the state written below stops pointing at it.
             val cachePath = if (bitmap != null) {
-                saveBitmapToCache(context, appWidgetId, bitmap)
+                // With no key to encrypt it the widget goes without its cached picture this cycle.
+                runCatching { saveBitmapToCache(context, appWidgetId, bitmap) }.getOrNull()
+                    ?: run { File(context.cacheDir, cacheFileName(appWidgetId)).delete(); null }
             } else {
                 File(context.cacheDir, cacheFileName(appWidgetId)).delete()
                 null

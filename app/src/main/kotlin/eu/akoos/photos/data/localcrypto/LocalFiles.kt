@@ -171,9 +171,11 @@ object LocalFiles {
 /**
  * Writing and reading the regenerable caches (thumbnails, full-size copies, motion clips). A cache file is
  * encrypted with the current local key and written through a temp in its own folder, so a reader never sees half
- * of one. With no key (no Keystore, or it does not answer) the bytes are written as they are, as before. A cache
- * file that does not open any more is deleted and reads as missing, so it is fetched or made again; reading one is
- * never an error for the user.
+ * of one. When the Keystore does not give a key, nothing is written ([LocalKeyUnavailableException]): the caller
+ * goes without the cache file and fetches it again later. Only where the platform has no Keystore at all (the JVM
+ * test runtime) are cache files written as they are, like every other file there. A cache file that does not open
+ * any more is deleted and reads as missing, so it is fetched or made again; reading one is never an error for the
+ * user.
  */
 object CacheFiles {
     @Volatile private var appContext: Context? = null
@@ -186,25 +188,34 @@ object CacheFiles {
     @PublishedApi
     internal fun contextOf(context: Context?): Context? = context?.applicationContext ?: context ?: appContext
 
-    /** The sealing new cache files get, or null to write plaintext. Never throws. */
+    /**
+     * The sealing new cache files get. Null only where the platform has no Keystore, so nothing is encrypted
+     * there; throws [LocalKeyUnavailableException] when there is a Keystore but no key can be had now.
+     */
     fun sealing(context: Context? = null): LocalCryptoFormat.Sealing? {
-        val ctx = contextOf(context) ?: return null
-        val keyring = LocalCrypto.keyringOrNull(ctx) ?: return null
-        return runCatching { keyring.current() }.getOrNull()
-            ?.let { LocalCryptoFormat.Sealing(it.keyId, it.key, LocalFileKind.CACHE) }
+        val keyring = contextOf(context)?.let { LocalCrypto.keyringOrNull(it) }
+            ?: LocalCrypto.loadedKeyring()
+            ?: if (LocalCrypto.platformHasKeystore()) throw LocalKeyUnavailableException(null) else return null
+        val current = try {
+            keyring.current()
+        } catch (e: Exception) {
+            throw LocalKeyUnavailableException(e)
+        }
+        return LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.CACHE)
     }
 
     /**
      * Writes [bytes] as [target], replacing it in one step through a temp in the same folder named with
-     * [tempPrefix] (a prefix the folder's own sweep already removes).
+     * [tempPrefix] (a prefix the folder's own sweep already removes). Throws [LocalKeyUnavailableException],
+     * writing nothing, when no key can be had.
      */
     fun write(target: File, bytes: ByteArray, tempPrefix: String = ".cache_", context: Context? = null) {
+        val sealing = sealing(context)
         val dir = target.absoluteFile.parentFile ?: throw IOException("no folder")
         dir.mkdirs()
         val temp = File.createTempFile(tempPrefix, ".tmp", dir)
         try {
             FileOutputStream(temp).use { out ->
-                val sealing = sealing(context)
                 if (sealing == null) out.write(bytes)
                 else LocalCryptoFormat.encryptingStream(out, sealing).use { it.write(bytes) }
             }
@@ -215,11 +226,17 @@ object CacheFiles {
     }
 
     /**
-     * A stream writing into [out] encrypted (or as it is, with no key). Closing it finishes the file and closes
-     * [out]. [PlainCountingStream.plainBytes] counts what was written to it.
+     * A stream writing into [out] encrypted. Closing it finishes the file and closes [out].
+     * [PlainCountingStream.plainBytes] counts what was written to it. Throws [LocalKeyUnavailableException] when
+     * no key can be had; [out] is closed then.
      */
     fun encryptingStream(out: OutputStream, context: Context? = null): PlainCountingStream {
-        val sealing = sealing(context)
+        val sealing = try {
+            sealing(context)
+        } catch (e: LocalKeyUnavailableException) {
+            runCatching { out.close() }
+            throw e
+        }
         val inner = if (sealing == null) out else LocalCryptoFormat.encryptingStream(out, sealing)
         return PlainCountingStream(inner)
     }
