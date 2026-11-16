@@ -40,6 +40,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import android.util.Log
@@ -141,9 +142,9 @@ class SyncWorker @AssistedInject constructor(
         try {
             // ONE reconcile + upload pass. Multi-stage trailing passes inside one worker run
             // cause 90-second "0 of 0 uploaded" notification loops when there's nothing to do.
-            // The OS content-URI trigger (rearmed in finally) fires multiple times during a
-            // camera burst — APPEND_OR_REPLACE coalesces them — so per-worker multi-pass adds
-            // complexity without buying anything the OS isn't already giving.
+            // The OS content-URI trigger fires multiple times during a camera burst, and each fire
+            // queues a run through runNow, whose APPEND_OR_REPLACE coalesces them, so per-worker
+            // multi-pass adds complexity without buying anything the OS isn't already giving.
             val pass = runSyncPass(userId, firstPass = true)
             val uploadFailed = pass.failed
 
@@ -173,9 +174,9 @@ class SyncWorker @AssistedInject constructor(
             runCatching {
                 NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
             }
-            // Content-URI trigger is OneTime; re-arm from finally so it keeps firing
-            // after each capture — but only while backup is effectively on, so an idle
-            // fire (auto-sync on, no folder selected) stops re-arming itself.
+            // Make sure a content trigger is armed while backup is effectively on. The trigger
+            // worker re-arms itself on every fire, so this only covers a trigger that is missing
+            // (or an older build's request that ran this backup) and never replaces a live one.
             runCatching {
                 if (syncEffectivelyEnabled(context)) {
                     val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
@@ -384,32 +385,67 @@ class SyncWorker @AssistedInject constructor(
 
         /**
          * OS-level MediaStore content-URI trigger via WorkManager. The system itself watches
-         * the URIs even when our process is dead and wakes SyncWorker within seconds of a
-         * MediaStore change. Re-armed by [doWork]'s finally block so each fire arms the
-         * NEXT one.
+         * the URIs even when our process is dead and wakes [SyncContentTriggerWorker] within
+         * seconds of a MediaStore change; that worker only queues a backup run ([runNow]) and
+         * arms the next trigger. The backup itself is never the trigger request, so arming the
+         * trigger again (on every activity start, settings change or finished run) can never
+         * cancel an upload in progress.
          */
-        fun scheduleContentObserver(context: Context, wifiOnly: Boolean = true) {
-            // CONNECTED for both modes; the metered-Wi-Fi-aware Wi-Fi-only gate lives in
-            // UploadPendingUseCase (see schedule()). wifiOnly stays in the signature for callers.
-            val networkType = NetworkType.CONNECTED
+        suspend fun scheduleContentObserver(context: Context, wifiOnly: Boolean = true) =
+            armContentTrigger(context, selfRearm = false)
+
+        /**
+         * Enqueues the content trigger under [NAME_CONTENT_OBSERVER] with the policy
+         * [contentTriggerPolicy] picks from what is armed now. [selfRearm] is the trigger worker
+         * arming its successor, the one caller allowed to replace a running request (itself).
+         */
+        internal suspend fun armContentTrigger(context: Context, selfRearm: Boolean) {
+            val workManager = WorkManager.getInstance(context)
+            val policy = if (selfRearm) {
+                ExistingWorkPolicy.REPLACE
+            } else {
+                // A state that cannot be read keeps whatever is armed: KEEP still enqueues when
+                // nothing is, and never stops a running request.
+                runCatching {
+                    val armed = workManager.getWorkInfosForUniqueWorkFlow(NAME_CONTENT_OBSERVER).first()
+                        .map { ArmedTrigger(it.state, TAG_CONTENT_TRIGGER in it.tags) }
+                    contentTriggerPolicy(armed)
+                }.getOrDefault(ExistingWorkPolicy.KEEP)
+            }
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(networkType)
                 .addContentUriTrigger(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
                 .addContentUriTrigger(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
                 .build()
-            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+            val request = OneTimeWorkRequestBuilder<SyncContentTriggerWorker>()
                 .setConstraints(constraints)
                 .addTag(TAG_CONTENT_OBSERVER)
+                .addTag(TAG_CONTENT_TRIGGER)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                NAME_CONTENT_OBSERVER,
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
+            workManager.enqueueUniqueWork(NAME_CONTENT_OBSERVER, policy, request)
+        }
+
+        /** One request under [NAME_CONTENT_OBSERVER]: its state, and whether it is a [SyncContentTriggerWorker]. */
+        internal data class ArmedTrigger(val state: WorkInfo.State, val isTriggerWorker: Boolean)
+
+        /**
+         * How to arm the content trigger over what is already under its name.
+         *  - A trigger worker that is waiting or running stays (KEEP); a running one arms its own successor.
+         *  - A request from an older build ran the whole backup as the trigger. A waiting one is
+         *    replaced. A running one is a backup in progress, so the new trigger is queued after it
+         *    (APPEND_OR_REPLACE) instead of stopping it.
+         *  - Nothing unfinished: a fresh trigger (REPLACE, which only drops finished entries).
+         */
+        internal fun contentTriggerPolicy(armed: List<ArmedTrigger>): ExistingWorkPolicy {
+            val open = armed.filterNot { it.state.isFinished }
+            if (open.any { it.isTriggerWorker }) return ExistingWorkPolicy.KEEP
+            if (open.any { it.state == WorkInfo.State.RUNNING }) return ExistingWorkPolicy.APPEND_OR_REPLACE
+            return ExistingWorkPolicy.REPLACE
         }
 
         const val NAME_CONTENT_OBSERVER = "sync_worker_content_observer"
         const val TAG_CONTENT_OBSERVER = "sync_content_observer"
+        /** Marks a content trigger that is a [SyncContentTriggerWorker], not an older build's full backup run. */
+        const val TAG_CONTENT_TRIGGER = "sync_content_trigger"
 
         /**
          * Immediately enqueue a OneTime sync run so the user doesn't have to wait for the next
