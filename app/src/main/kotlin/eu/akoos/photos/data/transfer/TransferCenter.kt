@@ -27,7 +27,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import eu.akoos.photos.data.localcrypto.encryptedPreferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,7 +44,7 @@ import javax.inject.Singleton
 
 /** Own DataStore so the transfer log lives apart from the app settings and can be cleared alone. */
 private val Context.transferHistoryDataStore: DataStore<Preferences> by
-    preferencesDataStore(name = "transfer_history")
+    encryptedPreferencesDataStore(name = "transfer_history")
 
 /**
  * Single point of truth for the background transfers the Activity screen shows.

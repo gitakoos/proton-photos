@@ -1,0 +1,312 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.data.localcrypto
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.okio.OkioSerializer
+import androidx.datastore.core.okio.OkioStorage
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferencesSerializer
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.preferencesDataStoreFile
+import eu.akoos.photos.data.db.encryption.writeWhole
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import okio.Buffer
+import okio.BufferedSink
+import okio.BufferedSource
+import okio.FileSystem
+import okio.Path.Companion.toPath
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.properties.ReadOnlyProperty
+import kotlin.reflect.KProperty
+
+/**
+ * Copies of encrypted settings files whose key could not be opened, kept until a recovery copy opens that key.
+ * A copy is written whole and synced before the settings file may be answered as empty, so the original bytes
+ * always survive the empty file DataStore then writes over them.
+ */
+class LockedStoreFiles(private val dir: File, private val clock: () -> Long = System::currentTimeMillis) {
+
+    fun setAside(storeName: String, bytes: ByteArray) {
+        dir.mkdirs()
+        writeWhole(File(dir, "$storeName-${clock()}$SUFFIX"), bytes)
+    }
+
+    fun pending(storeName: String): List<File> =
+        dir.listFiles()?.filter { it.name.startsWith("$storeName-") && it.name.endsWith(SUFFIX) }
+            ?.sortedBy { it.name } ?: emptyList()
+
+    fun all(): List<File> = dir.listFiles()?.filter { it.name.endsWith(SUFFIX) } ?: emptyList()
+
+    private companion object {
+        const val SUFFIX = ".pfle"
+    }
+}
+
+/**
+ * The preferences serializer with every file encrypted on the way out and decrypted on the way in. A plaintext
+ * file (written before this build, or while the Keystore did not answer) still reads, so nothing depends on
+ * the migration having run.
+ *
+ * Never answers empty for a file it could not read unless the file's bytes were first kept in [locked]: a
+ * locked or damaged file is copied there and then answered as empty; a Keystore that does not answer is waited
+ * for and then reported as an error, unless it has stayed silent for launches on end.
+ */
+class EncryptedPreferencesSerializer(
+    private val storeName: String,
+    private val keyring: LocalKeyring?,
+    private val locked: LockedStoreFiles,
+    private val log: (String) -> Unit,
+    private val pause: suspend (Long) -> Unit = { delay(it) },
+) : OkioSerializer<Preferences> {
+
+    override val defaultValue: Preferences get() = PreferencesSerializer.defaultValue
+
+    override suspend fun readFrom(source: BufferedSource): Preferences {
+        val bytes = source.readByteArray()
+        if (keyring == null || !LocalCryptoFormat.looksEncrypted(bytes)) return parse(bytes)
+        var attempt = 0
+        while (true) {
+            try {
+                return parse(LocalCryptoFormat.decryptBytes(bytes, keyring))
+            } catch (e: LocalKeyUnavailableException) {
+                if (++attempt < READ_ATTEMPTS) {
+                    pause(RETRY_MS)
+                    continue
+                }
+                if (!keyring.unavailableTooLong()) throw IOException("$storeName: key not available", e)
+                return setAsideAndStartEmpty(bytes, "key unavailable")
+            } catch (_: LocalKeyLockedException) {
+                return setAsideAndStartEmpty(bytes, "key locked")
+            } catch (_: LocalFileDamagedException) {
+                return setAsideAndStartEmpty(bytes, "damaged")
+            }
+        }
+    }
+
+    override suspend fun writeTo(t: Preferences, sink: BufferedSink) {
+        val plain = Buffer().also { PreferencesSerializer.writeTo(t, it) }.readByteArray()
+        val sealed = if (keyring == null) null else encryptVerified(keyring, plain)
+        sink.write(sealed ?: plain)
+    }
+
+    private suspend fun encryptVerified(keyring: LocalKeyring, plain: ByteArray): ByteArray? {
+        var attempt = 0
+        while (true) {
+            try {
+                return sealStoreBytes(keyring, storeName, plain)
+            } catch (e: LocalKeyUnavailableException) {
+                if (++attempt < WRITE_ATTEMPTS) {
+                    pause(RETRY_MS)
+                    continue
+                }
+                log("$storeName: key not available, written as before this once")
+                return null
+            } catch (e: Exception) {
+                log("$storeName: not encrypted this once (${e.javaClass.simpleName})")
+                return null
+            }
+        }
+    }
+
+    private suspend fun setAsideAndStartEmpty(bytes: ByteArray, reason: String): Preferences {
+        try {
+            locked.setAside(storeName, bytes)
+        } catch (e: Exception) {
+            throw IOException("$storeName: could not keep the unreadable file", e)
+        }
+        log("$storeName: kept aside ($reason), starting empty")
+        return emptyPreferences()
+    }
+
+    private suspend fun parse(bytes: ByteArray): Preferences = PreferencesSerializer.readFrom(Buffer().write(bytes))
+
+    companion object {
+        private const val READ_ATTEMPTS = 6
+        private const val WRITE_ATTEMPTS = 3
+        private const val RETRY_MS = 500L
+    }
+}
+
+/** Encrypts [plain] as a settings file with the current key and proves it decrypts back to the same bytes. */
+internal fun sealStoreBytes(keyring: LocalKeyring, storeName: String, plain: ByteArray): ByteArray {
+    val current = keyring.current()
+    val sealed = LocalCryptoFormat.encryptBytes(
+        plain,
+        LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.STORE, LocalFileMeta(storeName = storeName)),
+    )
+    check(LocalCryptoFormat.decryptBytes(sealed, keyring).contentEquals(plain)) { "settings copy did not verify" }
+    return sealed
+}
+
+/** The one-time move of a plaintext settings file into its encrypted form, done before DataStore first reads it. */
+object LocalStoreMigration {
+
+    /**
+     * Encrypts [file] in place when it is plaintext: the bytes must parse as preferences, the encrypted copy is
+     * written beside it and synced, read back and decrypted to the same bytes, and only then renamed over it in
+     * one step. Any failure leaves the plaintext file as it was. Answers whether the file is encrypted now.
+     */
+    fun migrate(file: File, storeName: String, keyring: LocalKeyring?, log: (String) -> Unit): Boolean {
+        val temp = File(file.parentFile, file.name + TEMP_SUFFIX)
+        if (temp.exists()) temp.delete()
+        if (keyring == null || !file.isFile || file.length() == 0L) return false
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return false
+        if (LocalCryptoFormat.looksEncrypted(bytes)) return true
+        val parsed = runCatching { runBlocking { PreferencesSerializer.readFrom(Buffer().write(bytes)) } }.isSuccess
+        if (!parsed) {
+            log("$storeName: not a readable settings file, left as it is")
+            return false
+        }
+        return try {
+            val sealed = sealStoreBytes(keyring, storeName, bytes)
+            FileOutputStream(temp).use { out ->
+                out.write(sealed)
+                out.fd.sync()
+            }
+            check(LocalCryptoFormat.decryptBytes(temp.readBytes(), keyring).contentEquals(bytes)) { "copy differs" }
+            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            syncDirectory(file.parentFile)
+            log("$storeName: encrypted (${bytes.size} bytes)")
+            true
+        } catch (e: Exception) {
+            temp.delete()
+            log("$storeName: stays as before this start (${e.javaClass.simpleName})")
+            false
+        }
+    }
+
+    private const val TEMP_SUFFIX = ".enc-tmp"
+}
+
+internal fun syncDirectory(dir: File?) {
+    if (dir == null) return
+    runCatching { FileChannel.open(dir.toPath(), StandardOpenOption.READ).use { it.force(true) } }
+}
+
+/**
+ * Settings files opened through [encryptedPreferencesDataStore], by name, so a recovered key can merge a locked copy
+ * back into the live file.
+ */
+object LocalStores {
+    private val stores = ConcurrentHashMap<String, DataStore<Preferences>>()
+
+    internal fun register(name: String, store: DataStore<Preferences>) {
+        stores[name] = store
+    }
+
+    fun named(name: String): DataStore<Preferences>? = stores[name]
+
+    /**
+     * Merges every locked copy of [storeName] whose key opens now into [store], then deletes that copy. Values the
+     * copy holds win over the live ones, except sets, which are joined, so a photo hidden in the meantime stays
+     * listed. Answers how many copies were merged.
+     */
+    suspend fun restoreLocked(
+        storeName: String,
+        store: DataStore<Preferences>,
+        keyring: LocalKeyring,
+        locked: LockedStoreFiles,
+        log: (String) -> Unit,
+    ): Int {
+        var merged = 0
+        for (file in locked.pending(storeName)) {
+            val recovered = try {
+                PreferencesSerializer.readFrom(Buffer().write(LocalCryptoFormat.decryptBytes(file.readBytes(), keyring)))
+            } catch (_: LocalKeyLockedException) {
+                continue
+            } catch (_: LocalKeyUnavailableException) {
+                continue
+            } catch (e: Exception) {
+                log("$storeName: locked copy unreadable (${e.javaClass.simpleName}), kept")
+                continue
+            }
+            store.updateData { current -> mergeRecovered(recovered, current) }
+            file.delete()
+            merged++
+        }
+        if (merged > 0) log("$storeName: $merged locked copies merged back")
+        return merged
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    internal fun mergeRecovered(recovered: Preferences, current: Preferences): Preferences {
+        val out: MutablePreferences = current.toMutablePreferences()
+        for ((key, value) in recovered.asMap()) {
+            val live = current.asMap()[key]
+            val mergedValue: Any = if (value is Set<*> && live is Set<*>) value + live else value
+            out[key as Preferences.Key<Any>] = mergedValue
+        }
+        return out.toPreferences()
+    }
+}
+
+/**
+ * A preferences DataStore exactly like `preferencesDataStore(name)` (same file, same scope, no corruption handler,
+ * no migrations), with the file encrypted by the local keys.
+ */
+fun encryptedPreferencesDataStore(name: String): ReadOnlyProperty<Context, DataStore<Preferences>> =
+    EncryptedStoreDelegate(name)
+
+private class EncryptedStoreDelegate(private val name: String) : ReadOnlyProperty<Context, DataStore<Preferences>> {
+    @Volatile private var instance: DataStore<Preferences>? = null
+
+    override fun getValue(thisRef: Context, property: KProperty<*>): DataStore<Preferences> =
+        instance ?: synchronized(this) {
+            instance ?: create(thisRef.applicationContext).also {
+                instance = it
+                LocalStores.register(name, it)
+            }
+        }
+
+    private fun create(context: Context): DataStore<Preferences> {
+        val keyring = LocalCrypto.keyringOrNull(context)
+        val serializer = EncryptedPreferencesSerializer(name, keyring, LocalCrypto.lockedStores(context), LocalCrypto::log)
+        return PreferenceDataStoreFactory.create(
+            storage = OkioStorage(
+                fileSystem = FileSystem.SYSTEM,
+                serializer = serializer,
+                producePath = {
+                    val file = context.preferencesDataStoreFile(name)
+                    LocalStoreMigration.migrate(file, name, keyring, LocalCrypto::log)
+                    file.absolutePath.toPath()
+                },
+            ),
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+        )
+    }
+}

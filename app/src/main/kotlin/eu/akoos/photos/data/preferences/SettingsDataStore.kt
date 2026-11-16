@@ -31,13 +31,13 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import eu.akoos.photos.data.localcrypto.encryptedPreferencesDataStore
 import eu.akoos.photos.util.MetadataStripConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+val Context.settingsDataStore: DataStore<Preferences> by encryptedPreferencesDataStore(name = "settings")
 
 object SettingsKeys {
     val AUTO_SYNC = booleanPreferencesKey("auto_sync")
