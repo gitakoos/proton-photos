@@ -32,7 +32,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
-import java.security.KeyStoreException
+import java.security.ProviderException
 
 /** Which file Room opens, and every way the move to the encrypted file can stop without losing the data. */
 class DatabaseOpenGateTest {
@@ -252,7 +252,7 @@ class DatabaseOpenGateTest {
     @Test
     fun `a keystore that does not answer during the copy keeps the plaintext database`() {
         writePlain()
-        wrapper.failure = KeyStoreException("busy")
+        wrapper.failure = ProviderException("busy")
 
         assertTrue(launch() is OpenTarget.Plain)
         assertTrue(plain.exists())
@@ -316,7 +316,7 @@ class DatabaseOpenGateTest {
     @Test
     fun `a keystore that does not answer moves nothing and fails the open`() {
         installEncrypted()
-        wrapper.failure = KeyStoreException("busy")
+        wrapper.failure = ProviderException("busy")
 
         try {
             gate().prepare()
@@ -330,7 +330,7 @@ class DatabaseOpenGateTest {
     @Test
     fun `a keystore that stays silent over three launches and an hour is treated as lost`() {
         installEncrypted()
-        wrapper.failure = KeyStoreException("busy")
+        wrapper.failure = ProviderException("busy")
         repeat(2) {
             assertTrue(runCatching { gate().prepare() }.exceptionOrNull() is DatabaseKeyUnavailableException)
             assertTrue(encrypted.exists())
@@ -351,12 +351,12 @@ class DatabaseOpenGateTest {
     @Test
     fun `an answer from the keystore resets the silent count`() {
         installEncrypted()
-        wrapper.failure = KeyStoreException("busy")
+        wrapper.failure = ProviderException("busy")
         runCatching { gate().prepare() }
         runCatching { gate().prepare() }
         wrapper.failure = null
         assertTrue(launch() is OpenTarget.Encrypted)
-        wrapper.failure = KeyStoreException("busy")
+        wrapper.failure = ProviderException("busy")
         now += 2 * 60 * 60 * 1000L
 
         assertTrue(runCatching { gate().prepare() }.exceptionOrNull() is DatabaseKeyUnavailableException)

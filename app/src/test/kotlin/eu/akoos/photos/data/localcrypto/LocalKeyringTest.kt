@@ -143,4 +143,18 @@ class LocalKeyringTest {
         assertNotEquals(owner, LocalKeyOwner.account("user-124"))
         assertFalse(LocalKeyOwner.isAccount(LocalKeyOwner.GUEST))
     }
+
+    @Test
+    fun `a Keystore key that throws for good locks its keys and a new key is made for new files`() {
+        val broken = FakeWrapper(KeyGenerator.getInstance("AES").apply { init(256) }.generateKey())
+        val ring = LocalKeyring(File(tmp.root, "permanent"), broken)
+        val old = ring.current()
+        broken.failure = java.security.UnrecoverableKeyException("broken entry")
+
+        val reopened = LocalKeyring(File(tmp.root, "permanent"), broken)
+        assertEquals(listOf(old.keyId), reopened.lockedKeyIds())
+        val fresh = reopened.current()
+        assertNotEquals(old.keyId, fresh.keyId)
+        assertTrue(File(tmp.root, "permanent/keyring/${old.keyId}").isDirectory)
+    }
 }

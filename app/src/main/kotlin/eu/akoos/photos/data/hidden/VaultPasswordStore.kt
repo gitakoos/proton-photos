@@ -27,6 +27,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.db.encryption.KeystoreErrors
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.flow.Flow
@@ -119,10 +120,21 @@ class VaultPasswordStore @Inject constructor(
         localEncryption.get().onPasswordConfirmed(password)
     }
 
-    /** The Keystore key the password is sealed with, made when missing and [create] is set. */
+    /**
+     * The Keystore key the password is sealed with, made when missing and [create] is set. With [create] a key that
+     * is broken for good (it throws rather than answers) is replaced: what it sealed cannot be read either way, and
+     * a password is being stored under the new one. Nothing but this key's own entry is touched.
+     */
     private fun keystoreKey(create: Boolean): SecretKey {
         val store = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        val existing = try {
+            store.getKey(KEY_ALIAS, null) as? SecretKey
+        } catch (e: Exception) {
+            if (!create || !KeystoreErrors.isPermanent(e)) throw e
+            store.deleteEntry(KEY_ALIAS)
+            null
+        }
+        existing?.let { return it }
         check(create) { "no password key" }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(

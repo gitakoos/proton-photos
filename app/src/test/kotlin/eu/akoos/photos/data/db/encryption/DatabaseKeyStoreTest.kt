@@ -45,11 +45,14 @@ class DatabaseKeyStoreTest {
     /** A Keystore stand-in: holds one key, can lose it, or can fail to answer. */
     class FakeWrapper(var key: SecretKey?, var failure: Exception? = null) : KeyWrapper {
         var generate: () -> SecretKey = { KeyGenerator.getInstance("AES").apply { init(256) }.generateKey() }
+        val successors = mutableMapOf<Int, FakeWrapper>()
         override fun wrappingKey(create: Boolean): SecretKey? {
             failure?.let { throw it }
             if (key == null && create) key = generate()
             return key
         }
+
+        override fun successor(generation: Int): KeyWrapper = successors.getOrPut(generation) { FakeWrapper(null) }
     }
 
     @Test
@@ -124,9 +127,63 @@ class DatabaseKeyStoreTest {
         val wrapper = FakeWrapper(null)
         val store = DatabaseKeyStore(tmp.root, wrapper)
         store.create()
-        wrapper.failure = KeyStoreException("not ready")
+        wrapper.failure = java.security.ProviderException("Keystore busy")
 
         assertTrue(store.load() is DatabaseKeyState.Unavailable)
+    }
+
+    @Test
+    fun `a Keystore key that throws for good is lost, so recovery runs`() {
+        for (failure in listOf(
+            java.security.UnrecoverableKeyException("broken entry"),
+            java.security.InvalidKeyException("invalidated"),
+            KeyStoreException("entry unreadable"),
+            java.security.ProviderException("wrapped", java.security.UnrecoverableKeyException("broken entry")),
+        )) {
+            val dir = File(tmp.root, "k${failure.hashCode()}")
+            val wrapper = FakeWrapper(null)
+            val store = DatabaseKeyStore(dir, wrapper)
+            store.create()
+            wrapper.failure = failure
+            assertEquals(failure.toString(), DatabaseKeyState.Lost, store.load())
+            assertTrue(store.hasWrappedKey())
+        }
+    }
+
+    @Test
+    fun `a key stored after the Keystore key broke for good is sealed by a new one and reads back`() {
+        val wrapper = FakeWrapper(null)
+        DatabaseKeyStore(tmp.root, wrapper).create()
+        wrapper.failure = java.security.UnrecoverableKeyException("broken entry")
+        val raw = ByteArray(32) { 9 }
+
+        DatabaseKeyStore(tmp.root, wrapper).store(raw)
+
+        val again = DatabaseKeyStore(tmp.root, wrapper).load()
+        assertTrue(again is DatabaseKeyState.Ready)
+        assertArrayEquals(raw, (again as DatabaseKeyState.Ready).key)
+        assertEquals(setOf(1), wrapper.successors.keys)
+    }
+
+    @Test
+    fun `a Keystore that only did not answer never moves to a new key`() {
+        val wrapper = FakeWrapper(null)
+        val store = DatabaseKeyStore(tmp.root, wrapper)
+        store.create()
+        wrapper.failure = java.security.ProviderException("Keystore busy")
+
+        assertTrue(runCatching { store.store(ByteArray(32)) }.isFailure)
+        assertTrue(wrapper.successors.isEmpty())
+    }
+
+    @Test
+    fun `a Keystore key the cipher refuses is lost, not unavailable`() {
+        val wrapper = FakeWrapper(null)
+        val store = DatabaseKeyStore(tmp.root, wrapper)
+        store.create()
+        wrapper.key = javax.crypto.spec.SecretKeySpec(ByteArray(7), "AES")
+
+        assertEquals(DatabaseKeyState.Lost, store.load())
     }
 
     @Test

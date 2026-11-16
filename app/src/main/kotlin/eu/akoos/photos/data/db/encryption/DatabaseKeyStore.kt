@@ -29,7 +29,6 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import java.security.SecureRandom
-import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -54,6 +53,12 @@ sealed interface DatabaseKeyState {
 interface KeyWrapper {
     /** The sealing key, or null when it does not exist and [create] is false. */
     fun wrappingKey(create: Boolean): SecretKey?
+
+    /**
+     * Another Keystore key beside this one, numbered [generation] (1, 2, ...), for keys made after this one broke
+     * for good. This one is never deleted. Null when there is no such thing.
+     */
+    fun successor(generation: Int): KeyWrapper? = null
 }
 
 /** The sealing key held by the Android Keystore: bound to this app and device, never exported, no user prompt. */
@@ -73,6 +78,8 @@ class AndroidKeystoreWrapper(private val alias: String = KEY_ALIAS) : KeyWrapper
         )
         return generator.generateKey()
     }
+
+    override fun successor(generation: Int): KeyWrapper = AndroidKeystoreWrapper("$alias.g$generation")
 
     private companion object {
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
@@ -127,16 +134,25 @@ class DatabaseKeyStore(
 ) {
     private val primary get() = File(dir, PRIMARY)
     private val backup get() = File(dir, BACKUP)
+    private val generationFile get() = File(dir, GENERATION)
+
+    /** Which Keystore key seals this key: 0 for [wrapper], n for its n-th successor. */
+    private fun generation(): Int = runCatching { generationFile.readText().trim().toInt() }.getOrDefault(0)
+
+    private fun wrapperOf(generation: Int): KeyWrapper? = if (generation == 0) wrapper else wrapper.successor(generation)
 
     fun hasWrappedKey(): Boolean = primary.exists() || backup.exists()
 
     fun load(): DatabaseKeyState {
         val copies = listOf(primary, backup).filter { it.exists() }
         if (copies.isEmpty()) return DatabaseKeyState.Absent
+        val sealing = wrapperOf(generation()) ?: return DatabaseKeyState.Lost
+        // A Keystore key that throws for good is lost like a missing one, so a recovery copy can open the key; one
+        // that did not answer this time stays unavailable and is tried again. Nothing is deleted either way.
         val wrappingKey = try {
-            wrapper.wrappingKey(create = false) ?: return DatabaseKeyState.Lost
+            sealing.wrappingKey(create = false) ?: return DatabaseKeyState.Lost
         } catch (e: Exception) {
-            return DatabaseKeyState.Unavailable(e)
+            return if (KeystoreErrors.isPermanent(e)) DatabaseKeyState.Lost else DatabaseKeyState.Unavailable(e)
         }
         for (copy in copies) {
             val blob = runCatching { copy.readBytes() }.getOrNull() ?: continue
@@ -145,11 +161,10 @@ class DatabaseKeyStore(
                 if (key.size != KEY_BYTES) continue
                 repairOtherCopy(copy, blob)
                 return DatabaseKeyState.Ready(key)
-            } catch (_: AEADBadTagException) {
-                continue
             } catch (_: MalformedKeyFileException) {
                 continue
             } catch (e: Exception) {
+                if (KeystoreErrors.isPermanent(e)) continue
                 return DatabaseKeyState.Unavailable(e)
             }
         }
@@ -168,8 +183,7 @@ class DatabaseKeyStore(
      */
     fun store(key: ByteArray): ByteArray {
         require(key.size == KEY_BYTES) { "key size" }
-        val wrappingKey = wrapper.wrappingKey(create = true) ?: error("no wrapping key")
-        val blob = DatabaseKeyCodec.wrap(key, wrappingKey)
+        val blob = DatabaseKeyCodec.wrap(key, workingWrappingKey())
         dir.mkdirs()
         writeWhole(primary, blob)
         writeWhole(backup, blob)
@@ -194,6 +208,31 @@ class DatabaseKeyStore(
         }
     }
 
+    /**
+     * A Keystore key to seal with: the recorded one, or when that one is broken for good, the first successor that
+     * works, recorded before anything is sealed with it. A Keystore that only did not answer throws.
+     */
+    private fun workingWrappingKey(): SecretKey {
+        var generation = generation()
+        var lastFailure: Exception? = null
+        repeat(MAX_GENERATIONS) {
+            val candidate = wrapperOf(generation) ?: throw lastFailure ?: IllegalStateException("no wrapping key")
+            try {
+                val key = candidate.wrappingKey(create = true) ?: error("no wrapping key")
+                if (generation != generation()) {
+                    dir.mkdirs()
+                    writeWhole(generationFile, generation.toString().toByteArray())
+                }
+                return key
+            } catch (e: Exception) {
+                if (!KeystoreErrors.isPermanent(e)) throw e
+                lastFailure = e
+                generation++
+            }
+        }
+        throw lastFailure ?: IllegalStateException("no wrapping key")
+    }
+
     private fun moveFile(from: File, to: File) {
         if (from.renameTo(to)) return
         val copied = runCatching { from.copyTo(to, overwrite = true).length() == from.length() }.getOrDefault(false)
@@ -209,6 +248,8 @@ class DatabaseKeyStore(
     companion object {
         private const val PRIMARY = "key.bin"
         private const val BACKUP = "key.bak"
+        private const val GENERATION = "keystore_generation"
+        private const val MAX_GENERATIONS = 5
         private const val KEY_BYTES = 32
 
         /** The folder beside the wrapped copies that holds the recovery copies of the same key. */
