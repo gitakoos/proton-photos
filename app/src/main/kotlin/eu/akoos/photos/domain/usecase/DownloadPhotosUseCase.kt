@@ -41,6 +41,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.PhotoLocationResolver
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.data.transfer.ItemCancels
+import eu.akoos.photos.data.transfer.ItemCommitPoint
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.CaptureDateOverride
@@ -250,7 +251,9 @@ class DownloadPhotosUseCase @Inject constructor(
         cloudItems.map { photo ->
             async {
                 gate.withPermit {
+                    var started = false
                     val body: suspend () -> Unit = {
+                        started = true
                         onItemState(photo.linkId, true)
                         try {
                             val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
@@ -286,6 +289,14 @@ class DownloadPhotosUseCase @Inject constructor(
                                 // common case. Counting it as done reported a photo saved that is not on
                                 // the device, so a batch that ran out of space still read as complete.
                                 if (savedUri != null) {
+                                    // Saved: a cancel of this one photo from now on keeps it. One that came
+                                    // first takes the saved copy out of the gallery again.
+                                    if (!ItemCommitPoint.reach()) {
+                                        withContext(NonCancellable) {
+                                            runCatching { context.contentResolver.delete(savedUri, null, null) }
+                                        }
+                                        throw kotlinx.coroutines.CancellationException("download cancelled by the user")
+                                    }
                                     linkSyncState(userId, savedUri, photo)
                                     onSaved(savedUri.toString())
                                     done.incrementAndGet()
@@ -303,7 +314,7 @@ class DownloadPhotosUseCase @Inject constructor(
                     if (stopped) {
                         // Only this photo stops: its partial and resume files go, the others carry on.
                         cancelled.incrementAndGet()
-                        runCatching { cloudRepo.discardPartialDownload(photo) }
+                        if (started) runCatching { cloudRepo.discardPartialDownload(photo) }
                         Log.d(TAG, "Download of ${photo.linkId} cancelled by the user")
                     }
                     onItemState(photo.linkId, false)

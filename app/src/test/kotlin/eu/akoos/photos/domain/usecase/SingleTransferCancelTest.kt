@@ -146,6 +146,27 @@ class SingleTransferCancelTest {
     }
 
     @Test
+    fun `a cancel that lands after the photo was saved keeps it as downloaded`() = runTest {
+        val cancels = ItemCancels()
+        val saved = mutableListOf<String>()
+
+        val progress = useCase.downloadGalleryItems(
+            userId, listOf(cloudItem("a", "image/jpeg")),
+            cancels = cancels,
+            onSaved = { uri ->
+                saved += uri
+                cancels.cancel("a")
+            },
+        )
+
+        assertEquals(1, saved.size)
+        assertEquals(0, progress.cancelled)
+        assertEquals(0, progress.failed)
+        assertEquals(1, progress.done)
+        assertTrue(cloud.discardedDownloads.isEmpty())
+    }
+
+    @Test
     fun `cancelling one item of a transfer drops its row and asks the batch to stop it`() {
         val center = TransferCenter(context)
         val asked = mutableListOf<String>()
@@ -169,7 +190,7 @@ class SingleTransferCancelTest {
     }
 
     @Test
-    fun `discarding a stopped download removes its temp and resume files only`() {
+    fun `discarding a stopped download removes its cache copy, temp and resume files only`() {
         val service = PhotoDownloadService(
             apiProvider = mockk(relaxed = true),
             cryptoHelper = mockk(relaxed = true),
@@ -187,8 +208,8 @@ class SingleTransferCancelTest {
         )
         val dir = File(context.cacheDir, "fullres").also { it.deleteRecursively(); it.mkdirs() }
         val ext = mimeToFileExtension("image/jpeg")
-        val partial = listOf("L1.$ext.tmp", "dec_L1_0.bin", "dec_L1_1.bin", "enc_L1_0.bin", "L1.hashes")
-        val kept = listOf("dec_L10_0.bin", "L2.$ext.tmp", "L1.$ext")
+        val partial = listOf("L1.$ext", "L1.$ext.tmp", "dec_L1_0.bin", "dec_L1_1.bin", "enc_L1_0.bin", "L1.hashes")
+        val kept = listOf("dec_L10_0.bin", "L2.$ext.tmp", "L2.$ext", "L10.$ext")
         (partial + kept).forEach { File(dir, it).writeText("x") }
 
         service.discardPartialDownload("L1", "image/jpeg")

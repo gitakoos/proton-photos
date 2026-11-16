@@ -421,7 +421,8 @@ class GalleryItemSelectionController @AssistedInject constructor(
             }
             transferCenter.log(TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList())
             selection.clear()
-            onResult(result.done - result.failed, result.failed)
+            // Every photo cancelled one by one: nothing was downloaded, so no "0 downloaded" message.
+            if (result.done > 0 || result.cancelled == 0) onResult(result.done - result.failed, result.failed)
         }
     }
 

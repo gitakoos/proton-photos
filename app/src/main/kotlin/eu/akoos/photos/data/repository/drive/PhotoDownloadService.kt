@@ -193,14 +193,16 @@ class PhotoDownloadService @Inject constructor(
     }
 
     /**
-     * Removes what a stopped download of [linkId] left in the cache: the half-stitched `.tmp`, the
-     * per-block resume files and their hash sidecar. Left alone while another caller is still
-     * downloading the same photo, since those files are its working state.
+     * Removes what a stopped download of [linkId] left in the cache: the finished copy a cancel caught
+     * before the save could delete it, the half-stitched `.tmp`, the per-block resume files and their
+     * hash sidecar. Left alone while another caller is still downloading the same photo, since those
+     * files are its working state.
      */
     fun discardPartialDownload(linkId: String, mimeType: String) {
         if (inFlight[linkId]?.isCompleted == false) return
         val cacheDir = File(context.cacheDir, "fullres")
         val ext = eu.akoos.photos.util.mimeToFileExtension(mimeType)
+        File(cacheDir, "${safeFileId(linkId)}.$ext").delete()
         File(cacheDir, "${safeFileId(linkId)}.$ext.tmp").delete()
         cacheDir.listFiles { _, name -> isBlockEncFileOf(name, linkId) }?.forEach { it.delete() }
         dropBlockResumeState(cacheDir, linkId)

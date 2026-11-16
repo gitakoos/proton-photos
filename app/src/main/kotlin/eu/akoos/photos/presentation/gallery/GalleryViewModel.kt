@@ -2340,8 +2340,11 @@ class GalleryViewModel @Inject constructor(
             transferCenter.log(
                 TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),
             )
+            // Every photo cancelled one by one: nothing was downloaded, so no "0 downloaded" message.
+            val allCancelled = result.done == 0 && result.cancelled > 0
             _uiState.update { it.copy(
-                multiDownloadState = MultiDownloadState.Done(result.done - result.failed, result.failed),
+                multiDownloadState = if (allCancelled) MultiDownloadState.Idle
+                    else MultiDownloadState.Done(result.done - result.failed, result.failed),
                 selectedItems = emptySet(),
             ) }
         }
