@@ -488,6 +488,7 @@
         <item quantity="one">%1$d foto oculta sigue con su archivo en la galería del teléfono, donde otras aplicaciones la ven.</item>
         <item quantity="other">%1$d fotos ocultas siguen con sus archivos en la galería del teléfono, donde otras aplicaciones las ven.</item>
     </plurals>
+    <string name="hidden_password_tip">Establece una contraseña para que las fotos ocultas solo en este teléfono sigan protegidas si Proton cierra tu sesión.</string>
     <string name="hidden_folders_section">Carpetas ocultas</string>
     <string name="hidden_cloud_photos_section">Fotos ocultas en la nube</string>
     <string name="hidden_photos_auth_prompt">Autentícate para ver tus fotos ocultas</string>

@@ -328,6 +328,7 @@
         <item quantity="one">%1$d hidden photo still has its file in the phone gallery, where other apps can see it.</item>
         <item quantity="other">%1$d hidden photos still have their files in the phone gallery, where other apps can see them.</item>
     </plurals>
+    <string name="hidden_password_tip">Set a password so photos hidden only on this phone stay protected if Proton signs you out.</string>
     <string name="hidden_folders_section">Hidden folders</string>
     <string name="hidden_cloud_photos_section">Hidden cloud photos</string>
     <string name="hidden_photos_auth_prompt">Authenticate to view your hidden photos</string>

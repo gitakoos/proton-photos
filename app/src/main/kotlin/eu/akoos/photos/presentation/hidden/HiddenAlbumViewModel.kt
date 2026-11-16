@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -57,6 +59,7 @@ import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.data.hidden.VaultPasswordStore
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateSnapshot
@@ -145,6 +148,13 @@ data class HiddenAlbumUiState(
     val allSelected: Boolean get() = selectableCount > 0 && selectedCount == selectableCount
 }
 
+/**
+ * A sign-out Proton forces moves the photos hidden only on this phone back into the gallery when no Hidden
+ * password is set; with one they go into a password-protected zip instead. A guest is never signed out that
+ * way and has a warning of its own, so the tip is for a signed-in account alone.
+ */
+internal fun hiddenPasswordTipDue(signedIn: Boolean, passwordSet: Boolean): Boolean = signedIn && !passwordSet
+
 @HiltViewModel
 class HiddenAlbumViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -155,10 +165,21 @@ class HiddenAlbumViewModel @Inject constructor(
     private val driveRepo: DrivePhotoRepository,
     private val syncStateSnapshot: SyncStateSnapshot,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    vaultPasswordStore: VaultPasswordStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HiddenAlbumUiState())
     val uiState: StateFlow<HiddenAlbumUiState> = _uiState.asStateFlow()
+
+    /** Whether the screen suggests setting a Hidden password, per [hiddenPasswordTipDue]. False until both
+     *  answers are in, so the line never flashes up before a set password has been read. */
+    val passwordTipDue: StateFlow<Boolean> = combine(
+        accountManager.getPrimaryUserId().map { it != null },
+        vaultPasswordStore.observeIsSet(),
+    ) { signedIn, passwordSet -> hiddenPasswordTipDue(signedIn, passwordSet) }
+        .distinctUntilChanged()
+        .catch { emit(false) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Tracks the active DataStore observer so a re-authentication (rare but possible
      *  if the user fails biometrics then retries) cancels the previous collector before

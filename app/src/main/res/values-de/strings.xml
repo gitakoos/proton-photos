@@ -484,6 +484,7 @@
         <item quantity="one">%1$d verstecktes Foto liegt noch in der Telefongalerie, wo andere Apps es sehen.</item>
         <item quantity="other">%1$d versteckte Fotos liegen noch in der Telefongalerie, wo andere Apps sie sehen.</item>
     </plurals>
+    <string name="hidden_password_tip">Lege ein Passwort fest, damit nur auf diesem Telefon versteckte Fotos geschützt bleiben, falls Proton dich abmeldet.</string>
     <string name="hidden_folders_section">Versteckte Ordner</string>
     <string name="hidden_cloud_photos_section">Versteckte Cloud-Fotos</string>
     <string name="hidden_photos_auth_prompt">Authentifiziere dich, um deine versteckten Fotos anzuzeigen</string>

@@ -507,6 +507,7 @@
         <item quantity="one">%1$d rejtett fotó fájlja még a telefon galériájában van, ahol más appok látják.</item>
         <item quantity="other">%1$d rejtett fotó fájlja még a telefon galériájában van, ahol más appok látják.</item>
     </plurals>
+    <string name="hidden_password_tip">Állíts be jelszót, hogy a csak ezen a telefonon rejtett fotók védve maradjanak, ha a Proton kijelentkeztet.</string>
     <string name="hidden_folders_section">Rejtett mappák</string>
     <string name="hidden_cloud_photos_section">Rejtett felhőfotók</string>
     <string name="hidden_photos_auth_prompt">Azonosítsd magad a rejtett fotók megtekintéséhez</string>

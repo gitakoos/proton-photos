@@ -171,6 +171,7 @@
         <item quantity="few">%1$d skrite fotografije imajo datoteke še v galeriji telefona, kjer jih vidijo druge aplikacije.</item>
         <item quantity="other">%1$d skritih fotografij ima datoteke še v galeriji telefona, kjer jih vidijo druge aplikacije.</item>
     </plurals>
+    <string name="hidden_password_tip">Nastavite geslo, da fotografije, skrite le v tem telefonu, ostanejo zaščitene, če vas Proton odjavi.</string>
     <string name="hidden_folders_section">Skrite mape</string>
     <string name="hidden_cloud_photos_section">Skrite fotografije v oblaku</string>
     <string name="hidden_photos_auth_prompt">Potrdite istovetnost za ogled skritih fotografij</string>

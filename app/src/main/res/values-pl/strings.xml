@@ -170,6 +170,7 @@
         <item quantity="many">%1$d ukrytych zdjęć ma nadal pliki w galerii telefonu, gdzie widzą je inne aplikacje.</item>
         <item quantity="other">%1$d ukrytych zdjęć ma nadal pliki w galerii telefonu, gdzie widzą je inne aplikacje.</item>
     </plurals>
+    <string name="hidden_password_tip">Ustaw hasło, aby zdjęcia ukryte tylko na tym telefonie pozostały chronione, jeśli Proton cię wyloguje.</string>
     <string name="hidden_folders_section">Ukryte foldery</string>
     <string name="hidden_cloud_photos_section">Ukryte zdjęcia w chmurze</string>
     <string name="hidden_photos_auth_prompt">Uwierzytelnij się, aby zobaczyć ukryte zdjęcia</string>

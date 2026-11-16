@@ -170,6 +170,7 @@
         <item quantity="many">%1$d skrytých fotiek má stále súbory v galérii telefónu, kde ich vidia iné aplikácie.</item>
         <item quantity="other">%1$d skrytých fotiek má stále súbory v galérii telefónu, kde ich vidia iné aplikácie.</item>
     </plurals>
+    <string name="hidden_password_tip">Nastavte heslo, aby fotky skryté len v tomto telefóne zostali chránené, ak vás Proton odhlási.</string>
     <string name="hidden_folders_section">Skryté priečinky</string>
     <string name="hidden_cloud_photos_section">Skryté fotky v cloude</string>
     <string name="hidden_photos_auth_prompt">Overte sa, aby ste videli svoje skryté fotky</string>

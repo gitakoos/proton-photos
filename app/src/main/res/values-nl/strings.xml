@@ -120,6 +120,7 @@
         <item quantity="one">%1$d verborgen foto heeft haar bestand nog in de telefoongalerij, waar andere apps het zien.</item>
         <item quantity="other">%1$d verborgen foto\'s hebben hun bestanden nog in de telefoongalerij, waar andere apps ze zien.</item>
     </plurals>
+    <string name="hidden_password_tip">Stel een wachtwoord in, zodat foto\'s die alleen op deze telefoon verborgen zijn beschermd blijven als Proton je afmeldt.</string>
     <string name="hidden_folders_section">Verborgen mappen</string>
     <string name="hidden_cloud_photos_section">Verborgen cloudfoto\'s</string>
     <string name="hidden_photos_auth_prompt">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>

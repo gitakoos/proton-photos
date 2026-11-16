@@ -307,6 +307,7 @@
         <item quantity="one">%1$d gizli fotoğrafın dosyası hâlâ telefon galerisinde ve diğer uygulamalar onu görebiliyor.</item>
         <item quantity="other">%1$d gizli fotoğrafın dosyaları hâlâ telefon galerisinde ve diğer uygulamalar onları görebiliyor.</item>
     </plurals>
+    <string name="hidden_password_tip">Proton oturumunu kapatırsa yalnızca bu telefonda gizlenen fotoğrafların korunması için bir parola belirle.</string>
     <string name="hidden_folders_section">Gizli klasörler</string>
     <string name="hidden_cloud_photos_section">Gizli bulut fotoğrafları</string>
     <string name="hidden_photos_auth_prompt">Gizli fotoğraflarını görmek için kimliğini doğrula</string>

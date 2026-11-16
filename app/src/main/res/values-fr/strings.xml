@@ -484,6 +484,7 @@
         <item quantity="one">%1$d photo masquée a encore son fichier dans la galerie du téléphone, où d\'autres applications la voient.</item>
         <item quantity="other">%1$d photos masquées ont encore leurs fichiers dans la galerie du téléphone, où d\'autres applications les voient.</item>
     </plurals>
+    <string name="hidden_password_tip">Définissez un mot de passe pour que les photos masquées uniquement sur ce téléphone restent protégées si Proton vous déconnecte.</string>
     <string name="hidden_folders_section">Dossiers masqués</string>
     <string name="hidden_cloud_photos_section">Photos cloud masquées</string>
     <string name="hidden_photos_auth_prompt">Authentifiez-vous pour voir vos photos masquées</string>

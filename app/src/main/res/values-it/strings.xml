@@ -488,6 +488,7 @@
         <item quantity="one">%1$d foto nascosta ha ancora il suo file nella galleria del telefono, dove altre app la vedono.</item>
         <item quantity="other">%1$d foto nascoste hanno ancora i loro file nella galleria del telefono, dove altre app le vedono.</item>
     </plurals>
+    <string name="hidden_password_tip">Imposta una password perché le foto nascoste solo su questo telefono restino protette se Proton ti disconnette.</string>
     <string name="hidden_folders_section">Cartelle nascoste</string>
     <string name="hidden_cloud_photos_section">Foto nascoste nel cloud</string>
     <string name="hidden_photos_auth_prompt">Autenticati per vedere le tue foto nascoste</string>
