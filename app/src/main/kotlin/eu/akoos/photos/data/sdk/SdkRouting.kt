@@ -31,10 +31,13 @@ import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.SdkDiagnostics
+import eu.akoos.photos.util.sanitizeErrorMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import me.proton.drive.sdk.ProtonDriveSdkException
+import me.proton.drive.sdk.SdkHttpClientException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -142,13 +145,49 @@ internal suspend fun <T> runRouted(
     } catch (e: VirtualMachineError) {
         throw e
     } catch (e: SdkOutcomeUnknownException) {
-        SdkDiagnostics.recordFallback(label, e)
+        SdkDiagnostics.recordFallback(label, describeSdkFailure(e))
         throw e
     } catch (e: Throwable) {
-        SdkDiagnostics.recordFallback(label, e)
-        runCatching { Log.w("SdkRouting", "$label through the SDK failed, using the app's own path: ${e.javaClass.simpleName}") }
+        val cause = describeSdkFailure(e)
+        SdkDiagnostics.recordFallback(label, cause)
+        runCatching { Log.w("SdkRouting", "$label through the SDK failed, using the app's own path: $cause") }
         return fallback()
     }
     SdkDiagnostics.recordSdk(label)
     return result
 }
+
+/**
+ * Why an SDK call failed, for the diagnostics: each exception of the cause chain (at most [MAX_CAUSES]) by
+ * class, with the HTTP status and Proton code of an HTTP failure, the domain and codes of an SDK error, and a
+ * short redacted message ([sanitizeErrorMessage] takes out names, paths, addresses and ids), so a fallback's
+ * cause shows in a release build without anything personal.
+ */
+internal fun describeSdkFailure(error: Throwable): String = buildString {
+    var current: Throwable? = error
+    var depth = 0
+    val seen = HashSet<Throwable>()
+    while (current != null && depth < MAX_CAUSES && seen.add(current)) {
+        if (depth > 0) append(" <- ")
+        append(current.javaClass.simpleName.ifEmpty { current.javaClass.name.substringAfterLast('.') })
+        var message = current.message
+        when (current) {
+            is SdkHttpClientException.Http -> {
+                append(" http=").append(current.statusCode)
+                current.protonCode?.let { append(" code=").append(it) }
+            }
+            is ProtonDriveSdkException -> current.error?.let { sdk ->
+                append(" domain=").append(sdk.domain)
+                sdk.primaryCode?.let { append(" code=").append(it) }
+                sdk.secondaryCode?.let { append('/').append(it) }
+                if (message.isNullOrBlank()) message = sdk.message
+            }
+        }
+        if (!message.isNullOrBlank()) append(": ").append(sanitizeErrorMessage(message).take(MAX_MESSAGE_CHARS))
+        current = current.cause
+        depth++
+    }
+}
+
+private const val MAX_CAUSES = 3
+private const val MAX_MESSAGE_CHARS = 80

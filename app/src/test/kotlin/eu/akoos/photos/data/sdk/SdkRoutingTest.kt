@@ -28,6 +28,7 @@ import kotlinx.coroutines.test.runTest
 import me.proton.drive.sdk.entity.LegacyNodeUid
 import me.proton.drive.sdk.entity.PhotoTag
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -95,6 +96,31 @@ class SdkRoutingTest {
         assertEquals(0, SdkDiagnostics.sdkCount("tags"))
         assertEquals(1, SdkDiagnostics.fallbackCount("tags"))
         assertTrue(SdkDiagnostics.snapshot().contains("lastFallback=tags IllegalStateException"))
+    }
+
+    @Test
+    fun `a fallback records the HTTP status and Proton code of the SDK failure`() = runTest {
+        val http = me.proton.drive.sdk.SdkHttpClientException.Http(400, 2011, null, "Bad request")
+        runRouted<String>("upload", on = true, viaSdk = { throw http }, fallback = { "own" })
+        assertTrue(SdkDiagnostics.snapshot(), SdkDiagnostics.snapshot().contains("lastFallback=upload Http http=400 code=2011"))
+    }
+
+    @Test
+    fun `an SDK error is described by its domain, codes and a redacted message down its causes`() {
+        val sdkError = me.proton.drive.sdk.ProtonSdkError(
+            "Upload of IMG_1234.jpg for someone@example.com failed", "Proton.Api",
+            me.proton.drive.sdk.ProtonSdkError.ErrorDomain.Api, 2011L, 422L, null, null, null,
+        )
+        val error = me.proton.drive.sdk.ProtonDriveSdkException(
+            null, java.io.IOException("connection reset"), sdkError,
+        )
+
+        val described = describeSdkFailure(error)
+
+        assertTrue(described, described.startsWith("ProtonDriveSdkException domain=Api code=2011/422: "))
+        assertTrue(described, described.endsWith(" <- IOException: connection reset"))
+        assertFalse(described, described.contains("IMG_1234"))
+        assertFalse(described, described.contains("someone@example.com"))
     }
 
     @Test

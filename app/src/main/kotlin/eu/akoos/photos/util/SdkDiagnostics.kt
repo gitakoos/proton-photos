@@ -51,9 +51,10 @@ object SdkDiagnostics {
         _changes.value++
     }
 
-    fun recordFallback(route: String, error: Throwable) {
+    /** Counts a fallback of [route]; [cause] is a short, redacted description of the failure, kept as the last one. */
+    fun recordFallback(route: String, cause: String) {
         fellBack.getOrPut(route) { AtomicInteger() }.incrementAndGet()
-        lastFallback = "$route ${error.javaClass.simpleName}"
+        lastFallback = "$route $cause"
         _changes.value++
     }
 
