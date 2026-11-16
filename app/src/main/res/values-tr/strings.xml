@@ -575,7 +575,7 @@
     <string name="settings_free_up_interval_1_month">1 ay</string>
     <string name="settings_free_up_auto_section">Otomatik yer açma</string>
     <string name="settings_free_up_auto">Yeri otomatik olarak aç</string>
-    <string name="settings_free_up_auto_desc">Seçilen süreden daha önce yedeklenmiş fotoğrafların cihazdaki kopyasını kaldırır. Yalnızca bu uygulamanın yüklediği ve Drive\'da doğruladığı fotoğraflar kaldırılır, Drive kopyası olduğu gibi kalır.</string>
+    <string name="settings_free_up_auto_desc">Seçilen süreden daha önce yedeklenmiş fotoğrafların cihazdaki kopyasını kaldırır. Yalnızca bu uygulamanın yüklediği ve Drive\'da doğruladığı fotoğraflar kaldırılır. Yüklemede sıkıştırma açıksa Drive\'da yalnızca sıkıştırılmış kopya kalır.</string>
     <string name="settings_free_up_interval">Cihazda tutma süresi</string>
     <string name="settings_free_up_interval_desc">Bir fotoğrafın yedeklendikten sonra bu cihazda ne kadar kalacağı.</string>
     <string name="settings_account_section">Hesap</string>
@@ -921,6 +921,7 @@
     <string name="settings_mirror_strip_local_desc">Bu ayrıntıları telefondaki kopyadan da kaldırır, böylece yedeklenen kopya ile yerel dosya aynı kalır. Tüm dosyalara erişim gerektirir ve orijinal dosyalarını değiştirir.</string>
     <string name="settings_mirror_compress_local">Yerel dosyayı da sıkıştır</string>
     <string name="settings_mirror_compress_local_desc">Telefondaki kopyayı da daha hafif sürümle değiştirir. Tüm dosyalara erişim gerektirir; orijinal tam kaliteli dosyanın üzerine yazılır.</string>
+    <string name="settings_compress_original_note">Tam kaliteli orijinal yalnızca bu telefonda durur. Telefondan kaldırıldığında, yer açarak ya da yedeklemeden sonra silerek, Drive\'da yalnızca sıkıştırılmış kopya kalır.</string>
     <string name="onboarding_mirror_title">Yerel kopyalarını eşleştir</string>
     <string name="onboarding_mirror_subtitle">Aynı değişiklikleri cihazındaki orijinallere de uygula</string>
     <string name="onboarding_mirror_toggle">Değişiklikleri yerel dosyalara yansıt</string>
@@ -928,7 +929,7 @@
     <string name="onboarding_mirror_grant">Tüm dosyalara erişime izin ver</string>
     <string name="settings_rename_on_upload">Yüklerken çekim tarihine göre yeniden adlandır</string>
     <string name="settings_delete_after_backup">Yedeklemeden sonra cihazdaki dosyayı sil</string>
-    <string name="settings_delete_after_backup_desc">Yükleme Drive\'a ulaştıktan sonra yerel kopyayı cihazından kaldırır. Android 11+ sürümlerinde önce cihazın çöp kutusuna gider, böylece yaklaşık bir ay boyunca oradan geri yükleyebilirsin.</string>
+    <string name="settings_delete_after_backup_desc">Yükleme Drive\'a ulaştıktan sonra yerel kopyayı cihazından kaldırır. Android 11+ sürümlerinde önce cihazın çöp kutusuna gider, böylece yaklaşık bir ay boyunca oradan geri yükleyebilirsin. Yüklemede sıkıştırma açıksa Drive\'da yalnızca sıkıştırılmış kopya kalır.</string>
     <string name="settings_strip_gps">GPS konumunu kaldır</string>
     <string name="settings_strip_gps_desc">GPS koordinatlarını ve konum verilerini temizle</string>
     <string name="settings_strip_camera">Kamera bilgilerini kaldır</string>

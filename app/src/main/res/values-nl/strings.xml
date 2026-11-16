@@ -301,7 +301,7 @@
     <string name="settings_free_up_interval_1_month">1 maand</string>
     <string name="settings_free_up_auto_section">Automatisch vrijmaken</string>
     <string name="settings_free_up_auto">Automatisch ruimte vrijmaken</string>
-    <string name="settings_free_up_auto_desc">Verwijdert de apparaatkopie van foto\'s die langer dan de gekozen tijd geback-upt zijn. Alleen foto\'s die deze app heeft geüpload en in Drive bevestigd zijn worden verwijderd, en de Drive-kopie blijft intact.</string>
+    <string name="settings_free_up_auto_desc">Verwijdert de apparaatkopie van foto\'s die langer dan de gekozen tijd geback-upt zijn. Alleen foto\'s die deze app heeft geüpload en in Drive bevestigd zijn worden verwijderd. Staat comprimeren bij uploaden aan, dan blijft in Drive alleen de gecomprimeerde kopie over.</string>
     <string name="settings_free_up_interval">Op apparaat houden gedurende</string>
     <string name="settings_free_up_interval_desc">Hoe lang een foto na de back-up op dit apparaat blijft.</string>
     <string name="settings_account_section">Account</string>
@@ -434,6 +434,7 @@
     <string name="settings_mirror_strip_local_desc">Verwijdert die gegevens ook uit de kopie op je telefoon, zodat de geback-upte kopie en het lokale bestand identiek blijven. Vereist toegang tot alle bestanden en wijzigt je originele bestanden.</string>
     <string name="settings_mirror_compress_local">Ook het lokale bestand comprimeren</string>
     <string name="settings_mirror_compress_local_desc">Vervangt ook de kopie op je telefoon door de lichtere versie. Vereist toegang tot alle bestanden; het originele bestand op volle kwaliteit wordt overschreven.</string>
+    <string name="settings_compress_original_note">Het origineel in volle kwaliteit staat alleen op deze telefoon. Zodra het van de telefoon verdwijnt, door ruimte vrij te maken of na de back-up te verwijderen, blijft in Drive alleen de gecomprimeerde kopie over.</string>
     <string name="onboarding_mirror_title">Lokale kopieën gelijktrekken</string>
     <string name="onboarding_mirror_subtitle">Pas dezelfde wijzigingen toe op de originelen op je apparaat</string>
     <string name="onboarding_mirror_toggle">Wijzigingen spiegelen naar lokale bestanden</string>
@@ -441,7 +442,7 @@
     <string name="onboarding_mirror_grant">Toegang tot alle bestanden toestaan</string>
     <string name="settings_rename_on_upload">Hernoemen naar opnamedatum bij uploaden</string>
     <string name="settings_delete_after_backup">Apparaatbestand verwijderen na back-up</string>
-    <string name="settings_delete_after_backup_desc">Verwijdert de lokale kopie van je apparaat zodra Drive de upload heeft. Op Android 11+ gaat die eerst naar de apparaatprullenbak, waar je hem nog ongeveer een maand kunt herstellen.</string>
+    <string name="settings_delete_after_backup_desc">Verwijdert de lokale kopie van je apparaat zodra Drive de upload heeft. Op Android 11+ gaat die eerst naar de apparaatprullenbak, waar je hem nog ongeveer een maand kunt herstellen. Staat comprimeren bij uploaden aan, dan blijft in Drive alleen de gecomprimeerde kopie over.</string>
     <string name="settings_strip_gps">GPS-locatie verwijderen</string>
     <string name="settings_strip_gps_desc">GPS-coördinaten en locatiegegevens verwijderen</string>
     <string name="settings_strip_camera">Camera-info verwijderen</string>

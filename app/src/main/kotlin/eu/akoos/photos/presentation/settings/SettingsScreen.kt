@@ -2305,6 +2305,17 @@ fun BackupProcessingScreen(
                 }
             }
         }
+        // Compression on with the phone copy left full quality: once that copy is removed (free up space,
+        // delete after backup), Drive holds only the compressed version, so say it where the choice is made.
+        if ((state.compressOnUpload || state.compressVideosOnUpload) && !state.mirrorCompressToLocal) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.settings_compress_original_note),
+                color = colors.fgMute,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
     }
 }
 

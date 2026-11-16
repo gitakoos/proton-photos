@@ -239,7 +239,7 @@
     <string name="settings_free_up_interval_1_month">1 hónap</string>
     <string name="settings_free_up_auto_section">Automatikus helyfelszabadítás</string>
     <string name="settings_free_up_auto">Hely automatikus felszabadítása</string>
-    <string name="settings_free_up_auto_desc">Törli az eszközről azoknak a fotóknak a másolatát, amelyek a megadott időnél régebben vannak mentve. Csak azok a fotók törlődnek, amelyeket ez az alkalmazás töltött fel és igazolt vissza a Drive-on, a Drive-os másolat érintetlen marad.</string>
+    <string name="settings_free_up_auto_desc">Törli az eszközről azoknak a fotóknak a másolatát, amelyek a megadott időnél régebben vannak mentve. Csak azok a fotók törlődnek, amelyeket ez az alkalmazás töltött fel és igazolt vissza a Drive-on. Ha a feltöltéskori tömörítés be van kapcsolva, a Drive-on csak a tömörített másolat marad meg.</string>
     <string name="settings_free_up_interval">Megőrzés az eszközön</string>
     <string name="settings_free_up_interval_desc">Meddig marad egy fotó ezen az eszközön a mentés után.</string>
     <string name="settings_account_section">Fiók</string>
@@ -375,6 +375,7 @@
     <string name="settings_mirror_strip_local_desc">Ezeket az adatokat a telefonon lévő másolatból is eltávolítja, így a mentett és a helyi fájl azonos marad. Az összes fájl elérése szükséges hozzá, és módosítja az eredeti fájljaidat.</string>
     <string name="settings_mirror_compress_local">A helyi fájl tömörítése is</string>
     <string name="settings_mirror_compress_local_desc">A telefonon lévő másolatot is lecseréli a könnyebb változatra. Az összes fájl elérése szükséges hozzá; az eredeti, teljes minőségű fájl felülíródik.</string>
+    <string name="settings_compress_original_note">A teljes minőségű eredeti csak ezen a telefonon van meg. Ha lekerül a telefonról, hely felszabadításával vagy mentés utáni törléssel, a Drive-on csak a tömörített másolat marad.</string>
     <string name="onboarding_mirror_title">Helyi másolatok egyeztetése</string>
     <string name="onboarding_mirror_subtitle">Ugyanazok a módosítások az eszközön lévő eredetiken is</string>
     <string name="onboarding_mirror_toggle">Módosítások tükrözése a helyi fájlokra</string>
@@ -382,7 +383,7 @@
     <string name="onboarding_mirror_grant">Összes fájl elérése</string>
     <string name="settings_rename_on_upload">Átnevezés készítés dátumára feltöltéskor</string>
     <string name="settings_delete_after_backup">Eszközről törlés mentés után</string>
-    <string name="settings_delete_after_backup_desc">A sikeres Drive-ra mentés után törli a fájl helyi másolatát. Android 11+ rendszeren előbb az eszköz kukájába kerül, ahonnan körülbelül egy hónapig visszaállítható.</string>
+    <string name="settings_delete_after_backup_desc">A sikeres Drive-ra mentés után törli a fájl helyi másolatát. Android 11+ rendszeren előbb az eszköz kukájába kerül, ahonnan körülbelül egy hónapig visszaállítható. Ha a feltöltéskori tömörítés be van kapcsolva, a Drive-on csak a tömörített másolat marad meg.</string>
     <string name="settings_strip_gps">GPS-hely eltávolítása</string>
     <string name="settings_strip_gps_desc">GPS-koordináták és helyadatok eltávolítása</string>
     <string name="settings_strip_camera">Kamera-információ eltávolítása</string>

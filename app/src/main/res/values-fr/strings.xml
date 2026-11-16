@@ -219,11 +219,11 @@
     <string name="settings_free_up_interval_1_month">1 mois</string>
     <string name="settings_free_up_auto_section">Libération automatique</string>
     <string name="settings_free_up_auto">Libérer de l\'espace automatiquement</string>
-    <string name="settings_free_up_auto_desc">Supprime de l\'appareil la copie des photos sauvegardées depuis plus longtemps que la durée choisie. Seules les photos que cette application a envoyées et confirmées sur Drive sont supprimées, et la copie dans Drive reste intacte.</string>
+    <string name="settings_free_up_auto_desc">Supprime de l\'appareil la copie des photos sauvegardées depuis plus longtemps que la durée choisie. Seules les photos que cette application a envoyées et confirmées sur Drive sont supprimées. Si la compression à l\'envoi est activée, Drive ne garde que la copie compressée.</string>
     <string name="settings_free_up_interval">Conserver sur l\'appareil pendant</string>
     <string name="settings_free_up_interval_desc">Combien de temps une photo reste sur cet appareil après sa sauvegarde.</string>
     <string name="settings_delete_after_backup">Supprimer le fichier de l\'appareil après la sauvegarde</string>
-    <string name="settings_delete_after_backup_desc">Retire la copie locale dès que Drive a reçu le fichier. Sous Android 11+, elle passe d\'abord dans la corbeille de l\'appareil, où vous pouvez la restaurer pendant environ un mois.</string>
+    <string name="settings_delete_after_backup_desc">Retire la copie locale dès que Drive a reçu le fichier. Sous Android 11+, elle passe d\'abord dans la corbeille de l\'appareil, où vous pouvez la restaurer pendant environ un mois. Si la compression à l\'envoi est activée, Drive ne garde que la copie compressée.</string>
     <string name="settings_account_section">Compte</string>
     <string name="settings_sign_in_to_proton">Se connecter à Proton</string>
     <string name="settings_sign_out">Se déconnecter</string>
@@ -354,6 +354,7 @@
     <string name="settings_mirror_strip_local_desc">Supprime aussi ces détails de la copie sur le téléphone, pour que la copie sauvegardée et le fichier local restent identiques. Nécessite l\'accès à tous les fichiers et modifie vos fichiers d\'origine.</string>
     <string name="settings_mirror_compress_local">Compresser aussi le fichier local</string>
     <string name="settings_mirror_compress_local_desc">Remplace aussi la copie sur le téléphone par la version plus légère. Nécessite l\'accès à tous les fichiers ; le fichier d\'origine en pleine qualité est écrasé.</string>
+    <string name="settings_compress_original_note">L\'original en pleine qualité n\'existe que sur ce téléphone. Une fois retiré du téléphone, en libérant de l\'espace ou en le supprimant après la sauvegarde, Drive ne garde que la copie compressée.</string>
     <string name="onboarding_mirror_title">Aligner les copies locales</string>
     <string name="onboarding_mirror_subtitle">Appliquer les mêmes modifications aux fichiers d\'origine sur l\'appareil</string>
     <string name="onboarding_mirror_toggle">Répercuter les modifications sur les fichiers locaux</string>

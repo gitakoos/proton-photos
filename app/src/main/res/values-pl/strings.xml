@@ -431,7 +431,7 @@
     <string name="settings_free_up_interval_1_month">1 miesiąc</string>
     <string name="settings_free_up_auto_section">Automatyczne zwalnianie</string>
     <string name="settings_free_up_auto">Automatycznie zwalniaj miejsce</string>
-    <string name="settings_free_up_auto_desc">Usuwa z urządzenia kopie zdjęć skopiowanych dawniej niż wybrany czas. Usuwane są tylko zdjęcia, które ta aplikacja wysłała i potwierdziła w Drive, a kopia w Drive pozostaje nienaruszona.</string>
+    <string name="settings_free_up_auto_desc">Usuwa z urządzenia kopie zdjęć skopiowanych dawniej niż wybrany czas. Usuwane są tylko zdjęcia, które ta aplikacja wysłała i potwierdziła w Drive. Przy włączonej kompresji wysyłanych plików w Drive zostaje tylko skompresowana kopia.</string>
     <string name="settings_free_up_interval">Przechowuj na urządzeniu przez</string>
     <string name="settings_free_up_interval_desc">Jak długo zdjęcie pozostaje na tym urządzeniu po skopiowaniu.</string>
     <string name="settings_account_section">Konto</string>
@@ -594,6 +594,7 @@
     <string name="settings_mirror_strip_local_desc">Usuwa te dane także z kopii na telefonie, aby kopia zapasowa i plik lokalny pozostały identyczne. Wymaga dostępu do wszystkich plików i zmienia Twoje oryginalne pliki.</string>
     <string name="settings_mirror_compress_local">Kompresuj także plik lokalny</string>
     <string name="settings_mirror_compress_local_desc">Zastępuje także kopię na telefonie lżejszą wersją. Wymaga dostępu do wszystkich plików; oryginalny plik w pełnej jakości zostaje nadpisany.</string>
+    <string name="settings_compress_original_note">Oryginał w pełnej jakości jest tylko na tym telefonie. Gdy zniknie z telefonu, przez zwolnienie miejsca lub usunięcie po kopii, w Drive zostanie tylko skompresowana kopia.</string>
     <string name="onboarding_mirror_title">Dopasuj lokalne kopie</string>
     <string name="onboarding_mirror_subtitle">Zastosuj te same zmiany do oryginałów na urządzeniu</string>
     <string name="onboarding_mirror_toggle">Odzwierciedlaj zmiany w plikach lokalnych</string>
@@ -601,7 +602,7 @@
     <string name="onboarding_mirror_grant">Zezwól na dostęp do wszystkich plików</string>
     <string name="settings_rename_on_upload">Zmieniaj nazwę na datę wykonania przy wysyłaniu</string>
     <string name="settings_delete_after_backup">Usuwaj plik z urządzenia po kopii</string>
-    <string name="settings_delete_after_backup_desc">Usuwa lokalną kopię z urządzenia po tym, jak Drive ma już wysłany plik. W Androidzie 11+ trafia ona najpierw do kosza urządzenia, skąd można ją przywrócić przez około miesiąc.</string>
+    <string name="settings_delete_after_backup_desc">Usuwa lokalną kopię z urządzenia po tym, jak Drive ma już wysłany plik. W Androidzie 11+ trafia ona najpierw do kosza urządzenia, skąd można ją przywrócić przez około miesiąc. Przy włączonej kompresji wysyłanych plików w Drive zostaje tylko skompresowana kopia.</string>
     <string name="settings_strip_gps">Usuwaj lokalizację GPS</string>
     <string name="settings_strip_gps_desc">Usuwaj współrzędne GPS i dane lokalizacji</string>
     <string name="settings_strip_camera">Usuwaj informacje o aparacie</string>

@@ -220,11 +220,11 @@
     <string name="settings_free_up_interval_1_month">1 mese</string>
     <string name="settings_free_up_auto_section">Liberazione automatica</string>
     <string name="settings_free_up_auto">Libera spazio automaticamente</string>
-    <string name="settings_free_up_auto_desc">Elimina dal dispositivo la copia delle foto sottoposte a backup da più tempo di quello scelto. Vengono rimosse solo le foto che questa app ha caricato e confermato su Drive, e la copia su Drive resta intatta.</string>
+    <string name="settings_free_up_auto_desc">Elimina dal dispositivo la copia delle foto sottoposte a backup da più tempo di quello scelto. Vengono rimosse solo le foto che questa app ha caricato e confermato su Drive. Con la compressione al caricamento attiva, su Drive resta solo la copia compressa.</string>
     <string name="settings_free_up_interval">Mantieni sul dispositivo per</string>
     <string name="settings_free_up_interval_desc">Per quanto tempo una foto resta su questo dispositivo dopo il backup.</string>
     <string name="settings_delete_after_backup">Elimina il file dal dispositivo dopo il backup</string>
-    <string name="settings_delete_after_backup_desc">Rimuove la copia locale dal dispositivo non appena Drive ha completato il caricamento. Su Android 11+ finisce prima nel cestino del dispositivo, da cui puoi ripristinarla per circa un mese.</string>
+    <string name="settings_delete_after_backup_desc">Rimuove la copia locale dal dispositivo non appena Drive ha completato il caricamento. Su Android 11+ finisce prima nel cestino del dispositivo, da cui puoi ripristinarla per circa un mese. Con la compressione al caricamento attiva, su Drive resta solo la copia compressa.</string>
     <string name="settings_account_section">Account</string>
     <string name="settings_sign_in_to_proton">Accedi a Proton</string>
     <string name="settings_sign_out">Esci</string>
@@ -358,6 +358,7 @@
     <string name="settings_mirror_strip_local_desc">Rimuove quei dettagli anche dalla copia sul telefono, così la copia salvata e il file locale restano identici. Richiede l\'accesso a tutti i file e modifica i tuoi file originali.</string>
     <string name="settings_mirror_compress_local">Comprimi anche il file locale</string>
     <string name="settings_mirror_compress_local_desc">Sostituisce anche la copia sul telefono con la versione più leggera. Richiede l\'accesso a tutti i file; il file originale a piena qualità viene sovrascritto.</string>
+    <string name="settings_compress_original_note">L\'originale a piena qualità resta solo su questo telefono. Una volta rimosso dal telefono, liberando spazio o eliminandolo dopo il backup, su Drive resta solo la copia compressa.</string>
     <string name="onboarding_mirror_title">Allinea le copie locali</string>
     <string name="onboarding_mirror_subtitle">Applica le stesse modifiche agli originali sul dispositivo</string>
     <string name="onboarding_mirror_toggle">Applica le modifiche anche ai file locali</string>

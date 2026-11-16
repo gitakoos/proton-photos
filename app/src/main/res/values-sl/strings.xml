@@ -432,7 +432,7 @@
     <string name="settings_free_up_interval_1_month">1 mesec</string>
     <string name="settings_free_up_auto_section">Samodejno sproščanje</string>
     <string name="settings_free_up_auto">Samodejno sprosti prostor</string>
-    <string name="settings_free_up_auto_desc">Izbriše kopijo v napravi za fotografije, ki so varnostno kopirane dlje od izbranega časa. Odstranijo se samo fotografije, ki jih je ta aplikacija naložila in potrdila v Drive, kopija v Drive pa ostane nedotaknjena.</string>
+    <string name="settings_free_up_auto_desc">Izbriše kopijo v napravi za fotografije, ki so varnostno kopirane dlje od izbranega časa. Odstranijo se samo fotografije, ki jih je ta aplikacija naložila in potrdila v Drive. Če je stiskanje ob nalaganju vklopljeno, v Drive ostane samo stisnjena kopija.</string>
     <string name="settings_free_up_interval">Obdrži v napravi</string>
     <string name="settings_free_up_interval_desc">Kako dolgo fotografija po varnostnem kopiranju ostane v tej napravi.</string>
     <string name="settings_account_section">Račun</string>
@@ -595,6 +595,7 @@
     <string name="settings_mirror_strip_local_desc">Te podatke odstrani tudi iz kopije v telefonu, tako da varnostno kopirana in lokalna datoteka ostaneta enaki. Zahteva dostop do vseh datotek in spremeni vaše izvirne datoteke.</string>
     <string name="settings_mirror_compress_local">Stisni tudi lokalno datoteko</string>
     <string name="settings_mirror_compress_local_desc">Tudi kopijo v telefonu zamenja z lažjo različico. Zahteva dostop do vseh datotek; izvirna datoteka v polni kakovosti je prepisana.</string>
+    <string name="settings_compress_original_note">Izvirnik v polni kakovosti je samo v tem telefonu. Ko ga odstranite iz telefona, s sproščanjem prostora ali brisanjem po varnostnem kopiranju, v Drive ostane samo stisnjena kopija.</string>
     <string name="onboarding_mirror_title">Uskladite lokalne kopije</string>
     <string name="onboarding_mirror_subtitle">Iste spremembe uveljavi tudi na izvirnikih v vaši napravi</string>
     <string name="onboarding_mirror_toggle">Zrcali spremembe v lokalne datoteke</string>
@@ -602,7 +603,7 @@
     <string name="onboarding_mirror_grant">Dovoli dostop do vseh datotek</string>
     <string name="settings_rename_on_upload">Preimenuj v datum zajema ob nalaganju</string>
     <string name="settings_delete_after_backup">Po varnostnem kopiranju izbriši datoteko v napravi</string>
-    <string name="settings_delete_after_backup_desc">Odstrani lokalno kopijo iz naprave, ko ima Drive naloženo datoteko. V sistemu Android 11+ najprej odide v koš naprave, od koder jo lahko obnovite približno en mesec.</string>
+    <string name="settings_delete_after_backup_desc">Odstrani lokalno kopijo iz naprave, ko ima Drive naloženo datoteko. V sistemu Android 11+ najprej odide v koš naprave, od koder jo lahko obnovite približno en mesec. Če je stiskanje ob nalaganju vklopljeno, v Drive ostane samo stisnjena kopija.</string>
     <string name="settings_strip_gps">Odstrani lokacijo GPS</string>
     <string name="settings_strip_gps_desc">Odstrani koordinate GPS in podatke o lokaciji</string>
     <string name="settings_strip_camera">Odstrani podatke o fotoaparatu</string>

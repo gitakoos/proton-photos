@@ -613,7 +613,7 @@
     <string name="settings_free_up_interval_1_month">1 month</string>
     <string name="settings_free_up_auto_section">Automatic free-up</string>
     <string name="settings_free_up_auto">Free up space automatically</string>
-    <string name="settings_free_up_auto_desc">Removes the device copy of photos backed up longer ago than the chosen time. Only photos this app uploaded and confirmed on Drive are removed, and the Drive copy stays intact.</string>
+    <string name="settings_free_up_auto_desc">Removes the device copy of photos backed up longer ago than the chosen time. Only photos this app uploaded and confirmed on Drive are removed. With upload compression on, only the compressed copy is left in Drive.</string>
     <string name="settings_free_up_interval">Keep on device for</string>
     <string name="settings_free_up_interval_desc">How long a photo stays on this device after it is backed up.</string>
     <string name="settings_account_section">Account</string>
@@ -967,6 +967,7 @@
     <string name="settings_mirror_strip_local_desc">Also removes those details from the copy on the phone, so the backed-up copy and the local file stay identical. Needs all-files access and changes your original files.</string>
     <string name="settings_mirror_compress_local">Also compress the local file</string>
     <string name="settings_mirror_compress_local_desc">Also replaces the copy on the phone with the lighter version. Needs all-files access; the original full-quality file is overwritten.</string>
+    <string name="settings_compress_original_note">The full-quality original stays only on this phone. Once it is removed from the phone, by freeing up space or deleting after backup, only the compressed copy is left in Drive.</string>
     <string name="onboarding_mirror_title">Match your local copies</string>
     <string name="onboarding_mirror_subtitle">Apply the same changes to the originals on your device</string>
     <string name="onboarding_mirror_toggle">Mirror changes to local files</string>
@@ -974,7 +975,7 @@
     <string name="onboarding_mirror_grant">Allow all-files access</string>
     <string name="settings_rename_on_upload">Rename to capture date on upload</string>
     <string name="settings_delete_after_backup">Delete device file after backup</string>
-    <string name="settings_delete_after_backup_desc">Removes the local copy from your device after Drive has the upload. On Android 11+ it goes to the device trash first, so you can still restore it there for about a month.</string>
+    <string name="settings_delete_after_backup_desc">Removes the local copy from your device after Drive has the upload. On Android 11+ it goes to the device trash first, so you can still restore it there for about a month. With upload compression on, only the compressed copy is left in Drive.</string>
     <string name="settings_strip_gps">Remove GPS location</string>
     <string name="settings_strip_gps_desc">Strip GPS coordinates and location data</string>
     <string name="settings_strip_camera">Remove camera info</string>

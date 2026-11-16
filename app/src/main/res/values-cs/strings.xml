@@ -431,7 +431,7 @@
     <string name="settings_free_up_interval_1_month">1 měsíc</string>
     <string name="settings_free_up_auto_section">Automatické uvolňování</string>
     <string name="settings_free_up_auto">Automaticky uvolňovat místo</string>
-    <string name="settings_free_up_auto_desc">Odstraní ze zařízení kopie fotek, které jsou zálohované déle než zvolenou dobu. Odstraní se jen fotky, které tato aplikace nahrála a potvrdila na Drive, kopie na Drive zůstane nedotčená.</string>
+    <string name="settings_free_up_auto_desc">Odstraní ze zařízení kopie fotek, které jsou zálohované déle než zvolenou dobu. Odstraní se jen fotky, které tato aplikace nahrála a potvrdila na Drive. Se zapnutou kompresí při nahrávání zůstane na Drive jen komprimovaná kopie.</string>
     <string name="settings_free_up_interval">Ponechat v zařízení po dobu</string>
     <string name="settings_free_up_interval_desc">Jak dlouho fotka zůstane v tomto zařízení po zálohování.</string>
     <string name="settings_account_section">Účet</string>
@@ -594,6 +594,7 @@
     <string name="settings_mirror_strip_local_desc">Odebere tyto údaje i z kopie v telefonu, takže zálohovaná kopie a místní soubor zůstanou totožné. Vyžaduje přístup ke všem souborům a změní vaše původní soubory.</string>
     <string name="settings_mirror_compress_local">Komprimovat i místní soubor</string>
     <string name="settings_mirror_compress_local_desc">Nahradí kopii v telefonu lehčí verzí. Vyžaduje přístup ke všem souborům; původní soubor v plné kvalitě bude přepsán.</string>
+    <string name="settings_compress_original_note">Originál v plné kvalitě zůstává jen v tomto telefonu. Jakmile ho z telefonu odstraníte, uvolněním místa nebo smazáním po záloze, zůstane na Drive jen komprimovaná kopie.</string>
     <string name="onboarding_mirror_title">Sjednoťte své místní kopie</string>
     <string name="onboarding_mirror_subtitle">Aplikujte stejné změny i na originály ve vašem zařízení</string>
     <string name="onboarding_mirror_toggle">Zrcadlit změny do místních souborů</string>
@@ -601,7 +602,7 @@
     <string name="onboarding_mirror_grant">Povolit přístup ke všem souborům</string>
     <string name="settings_rename_on_upload">Přejmenovat na datum pořízení při nahrávání</string>
     <string name="settings_delete_after_backup">Po záloze smazat soubor v zařízení</string>
-    <string name="settings_delete_after_backup_desc">Odebere místní kopii ze zařízení poté, co je nahrávka na Drive. V systému Android 11+ nejprve putuje do koše zařízení, odkud ji můžete zhruba měsíc obnovit.</string>
+    <string name="settings_delete_after_backup_desc">Odebere místní kopii ze zařízení poté, co je nahrávka na Drive. V systému Android 11+ nejprve putuje do koše zařízení, odkud ji můžete zhruba měsíc obnovit. Se zapnutou kompresí při nahrávání zůstane na Drive jen komprimovaná kopie.</string>
     <string name="settings_strip_gps">Odstranit polohu GPS</string>
     <string name="settings_strip_gps_desc">Odstranit souřadnice GPS a údaje o poloze</string>
     <string name="settings_strip_camera">Odstranit informace o fotoaparátu</string>

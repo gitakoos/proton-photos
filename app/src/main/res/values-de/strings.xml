@@ -219,11 +219,11 @@
     <string name="settings_free_up_interval_1_month">1 Monat</string>
     <string name="settings_free_up_auto_section">Automatisches Freigeben</string>
     <string name="settings_free_up_auto">Speicher automatisch freigeben</string>
-    <string name="settings_free_up_auto_desc">Löscht die Gerätekopie von Fotos, die länger als die gewählte Zeit gesichert sind. Es werden nur Fotos entfernt, die diese App hochgeladen und in Drive bestätigt hat, die Kopie in Drive bleibt erhalten.</string>
+    <string name="settings_free_up_auto_desc">Löscht die Gerätekopie von Fotos, die länger als die gewählte Zeit gesichert sind. Es werden nur Fotos entfernt, die diese App hochgeladen und in Drive bestätigt hat. Ist die Komprimierung beim Hochladen an, bleibt in Drive nur die komprimierte Kopie.</string>
     <string name="settings_free_up_interval">Auf dem Gerät behalten für</string>
     <string name="settings_free_up_interval_desc">Wie lange ein Foto nach der Sicherung auf diesem Gerät bleibt.</string>
     <string name="settings_delete_after_backup">Gerätedatei nach Sicherung löschen</string>
-    <string name="settings_delete_after_backup_desc">Entfernt die lokale Kopie vom Gerät, sobald Drive den Upload hat. Unter Android 11+ wandert sie zuerst in den Geräte-Papierkorb, wo du sie noch etwa einen Monat wiederherstellen kannst.</string>
+    <string name="settings_delete_after_backup_desc">Entfernt die lokale Kopie vom Gerät, sobald Drive den Upload hat. Unter Android 11+ wandert sie zuerst in den Geräte-Papierkorb, wo du sie noch etwa einen Monat wiederherstellen kannst. Ist die Komprimierung beim Hochladen an, bleibt in Drive nur die komprimierte Kopie.</string>
     <string name="settings_account_section">Konto</string>
     <string name="settings_sign_in_to_proton">Bei Proton anmelden</string>
     <string name="settings_sign_out">Abmelden</string>
@@ -354,6 +354,7 @@
     <string name="settings_mirror_strip_local_desc">Entfernt diese Daten auch aus der Kopie auf dem Gerät, damit die gesicherte und die lokale Datei identisch bleiben. Erfordert Zugriff auf alle Dateien und ändert deine Originaldateien.</string>
     <string name="settings_mirror_compress_local">Auch die lokale Datei komprimieren</string>
     <string name="settings_mirror_compress_local_desc">Ersetzt auch die Kopie auf dem Gerät durch die leichtere Version. Erfordert Zugriff auf alle Dateien; die ursprüngliche Datei in voller Qualität wird überschrieben.</string>
+    <string name="settings_compress_original_note">Das Original in voller Qualität gibt es nur auf diesem Handy. Sobald es vom Handy entfernt wird, durch Speicher freigeben oder Löschen nach der Sicherung, bleibt in Drive nur die komprimierte Kopie.</string>
     <string name="onboarding_mirror_title">Lokale Kopien angleichen</string>
     <string name="onboarding_mirror_subtitle">Dieselben Änderungen auch an den Originalen auf deinem Gerät</string>
     <string name="onboarding_mirror_toggle">Änderungen auf lokale Dateien spiegeln</string>
