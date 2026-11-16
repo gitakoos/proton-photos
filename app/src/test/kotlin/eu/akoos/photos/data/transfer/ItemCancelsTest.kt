@@ -35,8 +35,8 @@ import org.junit.Test
 
 /**
  * Pins [ItemCancels]: cancelling one item ends only that item, an item cancelled before its turn never
- * starts, a cancel after an item ended changes nothing, and a cancel of the whole batch still reaches
- * the caller.
+ * starts, a cancel after an item ended changes nothing, an item past its commit point finishes, and a
+ * cancel of the whole batch still reaches the caller.
  */
 class ItemCancelsTest {
 
@@ -106,5 +106,38 @@ class ItemCancelsTest {
         job.join()
         assertTrue(caught is CancellationException)
         assertFalse(cancels.isCancelled("k"))
+    }
+    @Test
+    fun `an item past its commit point finishes despite a later cancel`() = runTest {
+        val cancels = ItemCancels()
+        var committed: Boolean? = null
+        var finished = false
+        val stopped = cancels.run("k") {
+            committed = ItemCommitPoint.reach()
+            cancels.cancel("k")
+            delay(50)
+            finished = true
+        }
+        assertEquals(true, committed)
+        assertTrue(finished)
+        assertFalse(stopped)
+    }
+
+    @Test
+    fun `a cancel before the commit point makes the item stop there`() = runTest {
+        val cancels = ItemCancels()
+        var committed: Boolean? = null
+        val stopped = cancels.run("k") {
+            cancels.cancel("k")
+            committed = ItemCommitPoint.reach()
+            if (committed == false) throw CancellationException("stopped before the commit")
+        }
+        assertEquals(false, committed)
+        assertTrue(stopped)
+    }
+
+    @Test
+    fun `outside an item the commit point always lets the work go on`() = runTest {
+        assertTrue(ItemCommitPoint.reach())
     }
 }

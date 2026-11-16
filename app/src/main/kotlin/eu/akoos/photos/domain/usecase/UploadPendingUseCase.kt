@@ -890,8 +890,10 @@ class UploadPendingUseCase @Inject constructor(
             }
             // Once claimed, the batch stop never abandons this item: a user stop is honoured only at the
             // upload workers' item boundary (before the claim). Only a cancel of this one photo
-            // ([cancelItem]) or an OS stop cancels it mid-pipeline, and every native PGP call below runs
-            // non-cancellably, so such a cancel lands between them; the catch below releases the claim.
+            // ([cancelItem]) or an OS stop cancels it mid-pipeline: every native PGP call of the app's own
+            // upload runs non-cancellably, so such a cancel lands between them, and the SDK route stops
+            // through the SDK's own cancel. A cancel of this photo after its commit point lets it finish
+            // ([eu.akoos.photos.data.transfer.ItemCommitPoint]). The catch below releases the claim.
             // A row stranded UPLOADING by a genuine process death is recovered on the next pass.
             // Optional rename: derive cloud displayName from the source's capture timestamp
             // (MediaStore DATE_TAKEN). The on-device file keeps its own name unless "mirror to

@@ -25,24 +25,33 @@ package eu.akoos.photos.data.transfer
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Lets one item of a running batch be stopped on its own, keyed by a stable item key.
  *
  * Each item runs as its own child job under [run], so cancelling it ends only that item, through the
  * same cancellation path a stopped batch takes, while the batch's other items carry on. An item
- * cancelled before its turn is never started.
+ * cancelled before its turn is never started. An item that reached its commit point
+ * ([ItemCommitPoint.reach]) is past the point a cancel can undo, so a later cancel lets it finish.
  */
 class ItemCancels {
     private val requested = ConcurrentHashMap.newKeySet<String>()
+    private val committed = ConcurrentHashMap.newKeySet<String>()
     private val running = ConcurrentHashMap<String, Job>()
+    private val lock = Any()
 
-    /** Stop the item [key]: the running job is cancelled, a waiting one will not start. */
+    /** Stop the item [key]: the running job is cancelled unless it is committed, a waiting one will not start. */
     fun cancel(key: String) {
-        requested.add(key)
-        running[key]?.cancel()
+        val job = synchronized(lock) {
+            requested.add(key)
+            if (key in committed) null else running[key]
+        }
+        job?.cancel()
     }
 
     fun isCancelled(key: String): Boolean = key in requested
@@ -56,21 +65,50 @@ class ItemCancels {
         return coroutineScope {
             // Undispatched, so the item starts at once on this coroutine exactly as a plain call would and
             // the batch's own stop checks keep their order.
-            val job = launch(start = CoroutineStart.UNDISPATCHED) { block() }
-            running[key] = job
+            val job = launch(ItemCommitPoint { commit(key) }, start = CoroutineStart.UNDISPATCHED) { block() }
+            // A cancel that landed before the registration, while the item ran up to its first pause.
+            val cancelNow = synchronized(lock) {
+                running[key] = job
+                key in requested && key !in committed
+            }
             try {
-                // A cancel that landed before the registration, while the item ran up to its first pause.
-                if (key in requested) job.cancel()
+                if (cancelNow) job.cancel()
                 job.join()
             } finally {
                 running.remove(key, job)
             }
-            job.isCancelled && key in requested
+            job.isCancelled && key in requested && key !in committed
+        }
+    }
+
+    /** Marks [key] committed; false when a cancel came first, so the item must stop instead. */
+    private fun commit(key: String): Boolean = synchronized(lock) {
+        if (key in requested) {
+            false
+        } else {
+            committed.add(key)
+            true
         }
     }
 
     /** Forget every request, for a new batch. */
     fun clear() {
-        requested.clear()
+        synchronized(lock) {
+            requested.clear()
+            committed.clear()
+        }
+    }
+}
+
+/**
+ * The point in an item's work after which stopping it would lose more than it saves, such as an upload
+ * about to commit or a download already saved. Work running under [ItemCancels.run] finds it in its
+ * coroutine context; anywhere else there is none and [reach] always answers true.
+ */
+class ItemCommitPoint internal constructor(private val onReach: () -> Boolean) :
+    AbstractCoroutineContextElement(ItemCommitPoint) {
+    companion object Key : CoroutineContext.Key<ItemCommitPoint> {
+        /** Marks the running item committed. False when the user cancelled it first: the caller stops it. */
+        suspend fun reach(): Boolean = currentCoroutineContext()[ItemCommitPoint]?.onReach?.invoke() ?: true
     }
 }

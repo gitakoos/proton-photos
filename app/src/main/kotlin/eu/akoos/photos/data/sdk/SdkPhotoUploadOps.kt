@@ -24,13 +24,20 @@ package eu.akoos.photos.data.sdk
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.entity.isUsableGpsFix
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.domain.entity.UserId
+import me.proton.drive.sdk.Uploader
+import me.proton.drive.sdk.UploadController
 import me.proton.drive.sdk.entity.FileNode
 import me.proton.drive.sdk.entity.LegacyNodeUid
 import me.proton.drive.sdk.entity.LegacyRevisionUid
@@ -63,6 +70,11 @@ class SdkPhotoUpload(
     val sha1: ByteArray,
     val onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
 )
+
+private const val TAG = "SdkPhotoUploadOps"
+
+/** How long a stopped upload waits for the SDK to drop its draft. */
+private const val DROP_UNFINISHED_TIMEOUT_MS = 10_000L
 
 /** Thrown when the SDK cannot take the upload, so the app's own upload runs instead. */
 class SdkUploadException(message: String) : IllegalStateException(message)
@@ -112,12 +124,17 @@ class SdkPhotoUploadOps @Inject constructor(
                                 .filterNotNull()
                                 .onEach { upload.onProgress?.invoke(it.bytesCompleted, it.bytesInTotal ?: upload.fileSize) }
                                 .launchIn(this)
-                            controller.tryResume(this)
                             val result = try {
+                                controller.tryResume(this)
                                 controller.awaitCompletion()
+                            } catch (e: CancellationException) {
+                                withContext(NonCancellable) { dropUnfinished(uploader, controller) }
+                                throw e
                             } finally {
                                 progress.cancel()
                             }
+                            // Committed: a cancel of this one photo from now on lets it finish.
+                            eu.akoos.photos.data.transfer.ItemCommitPoint.reach()
                             SdkUploadResult(
                                 linkId = (result.nodeUid as LegacyNodeUid).linkId,
                                 revisionId = (result.revisionUid as LegacyRevisionUid).revisionId,
@@ -131,6 +148,22 @@ class SdkPhotoUploadOps @Inject constructor(
                 uploader.close()
             }
         } ?: throw SdkUploadException("the SDK cannot run on this device")
+
+    /**
+     * A stopped upload is never resumed (its controller is closed right after), so it is cancelled and
+     * disposed the way Drive's own app drops an upload, which deletes the draft it left on Drive unless
+     * the commit already went through. Bounded, so a Drive that cannot be reached does not hold the stop.
+     */
+    private suspend fun dropUnfinished(uploader: Uploader, controller: UploadController) {
+        val dropped = withTimeoutOrNull(DROP_UNFINISHED_TIMEOUT_MS) {
+            runCatching {
+                controller.cancel()
+                controller.dispose()
+                uploader.cancel()
+            }.isSuccess
+        } == true
+        Log.d(TAG, if (dropped) "stopped upload dropped with its draft" else "stopped upload: dropping its draft failed or timed out")
+    }
 
     /** The photos named [name] with content [sha1] on Drive, live and committed, by link id. */
     suspend fun findUploaded(userId: UserId, name: String, sha1: ByteArray): List<SdkUploadResult> =

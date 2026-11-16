@@ -1002,6 +1002,11 @@ class PhotoUploadService @Inject constructor(
             } ?: hash.also {
                 Log.w(TAG, "uploadFile: photos root NodeHashKey unavailable — falling back to bare SHA-256 for ContentHash; expect Drive web rejection")
             }
+            // From here a cancel of this one photo lets it finish: once the commit is out, whether it
+            // landed cannot be told. A cancel that came first stops it now, while the draft can still go.
+            if (!eu.akoos.photos.data.transfer.ItemCommitPoint.reach()) {
+                throw CancellationException("upload cancelled by the user before its commit")
+            }
             commitStarted = true
             if (useVolumeEndpoints) {
                 val v2Request = CommitRevisionV2Request(
