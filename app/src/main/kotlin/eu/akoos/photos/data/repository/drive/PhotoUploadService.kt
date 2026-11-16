@@ -1232,7 +1232,9 @@ class PhotoUploadService @Inject constructor(
     /**
      * [item] through the Drive SDK, with the same thumbnails, SHA-1, times, tags and metadata sections
      * the app's own upload commits. When the SDK fails, a photo it may still have committed is looked for
-     * on Drive first: found, it is the result; not found, the failure stands and the app's own upload runs.
+     * on Drive first: found, it is the result; not found, an upload the SDK aborted starts once more through
+     * the SDK ([eu.akoos.photos.data.sdk.uploadRetryingAbort]), and otherwise the failure stands and the
+     * app's own upload runs.
      */
     private suspend fun uploadViaSdk(
         userId: UserId,
@@ -1285,19 +1287,12 @@ class PhotoUploadService @Inject constructor(
             onProgress = onProgress?.let { report -> { done, total -> report(UploadPhase.Uploading, done, total) } },
             matchingBefore = before,
         )
-        val result = try {
-            sdkPhotoUploadOps.upload(userId, upload)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            val after = findUploadedOrNull(userId, item.displayName, sha1)
-            when (val outcome = eu.akoos.photos.data.sdk.sdkUploadAfterFailure(before, after)) {
-                is eu.akoos.photos.data.sdk.SdkUploadAfterFailure.Committed -> outcome.photo
-                eu.akoos.photos.data.sdk.SdkUploadAfterFailure.NothingCommitted -> throw e
-                eu.akoos.photos.data.sdk.SdkUploadAfterFailure.Unknown ->
-                    throw eu.akoos.photos.data.sdk.SdkOutcomeUnknownException("upload outcome unknown", e)
-            }
-        }
+        val result = eu.akoos.photos.data.sdk.uploadRetryingAbort(
+            upload = { sdkPhotoUploadOps.upload(userId, upload) },
+            afterFailure = {
+                eu.akoos.photos.data.sdk.sdkUploadAfterFailure(before, findUploadedOrNull(userId, item.displayName, sha1))
+            },
+        )
         return SdkUploadedPhoto(result.linkId, result.revisionId, thumbnails[me.proton.drive.sdk.entity.ThumbnailType.THUMBNAIL])
     }
 

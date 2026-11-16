@@ -32,6 +32,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -40,6 +41,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.domain.entity.UserId
 import me.proton.drive.sdk.ProtonPhotosClient
+import me.proton.drive.sdk.UploadAbortedException
 import me.proton.drive.sdk.Uploader
 import me.proton.drive.sdk.UploadController
 import me.proton.drive.sdk.entity.FileNode
@@ -152,7 +154,16 @@ class SdkPhotoUploadOps @Inject constructor(
                                     }
                                     try {
                                         controller.tryResume(this)
-                                        controller.awaitCompletion()
+                                        // An error the SDK can recover from pauses the upload with its draft and
+                                        // the blocks already sent kept; it is resumed here rather than started
+                                        // over on the app's own path.
+                                        awaitResumingPauses(
+                                            awaitCompletion = { controller.awaitCompletion() },
+                                            isPaused = { controller.isPaused() },
+                                            resume = { controller.tryResume(this) },
+                                            stopped = { stop.isCompleted },
+                                            waitBeforeResume = { ms -> withTimeoutOrNull(ms) { stop.await() } },
+                                        )
                                     } catch (e: Throwable) {
                                         if (stop.isCompleted && e !is CancellationException) {
                                             throw CancellationException("upload cancelled by the user").apply { initCause(e) }
@@ -167,9 +178,9 @@ class SdkPhotoUploadOps @Inject constructor(
                                 withContext(NonCancellable) { dropUnfinished(uploader, controller) }
                                 throw e
                             } catch (e: Exception) {
-                                // A failed upload is not resumed either (the app's own upload takes the photo
-                                // over), so its draft goes too, but only once Drive shows the commit did not
-                                // go through.
+                                // An aborted upload, or one still paused after its resumes, is not resumed any
+                                // more (a fresh SDK upload or the app's own takes the photo over), so its draft
+                                // goes too, but only once Drive shows the commit did not go through.
                                 handedOff = true
                                 withContext(NonCancellable) {
                                     val outcome = dropFailedSdkUpload(
@@ -336,6 +347,100 @@ internal fun sdkUploadAfterFailure(
         0 -> SdkUploadAfterFailure.NothingCommitted
         1 -> SdkUploadAfterFailure.Committed(fresh.single())
         else -> SdkUploadAfterFailure.Unknown
+    }
+}
+
+/** How often one SDK upload is resumed after the SDK paused it on an error it can recover from. */
+internal const val MAX_SDK_UPLOAD_RESUMES = 3
+
+/** The wait before the [attempt]th resume of a paused SDK upload (1-based). */
+internal fun sdkResumeBackoffMs(attempt: Int): Long = when (attempt) {
+    1 -> 2_000L
+    2 -> 5_000L
+    else -> 10_000L
+}
+
+/**
+ * Waits for an SDK upload through [awaitCompletion]. The SDK pauses an upload that hit an error it can recover
+ * from (a dropped connection, a 5xx), keeping its draft and the blocks already sent, and [awaitCompletion] then
+ * throws that error with the upload [isPaused]; such an upload is resumed through [resume] after
+ * [waitBeforeResume] (which returns early once the upload is [stopped]), at most [maxResumes] times. An upload
+ * the SDK aborted ([UploadAbortedException]) cannot be resumed, and a stopped one is never resumed: their error
+ * is thrown, as is the last one once the resumes are used up. Cancellation passes through.
+ */
+internal suspend fun <T> awaitResumingPauses(
+    awaitCompletion: suspend () -> T,
+    isPaused: suspend () -> Boolean,
+    resume: suspend () -> Unit,
+    stopped: () -> Boolean,
+    waitBeforeResume: suspend (Long) -> Unit,
+    maxResumes: Int = MAX_SDK_UPLOAD_RESUMES,
+    backoffMs: (Int) -> Long = ::sdkResumeBackoffMs,
+): T {
+    var resumes = 0
+    while (true) {
+        try {
+            return awaitCompletion()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: UploadAbortedException) {
+            throw e
+        } catch (e: Exception) {
+            if (stopped() || resumes >= maxResumes) throw e
+            val paused = try {
+                isPaused()
+            } catch (c: CancellationException) {
+                throw c
+            } catch (_: Exception) {
+                false
+            }
+            if (!paused) throw e
+            resumes++
+            runCatching { Log.d(TAG, "upload paused on ${e.javaClass.simpleName}, resume $resumes of $maxResumes") }
+            waitBeforeResume(backoffMs(resumes))
+            if (stopped()) throw e
+            resume()
+        }
+    }
+}
+
+/** How often an SDK upload the SDK aborted is started again before the app's own upload takes over. */
+internal const val MAX_SDK_UPLOAD_ABORT_RETRIES = 1
+
+/** The wait before an aborted SDK upload is started again. */
+internal const val SDK_ABORT_RETRY_DELAY_MS = 2_000L
+
+/**
+ * Runs [upload] and reads what a failure left on Drive through [afterFailure] (built from the photos matching it
+ * before the first attempt, so a commit of any attempt shows up as new). A committed photo is the result, an
+ * outcome that cannot be told throws [SdkOutcomeUnknownException], and with nothing committed an upload the SDK
+ * aborted ([UploadAbortedException], such as a block the storage refused with a 400) starts again after
+ * [SDK_ABORT_RETRY_DELAY_MS], at most [maxRetries] times. Any other failure, or one past the retries, is thrown
+ * for the app's own upload to take over. Cancellation passes through, also during the wait.
+ */
+internal suspend fun uploadRetryingAbort(
+    upload: suspend () -> SdkUploadResult,
+    afterFailure: suspend () -> SdkUploadAfterFailure,
+    maxRetries: Int = MAX_SDK_UPLOAD_ABORT_RETRIES,
+): SdkUploadResult {
+    var retries = 0
+    while (true) {
+        try {
+            return upload()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            when (val outcome = afterFailure()) {
+                is SdkUploadAfterFailure.Committed -> return outcome.photo
+                SdkUploadAfterFailure.Unknown -> throw SdkOutcomeUnknownException("upload outcome unknown", e)
+                SdkUploadAfterFailure.NothingCommitted -> {
+                    if (e !is UploadAbortedException || retries >= maxRetries) throw e
+                    retries++
+                    runCatching { Log.d(TAG, "upload aborted with nothing committed, starting it again ($retries of $maxRetries)") }
+                    delay(SDK_ABORT_RETRY_DELAY_MS)
+                }
+            }
+        }
     }
 }
 
