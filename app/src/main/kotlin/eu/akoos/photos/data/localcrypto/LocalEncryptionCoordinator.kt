@@ -25,6 +25,7 @@ package eu.akoos.photos.data.localcrypto
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.hidden.StoredVaultPassword
 import eu.akoos.photos.data.hidden.VaultPasswordStore
 import eu.akoos.photos.data.mlsync.AddressKeyEnvelopeCrypto
 import eu.akoos.photos.data.mlsync.EnvelopeCrypto
@@ -100,14 +101,7 @@ class LocalEncryptionCoordinator @Inject constructor(
             // not read.
             runCatching { context.settingsDataStore.data.first() }
             runCatching { encryptVault() }.onFailure { logFailure("vault encryption", it) }
-            runCatching {
-                val password = passwordStore.read()
-                try {
-                    keysLock.withLock { LocalCrypto.custody(context)?.syncPasswordCopies(password, rewrite = false) }
-                } finally {
-                    password?.fill('\u0000')
-                }
-            }.onFailure { logFailure("password copies", it) }
+            runCatching { writeMissingPasswordCopies() }.onFailure { logFailure("password copies", it) }
             refresh()
         }
         scope.launch {
@@ -126,7 +120,35 @@ class LocalEncryptionCoordinator @Inject constructor(
         keysLock.withLock { LocalCrypto.custody(context)?.onSignedOut(userId) }
     }
 
-    /** The Hidden password was set to [password], or removed (null): the password copies follow it. */
+    /**
+     * Writes the password copies a key lacks when the stored password reads. A password that is not set or cannot
+     * be read changes nothing: the copies are removed only when the user removes the password.
+     */
+    private suspend fun writeMissingPasswordCopies() {
+        val stored = passwordStore.readState() as? StoredVaultPassword.Readable ?: return
+        try {
+            keysLock.withLock { LocalCrypto.custody(context)?.syncPasswordCopies(stored.password, rewrite = false) }
+        } finally {
+            stored.password.fill('\u0000')
+        }
+    }
+
+    /** Whether [password] opens a password copy, for a stored password that cannot be read any more. */
+    suspend fun passwordOpensCopies(password: CharArray): Boolean = withContext(Dispatchers.IO) {
+        runCatching { keysLock.withLock { LocalCrypto.custody(context)?.passwordOpensCopies(password) } }
+            .onFailure { logFailure("password check", it) }
+            .getOrNull() == true
+    }
+
+    /** The stored password was stored again as [password]: only the copies a key lacks are written. */
+    suspend fun onPasswordConfirmed(password: CharArray) = withContext(Dispatchers.IO) {
+        runCatching {
+            keysLock.withLock { LocalCrypto.custody(context)?.syncPasswordCopies(password, rewrite = false) }
+        }.onFailure { logFailure("password copies", it) }
+        refresh()
+    }
+
+    /** The user set the Hidden password to [password], or removed it (null): the password copies follow it. */
     suspend fun onPasswordChanged(password: CharArray?) = withContext(Dispatchers.IO) {
         runCatching {
             keysLock.withLock { LocalCrypto.custody(context)?.syncPasswordCopies(password, rewrite = true) }
@@ -139,6 +161,8 @@ class LocalEncryptionCoordinator @Inject constructor(
         val custody = LocalCrypto.custody(context) ?: return@withContext RecoveryOutcome(0, 0)
         val outcome = keysLock.withLock { custody.recoverWithPassword(password) }
         if (outcome.keys > 0) restoreLockedStores()
+        // The stored password went with the same Keystore; the one that just opened a copy is stored again.
+        if (outcome.any) runCatching { passwordStore.reseal(password) }.onFailure { logFailure("password reseal", it) }
         refresh()
         outcome
     }

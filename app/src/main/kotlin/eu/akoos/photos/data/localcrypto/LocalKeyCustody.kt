@@ -176,18 +176,22 @@ class LocalKeyCustody(
     }
 
     /**
-     * Brings the password copies in line with [password]: for every key that opens now (and the database key), a
-     * copy under [password], or none when it is null. [rewrite] writes them again (the password changed); without
-     * it only missing copies are written. The copy of a key that does not open now is never touched: it may be the
+     * Brings the password copies in line with [password]. [rewrite] is the user's own change: a new password
+     * rewrites the copy of every key that opens now (each new copy replaces the old one in one step, so there is
+     * never a moment with neither), and none removes them. Without [rewrite] (a start, a new key) only missing
+     * copies are written, and no password removes nothing: a password that is not set or cannot be read is never
+     * taken for the user removing it. The copy of a key that does not open now is never touched: it may be the
      * only way back to that key, and it cannot be written again.
      */
     fun syncPasswordCopies(password: CharArray?, rewrite: Boolean) {
+        if (password == null && !rewrite) return
         runCatching { keyring.current() }
         val ready = keyring.keyIds().mapNotNull { id -> (keyring.state(id) as? DatabaseKeyState.Ready)?.let { id to it.key } }
         val dbKey = database.currentKey()
         if (password == null) {
             ready.forEach { (id, _) -> masterCopies.deletePasswordCopy(id) }
             if (dbKey != null) database.copies.deletePasswordCopy(DATABASE_NAME)
+            log("local keys: password copies removed by the user")
             return
         }
         var written = 0
@@ -201,6 +205,16 @@ class LocalKeyCustody(
             written++
         }
         if (written > 0) log("local keys: $written password copies written")
+    }
+
+    /**
+     * Whether [password] opens a password copy this phone holds: the proof that it is the user's password when
+     * the stored one cannot be read any more (its Keystore key was lost), so it can be stored again.
+     */
+    fun passwordOpensCopies(password: CharArray): Boolean {
+        val names = keyring.keyIds().filter { masterCopies.hasPasswordCopy(it) }
+        if (names.isEmpty()) return database.copies.openPasswordCopy(DATABASE_NAME, password) != null
+        return masterCopies.openPasswordCopy(names.first(), password) != null
     }
 
     fun status(): LocalKeyStatus {

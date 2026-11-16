@@ -222,6 +222,38 @@ class LocalKeyCustodyTest {
     }
 
     @Test
+    fun `a start that finds no readable password keeps every password copy`() {
+        custody.onOccupant(null)
+        val key = keyring.current()
+        custody.syncPasswordCopies("first password".toCharArray(), rewrite = false)
+        // The stored password could not be read (its Keystore key went with the others), or none is set:
+        // the start passes no password and must not take that for the user removing it.
+        custody.syncPasswordCopies(null, rewrite = false)
+        assertTrue(copies.hasPasswordCopy(key.keyId))
+        assertTrue(database.copies.hasPasswordCopy(LocalKeyCustody.DATABASE_NAME))
+        assertArrayEquals(key.key, copies.openPasswordCopy(key.keyId, "first password".toCharArray()))
+    }
+
+    @Test
+    fun `a password copy proves the password when the stored one cannot be read`() {
+        custody.onOccupant(null)
+        keyring.current()
+        custody.syncPasswordCopies("first password".toCharArray(), rewrite = false)
+        assertTrue(custody.passwordOpensCopies("first password".toCharArray()))
+        assertFalse(custody.passwordOpensCopies("a guess".toCharArray()))
+    }
+
+    @Test
+    fun `only the user removing the password removes the copies`() {
+        custody.onOccupant(null)
+        val key = keyring.current()
+        custody.syncPasswordCopies("first password".toCharArray(), rewrite = false)
+        custody.syncPasswordCopies(null, rewrite = true)
+        assertFalse(copies.hasPasswordCopy(key.keyId))
+        assertFalse(database.copies.hasPasswordCopy(LocalKeyCustody.DATABASE_NAME))
+    }
+
+    @Test
     fun `a changed password rewrites the copies of keys that open`() {
         custody.onOccupant(null)
         val key = keyring.current()

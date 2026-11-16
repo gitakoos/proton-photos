@@ -63,7 +63,7 @@ class VaultPasswordStore @Inject constructor(
     suspend fun isSet(): Boolean = context.settingsDataStore.data.first()[SettingsKeys.VAULT_PASSWORD_BLOB] != null
 
     suspend fun set(password: CharArray) {
-        val blob = VaultPasswordCodec.encrypt(password, keystoreKey())
+        val blob = VaultPasswordCodec.encrypt(password, keystoreKey(create = true))
         context.settingsDataStore.edit { it[SettingsKeys.VAULT_PASSWORD_BLOB] = blob }
         // The local keys get a copy sealed with the password, which opens them on a phone whose Keystore lost them.
         localEncryption.get().onPasswordChanged(password)
@@ -75,24 +75,55 @@ class VaultPasswordStore @Inject constructor(
     }
 
     /** The password, or null when none is set or the stored value can no longer be decrypted. */
-    suspend fun read(): CharArray? {
-        val blob = context.settingsDataStore.data.first()[SettingsKeys.VAULT_PASSWORD_BLOB] ?: return null
-        return runCatching { VaultPasswordCodec.decrypt(blob, keystoreKey()) }.getOrNull()
+    suspend fun read(): CharArray? = (readState() as? StoredVaultPassword.Readable)?.password
+
+    /**
+     * What is stored: no password, the password, or one that is set but cannot be read now (its Keystore key is
+     * gone). The last is never the same as no password: the password copies of the local keys stay for it.
+     */
+    suspend fun readState(): StoredVaultPassword {
+        val blob = context.settingsDataStore.data.first()[SettingsKeys.VAULT_PASSWORD_BLOB] ?: return StoredVaultPassword.None
+        return runCatching { VaultPasswordCodec.decrypt(blob, keystoreKey(create = false)) }
+            .fold({ StoredVaultPassword.Readable(it) }, { StoredVaultPassword.Unreadable })
     }
 
-    /** Whether [typed] is the stored password. False when none is set. */
+    /**
+     * Whether [typed] is the stored password. False when none is set. A stored password that cannot be read is
+     * checked against the local keys' password copies instead, and stored again under a working Keystore key when
+     * [typed] opens one, so the user is never locked out of their own password.
+     */
     suspend fun matches(typed: CharArray): Boolean {
-        val stored = read() ?: return false
-        try {
-            return vaultPasswordMatches(stored, typed)
-        } finally {
-            stored.fill('\u0000')
+        return when (val stored = readState()) {
+            StoredVaultPassword.None -> false
+            is StoredVaultPassword.Readable -> try {
+                vaultPasswordMatches(stored.password, typed)
+            } finally {
+                stored.password.fill('\u0000')
+            }
+            StoredVaultPassword.Unreadable -> {
+                val confirmed = localEncryption.get().passwordOpensCopies(typed)
+                if (confirmed) reseal(typed)
+                confirmed
+            }
         }
     }
 
-    private fun keystoreKey(): SecretKey {
+    /**
+     * Stores [password] again when the stored value cannot be read, after a password copy proved it. The copies
+     * stay as they are; only missing ones are added.
+     */
+    suspend fun reseal(password: CharArray) {
+        if (readState() != StoredVaultPassword.Unreadable) return
+        val blob = VaultPasswordCodec.encrypt(password, keystoreKey(create = true))
+        context.settingsDataStore.edit { it[SettingsKeys.VAULT_PASSWORD_BLOB] = blob }
+        localEncryption.get().onPasswordConfirmed(password)
+    }
+
+    /** The Keystore key the password is sealed with, made when missing and [create] is set. */
+    private fun keystoreKey(create: Boolean): SecretKey {
         val store = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        check(create) { "no password key" }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
             KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -108,6 +139,16 @@ class VaultPasswordStore @Inject constructor(
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "pfp_vault_password"
     }
+}
+
+/** What the password store holds. */
+sealed interface StoredVaultPassword {
+    data object None : StoredVaultPassword
+
+    class Readable(val password: CharArray) : StoredVaultPassword
+
+    /** Set, but its Keystore key cannot open it now. */
+    data object Unreadable : StoredVaultPassword
 }
 
 /** AES-GCM sealing of the password under a given key, apart from the Keystore so it runs in a unit test. */
