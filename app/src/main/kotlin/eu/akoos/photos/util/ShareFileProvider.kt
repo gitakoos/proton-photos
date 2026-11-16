@@ -50,8 +50,9 @@ import java.util.concurrent.ConcurrentHashMap
 class ShareFileProvider : FileProvider() {
 
     /**
-     * A full-size copy in the cache is kept encrypted, so the receiver is handed a descriptor that decrypts as it
-     * reads (seekable, nothing written in plaintext). A file written by an earlier version opens as it is.
+     * A full-size copy in the cache, like a stripped share copy, is kept encrypted, so the receiver is handed a
+     * descriptor that decrypts as it reads (seekable, nothing written in plaintext). A file written by an earlier
+     * version, or while no key answered, opens as it is.
      */
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val file = cacheFileOf(uri) ?: return super.openFile(uri, mode)
@@ -61,14 +62,20 @@ class ShareFileProvider : FileProvider() {
         return VaultReadProvider.openDecrypted(context, file)
     }
 
-    /** The full-size cache file a share uri names (`content://<authority>/shared/<name>`), or null. */
+    /** The full-size cache file (`content://<authority>/shared/<name>`) or stripped share copy
+     *  (`.../stripped/<name>`) a share uri names, or null. */
     private fun cacheFileOf(uri: Uri): File? {
         val context = context ?: return null
         val segments = uri.pathSegments
-        if (segments.size != 2 || segments[0] != SHARED_ROOT) return null
+        if (segments.size != 2) return null
+        val dir = when (segments[0]) {
+            SHARED_ROOT -> LocalFiles.dir(context, LocalFiles.Area.FULLRES)
+            STRIPPED_ROOT -> strippedShareDir(context)
+            else -> return null
+        }
         val name = segments[1]
-        if (name.isBlank() || name == "." || name == "..") return null
-        return File(LocalFiles.dir(context, LocalFiles.Area.FULLRES), name).takeIf { it.isFile }
+        if (name.isBlank() || name == "." || name == ".." || name.contains('/')) return null
+        return File(dir, name).takeIf { it.isFile }
     }
 
     override fun query(
@@ -114,6 +121,7 @@ class ShareFileProvider : FileProvider() {
         private const val MAX_ENTRIES = 256
         /** The `name` of the `cache-path` entry in share_paths.xml. */
         private const val SHARED_ROOT = "shared"
+        private const val STRIPPED_ROOT = "stripped"
         private val displayNames = ConcurrentHashMap<String, String>()
 
         /** Register the real filename to report for a just-created share URI. A blank name is

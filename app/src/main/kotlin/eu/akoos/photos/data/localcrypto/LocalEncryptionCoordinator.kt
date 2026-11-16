@@ -37,6 +37,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.HiddenCaptureTime
 import eu.akoos.photos.util.mimeFromPath
+import eu.akoos.photos.util.sweepLegacyShareCopies
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -120,6 +121,8 @@ class LocalEncryptionCoordinator @Inject constructor(
             // A little before this process started, so a temp it is writing now is never taken.
             runCatching { CacheFiles.sweepWriteTemps(context, before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS) }
                 .onFailure { logFailure("temp sweep", it) }
+            runCatching { sweepLegacyShareCopies(context, before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS) }
+                .onFailure { logFailure("share copy sweep", it) }
         }
         scope.launch {
             // The settings file is encrypted the first time it is opened, before any vault file is: an older
