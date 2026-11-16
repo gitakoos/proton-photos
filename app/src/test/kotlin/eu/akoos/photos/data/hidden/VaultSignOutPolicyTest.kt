@@ -50,6 +50,15 @@ class VaultSignOutPolicyTest {
     )
 
     @Test
+    fun `a sign-out the user asked for tells them when photos stayed in the vault`() {
+        assertTrue(VaultSignOutPolicy.keptAfterUserSignOut(HiddenVaultDecisions.keptForPassword(listOf("file:///v/a")), 3))
+        assertTrue(VaultSignOutPolicy.keptAfterUserSignOut(HiddenRescue(moved = 2, stillInVault = setOf("file:///v/b")), 3))
+        assertTrue("a rescue that could not run leaves the whole vault", VaultSignOutPolicy.keptAfterUserSignOut(null, 3))
+        assertFalse(VaultSignOutPolicy.keptAfterUserSignOut(HiddenRescue(moved = 3, stillInVault = emptySet()), 3))
+        assertFalse(VaultSignOutPolicy.keptAfterUserSignOut(null, 0))
+    }
+
+    @Test
     fun `a password that cannot be read keeps the photos in the vault, never in the gallery`() = runTest {
         assertEquals(RescueRoute.KEEP_IN_VAULT, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.Unreadable))
         assertEquals(RescueRoute.ZIP, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.Readable(charArrayOf('p'))))

@@ -83,6 +83,14 @@ class VaultSignOutPolicy(
         fun wipeAfterRescue(rescued: HiddenRescue?): VaultWipe =
             if (rescued == null) VaultWipe.None else VaultWipe.Except(rescued.stillInVault)
 
+        /**
+         * Whether a sign-out the user asked for, choosing to take the photos to the gallery, left some of them in the
+         * vault (a password that cannot be read, a write that failed, or a rescue that could not run with
+         * [vaultFiles] in the vault), so the user is told where they are.
+         */
+        fun keptAfterUserSignOut(rescued: HiddenRescue?, vaultFiles: Int): Boolean =
+            if (rescued == null) vaultFiles > 0 else rescued.stillInVault.isNotEmpty()
+
         /** What a rescue did, as counts only, for the diagnostics a tester copies out. */
         fun vaultNote(rescued: HiddenRescue?): String =
             if (rescued == null) "vault move failed, vault left alone"

@@ -191,6 +191,7 @@ class SettingsViewModel @Inject constructor(
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val hiddenVaultRestorer: eu.akoos.photos.data.hidden.HiddenVaultRestorer,
+    private val vaultRescueNotifier: eu.akoos.photos.data.hidden.VaultRescueNotifier,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val deviceHealth: DeviceHealthPolicy,
     private val personDao: PersonDao,
@@ -2182,6 +2183,9 @@ class SettingsViewModel @Inject constructor(
                             )
                         }.getOrNull()
                         vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
+                        if (eu.akoos.photos.data.hidden.VaultSignOutPolicy.keptAfterUserSignOut(rescued, vaultFiles)) {
+                            runCatching { vaultRescueNotifier.notifyKeptAfterSignOut() }
+                        }
                         eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued)
                     }
                 }

@@ -1420,6 +1420,8 @@
     <string name="vault_rescue_title">Vaše prihlásenie skončilo</string>
     <string name="vault_rescue_text">Vaše skryté fotky bez kópie na Drive sa vrátili do galérie, do priečinka %1$s, aby sa žiadna nestratila.</string>
     <string name="vault_rescue_kept_text">Heslo k skrytým fotkám sa nepodarilo prečítať, a tak skryté fotky bez kópie na Drive zostali v aplikácii, namiesto toho, aby išli nechránené do galérie. Otvorte Skryté fotky a zadajte heslo, aby ste ich videli.</string>
+    <string name="vault_signout_kept_title">Skryté fotky zostali v aplikácii</string>
+    <string name="vault_signout_kept_text">Niektoré skryté fotky bez kópie na Drive sa nepodarilo presunúť do galérie, a tak zostali v aplikácii. Otvorte Skryté fotky, aby ste ich videli.</string>
     <string name="update_notification_text">Ťuknutím nainštalujete verziu %1$s.</string>
     <string name="settings_backup_how_section">Ako prebieha zálohovanie</string>
     <string name="settings_theme_palette">Motív a paleta</string>

@@ -1182,6 +1182,8 @@
     <string name="vault_rescue_title">Du wurdest abgemeldet</string>
     <string name="vault_rescue_text">Deine versteckten Fotos ohne Kopie in Drive wurden zurück in die Galerie verschoben, in den Ordner %1$s, damit keines verloren geht.</string>
     <string name="vault_rescue_kept_text">Dein Passwort für versteckte Fotos konnte nicht gelesen werden, deshalb sind deine versteckten Fotos ohne Kopie in Drive in der App geblieben, statt ungeschützt in die Galerie zu gehen. Öffne Versteckte Fotos und gib das Passwort ein, um sie zu sehen.</string>
+    <string name="vault_signout_kept_title">Versteckte Fotos in der App behalten</string>
+    <string name="vault_signout_kept_text">Einige deiner versteckten Fotos ohne Kopie in Drive konnten nicht in die Galerie, deshalb sind sie in der App geblieben. Öffne Versteckte Fotos, um sie zu sehen.</string>
     <string name="update_notification_text">Tippen, um Version %1$s zu installieren.</string>
     <string name="settings_backup_how_section">Wie gesichert wird</string>
     <string name="settings_theme_palette">Design &amp; Palette</string>

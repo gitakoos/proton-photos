@@ -1205,6 +1205,8 @@
     <string name="vault_rescue_title">Ki lettél jelentkeztetve</string>
     <string name="vault_rescue_text">A Drive-ban másolattal nem rendelkező rejtett fotóid visszakerültek a galériába, a(z) %1$s mappába, így egyik sem veszett el.</string>
     <string name="vault_rescue_kept_text">A rejtett fotók jelszavát nem sikerült beolvasni, ezért a Drive-on másolat nélküli rejtett fotóid az alkalmazásban maradtak, ahelyett hogy védelem nélkül a galériába kerültek volna. Nyisd meg a Rejtett fotókat, és add meg a jelszót, hogy lásd őket.</string>
+    <string name="vault_signout_kept_title">Rejtett fotók maradtak az alkalmazásban</string>
+    <string name="vault_signout_kept_text">Néhány Drive-on másolat nélküli rejtett fotód nem kerülhetett a galériába, ezért az alkalmazásban maradt. Nyisd meg a Rejtett fotókat, hogy lásd őket.</string>
     <string name="update_notification_text">Koppints a(z) %1$s verzió telepítéséhez.</string>
     <string name="settings_backup_how_section">A mentés módja</string>
     <string name="settings_theme_palette">Téma és paletta</string>

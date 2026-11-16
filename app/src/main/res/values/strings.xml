@@ -1954,6 +1954,8 @@
     <string name="vault_rescue_title">You were signed out</string>
     <string name="vault_rescue_text">Your hidden photos with no copy in Drive were moved back to the gallery, into the %1$s folder, so none is lost.</string>
     <string name="vault_rescue_kept_text">Your password for hidden photos could not be read, so your hidden photos with no copy in Drive stayed in the app instead of going to the gallery unprotected. Open Hidden Photos and enter the password to see them.</string>
+    <string name="vault_signout_kept_title">Hidden photos kept in the app</string>
+    <string name="vault_signout_kept_text">Some of your hidden photos with no copy in Drive could not go to the gallery, so they stayed in the app. Open Hidden Photos to see them.</string>
     <string name="update_notification_text">Tap to install version %1$s.</string>
     <string name="settings_backup_how_section">How backup runs</string>
     <string name="settings_theme_palette">Theme &amp; palette</string>

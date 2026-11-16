@@ -48,6 +48,12 @@ class VaultRescueNotifier @Inject constructor(
     /** The photos stayed in the vault: a password is set but could not be read for the protected zip. */
     fun notifyKeptInVault() = post(context.getString(R.string.vault_rescue_kept_text))
 
+    /** A sign-out the user asked for could not take some photos to the gallery; they stayed in the vault. */
+    fun notifyKeptAfterSignOut() = post(
+        context.getString(R.string.vault_signout_kept_text),
+        title = context.getString(R.string.vault_signout_kept_title),
+    )
+
     /** [zipName] is the zip in Downloads the photos went into, or null when they went to the gallery. */
     fun notifyMoved(zipName: String? = null) {
         post(
@@ -59,7 +65,7 @@ class VaultRescueNotifier @Inject constructor(
         )
     }
 
-    private fun post(text: String) {
+    private fun post(text: String, title: String = context.getString(R.string.vault_rescue_title)) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         ensureNotificationChannel(
             context,
@@ -81,7 +87,7 @@ class VaultRescueNotifier @Inject constructor(
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(context.getString(R.string.vault_rescue_title))
+            .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)

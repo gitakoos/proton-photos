@@ -1197,6 +1197,8 @@
     <string name="vault_rescue_title">La tua sessione è terminata</string>
     <string name="vault_rescue_text">Le tue foto nascoste senza copia su Drive sono state riportate nella galleria, nella cartella %1$s, così nessuna va persa.</string>
     <string name="vault_rescue_kept_text">Non è stato possibile leggere la password delle foto nascoste, quindi le foto nascoste senza copia su Drive sono rimaste nell\'app invece di finire non protette nella galleria. Apri Foto nascoste e inserisci la password per vederle.</string>
+    <string name="vault_signout_kept_title">Foto nascoste rimaste nell\'app</string>
+    <string name="vault_signout_kept_text">Alcune foto nascoste senza copia su Drive non sono potute andare nella galleria, quindi sono rimaste nell\'app. Apri Foto nascoste per vederle.</string>
     <string name="update_notification_text">Tocca per installare la versione %1$s.</string>
     <string name="settings_backup_how_section">Come funziona il backup</string>
     <string name="settings_theme_palette">Tema e tavolozza</string>
