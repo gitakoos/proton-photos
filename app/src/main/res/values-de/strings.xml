@@ -2773,7 +2773,8 @@
     <string name="local_encryption_account_note">Der Schlüssel ist an dein Proton-Konto gebunden. Verliert das Telefon ihn einmal, öffnet eine erneute Anmeldung alles wieder.</string>
     <string name="local_encryption_password_note">Dein Passwort für versteckte Fotos öffnet diese Daten ebenfalls, falls das Telefon den Schlüssel einmal verliert.</string>
     <string name="local_encryption_guest_title">Lege ein Passwort für versteckte Fotos fest.</string>
-    <string name="local_encryption_guest_note">Ohne Konto liegt der Schlüssel nur im sicheren Speicher dieses Telefons. Verliert das Telefon ihn, lassen sich deine versteckten Fotos nur mit einem Passwort für versteckte Fotos wieder öffnen.</string>
+    <string name="local_encryption_guest_note">Ohne Konto liegt der Schlüssel nur im sicheren Speicher dieses Telefons. Verliert das Telefon ihn einmal, lassen sich deine versteckten Fotos nicht wiederherstellen, außer du legst ein Passwort für sie fest.</string>
+    <string name="local_encryption_guest_hide_title">Halte deine versteckten Fotos wiederherstellbar</string>
     <string name="local_encryption_not_now">Nicht jetzt</string>
     <string name="local_encryption_set_password">Passwort festlegen</string>
     <string name="local_encryption_ok">OK</string>

@@ -2775,7 +2775,8 @@
     <string name="local_encryption_account_note">La clé est liée à votre compte Proton. Si le téléphone la perd un jour, une nouvelle connexion rouvre tout.</string>
     <string name="local_encryption_password_note">Votre mot de passe des photos masquées ouvre aussi ces données si le téléphone perd un jour la clé.</string>
     <string name="local_encryption_guest_title">Définissez un mot de passe pour les photos masquées.</string>
-    <string name="local_encryption_guest_note">Sans compte, la clé se trouve uniquement dans le stockage sécurisé de ce téléphone. Si le téléphone la perd, vos photos masquées ne pourront être rouvertes qu\'avec un mot de passe des photos masquées.</string>
+    <string name="local_encryption_guest_note">Sans compte, la clé se trouve uniquement dans le stockage sécurisé de ce téléphone. Si le téléphone la perd un jour, vos photos masquées ne pourront pas être récupérées, sauf si vous leur définissez un mot de passe.</string>
+    <string name="local_encryption_guest_hide_title">Gardez vos photos masquées récupérables</string>
     <string name="local_encryption_not_now">Pas maintenant</string>
     <string name="local_encryption_set_password">Définir un mot de passe</string>
     <string name="local_encryption_ok">OK</string>

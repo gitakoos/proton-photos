@@ -2904,7 +2904,8 @@
     <string name="local_encryption_account_note">Ključ je vezan na vaš račun Proton. Če ga telefon kdaj izgubi, ponovna prijava vse odpre.</string>
     <string name="local_encryption_password_note">Vaše geslo za skrite fotografije te podatke prav tako odpre, če telefon kdaj izgubi ključ.</string>
     <string name="local_encryption_guest_title">Nastavite geslo za skrite fotografije.</string>
-    <string name="local_encryption_guest_note">Brez računa je ključ le v varni shrambi tega telefona. Če ga telefon izgubi, lahko skrite fotografije znova odprete le z geslom za skrite fotografije.</string>
+    <string name="local_encryption_guest_note">Brez računa je ključ le v varni shrambi tega telefona. Če ga telefon kdaj izgubi, skritih fotografij ne bo mogoče obnoviti, razen če zanje nastavite geslo.</string>
+    <string name="local_encryption_guest_hide_title">Poskrbite, da bo skrite fotografije mogoče obnoviti</string>
     <string name="local_encryption_not_now">Ne zdaj</string>
     <string name="local_encryption_set_password">Nastavi geslo</string>
     <string name="local_encryption_ok">V redu</string>

@@ -46,6 +46,7 @@ object LocalCrypto {
     private const val MIGRATED_MARKER = "migrated"
     private const val NOTICE_MARKER = "notice_due"
     private const val LEGACY_MARKER = "legacy_data"
+    private const val GUEST_HIDE_WARNED = "guest_hide_warned"
 
     @Volatile private var keyring: LocalKeyring? = null
     @Volatile private var supported: Boolean? = null
@@ -123,6 +124,16 @@ object LocalCrypto {
 
     fun hadLegacyData(context: Context): Boolean =
         runCatching { File(root(context), LEGACY_MARKER).readBytes().firstOrNull() == 1.toByte() }.getOrDefault(false)
+
+    /** Whether a guest was already told that hidden photos without a password cannot be recovered. */
+    fun isGuestHideWarned(context: Context): Boolean = File(root(context), GUEST_HIDE_WARNED).exists()
+
+    fun markGuestHideWarned(context: Context) {
+        runCatching {
+            root(context).mkdirs()
+            writeWhole(File(root(context), GUEST_HIDE_WARNED), byteArrayOf(1))
+        }
+    }
 
     fun isNoticeDue(context: Context): Boolean = File(root(context), NOTICE_MARKER).exists()
 

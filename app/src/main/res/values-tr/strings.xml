@@ -2690,7 +2690,8 @@
     <string name="local_encryption_account_note">Anahtar Proton hesabına bağlıdır. Telefon onu bir gün kaybederse yeniden oturum açmak her şeyi açar.</string>
     <string name="local_encryption_password_note">Telefon anahtarı bir gün kaybederse gizli fotoğraf parolan da bu verileri açar.</string>
     <string name="local_encryption_guest_title">Gizli fotoğraflar için bir parola belirle.</string>
-    <string name="local_encryption_guest_note">Hesap olmadan anahtar yalnızca bu telefonun güvenli deposunda durur. Telefon onu kaybederse gizli fotoğrafların yalnızca bu parolayla yeniden açılabilir.</string>
+    <string name="local_encryption_guest_note">Hesap olmadan anahtar yalnızca bu telefonun güvenli deposunda durur. Telefon onu bir gün kaybederse, onlar için bir parola belirlemediğin sürece gizli fotoğrafların kurtarılamaz.</string>
+    <string name="local_encryption_guest_hide_title">Gizli fotoğraflarını kurtarılabilir tut</string>
     <string name="local_encryption_not_now">Şimdi değil</string>
     <string name="local_encryption_set_password">Parola belirle</string>
     <string name="local_encryption_ok">Tamam</string>

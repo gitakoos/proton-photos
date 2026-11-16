@@ -2904,7 +2904,8 @@
     <string name="local_encryption_account_note">Klucz jest powiązany z Twoim kontem Proton. Jeśli telefon kiedyś go utraci, ponowne zalogowanie wszystko otworzy.</string>
     <string name="local_encryption_password_note">Twoje hasło do ukrytych zdjęć również otwiera te dane, jeśli telefon kiedyś utraci klucz.</string>
     <string name="local_encryption_guest_title">Ustaw hasło do ukrytych zdjęć.</string>
-    <string name="local_encryption_guest_note">Bez konta klucz znajduje się tylko w bezpiecznym magazynie tego telefonu. Jeśli telefon go utraci, ukryte zdjęcia będzie można otworzyć ponownie tylko hasłem do ukrytych zdjęć.</string>
+    <string name="local_encryption_guest_note">Bez konta klucz znajduje się tylko w bezpiecznym magazynie tego telefonu. Jeśli telefon kiedyś go utraci, ukrytych zdjęć nie da się odzyskać, chyba że ustawisz do nich hasło.</string>
+    <string name="local_encryption_guest_hide_title">Zadbaj, by ukryte zdjęcia dało się odzyskać</string>
     <string name="local_encryption_not_now">Nie teraz</string>
     <string name="local_encryption_set_password">Ustaw hasło</string>
     <string name="local_encryption_ok">OK</string>

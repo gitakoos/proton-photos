@@ -2797,7 +2797,8 @@
     <string name="local_encryption_account_note">De sleutel is gekoppeld aan je Proton-account. Raakt de telefoon hem ooit kwijt, dan opent opnieuw inloggen alles.</string>
     <string name="local_encryption_password_note">Je wachtwoord voor verborgen foto\'s opent deze gegevens ook als de telefoon de sleutel ooit kwijtraakt.</string>
     <string name="local_encryption_guest_title">Stel een wachtwoord voor verborgen foto\'s in.</string>
-    <string name="local_encryption_guest_note">Zonder account staat de sleutel alleen in de beveiligde opslag van deze telefoon. Raakt de telefoon hem kwijt, dan gaan je verborgen foto\'s alleen nog open met een wachtwoord voor verborgen foto\'s.</string>
+    <string name="local_encryption_guest_note">Zonder account staat de sleutel alleen in de beveiligde opslag van deze telefoon. Raakt de telefoon hem ooit kwijt, dan zijn je verborgen foto\'s niet te herstellen, tenzij je er een wachtwoord voor instelt.</string>
+    <string name="local_encryption_guest_hide_title">Houd je verborgen foto\'s herstelbaar</string>
     <string name="local_encryption_not_now">Niet nu</string>
     <string name="local_encryption_set_password">Wachtwoord instellen</string>
     <string name="local_encryption_ok">OK</string>

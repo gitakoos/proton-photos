@@ -2810,7 +2810,8 @@
     <string name="local_encryption_account_note">The key is tied to your Proton account. If the phone ever loses it, signing in again opens everything.</string>
     <string name="local_encryption_password_note">The password for hidden photos also opens this data if the phone ever loses the key.</string>
     <string name="local_encryption_guest_title">Set a password for hidden photos.</string>
-    <string name="local_encryption_guest_note">Without an account the key lives only in this phone\'s secure storage. If the phone loses it, your hidden photos can only be opened again with that password.</string>
+    <string name="local_encryption_guest_note">Without an account the key lives only in this phone\'s secure storage. If the phone ever loses it, your hidden photos cannot be recovered unless you set a password for them.</string>
+    <string name="local_encryption_guest_hide_title">Keep your hidden photos recoverable</string>
     <string name="local_encryption_not_now">Not now</string>
     <string name="local_encryption_set_password">Set password</string>
     <string name="local_encryption_ok">OK</string>

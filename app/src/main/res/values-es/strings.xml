@@ -2810,7 +2810,8 @@
     <string name="local_encryption_account_note">La clave está vinculada a tu cuenta de Proton. Si el teléfono la pierde alguna vez, volver a iniciar sesión lo abre todo.</string>
     <string name="local_encryption_password_note">Tu contraseña de fotos ocultas también abre estos datos si el teléfono pierde la clave alguna vez.</string>
     <string name="local_encryption_guest_title">Establece una contraseña de fotos ocultas.</string>
-    <string name="local_encryption_guest_note">Sin cuenta, la clave solo está en el almacenamiento seguro de este teléfono. Si el teléfono la pierde, tus fotos ocultas solo se podrán volver a abrir con una contraseña de fotos ocultas.</string>
+    <string name="local_encryption_guest_note">Sin cuenta, la clave solo está en el almacenamiento seguro de este teléfono. Si el teléfono la pierde alguna vez, tus fotos ocultas no se podrán recuperar a menos que establezcas una contraseña para ellas.</string>
+    <string name="local_encryption_guest_hide_title">Mantén tus fotos ocultas recuperables</string>
     <string name="local_encryption_not_now">Ahora no</string>
     <string name="local_encryption_set_password">Establecer contraseña</string>
     <string name="local_encryption_ok">Aceptar</string>

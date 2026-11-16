@@ -2277,6 +2277,9 @@ fun NavGraph(
     }
     }
 
+        // Once, after a guest without a Hidden password hides a photo, on whichever screen the hide ran.
+        eu.akoos.photos.presentation.settings.GuestHideWarning()
+
         // First-run map-style chooser, raised by either map entry point before the style has ever
         // been picked and then never again. A choice mirrors into the Settings map-style toggle and
         // opens that map; a dismiss keeps the globe default. Both mark the prompt answered so it stays

@@ -2812,7 +2812,8 @@
     <string name="local_encryption_account_note">La chiave è legata al tuo account Proton. Se il telefono la perde, accedere di nuovo riapre tutto.</string>
     <string name="local_encryption_password_note">Anche la tua password delle foto nascoste apre questi dati se il telefono perde la chiave.</string>
     <string name="local_encryption_guest_title">Imposta una password per le foto nascoste.</string>
-    <string name="local_encryption_guest_note">Senza account la chiave si trova solo nell\'archivio sicuro di questo telefono. Se il telefono la perde, le foto nascoste si potranno riaprire solo con una password delle foto nascoste.</string>
+    <string name="local_encryption_guest_note">Senza account la chiave si trova solo nell\'archivio sicuro di questo telefono. Se il telefono la perde, le foto nascoste non si potranno recuperare a meno che tu non imposti una password per esse.</string>
+    <string name="local_encryption_guest_hide_title">Mantieni recuperabili le foto nascoste</string>
     <string name="local_encryption_not_now">Non ora</string>
     <string name="local_encryption_set_password">Imposta password</string>
     <string name="local_encryption_ok">OK</string>

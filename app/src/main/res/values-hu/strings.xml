@@ -2772,7 +2772,8 @@
     <string name="local_encryption_account_note">A kulcs a Proton-fiókodhoz kötődik. Ha a telefon valaha elveszíti, újra bejelentkezve minden megnyílik.</string>
     <string name="local_encryption_password_note">A rejtett fotók jelszava is megnyitja ezeket az adatokat, ha a telefon valaha elveszíti a kulcsot.</string>
     <string name="local_encryption_guest_title">Állíts be jelszót a rejtett fotókhoz.</string>
-    <string name="local_encryption_guest_note">Fiók nélkül a kulcs csak a telefon biztonságos tárolójában van. Ha a telefon elveszíti, a rejtett fotóid csak ezzel a jelszóval nyithatók meg újra.</string>
+    <string name="local_encryption_guest_note">Fiók nélkül a kulcs csak a telefon biztonságos tárolójában van. Ha a telefon valaha elveszíti, a rejtett fotóid nem állíthatók helyre, hacsak nem állítasz be hozzájuk jelszót.</string>
+    <string name="local_encryption_guest_hide_title">Tedd helyreállíthatóvá a rejtett fotóidat</string>
     <string name="local_encryption_not_now">Most nem</string>
     <string name="local_encryption_set_password">Jelszó beállítása</string>
     <string name="local_encryption_ok">OK</string>

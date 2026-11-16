@@ -106,6 +106,8 @@ class LocalEncryptionViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { LocalCrypto.clearNotice(context) }
     }
 
+    fun dismissGuestHideWarning() = coordinator.dismissGuestHideWarning()
+
     fun unlock(password: CharArray, onResult: (RecoveryOutcome) -> Unit) {
         viewModelScope.launch {
             val outcome = try {
@@ -300,6 +302,51 @@ fun LocalEncryptionNotice(
             onUnlock = viewModel::unlock,
             onDismiss = viewModel::dismissNotice,
         )
+    }
+    VaultPasswordFlow(step = passwordStep, onStep = { passwordStep = it }, viewModel = passwordViewModel)
+}
+
+/**
+ * Shown once over any screen, after a guest without a Hidden password hides a photo: those photos can be opened
+ * only with this phone's key unless a password is set. Hiding has already gone through; this only informs.
+ */
+@Composable
+fun GuestHideWarning(
+    viewModel: LocalEncryptionViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    passwordViewModel: VaultPasswordViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    var passwordStep by remember { mutableStateOf(VaultPasswordStep.None) }
+    if (state.guestHideWarning && !state.signedIn && !state.passwordSet) {
+        val colors = AppColors.current
+        AppModalSheet(
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            onDismissRequest = viewModel::dismissGuestHideWarning,
+            containerColor = SheetBg,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(stringResource(R.string.local_encryption_guest_hide_title), color = colors.fgPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.local_encryption_guest_note), color = colors.fgDim, fontSize = 14.sp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SecondaryButton(stringResource(R.string.local_encryption_not_now), viewModel::dismissGuestHideWarning, modifier = Modifier.weight(1f))
+                    PrimaryButton(
+                        stringResource(R.string.local_encryption_set_password),
+                        {
+                            viewModel.dismissGuestHideWarning()
+                            passwordStep = VaultPasswordStep.Set
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
     VaultPasswordFlow(step = passwordStep, onStep = { passwordStep = it }, viewModel = passwordViewModel)
 }

@@ -2910,7 +2910,8 @@
     <string name="local_encryption_account_note">Klíč je vázán na váš účet Proton. Pokud o něj telefon někdy přijde, opětovné přihlášení vše otevře.</string>
     <string name="local_encryption_password_note">Vaše heslo ke skrytým fotkám tato data také otevře, pokud telefon někdy o klíč přijde.</string>
     <string name="local_encryption_guest_title">Nastavte heslo ke skrytým fotkám.</string>
-    <string name="local_encryption_guest_note">Bez účtu je klíč jen v zabezpečeném úložišti tohoto telefonu. Pokud o něj telefon přijde, skryté fotky půjde znovu otevřít jen heslem ke skrytým fotkám.</string>
+    <string name="local_encryption_guest_note">Bez účtu je klíč jen v zabezpečeném úložišti tohoto telefonu. Pokud o něj telefon někdy přijde, skryté fotky nepůjde obnovit, pokud k nim nenastavíte heslo.</string>
+    <string name="local_encryption_guest_hide_title">Zajistěte, aby šly skryté fotky obnovit</string>
     <string name="local_encryption_not_now">Teď ne</string>
     <string name="local_encryption_set_password">Nastavit heslo</string>
     <string name="local_encryption_ok">OK</string>

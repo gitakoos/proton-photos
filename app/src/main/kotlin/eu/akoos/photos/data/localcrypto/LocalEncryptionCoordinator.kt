@@ -69,8 +69,21 @@ data class LocalEncryptionState(
     val passwordCanUnlock: Boolean = false,
     val signedIn: Boolean = false,
     val passwordSet: Boolean = false,
+    /** A guest without a Hidden password just hid a photo and has not been told what that means yet. */
+    val guestHideWarning: Boolean = false,
 ) {
     val locked: Boolean get() = lockedKeys > 0 || lockedDatabases > 0
+}
+
+/** What the rest of the app tells local encryption about. */
+object LocalEncryptionEvents {
+    private val _photoHidden = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    internal val photoHidden: kotlinx.coroutines.flow.SharedFlow<Unit> = _photoHidden
+
+    /** A photo was sealed into the vault by a hide. */
+    fun photoHidden() {
+        _photoHidden.tryEmit(Unit)
+    }
 }
 
 /**
@@ -123,6 +136,28 @@ class LocalEncryptionCoordinator @Inject constructor(
         scope.launch {
             passwordStore.observeIsSet().collect { set -> _state.value = _state.value.copy(passwordSet = set) }
         }
+        scope.launch {
+            LocalEncryptionEvents.photoHidden.collect { runCatching { checkGuestHideWarning() } }
+        }
+    }
+
+    /**
+     * A guest's hidden photos are encrypted with a key only this phone's secure storage holds: without a Hidden
+     * password nothing can open them if that key is lost. Said once, after the first hide that finds it so.
+     */
+    private suspend fun checkGuestHideWarning() {
+        if (_state.value.guestHideWarning) return
+        // An answer that cannot be read counts as signed in or set: the warning is only for a sure case.
+        val signedIn = runCatching { accountManager.getPrimaryUserId().first() != null }.getOrDefault(true)
+        val passwordSet = runCatching { passwordStore.observeIsSet().first() }.getOrDefault(true)
+        if (guestHideWarningDue(signedIn, passwordSet, LocalCrypto.isGuestHideWarned(context))) {
+            _state.value = _state.value.copy(guestHideWarning = true)
+        }
+    }
+
+    fun dismissGuestHideWarning() {
+        _state.value = _state.value.copy(guestHideWarning = false)
+        scope.launch { LocalCrypto.markGuestHideWarned(context) }
     }
 
     /** Called by the sign-out cleanup once [userId] is gone: new files stop being written with its key. */
@@ -358,3 +393,7 @@ internal class EnvelopeAccountSealer(
         }
     }
 }
+
+/** A hide warns only a guest without a Hidden password who was not warned before. */
+internal fun guestHideWarningDue(signedIn: Boolean, passwordSet: Boolean, warned: Boolean): Boolean =
+    !signedIn && !passwordSet && !warned

@@ -2911,7 +2911,8 @@
     <string name="local_encryption_account_note">Kľúč je viazaný na váš účet Proton. Ak oň telefón niekedy príde, opätovné prihlásenie všetko otvorí.</string>
     <string name="local_encryption_password_note">Vaše heslo k skrytým fotkám tieto údaje tiež otvorí, ak telefón niekedy príde o kľúč.</string>
     <string name="local_encryption_guest_title">Nastavte heslo k skrytým fotkám.</string>
-    <string name="local_encryption_guest_note">Bez účtu je kľúč len v zabezpečenom úložisku tohto telefónu. Ak oň telefón príde, skryté fotky pôjde znova otvoriť len heslom k skrytým fotkám.</string>
+    <string name="local_encryption_guest_note">Bez účtu je kľúč len v zabezpečenom úložisku tohto telefónu. Ak oň telefón niekedy príde, skryté fotky nepôjde obnoviť, pokiaľ k nim nenastavíte heslo.</string>
+    <string name="local_encryption_guest_hide_title">Zabezpečte, aby sa skryté fotky dali obnoviť</string>
     <string name="local_encryption_not_now">Teraz nie</string>
     <string name="local_encryption_set_password">Nastaviť heslo</string>
     <string name="local_encryption_ok">OK</string>

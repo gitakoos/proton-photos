@@ -240,6 +240,7 @@ class HiddenStorageManager @Inject constructor(
                     return@withContext null
                 }
                 trace("store $ref: $copiedBytes bytes in ${SystemClock.elapsedRealtime() - startedAt}ms")
+                eu.akoos.photos.data.localcrypto.LocalEncryptionEvents.photoHidden()
                 Uri.fromFile(dest).toString()
             } finally {
                 work.delete()
