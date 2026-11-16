@@ -178,6 +178,7 @@ class MainHostActivity : AppCompatActivity() {
     @Inject lateinit var vaultRescueNotifier: VaultRescueNotifier
     @Inject lateinit var externalPickHandover: eu.akoos.photos.presentation.picker.ExternalPickHandover
     @Inject @eu.akoos.photos.di.AppScope lateinit var appScope: kotlinx.coroutines.CoroutineScope
+    @Inject lateinit var localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator
 
     private val vaultSignOut by lazy {
         val restorer = hiddenVaultRestorer
@@ -226,6 +227,9 @@ class MainHostActivity : AppCompatActivity() {
                     cleanup.clearDecryptedCaches(app)
                 }
             }
+            // New files stop being written with the key of the account that left; the key itself stays, so what
+            // it encrypted stays readable.
+            signOutStep { localEncryption.onSignedOut(userId.id) }
             signOutStep { cleanup.clearPending(app, userId.id) }
         } finally {
             cleanup.release(userId.id)

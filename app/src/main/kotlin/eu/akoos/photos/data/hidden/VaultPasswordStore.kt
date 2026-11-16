@@ -53,6 +53,7 @@ import javax.inject.Singleton
 @Singleton
 class VaultPasswordStore @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val localEncryption: javax.inject.Provider<eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator>,
 ) {
 
     /** Emits whether a password is set, and again whenever that changes. */
@@ -64,10 +65,13 @@ class VaultPasswordStore @Inject constructor(
     suspend fun set(password: CharArray) {
         val blob = VaultPasswordCodec.encrypt(password, keystoreKey())
         context.settingsDataStore.edit { it[SettingsKeys.VAULT_PASSWORD_BLOB] = blob }
+        // The local keys get a copy sealed with the password, which opens them on a phone whose Keystore lost them.
+        localEncryption.get().onPasswordChanged(password)
     }
 
     suspend fun clear() {
         context.settingsDataStore.edit { it.remove(SettingsKeys.VAULT_PASSWORD_BLOB) }
+        localEncryption.get().onPasswordChanged(null)
     }
 
     /** The password, or null when none is set or the stored value can no longer be decrypted. */

@@ -91,6 +91,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     @Inject
     lateinit var sharedBackupScheduler: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
 
+    @Inject
+    lateinit var localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator
+
     // Set up in constructor so getWorkManagerConfiguration() works before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
 
@@ -118,6 +121,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // The :crypto process shares this Application but must skip the main-process init below
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
+        // First: clears scratch plaintext of an earlier process, then encrypts what an earlier version left plain.
+        localEncryption.start()
         delegatingFactory.addFactory(workerFactory)
         sweepMlSyncScratch(processStartMs)
         // Watches the data behind the automatic Drive saves and plans their next check, which a force stop drops.
