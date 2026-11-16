@@ -1985,12 +1985,15 @@ class PhotoViewerViewModel @Inject constructor(
         }
         val target = context.contentResolver.insert(collection, values)
             ?: error("MediaStore insert failed")
-        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))?.use { input ->
-            val checked = eu.akoos.photos.data.localcrypto.LocalCryptoFormat.guardPlain(input)
-            context.contentResolver.openOutputStream(target)?.use { output ->
-                checked.copyTo(output)
-            } ?: error("openOutputStream returned null")
-        } ?: error("openInputStream returned null for $uri")
+        // The half-made row goes, like a reveal's: a refused or broken copy leaves nothing behind.
+        eu.akoos.photos.data.localcrypto.PlainContent.intoNewRow(rollBack = { context.contentResolver.delete(target, null, null) }) {
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))?.use { input ->
+                val checked = eu.akoos.photos.data.localcrypto.LocalCryptoFormat.guardPlain(input)
+                context.contentResolver.openOutputStream(target)?.use { output ->
+                    checked.copyTo(output)
+                } ?: error("openOutputStream returned null")
+            } ?: error("openInputStream returned null for $uri")
+        }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val finalValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
