@@ -548,7 +548,7 @@ class DatabaseOpenGateTest {
     @Test
     fun `the user's own work is what blocks a restore, rebuilt listings do not`() {
         val work = AppOwnedTables.USER_WORK
-        for (table in listOf("pending_metadata_edit", "import_history", "person", "photo_label", "sync_state")) {
+        for (table in listOf("pending_metadata_edit", "import_history", "person", "photo_label", "sync_state", "day_meta")) {
             assertTrue(table, table in work)
         }
         for (table in listOf("photo_listing", "face", "image_embedding", "perceptual_hash")) {

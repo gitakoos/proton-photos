@@ -300,9 +300,10 @@ class LocalEncryptionCoordinator @Inject constructor(
                     keyring,
                     locked,
                     keepOut = { copy ->
-                        if (LocalCrypto.passwordRemovedAfter(context, copy.lastModified())) setOf(SettingsKeys.VAULT_PASSWORD_BLOB.name) else emptySet()
+                        if (LocalCrypto.passwordRemovedAfter(context, copy)) setOf(SettingsKeys.VAULT_PASSWORD_BLOB.name) else emptySet()
                     },
                     newestOnly = setOf(SettingsKeys.VAULT_PASSWORD_BLOB.name),
+                    noJoin = setOf(SettingsKeys.SYNC_FOLDER_NAMES.name, SettingsKeys.EXCLUDED_FOLDER_NAMES.name),
                     log = LocalCrypto::log,
                 )
             }

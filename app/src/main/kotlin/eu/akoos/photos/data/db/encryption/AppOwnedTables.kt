@@ -97,8 +97,14 @@ object AppOwnedTables {
         "photo_label_deleted",
         "album_photo_order",
         "album_order_state",
+        "day_meta",
     ).associateWith { "SELECT count(*) FROM \"$it\"" } +
-        ("sync_state" to "SELECT count(*) FROM sync_state WHERE queued = 1 OR lastSyncSuccessMs IS NOT NULL")
+        // A photo the user hid keeps its own uri on the row; the rows the vault reseeds after a rebuild name the
+        // vault file, so they are not counted.
+        (
+            "sync_state" to "SELECT count(*) FROM sync_state WHERE queued = 1 OR lastSyncSuccessMs IS NOT NULL " +
+                "OR (status = 'HIDDEN' AND localUri NOT LIKE '%/files/hidden/%')"
+            )
 
     /** The Proton core tables, never restored from a set-aside database. */
     val PROTON_CORE: List<String> = listOf(

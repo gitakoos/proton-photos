@@ -245,7 +245,8 @@ object LocalStores {
      * it) do not have, and sets are joined, so a photo hidden in either stays listed. [keepOut] names, per copy,
      * keys it must not bring back at all (a Hidden password the user removed after that copy was set aside).
      * [newestOnly] names keys taken from the newest merged copy alone: an older copy never fills one the newest
-     * copy did not hold. Answers how many copies were merged.
+     * copy did not hold. [noJoin] names sets that are never joined: the live set, when there is one, stays as it is,
+     * so an entry removed since the copy was set aside does not come back. Answers how many copies were merged.
      */
     suspend fun restoreLocked(
         storeName: String,
@@ -254,6 +255,7 @@ object LocalStores {
         locked: LockedStoreFiles,
         keepOut: (File) -> Set<String> = { emptySet() },
         newestOnly: Set<String> = emptySet(),
+        noJoin: Set<String> = emptySet(),
         log: (String) -> Unit,
     ): Int {
         var merged = 0
@@ -269,7 +271,7 @@ object LocalStores {
                 continue
             }
             val excluded = keepOut(file) + if (merged > 0) newestOnly else emptySet()
-            store.updateData { current -> mergeRecovered(recovered, current, excluded) }
+            store.updateData { current -> mergeRecovered(recovered, current, excluded, noJoin) }
             file.delete()
             merged++
         }
@@ -278,13 +280,19 @@ object LocalStores {
     }
 
     @Suppress("UNCHECKED_CAST")
-    internal fun mergeRecovered(recovered: Preferences, current: Preferences, keepOut: Set<String> = emptySet()): Preferences {
+    internal fun mergeRecovered(
+        recovered: Preferences,
+        current: Preferences,
+        keepOut: Set<String> = emptySet(),
+        noJoin: Set<String> = emptySet(),
+    ): Preferences {
         val out: MutablePreferences = current.toMutablePreferences()
         for ((key, value) in recovered.asMap()) {
             if (key.name in keepOut) continue
             val live = current.asMap()[key]
             val mergedValue: Any = when {
                 live == null -> value
+                key.name in noJoin -> continue
                 value is Set<*> && live is Set<*> -> value + live
                 else -> continue
             }

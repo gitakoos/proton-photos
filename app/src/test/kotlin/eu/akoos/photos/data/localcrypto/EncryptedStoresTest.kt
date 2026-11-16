@@ -49,11 +49,16 @@ class EncryptedStoresTest {
     }
 
     @Test
-    fun `a Hidden password removed after a copy was set aside is known to be newer than it`() {
-        val before = System.currentTimeMillis() - 60_000
+    fun `a Hidden password removed after a copy was set aside is known to be newer than it, whatever the clock says`() {
+        val locked = LocalCrypto.lockedStores(context)
+        locked.setAside("settings", byteArrayOf(1))
+        val older = locked.pending("settings").single()
         LocalCrypto.markPasswordRemoved(context)
+        // Set aside after the removal, under a clock set back a day.
+        LockedStoreFiles(older.parentFile!!, clock = { System.currentTimeMillis() - 86_400_000L }).setAside("settings", byteArrayOf(2))
+        val newer = locked.pending("settings").single { it != older }
 
-        assertTrue(LocalCrypto.passwordRemovedAfter(context, before))
-        assertFalse(LocalCrypto.passwordRemovedAfter(context, System.currentTimeMillis() + 60_000))
+        assertTrue(LocalCrypto.passwordRemovedAfter(context, older))
+        assertFalse(LocalCrypto.passwordRemovedAfter(context, newer))
     }
 }

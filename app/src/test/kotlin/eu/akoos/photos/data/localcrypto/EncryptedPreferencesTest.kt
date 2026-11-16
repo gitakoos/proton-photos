@@ -208,6 +208,15 @@ class EncryptedPreferencesTest {
         val removed = LocalStores.mergeRecovered(old, preferencesOf(), keepOut = setOf("vault_password_blob"))
         assertEquals("a Hidden password removed since is not brought back", null, removed[password])
         assertEquals("Ada", removed[name])
+
+        val folders = androidx.datastore.preferences.core.stringSetPreferencesKey("sync_folder_names")
+        val notJoined = LocalStores.mergeRecovered(
+            preferencesOf(folders to setOf("Camera", "WhatsApp"), hidden to setOf("a")),
+            preferencesOf(folders to setOf("Camera"), hidden to setOf("b")),
+            noJoin = setOf("sync_folder_names"),
+        )
+        assertEquals("a folder the user stopped backing up stays stopped", setOf("Camera"), notJoined[folders])
+        assertEquals(setOf("a", "b"), notJoined[hidden])
     }
 
     @Test

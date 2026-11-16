@@ -142,16 +142,18 @@ object LocalCrypto {
     /** Records that the user removed the Hidden password, so a settings copy set aside before never brings it back. */
     fun markPasswordRemoved(context: Context) {
         runCatching {
+            // Every settings copy set aside so far is older than the removal; noted by name, so no clock is needed.
+            val names = removedBefore(context) + lockedStores(context).all().map { it.name }
             root(context).mkdirs()
-            writeWhole(File(root(context), PASSWORD_REMOVED), System.currentTimeMillis().toString().toByteArray())
+            writeWhole(File(root(context), PASSWORD_REMOVED), names.joinToString("\n").toByteArray())
         }
     }
 
-    /** Whether the user removed the Hidden password after [time]. */
-    fun passwordRemovedAfter(context: Context, time: Long): Boolean {
-        val at = runCatching { File(root(context), PASSWORD_REMOVED).readText().trim().toLong() }.getOrNull() ?: return false
-        return at >= time
-    }
+    private fun removedBefore(context: Context): Set<String> =
+        runCatching { File(root(context), PASSWORD_REMOVED).readLines().filter { it.isNotBlank() }.toSet() }.getOrNull().orEmpty()
+
+    /** Whether the user removed the Hidden password after the settings copy [copy] was set aside. */
+    fun passwordRemovedAfter(context: Context, copy: File): Boolean = copy.name in removedBefore(context)
 
     fun markGuestHideWarned(context: Context) {
         runCatching {
