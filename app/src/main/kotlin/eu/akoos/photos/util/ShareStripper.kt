@@ -100,6 +100,24 @@ internal fun sealShareCopy(context: Context, plain: File, dir: File): File {
 }
 
 /**
+ * A copy made only to be shared, named [name] and written by [write], kept as [sealShareCopy] keeps a stripped
+ * one (encrypted, in the scratch folder emptied at every start), as a share-provider uri.
+ */
+fun shareCopyUri(context: Context, name: String, write: (java.io.OutputStream) -> Unit): Uri {
+    val dir = strippedShareDir(context).apply { mkdirs() }
+    val work = File(dir, SHARE_WORK_DIR).apply { mkdirs() }
+    val plain = File(work, name)
+    try {
+        java.io.FileOutputStream(plain).use(write)
+    } catch (e: Exception) {
+        plain.delete()
+        throw e
+    }
+    val copy = sealShareCopy(context, plain, dir)
+    return FileProvider.getUriForFile(context, "${context.packageName}.share.fileprovider", copy)
+}
+
+/**
  * Produces a share-ready content [Uri] whose bytes have [config]'s metadata removed, or null to tell
  * the caller to share the ORIGINAL unchanged. The source is never mutated and no in-place stripper is
  * called: a stripped copy is written, encrypted, into the scratch folder emptied at every start (never the

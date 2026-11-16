@@ -113,6 +113,20 @@ class ShareCopyTest {
     }
 
     @Test
+    fun `a copy made to be shared is written encrypted into the scratch folder`() {
+        val bytes = Random(2).nextBytes(70_000)
+        val copy = File(strippedShareDir(context), "annotated_1x1.jpg")
+
+        val written = runCatching { shareCopyUri(context, copy.name) { it.write(bytes) } }
+
+        // The uri needs the provider registered, which a plain test run does not have; the copy is made first.
+        assertTrue(written.isSuccess || written.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(LocalFiles.isEncrypted(copy))
+        assertArrayEquals(bytes, LocalFiles.readBytes(context, copy))
+        assertFalse(File(strippedShareDir(context), "work/annotated_1x1.jpg").exists())
+    }
+
+    @Test
     fun `the share provider serves the scratch folder`() {
         val paths = context.resources.getXml(eu.akoos.photos.R.xml.share_paths)
         val served = mutableListOf<String>()
