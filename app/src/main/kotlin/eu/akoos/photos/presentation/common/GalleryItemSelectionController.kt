@@ -439,8 +439,8 @@ class GalleryItemSelectionController @AssistedInject constructor(
         val pinning = downloads.pinOffline(toPin.map { it.cloud })
         selection.clear()
         scope.launch {
-            val pinnedCount = pinning.awaitUnlessStopped() ?: return@launch
-            _offlineBatchResult.emit(pinnedCount)
+            val result = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineBatchResult.emit(result.pinned)
         }
     }
 

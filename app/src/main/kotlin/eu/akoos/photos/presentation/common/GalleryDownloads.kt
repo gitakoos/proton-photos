@@ -162,20 +162,22 @@ class GalleryDownloads @Inject constructor(
      * Pins [photos] for offline viewing: the pins are written at once so the badges light up, each
      * full-res original then downloads into the offline store, and every pin whose photo did not
      * land (a failure, or the batch stopped first) is taken back with its blob, so a photo never
-     * reads as offline with nothing behind it. Resolves to the number pinned with their blob in place.
+     * reads as offline with nothing behind it.
      */
-    fun pinOffline(photos: List<CloudPhoto>): Deferred<Int> = appScope.async {
+    fun pinOffline(photos: List<CloudPhoto>): Deferred<PinResult> = appScope.async {
         val linkIds = photos.map { it.linkId }
         context.settingsDataStore.edit { prefs ->
             prefs[SettingsKeys.OFFLINE_PIN_IDS] = (prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()) + linkIds
         }
         val userId = accountManager.getPrimaryUserId().first()
         val stored = mutableSetOf<String>()
+        var failed = 0
         val savedPaths = mutableListOf<String>()
         val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, photos.size)
         var kept = 0
         try {
-            if (userId != null) stopOnAccountChange(userId) {
+            if (userId == null) failed = photos.size
+            else stopOnAccountChange(userId) {
                 var attempted = 0
                 for (photo in photos) {
                     try {
@@ -186,6 +188,7 @@ class GalleryDownloads @Inject constructor(
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
                         Log.w(TAG, "offline pin failed: ${e.message}")
+                        failed++
                     }
                     // Advance once per attempt so the Activity screen's row fills either way.
                     transferCenter.progress(transferId, ++attempted)
@@ -196,8 +199,12 @@ class GalleryDownloads @Inject constructor(
             kept = withContext(NonCancellable) { settlePins(linkIds, stored) }
         }
         transferCenter.log(TransferCenter.Kind.OFFLINE, kept, uris = savedPaths)
-        kept
+        PinResult(pinned = kept, failed = failed)
     }
+
+    /** How a pin batch ended: [pinned] photos have their blob in place, [failed] could not be
+     *  downloaded. The rest were un-pinned while they downloaded, which is no failure. */
+    data class PinResult(val pinned: Int, val failed: Int)
 
     /** Takes back the pins of [linkIds] that never got a blob, and drops any blob whose pin went
      *  away (an un-pin or a sign-out) while it downloaded, so the disk never drifts from the set.

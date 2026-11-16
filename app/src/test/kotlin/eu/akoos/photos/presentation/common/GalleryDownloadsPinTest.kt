@@ -90,9 +90,10 @@ class GalleryDownloadsPinTest {
     }
 
     @After
-    fun cancelScopes() {
+    fun cancelScopesAndClearPins() {
         screen.cancel()
         appScope.cancel()
+        clearPins()
     }
 
     private fun photo(linkId: String) = CloudPhoto(
@@ -124,7 +125,7 @@ class GalleryDownloadsPinTest {
 
         screen.cancel()
         release.complete(Unit)
-        assertEquals(1, withTimeout(5_000) { pinning.await() })
+        assertEquals(GalleryDownloads.PinResult(pinned = 1, failed = 0), withTimeout(5_000) { pinning.await() })
         assertEquals("the pin stays with its blob in place", setOf("a"), pins())
         assertFalse(screenSawResult)
         verify(exactly = 0) { offlineStore.delete("a") }
@@ -134,7 +135,32 @@ class GalleryDownloadsPinTest {
     fun `a failed download takes its pin back`() = runBlocking {
         coEvery { driveRepo.downloadFullResPhoto(userA, any(), any(), any()) } throws IllegalStateException("offline")
 
-        assertEquals(0, withTimeout(5_000) { downloads.pinOffline(listOf(photo("a"))).await() })
+        assertEquals(
+            GalleryDownloads.PinResult(pinned = 0, failed = 1),
+            withTimeout(5_000) { downloads.pinOffline(listOf(photo("a"))).await() },
+        )
+        assertTrue(pins().isEmpty())
+        verify { offlineStore.delete("a") }
+    }
+
+    @Test
+    fun `an un-pin while the download runs is no failure and drops the blob`() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        coEvery { driveRepo.downloadFullResPhoto(userA, any(), any(), any()) } coAnswers {
+            started.complete(Unit)
+            release.await()
+            CachedOriginal(File("plain"))
+        }
+        coEvery { offlineStore.store(any(), any()) } answers { File("blob-${firstArg<String>()}") }
+
+        val pinning = downloads.pinOffline(listOf(photo("a")))
+        withTimeout(5_000) { started.await() }
+        // The user taps the pin again: the un-pin drops the id at once.
+        context.settingsDataStore.edit { it[SettingsKeys.OFFLINE_PIN_IDS] = emptySet() }
+        release.complete(Unit)
+
+        assertEquals(GalleryDownloads.PinResult(pinned = 0, failed = 0), withTimeout(5_000) { pinning.await() })
         assertTrue(pins().isEmpty())
         verify { offlineStore.delete("a") }
     }

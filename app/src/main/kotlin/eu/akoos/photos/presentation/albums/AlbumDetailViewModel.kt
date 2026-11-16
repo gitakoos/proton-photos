@@ -1073,8 +1073,8 @@ class AlbumDetailViewModel @Inject constructor(
         _uiState.update { it.copy(selectedPhotos = emptySet()) }
         _offlineStarted.tryEmit(Unit)
         viewModelScope.launch {
-            val pinnedCount = pinning.awaitUnlessStopped() ?: return@launch
-            _offlineResult.emit(pinnedCount)
+            val result = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineResult.emit(result.pinned)
         }
     }
 

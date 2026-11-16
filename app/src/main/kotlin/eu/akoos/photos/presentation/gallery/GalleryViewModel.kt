@@ -2385,8 +2385,8 @@ class GalleryViewModel @Inject constructor(
         val pinning = galleryDownloads.pinOffline(toPin.map { it.cloud })
         _uiState.update { it.copy(selectedItems = emptySet()) }
         viewModelScope.launch {
-            val pinnedCount = pinning.awaitUnlessStopped() ?: return@launch
-            _offlineBatchResult.emit(pinnedCount)
+            val result = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineBatchResult.emit(result.pinned)
         }
     }
 

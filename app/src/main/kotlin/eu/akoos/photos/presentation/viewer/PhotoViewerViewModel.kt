@@ -1684,10 +1684,10 @@ class PhotoViewerViewModel @Inject constructor(
         _isOffline.value = true
         val pinning = galleryDownloads.pinOffline(listOf(cloud))
         viewModelScope.launch {
-            val pinned = pinning.awaitUnlessStopped() ?: return@launch
-            if (pinned > 0) {
+            val result = pinning.awaitUnlessStopped() ?: return@launch
+            if (result.pinned > 0) {
                 _offlineMessage.emit(context.getString(R.string.offline_available))
-            } else {
+            } else if (result.failed > 0) {
                 // The pin was taken back with the failed download, so the button follows it.
                 _isOffline.value = false
                 _offlineMessage.emit(context.getString(R.string.offline_failed))
