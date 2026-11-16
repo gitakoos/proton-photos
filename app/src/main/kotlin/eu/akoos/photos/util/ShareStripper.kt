@@ -54,27 +54,20 @@ internal fun shareStripKind(mimeType: String?, uri: String): ShareStripKind {
 /** Where stripped share copies live: the scratch folder emptied at every start, never the full-size cache. */
 internal fun strippedShareDir(context: Context): File = File(context.cacheDir, VaultFiles.SHARE_DIR)
 
-/** How long a stripped share copy is kept for the receiving app to read, at most; the next start removes it
- *  sooner. */
-internal const val SHARE_COPY_KEEP_MS = 60 * 60 * 1000L
+/** How long a share copy is kept for the receiving app to read, across restarts too. */
+internal const val SHARE_COPY_KEEP_MS = VaultFiles.SHARE_KEEP_MS
 
-private const val SHARE_WORK_DIR = "work"
+private const val SHARE_WORK_DIR = VaultFiles.SHARE_WORK_DIR
 private const val STRIPPED_PREFIX = "stripped_"
-
-/** Removes stripped share copies (and unfinished strips) in [dir] made before [cutoff]. */
-internal fun sweepStrippedShareCopies(dir: File, cutoff: Long) {
-    val files = (dir.listFiles().orEmpty().toList() + File(dir, SHARE_WORK_DIR).listFiles().orEmpty())
-    for (f in files) {
-        if (f.isFile && f.name.startsWith(STRIPPED_PREFIX) && f.lastModified() < cutoff) runCatching { f.delete() }
-    }
-}
 
 /**
  * Removes the stripped share copies an earlier version wrote in plain into the full-size cache folder, made before
  * [before] (the start of this process).
  */
 fun sweepLegacyShareCopies(context: Context, before: Long) {
-    sweepStrippedShareCopies(File(context.cacheDir, "fullres"), before)
+    for (f in File(context.cacheDir, "fullres").listFiles().orEmpty()) {
+        if (f.isFile && f.name.startsWith(STRIPPED_PREFIX) && f.lastModified() < before) runCatching { f.delete() }
+    }
 }
 
 /**
@@ -122,7 +115,7 @@ fun shareCopyUri(context: Context, name: String, write: (java.io.OutputStream) -
  * the caller to share the ORIGINAL unchanged. The source is never mutated and no in-place stripper is
  * called: a stripped copy is written, encrypted, into the scratch folder emptied at every start (never the
  * full-size cache) and handed out through the share FileProvider, which decrypts it as the receiver reads,
- * with [displayName] reported as the filename. Copies older than [SHARE_COPY_KEEP_MS] go at the next strip.
+ * with [displayName] reported as the filename. Copies older than [SHARE_COPY_KEEP_MS] go at the next strip or start.
  *
  * IMAGE runs the EXIF temp-file strip. VIDEO can only shed its location atom, so it acts only when
  * [MetadataStripConfig.stripGps] is set and otherwise returns null. Any failure — an unsupported
@@ -144,7 +137,7 @@ fun stripForShare(
 
     return try {
         val shareDir = strippedShareDir(context).apply { mkdirs() }
-        sweepStrippedShareCopies(shareDir, System.currentTimeMillis() - SHARE_COPY_KEEP_MS)
+        VaultFiles.sweepShareCopies(shareDir, System.currentTimeMillis() - SHARE_COPY_KEEP_MS)
         val work = File(shareDir, SHARE_WORK_DIR).apply { mkdirs() }
         val stripped = when (kind) {
             ShareStripKind.IMAGE -> ExifHelper.stripToTempFile(context, sourceUri, config, work)

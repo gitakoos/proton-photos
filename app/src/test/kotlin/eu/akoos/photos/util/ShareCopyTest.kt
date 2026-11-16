@@ -65,7 +65,7 @@ class ShareCopyTest {
     }
 
     @Test
-    fun `a stripped copy is kept encrypted in the scratch folder the next start empties`() {
+    fun `a stripped copy is kept encrypted in the share folder`() {
         val dir = strippedShareDir(context)
         val work = File(dir, "work").apply { mkdirs() }
         val bytes = Random(1).nextBytes(150_000)
@@ -77,9 +77,21 @@ class ShareCopyTest {
         assertFalse("the plain strip is gone", plain.exists())
         assertTrue(LocalFiles.isEncrypted(copy))
         assertArrayEquals(bytes, LocalFiles.readBytes(context, copy))
+    }
 
-        VaultFiles.clearScratch(context)
-        assertFalse(copy.exists())
+    @Test
+    fun `a share copy outlives a restart for a day, an unfinished one does not`() {
+        val dir = strippedShareDir(context).apply { mkdirs() }
+        val now = 1_800_000_000_000L
+        val fresh = File(dir, "annotated_1x1.jpg").apply { writeBytes(byteArrayOf(1)); setLastModified(now - 60 * 60_000L) }
+        val old = File(dir, "stripped_old.jpg").apply { writeBytes(byteArrayOf(1)); setLastModified(now - SHARE_COPY_KEEP_MS - 1) }
+        val unfinished = File(File(dir, "work").apply { mkdirs() }, "stripped_cut.mp4").apply { writeBytes(byteArrayOf(1)) }
+
+        VaultFiles.clearScratch(context, now)
+
+        assertTrue("a receiver may still read it after the restart", fresh.exists())
+        assertFalse(old.exists())
+        assertFalse(unfinished.exists())
     }
 
     @Test
@@ -91,7 +103,7 @@ class ShareCopyTest {
             .apply { writeBytes(byteArrayOf(1)); setLastModified(now - SHARE_COPY_KEEP_MS - 1) }
         val fresh = File(dir, "stripped_new.jpg").apply { writeBytes(byteArrayOf(1)); setLastModified(now - 60_000) }
 
-        sweepStrippedShareCopies(dir, now - SHARE_COPY_KEEP_MS)
+        VaultFiles.sweepShareCopies(dir, now - SHARE_COPY_KEEP_MS)
 
         assertFalse(old.exists())
         assertFalse(unfinished.exists())

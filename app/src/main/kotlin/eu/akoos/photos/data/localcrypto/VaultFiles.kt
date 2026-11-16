@@ -234,13 +234,31 @@ object VaultFiles {
         }
     }
 
-    /** Removes scratch and staging leftovers of an earlier process. Nothing in either is ever the only copy. */
-    fun clearScratch(context: Context) {
+    /**
+     * Removes scratch and staging leftovers of an earlier process. Nothing in either is ever the only copy. A copy
+     * handed to another app stays for [SHARE_KEEP_MS], so a receiver that reads it after a restart still can; an
+     * unfinished one goes.
+     */
+    fun clearScratch(context: Context, now: Long = System.currentTimeMillis()) {
         workDir(context).deleteRecursively()
         stagingDir(context).deleteRecursively()
-        File(context.applicationContext.cacheDir, SHARE_DIR).deleteRecursively()
+        val share = File(context.applicationContext.cacheDir, SHARE_DIR)
+        File(share, SHARE_WORK_DIR).deleteRecursively()
+        sweepShareCopies(share, now - SHARE_KEEP_MS)
         File(context.applicationContext.cacheDir, PLAIN_STAGING_DIR).deleteRecursively()
     }
+
+    /** Removes the copies in the share folder [dir] (and its unfinished ones) made before [cutoff]. */
+    fun sweepShareCopies(dir: File, cutoff: Long) {
+        val files = dir.listFiles().orEmpty().toList() + File(dir, SHARE_WORK_DIR).listFiles().orEmpty()
+        for (f in files) if (f.isFile && f.lastModified() < cutoff) runCatching { f.delete() }
+    }
+
+    /** How long a copy handed to another app is kept for it to read. */
+    const val SHARE_KEEP_MS = 24L * 60 * 60 * 1000
+
+    /** Where a share copy is made before it is sealed into the share folder. */
+    const val SHARE_WORK_DIR = "work"
 
     /**
      * The one folder for the plaintext copies a library can only take as a file path (the EXIF writer, the media
@@ -268,7 +286,7 @@ object VaultFiles {
         for (f in files) if (f.isFile && f.lastModified() < before) runCatching { f.delete() }
     }
 
-    /** Where a decrypted copy handed to another app (share, set as) lives until the next start. */
+    /** Where a copy handed to another app (share, set as) lives, encrypted, for [SHARE_KEEP_MS]. */
     const val SHARE_DIR = "vault_share"
 
     internal fun debugTrace(message: String) {
