@@ -145,6 +145,8 @@ interface SyncStateRepository {
      *  row. Returns the rows changed. Called from the user-cancel path only. */
     suspend fun clearManualQueue(): Int
 
-    /** [clearManualQueue] for the one photo [localUri]: a single cancelled "back up now" upload. */
+    /** [clearManualQueue] for the one photo [localUri]: a single cancelled "back up now" upload. A row
+     *  claimed UPLOADING right now only loses its queued flag (source kept), so a restart after a process
+     *  death never uploads it again, while the claim release still re-queues it under its own source. */
     suspend fun clearManualQueueFor(localUri: String): Int = 0
 }

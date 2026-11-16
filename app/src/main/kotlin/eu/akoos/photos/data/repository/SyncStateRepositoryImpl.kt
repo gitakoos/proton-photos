@@ -176,5 +176,6 @@ class SyncStateRepositoryImpl @Inject constructor(
 
     override suspend fun clearManualQueue(): Int = dao.clearManualQueue()
 
-    override suspend fun clearManualQueueFor(localUri: String): Int = dao.clearManualQueueFor(localUri)
+    override suspend fun clearManualQueueFor(localUri: String): Int =
+        dao.clearManualQueueFor(localUri) + dao.unqueueClaimedManual(localUri)
 }

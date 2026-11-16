@@ -31,6 +31,8 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import java.util.Collections
 import java.util.UUID
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -124,10 +127,32 @@ class SdkDriveClientProvider @Inject constructor(
         val caller = currentCoroutineContext()[Job]
         caller?.let { waitingCallers.add(it) }
         try {
-            return block(held.client)
+            return withContext(HeldCall(held)) { block(held.client) }
         } finally {
             caller?.let { waitingCallers.remove(it) }
             withContext(NonCancellable) { release(held) }
+        }
+    }
+
+    /**
+     * Starts [block] in the background on the client the calling code runs inside ([withClient] /
+     * [withPhotosClient]), counted as one more call on it, so the client is never closed under [block] even
+     * after the calling code returns. Null, with nothing started, outside such a call or once its client is
+     * closed. For native work that has to finish on its own, such as an upload's draft being dropped.
+     */
+    suspend fun launchHoldingClient(block: suspend () -> Unit): Job? {
+        val held = currentCoroutineContext()[HeldCall]?.held ?: return null
+        if (!mutex.withLock { held.lease.extend() }) return null
+        return held.scope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "background client work failed: ${e.javaClass.simpleName}")
+            } finally {
+                withContext(NonCancellable) { release(held) }
+            }
         }
     }
 
@@ -320,6 +345,11 @@ class SdkDriveClientProvider @Inject constructor(
         val lease = SdkClientLease()
     }
 
+    /** The client call a coroutine runs inside, so work it starts in the background can keep that client open. */
+    private class HeldCall(val held: HeldClient) : AbstractCoroutineContextElement(HeldCall) {
+        companion object Key : CoroutineContext.Key<HeldCall>
+    }
+
     private companion object {
         const val TAG = "SdkDriveClient"
 
@@ -364,6 +394,13 @@ internal class SdkClientLease {
         if (retired) return false
         inFlight++
         _idle.value = false
+        return true
+    }
+
+    /** Counts one more call in while another is still in flight, retired or not. False once nothing holds it. */
+    fun extend(): Boolean {
+        if (inFlight == 0 || closed) return false
+        inFlight++
         return true
     }
 

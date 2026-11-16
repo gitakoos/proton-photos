@@ -402,6 +402,17 @@ interface SyncStateDao {
     )
     suspend fun clearManualQueueFor(localUri: String): Int
 
+    /**
+     * Takes a cancelled "back up now" photo off the queue while its upload is claimed (UPLOADING), keeping
+     * its source, so a claim a process death strands is not uploaded again once the restart recovers it.
+     * The claim release re-queues it under that source, and [clearManualQueueFor] then clears it.
+     */
+    @Query(
+        "UPDATE sync_state SET queued = 0 " +
+            "WHERE localUri = :localUri AND queueSource = 'MANUAL' AND status = 'UPLOADING'"
+    )
+    suspend fun unqueueClaimedManual(localUri: String): Int
+
     /** The reason a row was queued (a QueueSource constant), or null when it carries none. Read so a
      *  failure demotion can re-queue the row under its ORIGINAL source instead of guessing one. */
     @Query("SELECT queueSource FROM sync_state WHERE localUri = :localUri LIMIT 1")

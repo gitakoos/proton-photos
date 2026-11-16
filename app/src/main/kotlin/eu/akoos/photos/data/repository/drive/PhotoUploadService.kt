@@ -1084,18 +1084,20 @@ class PhotoUploadService @Inject constructor(
                 val orphanShare = orphanShareId
                 if (orphan != null && orphanShare != null && !commitStarted) {
                     withContext(NonCancellable) {
-                        val dropped = withTimeoutOrNull(ORPHAN_DELETE_ON_CANCEL_TIMEOUT_MS) {
-                            runCatching {
+                        val dropped = deleteDraftTracked(
+                            record = { enqueuePendingOrphanDelete(orphanShare, orphan) },
+                            forget = { removePendingOrphanDelete("$orphanShare|$orphan") },
+                            delete = {
                                 apiProvider.get<DriveApiService>(userId).invoke {
                                     deleteLinks(orphanShare, eu.akoos.photos.data.api.dto.DeleteLinksRequest(listOf(orphan)))
                                 }.valueOrThrow
-                            }.isSuccess
-                        } == true
+                            },
+                            timeoutMs = ORPHAN_DELETE_ON_CANCEL_TIMEOUT_MS,
+                        )
                         if (dropped) {
                             Log.d(TAG, "uploadFile: cancelled upload's draft $orphan deleted")
                         } else {
-                            Log.w(TAG, "uploadFile: cancelled upload's draft $orphan not deleted now; queuing for retry")
-                            runCatching { enqueuePendingOrphanDelete(orphanShare, orphan) }
+                            Log.w(TAG, "uploadFile: cancelled upload's draft $orphan not deleted now; queued for retry")
                         }
                     }
                 }
@@ -1256,6 +1258,9 @@ class PhotoUploadService @Inject constructor(
                 .getOrNull()?.let { thumbnails[me.proton.drive.sdk.entity.ThumbnailType.PREVIEW] = it }
         }
         val sha1 = eu.akoos.photos.data.sdk.hexToBytes(sha1Hex)
+        // The matching photos already on Drive, so a failure can tell a photo this upload made from
+        // one that was there before (a metadata correction re-uploads under the original's name and bytes).
+        val before = findUploadedOrNull(userId, item.displayName, sha1)
         val upload = eu.akoos.photos.data.sdk.SdkPhotoUpload(
             uploadUri = uploadUri,
             name = item.displayName,
@@ -1278,10 +1283,8 @@ class PhotoUploadService @Inject constructor(
             thumbnails = thumbnails,
             sha1 = sha1,
             onProgress = onProgress?.let { report -> { done, total -> report(UploadPhase.Uploading, done, total) } },
+            matchingBefore = before,
         )
-        // The matching photos already on Drive, so a failure below can tell a photo this upload made from
-        // one that was there before (a metadata correction re-uploads under the original's name and bytes).
-        val before = findUploadedOrNull(userId, item.displayName, sha1)
         val result = try {
             sdkPhotoUploadOps.upload(userId, upload)
         } catch (e: CancellationException) {
@@ -1587,6 +1590,24 @@ class PhotoUploadService @Inject constructor(
         return rotated
     }
 
+}
+
+/**
+ * Deletes a cancelled upload's draft through [delete], tracked so nothing is lost to a process death on the
+ * way: [record] queues the retry entry first and [forget] drops it only once the delete landed. Waits at
+ * most [timeoutMs] for the delete; on a timeout or a failure the entry stays for the next upload pass.
+ * True when the draft was deleted.
+ */
+internal suspend fun deleteDraftTracked(
+    record: suspend () -> Unit,
+    forget: suspend () -> Unit,
+    delete: suspend () -> Unit,
+    timeoutMs: Long,
+): Boolean {
+    runCatching { record() }
+    val dropped = withTimeoutOrNull(timeoutMs) { runCatching { delete() }.isSuccess } == true
+    if (dropped) runCatching { forget() }
+    return dropped
 }
 
 /**

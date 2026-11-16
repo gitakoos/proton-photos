@@ -28,14 +28,18 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.entity.isUsableGpsFix
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.domain.entity.UserId
+import me.proton.drive.sdk.ProtonPhotosClient
 import me.proton.drive.sdk.Uploader
 import me.proton.drive.sdk.UploadController
 import me.proton.drive.sdk.entity.FileNode
@@ -69,12 +73,21 @@ class SdkPhotoUpload(
     val thumbnails: Map<ThumbnailType, ByteArray>,
     val sha1: ByteArray,
     val onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
+    /**
+     * The photos with this name and content already on Drive before the upload ([SdkPhotoUploadOps.findUploaded]),
+     * or null when that lookup failed. A failed upload compares them with the ones after it before it drops its
+     * draft, so a draft is never dropped once its commit may have gone through.
+     */
+    val matchingBefore: List<SdkUploadResult>? = null,
 )
 
 private const val TAG = "SdkPhotoUploadOps"
 
 /** How long a stopped upload waits for the SDK to drop its draft. */
 private const val DROP_UNFINISHED_TIMEOUT_MS = 10_000L
+
+/** How long a failed upload waits for the lookup that tells whether its commit went through. */
+private const val FAILED_UPLOAD_LOOKUP_TIMEOUT_MS = 10_000L
 
 /** Thrown when the SDK cannot take the upload, so the app's own upload runs instead. */
 class SdkUploadException(message: String) : IllegalStateException(message)
@@ -108,6 +121,9 @@ class SdkPhotoUploadOps @Inject constructor(
                     noWaiting = false,
                 ),
             )
+            // Set once a stopped upload's handles went to [dropUnfinished], which closes them after the SDK
+            // has finished dropping it, never while that still runs.
+            var handedOff = false
             try {
                 coroutineScope {
                     val input = eu.akoos.photos.data.localcrypto.PlainContent.open(context, upload.uploadUri)
@@ -124,57 +140,169 @@ class SdkPhotoUploadOps @Inject constructor(
                                 .filterNotNull()
                                 .onEach { upload.onProgress?.invoke(it.bytesCompleted, it.bytesInTotal ?: upload.fileSize) }
                                 .launchIn(this)
+                            val stop = CompletableDeferred<Unit>()
                             val result = try {
-                                controller.tryResume(this)
-                                controller.awaitCompletion()
+                                // A cancel of this one photo stops the transfer through the SDK rather than
+                                // the coroutine, so an upload the SDK still commits counts as committed and
+                                // the steps after the commit run.
+                                eu.akoos.photos.data.transfer.ItemCommitPoint.stopVia(onStop = { stop.complete(Unit) }) {
+                                    val stopper = launch {
+                                        stop.await()
+                                        runCatching { controller.cancellationTokenSource.cancel() }
+                                    }
+                                    try {
+                                        controller.tryResume(this)
+                                        controller.awaitCompletion()
+                                    } catch (e: Throwable) {
+                                        if (stop.isCompleted && e !is CancellationException) {
+                                            throw CancellationException("upload cancelled by the user").apply { initCause(e) }
+                                        }
+                                        throw e
+                                    } finally {
+                                        stopper.cancel()
+                                    }
+                                }
                             } catch (e: CancellationException) {
+                                handedOff = true
                                 withContext(NonCancellable) { dropUnfinished(uploader, controller) }
+                                throw e
+                            } catch (e: Exception) {
+                                // A failed upload is not resumed either (the app's own upload takes the photo
+                                // over), so its draft goes too, but only once Drive shows the commit did not
+                                // go through.
+                                handedOff = true
+                                withContext(NonCancellable) {
+                                    val outcome = dropFailedSdkUpload(
+                                        before = upload.matchingBefore,
+                                        findAfter = { matching(client, upload.name, upload.sha1) },
+                                        lookupMs = FAILED_UPLOAD_LOOKUP_TIMEOUT_MS,
+                                        drop = { dropUnfinished(uploader, controller) },
+                                        keep = { closeQuietly(uploader, controller) },
+                                    )
+                                    if (outcome != null) Log.d(TAG, "failed upload: draft kept, $outcome")
+                                }
                                 throw e
                             } finally {
                                 progress.cancel()
                             }
-                            // Committed: a cancel of this one photo from now on lets it finish.
-                            eu.akoos.photos.data.transfer.ItemCommitPoint.reach()
                             SdkUploadResult(
                                 linkId = (result.nodeUid as LegacyNodeUid).linkId,
                                 revisionId = (result.revisionUid as LegacyRevisionUid).revisionId,
                             )
                         } finally {
-                            controller.close()
+                            if (!handedOff) controller.close()
                         }
                     }
                 }
             } finally {
-                uploader.close()
+                if (!handedOff) uploader.close()
             }
         } ?: throw SdkUploadException("the SDK cannot run on this device")
 
     /**
-     * A stopped upload is never resumed (its controller is closed right after), so it is cancelled and
-     * disposed the way Drive's own app drops an upload, which deletes the draft it left on Drive unless
-     * the commit already went through. Bounded, so a Drive that cannot be reached does not hold the stop.
+     * A stopped upload is never resumed, so it is cancelled and disposed the way Drive's own app drops an
+     * upload, which deletes the draft it left on Drive unless the commit already went through, and only then
+     * are its handles closed ([dropStoppedSdkUpload]). The SDK names no draft before the commit, so a draft
+     * it could not drop cannot be queued for a later delete like the app's own; the SDK deletes a draft of
+     * this client under the same name when that photo is uploaded again.
      */
     private suspend fun dropUnfinished(uploader: Uploader, controller: UploadController) {
-        val dropped = withTimeoutOrNull(DROP_UNFINISHED_TIMEOUT_MS) {
-            runCatching {
+        val outcome = dropStoppedSdkUpload(
+            cancelAndDispose = {
                 controller.cancel()
                 controller.dispose()
                 uploader.cancel()
-            }.isSuccess
-        } == true
-        Log.d(TAG, if (dropped) "stopped upload dropped with its draft" else "stopped upload: dropping its draft failed or timed out")
+            },
+            close = {
+                runCatching { controller.close() }
+                runCatching { uploader.close() }
+            },
+            launchHolding = { work -> clientProvider.launchHoldingClient(work) },
+            waitMs = DROP_UNFINISHED_TIMEOUT_MS,
+        )
+        Log.d(
+            TAG,
+            when (outcome) {
+                StoppedUploadDrop.DROPPED -> "stopped upload dropped with its draft"
+                StoppedUploadDrop.FAILED -> "stopped upload: dropping its draft failed"
+                StoppedUploadDrop.STILL_RUNNING -> "stopped upload: still dropping its draft in the background"
+            },
+        )
+    }
+
+    /** Frees a failed upload's handles when its draft stays. */
+    private fun closeQuietly(uploader: Uploader, controller: UploadController) {
+        runCatching { controller.close() }
+        runCatching { uploader.close() }
     }
 
     /** The photos named [name] with content [sha1] on Drive, live and committed, by link id. */
     suspend fun findUploaded(userId: UserId, name: String, sha1: ByteArray): List<SdkUploadResult> =
-        clientProvider.withPhotosClient(userId) { client ->
-            client.findPhotoDuplicates(name) { sha1 }.mapNotNull { uid ->
-                val node = client.getNode(uid) as? FileNode ?: return@mapNotNull null
-                if (node.trashTime != null) return@mapNotNull null
-                val revision = node.activeRevision?.uid as? LegacyRevisionUid ?: return@mapNotNull null
-                SdkUploadResult((uid as? LegacyNodeUid ?: return@mapNotNull null).linkId, revision.revisionId)
-            }
-        } ?: throw SdkUploadException("the SDK cannot run on this device")
+        clientProvider.withPhotosClient(userId) { client -> matching(client, name, sha1) }
+            ?: throw SdkUploadException("the SDK cannot run on this device")
+
+    private suspend fun matching(client: ProtonPhotosClient, name: String, sha1: ByteArray): List<SdkUploadResult> =
+        client.findPhotoDuplicates(name) { sha1 }.mapNotNull { uid ->
+            val node = client.getNode(uid) as? FileNode ?: return@mapNotNull null
+            if (node.trashTime != null) return@mapNotNull null
+            val revision = node.activeRevision?.uid as? LegacyRevisionUid ?: return@mapNotNull null
+            SdkUploadResult((uid as? LegacyNodeUid ?: return@mapNotNull null).linkId, revision.revisionId)
+        }
+}
+
+/** How [dropStoppedSdkUpload] ended within its wait. */
+internal enum class StoppedUploadDrop { DROPPED, FAILED, STILL_RUNNING }
+
+/**
+ * Drops a stopped SDK upload: [cancelAndDispose] (the SDK cancels the transfer and deletes its draft), then
+ * [close] (frees the native handles), always in that order, so a handle is never freed while the SDK still
+ * works on it. The two run in the background through [launchHolding] (which keeps the SDK client open
+ * meanwhile), and the caller waits at most [waitMs]: past it they keep running and the answer is
+ * [StoppedUploadDrop.STILL_RUNNING]. When nothing can be started in the background they run here, to the end.
+ */
+internal suspend fun dropStoppedSdkUpload(
+    cancelAndDispose: suspend () -> Unit,
+    close: () -> Unit,
+    launchHolding: suspend (suspend () -> Unit) -> Job?,
+    waitMs: Long,
+): StoppedUploadDrop {
+    val dropped = CompletableDeferred<Boolean>()
+    val work: suspend () -> Unit = {
+        try {
+            dropped.complete(runCatching { cancelAndDispose() }.isSuccess)
+        } finally {
+            close()
+        }
+    }
+    if (launchHolding(work) == null) work()
+    return when (withTimeoutOrNull(waitMs) { dropped.await() }) {
+        true -> StoppedUploadDrop.DROPPED
+        false -> StoppedUploadDrop.FAILED
+        null -> StoppedUploadDrop.STILL_RUNNING
+    }
+}
+
+/**
+ * Drops a failed SDK upload's draft through [drop] only when the photos matching it on Drive, [before] and
+ * after it ([findAfter], given at most [lookupMs]), show nothing committed ([sdkUploadAfterFailure]). A commit
+ * that went through, or one that cannot be told, keeps the draft and only frees the handles through [keep]:
+ * dropping it then could remove the photo itself. Null when it was dropped, else why it was kept.
+ */
+internal suspend fun dropFailedSdkUpload(
+    before: List<SdkUploadResult>?,
+    findAfter: suspend () -> List<SdkUploadResult>,
+    lookupMs: Long,
+    drop: suspend () -> Unit,
+    keep: () -> Unit,
+): SdkUploadAfterFailure? {
+    val after = withTimeoutOrNull(lookupMs) { runCatching { findAfter() }.getOrNull() }
+    val outcome = sdkUploadAfterFailure(before, after)
+    if (outcome == SdkUploadAfterFailure.NothingCommitted) {
+        drop()
+        return null
+    }
+    keep()
+    return outcome
 }
 
 /** What a failed SDK upload left on Drive, read from the matching photos before and after it. */
