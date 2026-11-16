@@ -1210,7 +1210,7 @@
     <string name="vault_rescue_partial_text">A Drive-on másolat nélküli rejtett fotóid egy része visszakerült a galériába, a(z) %1$s mappába. A többit nem sikerült áthelyezni, ezért az alkalmazásban maradt. Nyisd meg a Rejtett fotókat, hogy lásd őket.</string>
     <string name="vault_rescue_not_moved_text">A Drive-on másolat nélküli rejtett fotóidat nem sikerült visszahelyezni a galériába, ezért az alkalmazásban maradtak. Nyisd meg a Rejtett fotókat, hogy lásd őket.</string>
     <string name="vault_rescue_zip_failed_text">A Drive-on másolat nélküli rejtett fotóidat nem sikerült jelszóval védett zipbe menteni a Letöltések mappában, ezért az alkalmazásban maradtak. Nyisd meg a Rejtett fotókat, hogy lásd őket.</string>
-    <string name="vault_signout_kept_drive_text">A Drive nem tudta megerősíteni, hogy néhány rejtett fotód még megvan rajta, ezért ezek nem törlődtek, és az alkalmazásban maradtak. Nyisd meg a Rejtett fotókat, hogy lásd őket.</string>
+    <string name="vault_signout_kept_drive_text">A Drive nem tudta megerősíteni, hogy néhány rejtett fotód még megvan rajta, ezért ezek az alkalmazásban maradtak, és nem törlődtek. Bejelentkezés után újra megjelennek a Rejtett fotók között.</string>
     <string name="update_notification_text">Koppints a(z) %1$s verzió telepítéséhez.</string>
     <string name="settings_backup_how_section">A mentés módja</string>
     <string name="settings_theme_palette">Téma és paletta</string>

@@ -64,10 +64,12 @@ class VaultRescueNotifier @Inject constructor(
         }
         val title = if (afterUserSignOut) context.getString(R.string.vault_signout_kept_title)
         else context.getString(R.string.vault_rescue_title)
-        post(text, title)
+        val id = if (notice == RescueNotice.KeptUnconfirmedInDrive) NotificationIds.VAULT_KEPT_FOR_DRIVE
+        else NotificationIds.VAULT_RESCUE
+        post(text, title, id)
     }
 
-    private fun post(text: String, title: String) {
+    private fun post(text: String, title: String, id: Int) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         ensureNotificationChannel(
             context,
@@ -98,7 +100,7 @@ class VaultRescueNotifier @Inject constructor(
             .build()
         // A denied POST_NOTIFICATIONS grant makes the platform drop the post silently rather than
         // throw, so this only guards the rarer failures the manager itself can raise.
-        runCatching { nm.notify(NotificationIds.VAULT_RESCUE, notification) }
+        runCatching { nm.notify(id, notification) }
     }
 
     private companion object {

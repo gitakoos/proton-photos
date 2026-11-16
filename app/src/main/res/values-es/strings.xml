@@ -1202,7 +1202,7 @@
     <string name="vault_rescue_partial_text">Algunas de tus fotos ocultas sin copia en Drive se devolvieron a la galería, a la carpeta %1$s. Las demás no se pudieron mover y se quedaron en la app. Abre Fotos ocultas para verlas.</string>
     <string name="vault_rescue_not_moved_text">Tus fotos ocultas sin copia en Drive no se pudieron devolver a la galería, así que se quedaron en la app. Abre Fotos ocultas para verlas.</string>
     <string name="vault_rescue_zip_failed_text">Tus fotos ocultas sin copia en Drive no se pudieron guardar en un zip protegido con contraseña en la carpeta Descargas, así que se quedaron en la app. Abre Fotos ocultas para verlas.</string>
-    <string name="vault_signout_kept_drive_text">Drive no pudo confirmar que aún tiene algunas de tus fotos ocultas, así que no se borraron y se quedaron en la app. Abre Fotos ocultas para verlas.</string>
+    <string name="vault_signout_kept_drive_text">Drive no pudo confirmar que aún tiene algunas de tus fotos ocultas, así que se quedaron en la app y no se borraron. Volverán a aparecer en Fotos ocultas cuando inicies sesión.</string>
     <string name="update_notification_text">Toca para instalar la versión %1$s.</string>
     <string name="settings_backup_how_section">Cómo se hace la copia</string>
     <string name="settings_theme_palette">Tema y paleta</string>

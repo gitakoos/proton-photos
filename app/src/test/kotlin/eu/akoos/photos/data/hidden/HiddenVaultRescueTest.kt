@@ -79,6 +79,7 @@ class HiddenVaultRescueTest {
     private val b = "file:///vault/b.jpg"
     private val c = "file:///vault/c.jpg"
     private val d = "file:///vault/d.jpg"
+    private val e = "file:///vault/e.jpg"
 
     @Before
     fun setUp(): Unit = runBlocking {
@@ -122,40 +123,67 @@ class HiddenVaultRescueTest {
     }
 
     @Test
-    fun `the gallery route moves what it can, keeps a photo whose write throws, and offers only confirmed Drive files to the wipe`() = runBlocking {
-        every { storage.vaultBlobUris() } returns setOf(a, b, c, d)
-        record(index = setOf(a, b, c, d), pairings = setOf("$b|L-b", "$c|L-c"))
+    fun `the gallery route moves device photos, keeps a photo whose write throws and an unconfirmed Drive photo, and offers only confirmed Drive files to the wipe`() = runBlocking {
+        every { storage.vaultBlobUris() } returns setOf(a, b, c, d, e)
+        record(index = setOf(a, b, c, d, e), pairings = setOf("$b|L-b", "$c|L-c"))
         coEvery { drive.liveOf(user, any()) } returns setOf("L-b")
         coEvery { password.readState() } returns StoredVaultPassword.None
         restoresTo(a, "content://media/external/images/media/1")
         // An Android 9 provider refusing the insert, surfacing from below the restore.
-        coEvery { storage.restore(c, any(), any(), any()) } throws SecurityException("no storage permission")
+        coEvery { storage.restore(e, any(), any(), any()) } throws SecurityException("no storage permission")
 
         val rescued = restorer().rescueDeviceOnly(userId = user, busy = setOf(d))
 
         assertEquals(1, rescued.moved)
-        assertEquals(setOf(c), rescued.stillInVault)
+        assertEquals(setOf(e), rescued.stillInVault)
         assertEquals("only the photo Drive confirmed is safe to destroy", setOf(b), rescued.wipeable)
+        assertEquals("the Drive photo Drive did not confirm stays in the vault", setOf(c), rescued.keptForDrive)
         assertEquals(VaultWipe.Only(setOf(b)), VaultSignOutPolicy.wipeAfterRescue(rescued, setOf(d)))
         assertEquals(RescueNotice.MovedPartly, VaultSignOutPolicy.forcedLogoutNotice(rescued))
         coVerify(exactly = 0) { storage.restore(b, any(), any(), any()) }
+        coVerify(exactly = 0) { storage.restore(c, any(), any(), any()) }
         coVerify(exactly = 0) { storage.restore(d, any(), any(), any()) }
         coVerify { drive.liveOf(user, match { it.toSet() == setOf("L-b", "L-c") }) }
+        val index = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_PHOTO_URIS].orEmpty()
+        assertTrue("the kept Drive photo keeps its record", c in index)
     }
 
     @Test
-    fun `a session that cannot confirm Drive takes the recorded Drive photo back too`() = runBlocking {
+    fun `a session that cannot confirm Drive keeps the recorded Drive photo in the vault, out of the gallery`() = runBlocking {
         every { storage.vaultBlobUris() } returns setOf(b)
         record(index = setOf(b), pairings = setOf("$b|L-b"))
         coEvery { drive.liveOf(any(), any()) } returns emptySet()
         coEvery { password.readState() } returns StoredVaultPassword.None
-        restoresTo(b, "content://media/external/images/media/2")
 
-        val rescued = restorer().rescueDeviceOnly(userId = null)
+        val notices = mutableListOf<RescueNotice>()
+        val policy = VaultSignOutPolicy(
+            rescue = { _, busy -> restorer().rescueDeviceOnly(userId = null, busy = busy) },
+            notify = { notices += it },
+        )
+        val wipe = policy.afterSignOut("u-no-session")
 
+        assertEquals(VaultWipe.Only(emptySet()), wipe)
+        assertEquals(listOf(RescueNotice.KeptUnconfirmedInDrive), notices)
+        coVerify(exactly = 0) { storage.restore(any(), any(), any(), any()) }
+        assertEquals(setOf(b), context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_PHOTO_URIS])
+    }
+
+    @Test
+    fun `a zip with an unconfirmed Drive photo zips only the device photos and keeps the Drive one`() = runBlocking {
+        val files = vaultFiles("one.jpg")
+        every { storage.vaultBlobUris() } returns files.toSet() + c
+        record(index = files.toSet() + c, pairings = setOf("$c|L-c"))
+        coEvery { drive.liveOf(user, any()) } returns emptySet()
+        coEvery { password.readState() } returns StoredVaultPassword.Readable("pw".toCharArray())
+        every { publisher.publish(any(), any()) } returns true
+
+        val rescued = restorer().rescueDeviceOnly(userId = user)
+
+        assertNotNull(rescued.zipName)
         assertEquals(1, rescued.moved)
-        assertTrue(rescued.wipeable.isEmpty())
-        coVerify { storage.restore(b, any(), any(), any()) }
+        assertEquals(setOf(c), rescued.keptForDrive)
+        assertEquals(VaultWipe.Only(files.toSet()), VaultSignOutPolicy.wipeAfterRescue(rescued))
+        assertEquals(setOf(c), context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_PHOTO_URIS])
     }
 
     @Test

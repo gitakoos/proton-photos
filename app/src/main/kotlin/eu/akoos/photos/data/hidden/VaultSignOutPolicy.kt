@@ -70,6 +70,7 @@ class VaultSignOutPolicy(
         }
         SyncDiagnostics.log("sign-out: session ended, ${vaultNote(rescued)}")
         forcedLogoutNotice(rescued)?.let(notify)
+        if (rescued.keptForDrive.isNotEmpty()) notify(RescueNotice.KeptUnconfirmedInDrive)
         return wipeAfterRescue(rescued, busy)
     }
 
@@ -81,9 +82,10 @@ class VaultSignOutPolicy(
          */
         fun wipeAfterRescue(rescued: HiddenRescue?, busy: Set<String> = emptySet()): VaultWipe =
             if (rescued == null) VaultWipe.None
-            else VaultWipe.Only(rescued.wipeable - rescued.stillInVault - busy)
+            else VaultWipe.Only(rescued.wipeable - rescued.stillInVault - rescued.keptForDrive - busy)
 
-        /** The one notice a forced logout's rescue posts, or null when it took nothing anywhere. */
+        /** The notice about the photos a forced logout's rescue took out, or null when it took nothing
+         *  anywhere. The photos kept for Drive have a notice of their own beside it. */
         fun forcedLogoutNotice(rescued: HiddenRescue): RescueNotice? = when {
             rescued.keptForPassword -> RescueNotice.KeptForPassword
             rescued.zipFailed -> RescueNotice.ZipFailed
@@ -107,12 +109,15 @@ class VaultSignOutPolicy(
         }
 
         /** What a rescue did, as counts only, for the diagnostics a tester copies out. */
-        fun vaultNote(rescued: HiddenRescue?): String =
-            if (rescued == null) "vault move failed, vault left alone"
-            else if (rescued.keptForPassword) "vault kept ${rescued.stillInVault.size}, password not readable for the zip"
+        fun vaultNote(rescued: HiddenRescue?): String {
+            if (rescued == null) return "vault move failed, vault left alone"
+            val note = if (rescued.keptForPassword) "vault kept ${rescued.stillInVault.size}, password not readable for the zip"
             else if (rescued.zipFailed) "vault kept ${rescued.stillInVault.size}, zip not made"
             else if (rescued.zipName != null) "vault zipped ${rescued.moved}, ${rescued.stillInVault.size} left in vault"
             else "vault moved ${rescued.moved}, ${rescued.stillInVault.size} left in vault"
+            return if (rescued.keptForDrive.isEmpty()) note
+            else "$note, ${rescued.keptForDrive.size} kept, not confirmed in Drive"
+        }
     }
 }
 
@@ -133,7 +138,8 @@ sealed interface RescueNotice {
     /** The password-protected zip could not be made, so they stayed in the app. */
     data object ZipFailed : RescueNotice
 
-    /** A "delete" sign-out kept the photos Drive could not confirm it holds. */
+    /** Photos recorded with a Drive copy that Drive could not confirm stayed in the app, and show in Hidden
+     *  again after the next sign-in. */
     data object KeptUnconfirmedInDrive : RescueNotice
 }
 

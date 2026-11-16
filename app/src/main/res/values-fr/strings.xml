@@ -1189,7 +1189,7 @@
     <string name="vault_rescue_partial_text">Certaines de vos photos masquées sans copie dans Drive ont été remises dans la galerie, dans le dossier %1$s. Les autres n\'ont pas pu être déplacées et sont restées dans l\'app. Ouvrez Photos masquées pour les voir.</string>
     <string name="vault_rescue_not_moved_text">Vos photos masquées sans copie dans Drive n\'ont pas pu être remises dans la galerie : elles sont donc restées dans l\'app. Ouvrez Photos masquées pour les voir.</string>
     <string name="vault_rescue_zip_failed_text">Vos photos masquées sans copie dans Drive n\'ont pas pu être enregistrées dans un zip protégé par mot de passe, dans le dossier Téléchargements : elles sont donc restées dans l\'app. Ouvrez Photos masquées pour les voir.</string>
-    <string name="vault_signout_kept_drive_text">Drive n\'a pas pu confirmer qu\'il conserve encore certaines de vos photos masquées : elles n\'ont donc pas été supprimées et sont restées dans l\'app. Ouvrez Photos masquées pour les voir.</string>
+    <string name="vault_signout_kept_drive_text">Drive n\'a pas pu confirmer qu\'il conserve encore certaines de vos photos masquées : elles sont donc restées dans l\'app et n\'ont pas été supprimées. Elles réapparaîtront dans Photos masquées une fois que vous serez reconnecté.</string>
     <string name="update_notification_text">Appuyez pour installer la version %1$s.</string>
     <string name="settings_backup_how_section">Déroulement de la sauvegarde</string>
     <string name="settings_theme_palette">Thème et palette</string>

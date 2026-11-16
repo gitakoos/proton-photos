@@ -752,6 +752,7 @@ class HiddenVaultDecisionsTest {
 
         assertEquals(listOf("file:///v/a", "file:///v/c"), plan.rescue)
         assertEquals(setOf("file:///v/b"), plan.inDrive)
+        assertTrue(plan.unconfirmedInDrive.isEmpty())
     }
 
     @Test
@@ -768,7 +769,7 @@ class HiddenVaultDecisionsTest {
     }
 
     @Test
-    fun `a Drive copy recorded at hide time but not confirmed now is saved like a device-only photo`() {
+    fun `a Drive copy recorded at hide time but not confirmed now stays in the vault, out of the gallery`() {
         val plan = HiddenVaultDecisions.signOutPlan(
             blobUris = setOf("file:///v/trashed", "file:///v/live"),
             cloudIdByUri = mapOf("file:///v/trashed" to "L-t", "file:///v/live" to "L-l"),
@@ -776,12 +777,13 @@ class HiddenVaultDecisionsTest {
             busy = emptySet(),
         )
 
-        assertEquals(listOf("file:///v/trashed"), plan.rescue)
+        assertTrue("a Drive photo never goes to the gallery or a zip", plan.rescue.isEmpty())
         assertEquals(setOf("file:///v/live"), plan.inDrive)
+        assertEquals(setOf("file:///v/trashed"), plan.unconfirmedInDrive)
     }
 
     @Test
-    fun `a session that cannot answer saves every recorded Drive photo, a duplicate rather than a loss`() {
+    fun `a session that cannot answer keeps every recorded Drive photo in the vault`() {
         val plan = HiddenVaultDecisions.signOutPlan(
             blobUris = setOf("file:///v/a", "file:///v/b"),
             cloudIdByUri = mapOf("file:///v/a" to "L-a", "file:///v/b" to "L-b"),
@@ -789,8 +791,9 @@ class HiddenVaultDecisionsTest {
             busy = emptySet(),
         )
 
-        assertEquals(listOf("file:///v/a", "file:///v/b"), plan.rescue)
+        assertTrue(plan.rescue.isEmpty())
         assertTrue("nothing may be destroyed on a record alone", plan.inDrive.isEmpty())
+        assertEquals(setOf("file:///v/a", "file:///v/b"), plan.unconfirmedInDrive)
     }
 
     @Test
@@ -804,6 +807,7 @@ class HiddenVaultDecisionsTest {
 
         assertEquals(listOf("file:///v/settled"), plan.rescue)
         assertTrue(plan.inDrive.isEmpty())
+        assertTrue(plan.unconfirmedInDrive.isEmpty())
     }
 
     @Test

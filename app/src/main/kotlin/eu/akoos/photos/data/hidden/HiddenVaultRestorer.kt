@@ -65,7 +65,9 @@ data class HiddenFolderProgress(val done: Int, val total: Int, val restoring: Bo
  *  than going to the gallery unprotected. [zipFailed]: the password reads, but the zip could not be
  *  written, checked or put in Downloads, so the photos stayed in the vault.
  *  [wipeable] is every vault file the vault wipe may now destroy, because its photo is safe elsewhere:
- *  in the zip, or in Drive by Drive's own answer. No other file may be destroyed. */
+ *  in the zip, or in Drive by Drive's own answer. No other file may be destroyed.
+ *  [keptForDrive] are the photos recorded with a Drive copy that Drive did not confirm: they stay in the
+ *  vault with their records and show in Hidden again after the next sign-in. */
 data class HiddenRescue(
     val moved: Int,
     val stillInVault: Set<String>,
@@ -73,6 +75,7 @@ data class HiddenRescue(
     val keptForPassword: Boolean = false,
     val zipFailed: Boolean = false,
     val wipeable: Set<String> = emptySet(),
+    val keptForDrive: Set<String> = emptySet(),
 ) {
     companion object {
         /** The gallery folder rescued photos land in, apart from every folder the user chose. The suffix
@@ -521,15 +524,16 @@ class HiddenVaultRestorer @Inject constructor(
     }
 
     /**
-     * Take every vault photo with no confirmed Drive copy back to the device, into the gallery [folder]
-     * of its own (or the password-protected zip), for a sign-out.
+     * Take every vault photo with no Drive copy back to the device, into the gallery [folder] of its
+     * own (or the password-protected zip), for a sign-out.
      *
      * A forced logout cannot warn, and for a photo that only ever existed on this device the vault
-     * file is the only copy, the hide having deleted the original. Those come back. So does a photo the
-     * vault recorded a Drive copy for that Drive does not confirm now, asked as [userId]: the copy may
-     * have been trashed since the hide, and a session that already ended cannot say. What remains is
-     * what Drive confirmed it holds. A folder of their own keeps the photos apart from photos the user
-     * took out of hiding, and each keeps the name and capture date it was hidden under.
+     * file is the only copy, the hide having deleted the original. Those come back. A photo the vault
+     * recorded a Drive copy for stays out of the gallery: Drive is asked as [userId] whether it still
+     * holds that copy, and only a confirmed one may lose its vault file. One Drive does not confirm (the
+     * copy trashed since the hide, or a session that already ended) stays in the vault. A folder of their
+     * own keeps the photos apart from photos the user took out of hiding, and each keeps the name and
+     * capture date it was hidden under.
      *
      * [busy] are the files a hide was moving when the sign-out began (see
      * [HiddenVaultJournal.beginSignOut]); they are left in the vault untouched.
@@ -555,7 +559,15 @@ class HiddenVaultRestorer @Inject constructor(
         )
         val targets = plan.rescue
         val inDrive = plan.inDrive
-        if (targets.isEmpty()) return@detached HiddenRescue(moved = 0, stillInVault = emptySet(), wipeable = inDrive)
+        val keptForDrive = plan.unconfirmedInDrive
+        if (targets.isEmpty()) {
+            return@detached HiddenRescue(
+                moved = 0,
+                stillInVault = emptySet(),
+                wipeable = inDrive,
+                keptForDrive = keptForDrive,
+            )
+        }
         val buckets = recordedBucketsOf(targets)
         // With a vault password the photos go into an encrypted zip and never back into the gallery
         // unprotected: a password that cannot be read now, or a zip that could not be made, leaves them in the
@@ -572,10 +584,13 @@ class HiddenVaultRestorer @Inject constructor(
                 } finally {
                     password.fill('\u0000')
                 }
-                return@detached zipped?.copy(wipeable = inDrive + targets)
+                val outcome = zipped?.copy(wipeable = inDrive + targets)
                     ?: HiddenVaultDecisions.zipFailed(targets, wipeable = inDrive)
+                return@detached outcome.copy(keptForDrive = keptForDrive)
             }
-            RescueRoute.KEEP_IN_VAULT -> return@detached HiddenVaultDecisions.keptForPassword(targets, wipeable = inDrive)
+            RescueRoute.KEEP_IN_VAULT ->
+                return@detached HiddenVaultDecisions.keptForPassword(targets, wipeable = inDrive)
+                    .copy(keptForDrive = keptForDrive)
             RescueRoute.GALLERY -> Unit
         }
         val tally = RevealTally()
@@ -600,7 +615,7 @@ class HiddenVaultRestorer @Inject constructor(
         journal.forget(targets - kept)
         clearEmptiedFolders(buckets)
         HiddenVaultDiagnostics.revealFinished(moved, targets.size - moved, tally)
-        HiddenRescue(moved = moved, stillInVault = stillInVault, wipeable = inDrive)
+        HiddenRescue(moved = moved, stillInVault = stillInVault, wipeable = inDrive, keptForDrive = keptForDrive)
     }
 
     /**

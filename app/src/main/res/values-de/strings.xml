@@ -1187,7 +1187,7 @@
     <string name="vault_rescue_partial_text">Einige deiner versteckten Fotos ohne Kopie in Drive wurden zurück in die Galerie verschoben, in den Ordner %1$s. Die übrigen konnten nicht verschoben werden und sind in der App geblieben. Öffne Versteckte Fotos, um sie zu sehen.</string>
     <string name="vault_rescue_not_moved_text">Deine versteckten Fotos ohne Kopie in Drive konnten nicht zurück in die Galerie verschoben werden, deshalb sind sie in der App geblieben. Öffne Versteckte Fotos, um sie zu sehen.</string>
     <string name="vault_rescue_zip_failed_text">Deine versteckten Fotos ohne Kopie in Drive konnten nicht in einer passwortgeschützten ZIP-Datei in deinem Ordner Downloads gespeichert werden, deshalb sind sie in der App geblieben. Öffne Versteckte Fotos, um sie zu sehen.</string>
-    <string name="vault_signout_kept_drive_text">Drive konnte nicht bestätigen, dass es einige deiner versteckten Fotos noch hat, deshalb wurden sie nicht gelöscht und sind in der App geblieben. Öffne Versteckte Fotos, um sie zu sehen.</string>
+    <string name="vault_signout_kept_drive_text">Drive konnte nicht bestätigen, dass es einige deiner versteckten Fotos noch hat, deshalb sind sie in der App geblieben und wurden nicht gelöscht. Nach der Anmeldung erscheinen sie wieder unter Versteckte Fotos.</string>
     <string name="update_notification_text">Tippen, um Version %1$s zu installieren.</string>
     <string name="settings_backup_how_section">Wie gesichert wird</string>
     <string name="settings_theme_palette">Design &amp; Palette</string>

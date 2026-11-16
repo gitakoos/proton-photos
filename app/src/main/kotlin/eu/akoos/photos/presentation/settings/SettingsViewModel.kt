@@ -2215,6 +2215,14 @@ class SettingsViewModel @Inject constructor(
                             eu.akoos.photos.data.hidden.VaultSignOutPolicy.userSignOutNotice(rescued, vaultFiles)?.let { notice ->
                                 runCatching { vaultRescueNotifier.notify(notice, afterUserSignOut = true) }
                             }
+                            if (!rescued?.keptForDrive.isNullOrEmpty()) {
+                                runCatching {
+                                    vaultRescueNotifier.notify(
+                                        eu.akoos.photos.data.hidden.RescueNotice.KeptUnconfirmedInDrive,
+                                        afterUserSignOut = true,
+                                    )
+                                }
+                            }
                             eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued, busy)
                         }
                     }

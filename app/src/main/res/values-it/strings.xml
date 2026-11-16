@@ -1202,7 +1202,7 @@
     <string name="vault_rescue_partial_text">Alcune foto nascoste senza copia su Drive sono state riportate nella galleria, nella cartella %1$s. Le altre non è stato possibile spostarle e sono rimaste nell\'app. Apri Foto nascoste per vederle.</string>
     <string name="vault_rescue_not_moved_text">Non è stato possibile riportare nella galleria le foto nascoste senza copia su Drive, quindi sono rimaste nell\'app. Apri Foto nascoste per vederle.</string>
     <string name="vault_rescue_zip_failed_text">Non è stato possibile salvare le foto nascoste senza copia su Drive in uno zip protetto da password nella cartella Download, quindi sono rimaste nell\'app. Apri Foto nascoste per vederle.</string>
-    <string name="vault_signout_kept_drive_text">Drive non ha potuto confermare di avere ancora alcune delle tue foto nascoste, quindi non sono state eliminate e sono rimaste nell\'app. Apri Foto nascoste per vederle.</string>
+    <string name="vault_signout_kept_drive_text">Drive non ha potuto confermare di avere ancora alcune delle tue foto nascoste, quindi sono rimaste nell\'app e non sono state eliminate. Riappariranno in Foto nascoste dopo che avrai effettuato l\'accesso.</string>
     <string name="update_notification_text">Tocca per installare la versione %1$s.</string>
     <string name="settings_backup_how_section">Come funziona il backup</string>
     <string name="settings_theme_palette">Tema e tavolozza</string>

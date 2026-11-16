@@ -1959,7 +1959,7 @@
     <string name="vault_rescue_partial_text">Some of your hidden photos with no copy in Drive were moved back to the gallery, into the %1$s folder. The others could not be moved and stayed in the app. Open Hidden Photos to see them.</string>
     <string name="vault_rescue_not_moved_text">Your hidden photos with no copy in Drive could not be moved back to the gallery, so they stayed in the app. Open Hidden Photos to see them.</string>
     <string name="vault_rescue_zip_failed_text">Your hidden photos with no copy in Drive could not be saved to a password-protected zip in your Downloads folder, so they stayed in the app. Open Hidden Photos to see them.</string>
-    <string name="vault_signout_kept_drive_text">Drive could not confirm it still holds some of your hidden photos, so they were not deleted and stayed in the app. Open Hidden Photos to see them.</string>
+    <string name="vault_signout_kept_drive_text">Drive could not confirm it still holds some of your hidden photos, so they stayed in the app and were not deleted. They appear in Hidden Photos again after you sign in.</string>
     <string name="update_notification_text">Tap to install version %1$s.</string>
     <string name="settings_backup_how_section">How backup runs</string>
     <string name="settings_theme_palette">Theme &amp; palette</string>

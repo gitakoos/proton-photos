@@ -145,6 +145,39 @@ class VaultSignOutPolicyTest {
     }
 
     @Test
+    fun `a forced logout keeps the Drive photos Drive did not confirm and says they come back`() = runTest {
+        val policy = policy {
+            HiddenRescue(
+                moved = 2,
+                stillInVault = emptySet(),
+                wipeable = setOf("file:///v/drive", "file:///v/unconfirmed"),
+                keptForDrive = setOf("file:///v/unconfirmed"),
+            )
+        }
+
+        val wipe = policy.afterSignOut("u1")
+
+        assertEquals("a Drive photo Drive did not confirm is never wiped", VaultWipe.Only(setOf("file:///v/drive")), wipe)
+        assertEquals(listOf(RescueNotice.Moved(null), RescueNotice.KeptUnconfirmedInDrive), notices)
+    }
+
+    @Test
+    fun `a vault of only unconfirmed Drive photos keeps them all and posts only the kept notice`() = runTest {
+        val policy = policy {
+            HiddenRescue(moved = 0, stillInVault = emptySet(), keptForDrive = setOf("file:///v/a", "file:///v/b"))
+        }
+
+        val wipe = policy.afterSignOut("u1")
+
+        assertEquals(VaultWipe.Only(emptySet()), wipe)
+        assertEquals(listOf(RescueNotice.KeptUnconfirmedInDrive), notices)
+        assertEquals(
+            "vault moved 0, 0 left in vault, 2 kept, not confirmed in Drive",
+            VaultSignOutPolicy.vaultNote(HiddenRescue(moved = 0, stillInVault = emptySet(), keptForDrive = setOf("file:///v/a", "file:///v/b"))),
+        )
+    }
+
+    @Test
     fun `a vault with nothing to take back posts no notice`() = runTest {
         val policy = policy { HiddenRescue(moved = 0, stillInVault = emptySet()) }
 

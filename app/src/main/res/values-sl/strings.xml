@@ -1426,7 +1426,7 @@
     <string name="vault_rescue_partial_text">Nekatere skrite fotografije brez kopije v Drive so bile premaknjene nazaj v galerijo, v mapo %1$s. Ostalih ni bilo mogoče premakniti, zato so ostale v aplikaciji. Odprite Skrite fotografije, da jih vidite.</string>
     <string name="vault_rescue_not_moved_text">Vaših skritih fotografij brez kopije v Drive ni bilo mogoče premakniti nazaj v galerijo, zato so ostale v aplikaciji. Odprite Skrite fotografije, da jih vidite.</string>
     <string name="vault_rescue_zip_failed_text">Vaših skritih fotografij brez kopije v Drive ni bilo mogoče shraniti v zip, zaščiten z geslom, v mapi Prenosi, zato so ostale v aplikaciji. Odprite Skrite fotografije, da jih vidite.</string>
-    <string name="vault_signout_kept_drive_text">Drive ni mogel potrditi, da še hrani nekatere vaše skrite fotografije, zato niso bile izbrisane in so ostale v aplikaciji. Odprite Skrite fotografije, da jih vidite.</string>
+    <string name="vault_signout_kept_drive_text">Drive ni mogel potrditi, da še hrani nekatere vaše skrite fotografije, zato so ostale v aplikaciji in niso bile izbrisane. Po prijavi se znova prikažejo med Skritimi fotografijami.</string>
     <string name="update_notification_text">Tapnite za namestitev različice %1$s.</string>
     <string name="settings_backup_how_section">Kako poteka varnostno kopiranje</string>
     <string name="settings_theme_palette">Tema in paleta</string>

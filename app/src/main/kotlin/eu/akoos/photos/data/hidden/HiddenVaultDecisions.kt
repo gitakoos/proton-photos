@@ -260,11 +260,12 @@ object HiddenVaultDecisions {
      * Drive has just confirmed it holds outside its trash ([liveCloudIds]) and the files a hide is still
      * moving ([busy]).
      *
-     * Only a confirmed Drive copy makes a vault file safe to lose: the record is from hide time, and the
-     * Drive copy may have been trashed or deleted since. A file whose copy cannot be confirmed now is
-     * treated as the only copy and taken back like one; a duplicate costs far less than a lost photo. A
-     * file no record names counts the same way. A busy file is neither taken back nor destroyed: its
-     * original may still be deleted, after which it is the only copy, so it stays in the vault.
+     * A file with no recorded Drive copy is the only copy of its photo and is taken back to the device,
+     * and a file no record names counts the same way. A file with a recorded Drive copy belongs in the
+     * cloud and never goes to the gallery or a zip: only Drive's own answer, given now, makes it safe to
+     * destroy, and one Drive does not confirm (trashed, missing, or a session that cannot answer) stays
+     * in the vault with its records. A busy file is neither taken back nor destroyed: its original may
+     * still be deleted, after which it is the only copy.
      */
     fun signOutPlan(
         blobUris: Set<String>,
@@ -273,8 +274,13 @@ object HiddenVaultDecisions {
         busy: Set<String>,
     ): SignOutVaultPlan {
         val settled = blobUris - busy
-        val inDrive = settled.filterTo(HashSet()) { uri -> cloudIdByUri[uri]?.let { it in liveCloudIds } == true }
-        return SignOutVaultPlan(rescue = (settled - inDrive).sorted(), inDrive = inDrive)
+        val paired = settled.filterTo(HashSet()) { it in cloudIdByUri }
+        val inDrive = paired.filterTo(HashSet()) { cloudIdByUri.getValue(it) in liveCloudIds }
+        return SignOutVaultPlan(
+            rescue = (settled - paired).sorted(),
+            inDrive = inDrive,
+            unconfirmedInDrive = paired - inDrive,
+        )
     }
 
     /**
@@ -509,8 +515,13 @@ object HiddenVaultDecisions {
 }
 
 /** [rescue]: the vault files a sign-out takes back to the device; [inDrive]: the ones Drive was just
- *  confirmed to hold, which the vault wipe may destroy. */
-data class SignOutVaultPlan(val rescue: List<String>, val inDrive: Set<String>)
+ *  confirmed to hold, which the vault wipe may destroy; [unconfirmedInDrive]: the ones recorded with a Drive
+ *  copy that Drive did not confirm, which stay in the vault. */
+data class SignOutVaultPlan(
+    val rescue: List<String>,
+    val inDrive: Set<String>,
+    val unconfirmedInDrive: Set<String> = emptySet(),
+)
 
 /** [delete]: the vault files a confirmed "delete" sign-out destroys; [unconfirmedInDrive]: the ones it
  *  keeps because Drive could not confirm the copy the user was told it holds. */

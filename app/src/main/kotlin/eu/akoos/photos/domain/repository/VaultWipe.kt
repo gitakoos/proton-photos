@@ -36,8 +36,9 @@ sealed interface VaultWipe {
 
     /**
      * Exactly the vault files [uris] names go, and no other. The caller names only files it has dealt
-     * with: taken back to the device, saved in a zip, confirmed in Drive, or named in the sign-out confirmation. A
-     * file that appeared after the caller looked, or one a hide was still moving, is never among them.
+     * with: taken back to the device, saved in a zip, confirmed in Drive, or named in the sign-out
+     * confirmation. A file that appeared after the caller looked, or one a hide was still moving, is
+     * never among them.
      */
     data class Only(val uris: Set<String>) : VaultWipe
 }
