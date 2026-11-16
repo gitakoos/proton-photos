@@ -2966,7 +2966,7 @@
     <string name="whats_new_260_triggerkeep_title">Varnostne kopije tečejo naprej</string>
     <string name="whats_new_260_triggerkeep_body">Varnostno kopiranje, ki se začne, ko se v telefonu pojavi nova fotografija, teče naprej, tudi ko odprete aplikacijo ali spremenite nastavitev.</string>
     <string name="whats_new_260_freeupbackup_title">Spremenjene fotografije ostanejo</string>
-    <string name="whats_new_260_freeupbackup_body">Sproščanje prostora primerja vsako fotografijo z njeno varnostno kopijo tik preden zapusti telefon. Fotografija, spremenjena po varnostnem kopiranju, ostane v telefonu in se znova uvrsti v vrsto za varnostno kopiranje; tista, ki je ni mogoče preveriti, ostane nespremenjena.</string>
+    <string name="whats_new_260_freeupbackup_body">Sproščanje prostora in brisanje po varnostnem kopiranju primerjata vsako fotografijo z njeno varnostno kopijo tik preden zapusti telefon. Fotografija, spremenjena po varnostnem kopiranju, ostane v telefonu in se znova uvrsti v vrsto za varnostno kopiranje; tista, ki je ni mogoče preveriti, ostane nespremenjena.</string>
     <string name="whats_new_260_compressnote_title">Opomba o stiskanju in sproščanju prostora</string>
     <string name="whats_new_260_compressnote_body">Ko je stiskanje ob nalaganju vklopljeno, Nastavitve povedo, da v Drive ostane samo stisnjena kopija, ko izvirnik zapusti telefon s sproščanjem prostora ali brisanjem po varnostnem kopiranju.</string>
     <string name="whats_new_260_mirrorcheck_title">Izvirniki zamenjani šele po preverjanju</string>

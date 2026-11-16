@@ -2835,7 +2835,7 @@
     <string name="whats_new_260_triggerkeep_title">Sicherungen laufen weiter</string>
     <string name="whats_new_260_triggerkeep_body">Eine Sicherung, die startet, wenn ein neues Foto auf dem Telefon erscheint, läuft weiter, wenn du die App öffnest oder eine Einstellung änderst.</string>
     <string name="whats_new_260_freeupbackup_title">Geänderte Fotos bleiben</string>
-    <string name="whats_new_260_freeupbackup_body">Speicher freigeben vergleicht jedes Foto direkt vor dem Entfernen vom Telefon mit seiner Sicherung. Ein seit der Sicherung geändertes Foto bleibt auf dem Telefon und wird erneut zur Sicherung eingereiht; eines, das sich nicht prüfen lässt, bleibt unverändert.</string>
+    <string name="whats_new_260_freeupbackup_body">Speicher freigeben und Löschen nach der Sicherung vergleichen jedes Foto direkt vor dem Entfernen vom Telefon mit seiner Sicherung. Ein seit der Sicherung geändertes Foto bleibt auf dem Telefon und wird erneut zur Sicherung eingereiht; eines, das sich nicht prüfen lässt, bleibt unverändert.</string>
     <string name="whats_new_260_compressnote_title">Hinweis zu Komprimierung und Freigeben</string>
     <string name="whats_new_260_compressnote_body">Ist die Komprimierung beim Hochladen an, sagen die Einstellungen, dass in Drive nur die komprimierte Kopie bleibt, sobald das Original durch Speicher freigeben oder Löschen nach der Sicherung vom Telefon entfernt wird.</string>
     <string name="whats_new_260_mirrorcheck_title">Originale erst nach einer Prüfung ersetzt</string>

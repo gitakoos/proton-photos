@@ -2834,7 +2834,7 @@
     <string name="whats_new_260_triggerkeep_title">A mentések futnak tovább</string>
     <string name="whats_new_260_triggerkeep_body">Az a mentés, amely egy új fotó megjelenésekor indul el a telefonon, tovább fut, ha megnyitod az appot vagy módosítasz egy beállítást.</string>
     <string name="whats_new_260_freeupbackup_title">A módosított fotók megmaradnak</string>
-    <string name="whats_new_260_freeupbackup_body">A hely felszabadítása minden fotót összevet a mentésével közvetlenül azelőtt, hogy lekerülne a telefonról. A mentés óta módosított fotó a telefonon marad, és újra mentésre vár; amelyik nem ellenőrizhető, változatlanul marad.</string>
+    <string name="whats_new_260_freeupbackup_body">A hely felszabadítása és a mentés utáni törlés minden fotót összevet a mentésével közvetlenül azelőtt, hogy lekerülne a telefonról. A mentés óta módosított fotó a telefonon marad, és újra mentésre vár; amelyik nem ellenőrizhető, változatlanul marad.</string>
     <string name="whats_new_260_compressnote_title">Megjegyzés a tömörítésről és a helyfelszabadításról</string>
     <string name="whats_new_260_compressnote_body">Bekapcsolt feltöltéskori tömörítésnél a Beállítások jelzi, hogy a Drive-on csak a tömörített másolat marad, amint az eredeti lekerül a telefonról hely felszabadításával vagy mentés utáni törléssel.</string>
     <string name="whats_new_260_mirrorcheck_title">Az eredeti csak ellenőrzés után cserélődik</string>

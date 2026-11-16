@@ -2752,7 +2752,7 @@
     <string name="whats_new_260_triggerkeep_title">Yedeklemeler sürer</string>
     <string name="whats_new_260_triggerkeep_body">Telefonda yeni bir fotoğraf belirdiğinde başlayan yedekleme, uygulamayı açtığında ya da bir ayarı değiştirdiğinde de sürer.</string>
     <string name="whats_new_260_freeupbackup_title">Değişen fotoğraflar kalır</string>
-    <string name="whats_new_260_freeupbackup_body">Yer açma, her fotoğrafı telefondan kalkmadan hemen önce yedeğiyle karşılaştırır. Yedeklemeden sonra değişen bir fotoğraf telefonda kalır ve yeniden yedeklenmek üzere sıraya girer; denetlenemeyen bir fotoğraf olduğu gibi kalır.</string>
+    <string name="whats_new_260_freeupbackup_body">Yer açma ve yedeklemeden sonra silme, her fotoğrafı telefondan kalkmadan hemen önce yedeğiyle karşılaştırır. Yedeklemeden sonra değişen bir fotoğraf telefonda kalır ve yeniden yedeklenmek üzere sıraya girer; denetlenemeyen bir fotoğraf olduğu gibi kalır.</string>
     <string name="whats_new_260_compressnote_title">Sıkıştırma ve yer açma notu</string>
     <string name="whats_new_260_compressnote_body">Yüklemede sıkıştırma açıksa Ayarlar, orijinal yer açarak ya da yedeklemeden sonra silerek telefondan kalktığında Drive\'da yalnızca sıkıştırılmış kopyanın kalacağını söyler.</string>
     <string name="whats_new_260_mirrorcheck_title">Orijinaller ancak bir denetimden sonra değişir</string>

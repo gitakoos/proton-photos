@@ -2859,7 +2859,7 @@
     <string name="whats_new_260_triggerkeep_title">Back-ups lopen door</string>
     <string name="whats_new_260_triggerkeep_body">Een back-up die start als er een nieuwe foto op de telefoon verschijnt, loopt door als je de app opent of een instelling wijzigt.</string>
     <string name="whats_new_260_freeupbackup_title">Gewijzigde foto\'s blijven</string>
-    <string name="whats_new_260_freeupbackup_body">Ruimte vrijmaken vergelijkt elke foto met zijn back-up vlak voordat hij van de telefoon gaat. Een foto die sinds de back-up is gewijzigd, blijft op de telefoon en komt opnieuw in de wachtrij voor een back-up; een foto die niet te controleren is, blijft zoals hij is.</string>
+    <string name="whats_new_260_freeupbackup_body">Ruimte vrijmaken en verwijderen na de back-up vergelijken elke foto met zijn back-up vlak voordat hij van de telefoon gaat. Een foto die sinds de back-up is gewijzigd, blijft op de telefoon en komt opnieuw in de wachtrij voor een back-up; een foto die niet te controleren is, blijft zoals hij is.</string>
     <string name="whats_new_260_compressnote_title">Opmerking over comprimeren en ruimte vrijmaken</string>
     <string name="whats_new_260_compressnote_body">Staat comprimeren bij uploaden aan, dan zeggen de Instellingen dat in Drive alleen de gecomprimeerde kopie overblijft zodra het origineel van de telefoon gaat door ruimte vrij te maken of na de back-up te verwijderen.</string>
     <string name="whats_new_260_mirrorcheck_title">Originelen pas vervangen na een controle</string>

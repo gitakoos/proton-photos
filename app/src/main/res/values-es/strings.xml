@@ -2872,7 +2872,7 @@
     <string name="whats_new_260_triggerkeep_title">Las copias siguen en marcha</string>
     <string name="whats_new_260_triggerkeep_body">Una copia que empieza cuando aparece una foto nueva en el teléfono sigue en marcha aunque abras la app o cambies un ajuste.</string>
     <string name="whats_new_260_freeupbackup_title">Las fotos cambiadas se quedan</string>
-    <string name="whats_new_260_freeupbackup_body">Liberar espacio compara cada foto con su copia justo antes de quitarla del teléfono. Una foto cambiada desde su copia se queda en el teléfono y vuelve a la cola de copia; una que no se puede comprobar se queda tal cual.</string>
+    <string name="whats_new_260_freeupbackup_body">Liberar espacio y eliminar tras la copia comparan cada foto con su copia justo antes de quitarla del teléfono. Una foto cambiada desde su copia se queda en el teléfono y vuelve a la cola de copia; una que no se puede comprobar se queda tal cual.</string>
     <string name="whats_new_260_compressnote_title">Nota sobre compresión y liberar espacio</string>
     <string name="whats_new_260_compressnote_body">Con la compresión al subir activada, Ajustes indica que en Drive solo queda la copia comprimida cuando el original sale del teléfono al liberar espacio o al eliminarlo tras la copia.</string>
     <string name="whats_new_260_mirrorcheck_title">Originales sustituidos solo tras una comprobación</string>

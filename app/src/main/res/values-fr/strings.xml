@@ -2837,7 +2837,7 @@
     <string name="whats_new_260_triggerkeep_title">Les sauvegardes continuent</string>
     <string name="whats_new_260_triggerkeep_body">Une sauvegarde qui démarre quand une nouvelle photo apparaît sur le téléphone continue quand vous ouvrez l\'app ou modifiez un réglage.</string>
     <string name="whats_new_260_freeupbackup_title">Les photos modifiées sont gardées</string>
-    <string name="whats_new_260_freeupbackup_body">Libérer de l\'espace compare chaque photo à sa sauvegarde juste avant de la retirer du téléphone. Une photo modifiée depuis sa sauvegarde reste sur le téléphone et est remise en file pour être sauvegardée à nouveau ; une photo qui ne peut pas être vérifiée reste telle quelle.</string>
+    <string name="whats_new_260_freeupbackup_body">Libérer de l\'espace et supprimer après la sauvegarde comparent chaque photo à sa sauvegarde juste avant de la retirer du téléphone. Une photo modifiée depuis sa sauvegarde reste sur le téléphone et est remise en file pour être sauvegardée à nouveau ; une photo qui ne peut pas être vérifiée reste telle quelle.</string>
     <string name="whats_new_260_compressnote_title">Note sur la compression et la libération d\'espace</string>
     <string name="whats_new_260_compressnote_body">Si la compression à l\'envoi est activée, les réglages indiquent que Drive ne garde que la copie compressée une fois l\'original retiré du téléphone en libérant de l\'espace ou en le supprimant après la sauvegarde.</string>
     <string name="whats_new_260_mirrorcheck_title">Originaux remplacés seulement après vérification</string>

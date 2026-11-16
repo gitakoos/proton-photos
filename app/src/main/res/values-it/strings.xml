@@ -2874,7 +2874,7 @@
     <string name="whats_new_260_triggerkeep_title">I backup continuano</string>
     <string name="whats_new_260_triggerkeep_body">Un backup che parte quando sul telefono compare una nuova foto continua anche se apri l\'app o cambi un\'impostazione.</string>
     <string name="whats_new_260_freeupbackup_title">Le foto modificate restano</string>
-    <string name="whats_new_260_freeupbackup_body">Liberare spazio confronta ogni foto con il suo backup subito prima di toglierla dal telefono. Una foto modificata dopo il backup resta sul telefono e torna in coda per un nuovo backup; una che non si può verificare resta com\'è.</string>
+    <string name="whats_new_260_freeupbackup_body">Liberare spazio ed eliminare dopo il backup confrontano ogni foto con il suo backup subito prima di toglierla dal telefono. Una foto modificata dopo il backup resta sul telefono e torna in coda per un nuovo backup; una che non si può verificare resta com\'è.</string>
     <string name="whats_new_260_compressnote_title">Nota su compressione e spazio liberato</string>
     <string name="whats_new_260_compressnote_body">Con la compressione al caricamento attiva, le Impostazioni indicano che su Drive resta solo la copia compressa quando l\'originale lascia il telefono liberando spazio o eliminandolo dopo il backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originali sostituiti solo dopo un controllo</string>
