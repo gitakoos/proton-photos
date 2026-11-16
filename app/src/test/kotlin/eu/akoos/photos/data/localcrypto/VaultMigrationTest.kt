@@ -72,6 +72,7 @@ class VaultMigrationTest {
 
     private fun migration(
         free: Long = Long.MAX_VALUE,
+        formOf: (File) -> LocalFileForm = { LocalCryptoFormat.formOf(it) },
         checkpoint: (VaultMigration.Step, File) -> Unit = { _, _ -> },
     ) = VaultMigration(
         vaultDir = vault,
@@ -82,6 +83,7 @@ class VaultMigrationTest {
         metaFor = { LocalFileMeta(originalName = "orig-${it.name}", sourceFolder = "Camera") },
         freeBytes = { free },
         checkpoint = checkpoint,
+        formOf = formOf,
     )
 
     private fun plainOf(file: File): ByteArray = if (!LocalCryptoFormat.isEncrypted(file)) file.readBytes()
@@ -191,6 +193,24 @@ class VaultMigrationTest {
         assertEquals(0, outcome.encrypted)
         assertEquals(4, outcome.remaining)
         assertVaultWhole()
+    }
+
+    @Test
+    fun `a file whose first bytes cannot be read is never encrypted and the run stays unfinished`() {
+        val unreadable = "uuid-2.jpg"
+        val outcome = migration(formOf = { if (it.name == unreadable) LocalFileForm.UNKNOWN else LocalCryptoFormat.formOf(it) }).run()
+
+        assertArrayEquals(originals[unreadable], File(vault, unreadable).readBytes())
+        assertFalse(outcome.complete)
+        assertEquals(1, outcome.remaining)
+        assertVaultWhole()
+    }
+
+    @Test
+    fun `a read error is an unknown form, never a plaintext one`() {
+        val file = File(vault, "uuid-3.jpg")
+        assertEquals(LocalFileForm.UNKNOWN, LocalCryptoFormat.formOf(file) { throw java.io.IOException("EIO") })
+        assertEquals(LocalFileForm.PLAIN, LocalCryptoFormat.formOf(file))
     }
 
     @Test

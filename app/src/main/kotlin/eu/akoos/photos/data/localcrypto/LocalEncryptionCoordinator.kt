@@ -170,7 +170,7 @@ class LocalEncryptionCoordinator @Inject constructor(
 
     suspend fun refresh() {
         val status = withContext(Dispatchers.IO) { runCatching { LocalCrypto.custody(context)?.status() }.getOrNull() }
-        val pending = withContext(Dispatchers.IO) { runCatching { migration()?.plaintextFiles()?.size }.getOrNull() } ?: 0
+        val pending = withContext(Dispatchers.IO) { runCatching { migration()?.pendingFiles()?.size }.getOrNull() } ?: 0
         val signedIn = runCatching { accountManager.getPrimaryUserId().first() != null }.getOrDefault(false)
         _state.value = _state.value.copy(
             available = LocalCrypto.keyringOrNull(context) != null,
@@ -253,7 +253,7 @@ class LocalEncryptionCoordinator @Inject constructor(
 
     private suspend fun encryptVault() {
         val base = migration() ?: return
-        if (base.plaintextFiles().isEmpty()) {
+        if (base.pendingFiles().isEmpty()) {
             LocalCrypto.markMigrated(context)
             return
         }

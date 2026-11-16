@@ -99,7 +99,7 @@ object VaultFiles {
     /** The plaintext of a vault file. Throws [LocalKeyLockedException], [LocalKeyUnavailableException] or
      *  [LocalFileDamagedException] for an encrypted file that does not open. */
     fun openPlain(context: Context, file: File): InputStream {
-        if (!isEncrypted(file)) return FileInputStream(file)
+        if (plainForm(file)) return FileInputStream(file)
         val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
         return LocalCryptoFormat.openFile(file, keyring).inputStream()
     }
@@ -111,6 +111,14 @@ object VaultFiles {
 
     /** The size of a vault file's plaintext, from its header for an encrypted one. */
     fun plainLength(file: File): Long = if (isEncrypted(file)) LocalCryptoFormat.plainSize(file) ?: 0L else file.length()
+
+    /** True for a plaintext file, false for an encrypted one; throws [LocalFileUnreadableException] when its
+     *  start cannot be read, so nothing takes its raw bytes for the photo. */
+    fun plainForm(file: File): Boolean = when (LocalCryptoFormat.formOf(file)) {
+        LocalFileForm.PLAIN -> true
+        LocalFileForm.ENCRYPTED -> false
+        LocalFileForm.UNKNOWN -> throw LocalFileUnreadableException(file)
+    }
 
     /** What an encrypted vault file says about itself, or null (plaintext, or it does not open). */
     fun meta(context: Context, file: File): LocalFileMeta? {
@@ -131,7 +139,7 @@ object VaultFiles {
         val dir = workDir(context).apply { mkdirs() }
         val work = File(dir, "${UUID.randomUUID()}.${file.extension.ifBlank { "bin" }}")
         try {
-            if (isEncrypted(file)) {
+            if (!plainForm(file)) {
                 val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
                 val digest = FileOutputStream(work).use { LocalCryptoFormat.decryptFile(file, keyring, it) }
                 if (work.length() != digest.bytes) throw IOException("scratch copy incomplete")
@@ -149,7 +157,7 @@ object VaultFiles {
     /** Runs [block] with a plaintext file holding [file]'s bytes: the file itself when it is not encrypted, else a
      *  scratch copy that is deleted afterwards. [block] must only read. */
     inline fun <T> withPlainFile(context: Context, file: File, block: (File) -> T): T {
-        if (!isEncrypted(file)) return block(file)
+        if (plainForm(file)) return block(file)
         val work = materialize(context, file)
         try {
             return block(work)

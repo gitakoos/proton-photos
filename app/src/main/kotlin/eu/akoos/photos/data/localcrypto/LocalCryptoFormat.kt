@@ -38,6 +38,12 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+/** What a file on disk is: encrypted, plaintext, or not readable now ([UNKNOWN]). */
+enum class LocalFileForm { ENCRYPTED, PLAIN, UNKNOWN }
+
+/** A file whose first bytes could not be read, so whether it is encrypted is not known. Try again later. */
+class LocalFileUnreadableException(file: File) : IOException("cannot read the start of ${file.name}")
+
 /** What an encrypted file holds, written into its header so the kind can never be mistaken for another. */
 enum class LocalFileKind(val code: Int) {
     VAULT(1),
@@ -197,15 +203,21 @@ object LocalCryptoFormat {
         length >= 5 && (0 until 4).all { head[it] == MAGIC[it] } && head[4].toInt() == VERSION
 
     /** Whether [file] starts like one of these files. A file that cannot be read answers false. */
-    fun isEncrypted(file: File): Boolean {
-        if (!file.isFile || file.length() < META_OFFSET) return false
+    fun isEncrypted(file: File): Boolean = formOf(file) == LocalFileForm.ENCRYPTED
+
+    /**
+     * What [file] is, read from its first bytes. A file that exists but cannot be read now is [LocalFileForm.UNKNOWN],
+     * never plaintext: such a file is not encrypted again, copied out or deleted, and is looked at again later.
+     */
+    fun formOf(file: File, open: (File) -> RandomAccessFile = { RandomAccessFile(it, "r") }): LocalFileForm {
+        if (!file.isFile || file.length() < META_OFFSET) return LocalFileForm.PLAIN
         return runCatching {
-            RandomAccessFile(file, "r").use { raf ->
+            open(file).use { raf ->
                 val head = ByteArray(5)
                 raf.readFully(head)
-                looksEncrypted(head)
+                if (looksEncrypted(head)) LocalFileForm.ENCRYPTED else LocalFileForm.PLAIN
             }
-        }.getOrDefault(false)
+        }.getOrDefault(LocalFileForm.UNKNOWN)
     }
 
     fun keyIdHex(id: ByteArray): String = id.joinToString("") { "%02x".format(it) }

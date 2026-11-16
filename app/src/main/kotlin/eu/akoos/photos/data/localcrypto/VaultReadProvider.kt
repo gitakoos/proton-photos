@@ -76,7 +76,12 @@ class VaultReadProvider : ContentProvider() {
         if (mode != "r") throw SecurityException("read only")
         val context = context ?: throw FileNotFoundException()
         val file = fileFor(uri) ?: throw FileNotFoundException()
-        if (!VaultFiles.isEncrypted(file)) return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val plain = try {
+            VaultFiles.plainForm(file)
+        } catch (e: LocalFileUnreadableException) {
+            throw FileNotFoundException("file cannot be read now")
+        }
+        if (plain) return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         val reader = try {
             VaultFiles.openReader(context, file)
         } catch (e: Exception) {

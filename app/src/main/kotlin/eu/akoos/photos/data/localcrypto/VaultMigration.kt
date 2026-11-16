@@ -52,6 +52,7 @@ class VaultMigration(
     private val log: (String) -> Unit = {},
     /** Called between steps, for tests that stop the run at a given point. */
     private val checkpoint: (Step, File) -> Unit = { _, _ -> },
+    private val formOf: (File) -> LocalFileForm = { LocalCryptoFormat.formOf(it) },
 ) {
     enum class Step { STAGED, VERIFIED, MOVED }
 
@@ -89,21 +90,28 @@ class VaultMigration(
                 log("vault encryption: a file did not encrypt (${e.javaClass.simpleName})")
             }
         }
-        val remaining = plaintextFiles().size
+        // A file that could not be read is not done either: the run stays unfinished and looks again next time.
+        val remaining = pendingFiles().size
         if (encrypted > 0 || failed > 0) log("vault encryption: $encrypted encrypted, $failed failed, $remaining left")
         return Outcome(encrypted, remaining, stoppedForSpace, failed)
     }
 
-    /** The vault's files that are not encrypted yet. */
+    /** The vault's files not known to be encrypted: plaintext ones and ones that could not be read. */
+    fun pendingFiles(): List<File> =
+        vaultDir.listFiles()
+            ?.filter { it.isFile && !it.name.startsWith(".") && formOf(it) != LocalFileForm.ENCRYPTED }
+            ?: emptyList()
+
+    /** The vault's files that are plaintext, the ones to encrypt. */
     fun plaintextFiles(): List<File> =
         vaultDir.listFiles()
-            ?.filter { it.isFile && !it.name.startsWith(".") && !LocalCryptoFormat.isEncrypted(it) }
+            ?.filter { it.isFile && !it.name.startsWith(".") && formOf(it) == LocalFileForm.PLAIN }
             ?.sortedBy { it.name }
             ?: emptyList()
 
     private fun encryptOne(file: File): Boolean = lock.withLock {
         // Under the vault lock: no edit, reveal or rename changes this file until it is replaced.
-        if (!file.isFile || LocalCryptoFormat.isEncrypted(file)) return false
+        if (!file.isFile || formOf(file) != LocalFileForm.PLAIN) return false
         stagingDir.mkdirs()
         val temp = File(stagingDir, file.name + STAGING_SUFFIX)
         try {
