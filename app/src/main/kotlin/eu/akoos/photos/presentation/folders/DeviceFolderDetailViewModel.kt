@@ -1215,6 +1215,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (reportProgress) _folderVault.value = HiddenFolderProgress(0, vaultable.size, restoring = false)
         for (target in vaultable) {
             if (reportProgress && stopFolderVault.get()) break
+            // A sign-out refuses the journal below, so every further copy would only be dropped again.
+            if (hiddenVaultJournal.signingOut()) break
             val local = target.local
             val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
             val privateUri = hiddenStorage.store(

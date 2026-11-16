@@ -490,6 +490,11 @@ class SettingsViewModel @Inject constructor(
      * Both the reconciliation and the directory listing run off the main thread, and the listing is
      * repeated only when the index itself changes.
      */
+    /** The vault files behind [SettingsUiState.vaultedPhotoCount], the count the sign-out confirmation
+     *  names: a sign-out the user confirms with "delete" destroys these and never a file added after. */
+    @Volatile
+    private var countedVaultUris: Set<String> = emptySet()
+
     private fun observeVaultedCount() {
         viewModelScope.launch {
             hiddenVaultJournal.reconcile()
@@ -516,6 +521,7 @@ class SettingsViewModel @Inject constructor(
                         android.util.Log.w("SettingsViewModel", "vault count: directory unreadable", e)
                         recorded
                     }
+                    countedVaultUris = everything
                     _uiState.update {
                         it.copy(
                             vaultedPhotoCount = everything.size,
@@ -2171,55 +2177,86 @@ class SettingsViewModel @Inject constructor(
                 //    token disappears (heap can't recover keys; the re-login starts from a clean
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).
                 // The photos the user chose to keep go to the gallery before the vault is emptied; the
-                // wipe then spares any that could not be moved.
-                val vaultFiles = runCatching { hiddenStorage.vaultBlobUris().size }.getOrDefault(0)
-                var vaultNote = "vault deleted ($vaultFiles files)"
-                val vaultWipe = when (vault) {
-                    eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE -> eu.akoos.photos.domain.repository.VaultWipe.All
-                    eu.akoos.photos.data.hidden.SignOutVaultChoice.MOVE_OUT -> {
-                        val rescued = runCatching {
-                            hiddenVaultRestorer.rescueDeviceOnly(
-                                eu.akoos.photos.data.hidden.HiddenRescue.SIGN_OUT_FOLDER,
-                            )
-                        }.getOrNull()
-                        vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
-                        if (eu.akoos.photos.data.hidden.VaultSignOutPolicy.keptAfterUserSignOut(rescued, vaultFiles)) {
-                            runCatching { vaultRescueNotifier.notifyKeptAfterSignOut() }
+                // wipe then destroys only what is safe elsewhere or what the confirmation counted. No hide
+                // is admitted until the account is gone, and the ones already admitted are spared.
+                val confirmedVault = countedVaultUris
+                val busy = hiddenVaultJournal.beginSignOut()
+                try {
+                    val vaultFiles = runCatching { hiddenStorage.vaultBlobUris().size }.getOrDefault(0)
+                    var vaultNote = "vault deleted ($vaultFiles files)"
+                    val vaultWipe = when (vault) {
+                        eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE -> {
+                            val plan = runCatching { hiddenVaultRestorer.userDeletePlan(confirmedVault, userId, busy) }.getOrNull()
+                            if (plan == null) {
+                                vaultNote = "vault delete not planned, vault left alone"
+                                eu.akoos.photos.domain.repository.VaultWipe.None
+                            } else {
+                                vaultNote = "vault deleted ${plan.delete.size}, ${plan.unconfirmedInDrive.size} kept, not confirmed in Drive"
+                                if (plan.unconfirmedInDrive.isNotEmpty()) {
+                                    runCatching {
+                                        vaultRescueNotifier.notify(
+                                            eu.akoos.photos.data.hidden.RescueNotice.KeptUnconfirmedInDrive,
+                                            afterUserSignOut = true,
+                                        )
+                                    }
+                                }
+                                eu.akoos.photos.domain.repository.VaultWipe.Only(plan.delete)
+                            }
                         }
-                        eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued)
+                        eu.akoos.photos.data.hidden.SignOutVaultChoice.MOVE_OUT -> {
+                            val rescued = runCatching {
+                                hiddenVaultRestorer.rescueDeviceOnly(
+                                    eu.akoos.photos.data.hidden.HiddenRescue.SIGN_OUT_FOLDER,
+                                    userId = userId,
+                                    busy = busy,
+                                )
+                            }.getOrNull()
+                            vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
+                            eu.akoos.photos.data.hidden.VaultSignOutPolicy.userSignOutNotice(rescued, vaultFiles)?.let { notice ->
+                                runCatching { vaultRescueNotifier.notify(notice, afterUserSignOut = true) }
+                            }
+                            eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued, busy)
+                        }
                     }
-                }
-                cloudRepo.clearCacheForSignOut(userId, vaultWipe)
-                // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
-                //    thumbnail of the signed-out user stays readable, and drop the diagnostics
-                //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
-                //    a different user. The offline blobs, the hidden vault, the widgets' bitmaps and
-                //    the key material are wiped inside clearCacheForSignOut above so EVERY sign-out
-                //    route (including a server-side force-logout) covers them; MediaStore originals
-                //    and the encrypted in-flight upload spill are left alone.
-                runCatching {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        eu.akoos.photos.util.SignOutCleanup.clearDecryptedCaches(context)
-                        eu.akoos.photos.util.SyncDiagnostics.clear()
-                        eu.akoos.photos.util.PerfDiagnostics.clear()
-                        eu.akoos.photos.util.ImportDiagnostics.clear()
-                        File(context.filesDir, "diagnostics").deleteRecursively()
+                    cloudRepo.clearCacheForSignOut(userId, vaultWipe)
+                    // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
+                    //    thumbnail of the signed-out user stays readable, and drop the diagnostics
+                    //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
+                    //    a different user. The offline blobs, the hidden vault, the widgets' bitmaps and
+                    //    the key material are wiped inside clearCacheForSignOut above so EVERY sign-out
+                    //    route (including a server-side force-logout) covers them; MediaStore originals
+                    //    and the encrypted in-flight upload spill are left alone.
+                    runCatching {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            eu.akoos.photos.util.SignOutCleanup.clearDecryptedCaches(context)
+                            eu.akoos.photos.util.SyncDiagnostics.clear()
+                            eu.akoos.photos.util.PerfDiagnostics.clear()
+                            eu.akoos.photos.util.ImportDiagnostics.clear()
+                            File(context.filesDir, "diagnostics").deleteRecursively()
+                        }
                     }
+                    // 4. Clear account-tied DataStore state so a sign-in as a different user can't
+                    //    inherit the previous account's sync state, folder selection, recent upload
+                    //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
+                    //    machine-level flags (onboarding-complete, app-lock, update throttle).
+                    // The vault files still on disk keep their records, so the Hidden screen still reaches them.
+                    runCatching {
+                        val kept = if (vaultWipe is eu.akoos.photos.domain.repository.VaultWipe.None) null
+                        else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+                        AccountScopedPreferences.clear(context, userId, keptVaultUris = kept)
+                    }
+                    // The line goes in after the buffers were emptied above, so it opens the next session's log.
+                    eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote")
+                    // The handler every sign-out reaches must know this one was asked for.
+                    eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id)
+                    // End the app lock's post-unlock grace in AppLockSession, which holds the lock
+                    // timestamps, BEFORE disableAccount triggers the route change, so the stop and
+                    // start of the sign-in flow is judged by the lock timeout alone.
+                    appLockManager.notifyResetLockTimestamps()
+                    accountManager.disableAccount(userId)
+                } finally {
+                    hiddenVaultJournal.endSignOut()
                 }
-                // 4. Clear account-tied DataStore state so a sign-in as a different user can't
-                //    inherit the previous account's sync state, folder selection, recent upload
-                //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
-                //    machine-level flags (onboarding-complete, app-lock, update throttle).
-                runCatching { AccountScopedPreferences.clear(context, userId) }
-                // The line goes in after the buffers were emptied above, so it opens the next session's log.
-                eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote")
-                // The handler every sign-out reaches must know this one was asked for.
-                eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id)
-                // End the app lock's post-unlock grace in AppLockSession, which holds the lock
-                // timestamps, BEFORE disableAccount triggers the route change, so the stop and
-                // start of the sign-in flow is judged by the lock timeout alone.
-                appLockManager.notifyResetLockTimestamps()
-                accountManager.disableAccount(userId)
             }
         }
     }

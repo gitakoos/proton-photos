@@ -45,27 +45,29 @@ class VaultRescueNotifier @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    /** The photos stayed in the vault: a password is set but could not be read for the protected zip. */
-    fun notifyKeptInVault() = post(context.getString(R.string.vault_rescue_kept_text))
-
-    /** A sign-out the user asked for could not take some photos to the gallery; they stayed in the vault. */
-    fun notifyKeptAfterSignOut() = post(
-        context.getString(R.string.vault_signout_kept_text),
-        title = context.getString(R.string.vault_signout_kept_title),
-    )
-
-    /** [zipName] is the zip in Downloads the photos went into, or null when they went to the gallery. */
-    fun notifyMoved(zipName: String? = null) {
-        post(
-            if (zipName != null) {
-                context.getString(R.string.vault_rescue_zip_text, zipName)
-            } else {
-                context.getString(R.string.vault_rescue_text, HiddenRescue.FOLDER)
-            },
-        )
+    /**
+     * Posts [notice]. [afterUserSignOut] is true for a sign-out the user asked for, whose notices are only
+     * ever about photos that stayed in the app; a forced logout's notice opens with the sign-out itself.
+     */
+    fun notify(notice: RescueNotice, afterUserSignOut: Boolean = false) {
+        val text = when (notice) {
+            is RescueNotice.Moved ->
+                if (notice.zipName != null) context.getString(R.string.vault_rescue_zip_text, notice.zipName)
+                else context.getString(R.string.vault_rescue_text, HiddenRescue.FOLDER)
+            RescueNotice.MovedPartly ->
+                if (afterUserSignOut) context.getString(R.string.vault_signout_kept_text)
+                else context.getString(R.string.vault_rescue_partial_text, HiddenRescue.FOLDER)
+            RescueNotice.NotMoved -> context.getString(R.string.vault_rescue_not_moved_text)
+            RescueNotice.KeptForPassword -> context.getString(R.string.vault_rescue_kept_text)
+            RescueNotice.ZipFailed -> context.getString(R.string.vault_rescue_zip_failed_text)
+            RescueNotice.KeptUnconfirmedInDrive -> context.getString(R.string.vault_signout_kept_drive_text)
+        }
+        val title = if (afterUserSignOut) context.getString(R.string.vault_signout_kept_title)
+        else context.getString(R.string.vault_rescue_title)
+        post(text, title)
     }
 
-    private fun post(text: String, title: String = context.getString(R.string.vault_rescue_title)) {
+    private fun post(text: String, title: String) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         ensureNotificationChannel(
             context,

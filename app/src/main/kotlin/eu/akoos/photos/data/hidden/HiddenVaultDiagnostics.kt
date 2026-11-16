@@ -106,6 +106,11 @@ object HiddenVaultDiagnostics {
         SyncDiagnostics.log("hide: journal write failed ($reason)")
     }
 
+    /** A hide refused because a sign-out was emptying the vault; its originals were left alone. */
+    fun refusedForSignOut(count: Int) {
+        SyncDiagnostics.log("hide: $count refused, sign-out running, originals kept")
+    }
+
     /** The originals are gone. [neededConsent] is false only where the delete ran without the system
      *  dialog, which is the pre-Android-11 path. */
     fun originalsRemoved(count: Int, neededConsent: Boolean) {

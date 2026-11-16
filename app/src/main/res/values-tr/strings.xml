@@ -1855,6 +1855,10 @@
     <string name="vault_rescue_kept_text">Gizli fotoğraflar parolan okunamadı, bu yüzden Drive\'da kopyası olmayan gizli fotoğrafların korumasız olarak galeriye gitmek yerine uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç ve parolayı gir.</string>
     <string name="vault_signout_kept_title">Gizli fotoğraflar uygulamada kaldı</string>
     <string name="vault_signout_kept_text">Drive\'da kopyası olmayan gizli fotoğraflarının bazıları galeriye taşınamadı, bu yüzden uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç.</string>
+    <string name="vault_rescue_partial_text">Drive\'da kopyası olmayan gizli fotoğraflarının bazıları galeriye, %1$s klasörüne geri taşındı. Diğerleri taşınamadı ve uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç.</string>
+    <string name="vault_rescue_not_moved_text">Drive\'da kopyası olmayan gizli fotoğrafların galeriye geri taşınamadı, bu yüzden uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç.</string>
+    <string name="vault_rescue_zip_failed_text">Drive\'da kopyası olmayan gizli fotoğrafların İndirilenler klasöründe parola korumalı bir zip dosyasına kaydedilemedi, bu yüzden uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç.</string>
+    <string name="vault_signout_kept_drive_text">Drive, gizli fotoğraflarının bazılarını hâlâ sakladığını doğrulayamadı, bu yüzden bunlar silinmedi ve uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç.</string>
     <string name="update_notification_text">%1$s sürümünü yüklemek için dokun.</string>
     <string name="settings_backup_how_section">Yedekleme nasıl çalışır</string>
     <string name="settings_theme_palette">Tema ve palet</string>

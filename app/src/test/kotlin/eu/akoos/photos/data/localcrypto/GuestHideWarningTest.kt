@@ -57,7 +57,7 @@ class GuestHideWarningTest {
     @After
     fun tearDown() {
         LocalCrypto.root(context).deleteRecursively()
-        HiddenStorageManager(context).clearVault()
+        File(context.filesDir, "hidden").deleteRecursively()
     }
 
     @Test

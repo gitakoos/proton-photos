@@ -1956,6 +1956,10 @@
     <string name="vault_rescue_kept_text">Your password for hidden photos could not be read, so your hidden photos with no copy in Drive stayed in the app instead of going to the gallery unprotected. Open Hidden Photos and enter the password to see them.</string>
     <string name="vault_signout_kept_title">Hidden photos kept in the app</string>
     <string name="vault_signout_kept_text">Some of your hidden photos with no copy in Drive could not go to the gallery, so they stayed in the app. Open Hidden Photos to see them.</string>
+    <string name="vault_rescue_partial_text">Some of your hidden photos with no copy in Drive were moved back to the gallery, into the %1$s folder. The others could not be moved and stayed in the app. Open Hidden Photos to see them.</string>
+    <string name="vault_rescue_not_moved_text">Your hidden photos with no copy in Drive could not be moved back to the gallery, so they stayed in the app. Open Hidden Photos to see them.</string>
+    <string name="vault_rescue_zip_failed_text">Your hidden photos with no copy in Drive could not be saved to a password-protected zip in your Downloads folder, so they stayed in the app. Open Hidden Photos to see them.</string>
+    <string name="vault_signout_kept_drive_text">Drive could not confirm it still holds some of your hidden photos, so they were not deleted and stayed in the app. Open Hidden Photos to see them.</string>
     <string name="update_notification_text">Tap to install version %1$s.</string>
     <string name="settings_backup_how_section">How backup runs</string>
     <string name="settings_theme_palette">Theme &amp; palette</string>

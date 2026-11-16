@@ -175,6 +175,8 @@ class MainHostActivity : AppCompatActivity() {
     @Inject lateinit var installSessionEvents: InstallSessionEvents
     @Inject lateinit var newsRepository: NewsRepository
     @Inject lateinit var hiddenVaultRestorer: HiddenVaultRestorer
+    @Inject lateinit var hiddenVaultJournal: eu.akoos.photos.data.hidden.HiddenVaultJournal
+    @Inject lateinit var hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager
     @Inject lateinit var vaultRescueNotifier: VaultRescueNotifier
     @Inject lateinit var externalPickHandover: eu.akoos.photos.presentation.picker.ExternalPickHandover
     @Inject @eu.akoos.photos.di.AppScope lateinit var appScope: kotlinx.coroutines.CoroutineScope
@@ -184,9 +186,8 @@ class MainHostActivity : AppCompatActivity() {
         val restorer = hiddenVaultRestorer
         val notifier = vaultRescueNotifier
         VaultSignOutPolicy(
-            rescue = { restorer.rescueDeviceOnly() },
-            notifyMoved = { zipName -> notifier.notifyMoved(zipName) },
-            notifyKept = { notifier.notifyKeptInVault() },
+            rescue = { userId, busy -> restorer.rescueDeviceOnly(userId = UserId(userId), busy = busy) },
+            notify = { notice -> notifier.notify(notice) },
         )
     }
 
@@ -212,17 +213,30 @@ class MainHostActivity : AppCompatActivity() {
     ) {
         val cleanup = eu.akoos.photos.util.SignOutCleanup
         if (!cleanup.claim(userId.id)) return
+        // No hide is admitted from here until the vault is settled, and the ones already admitted are
+        // spared by everything below: their originals may still be deleted, and then the vault file is
+        // the only copy.
+        val busy = hiddenVaultJournal.beginSignOut()
         try {
             if (persist) signOutStep { cleanup.markPending(app, userId.id) }
             cleanup.stopBackgroundWork(app, workManager)
             val vault = try {
-                policy.afterSignOut(userId.id)
+                policy.afterSignOut(userId.id, busy)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 eu.akoos.photos.domain.repository.VaultWipe.None
             }
             signOutStep { driveRepo.clearCacheForSignOut(userId, vault) }
-            signOutStep { eu.akoos.photos.data.preferences.AccountScopedPreferences.clear(app, userId) }
+            signOutStep {
+                // Every vault file still on disk keeps its records, so the Hidden screen still reaches
+                // it; a vault left alone keeps all of them. A sign-in that gave up (persist false) never
+                // had a session, so the favourites belong to whoever is still using the app.
+                val kept = if (vault is eu.akoos.photos.domain.repository.VaultWipe.None) null
+                else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+                eu.akoos.photos.data.preferences.AccountScopedPreferences.clear(
+                    app, userId, keptVaultUris = kept, keepFavorites = !persist,
+                )
+            }
             signOutStep {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     cleanup.clearDecryptedCaches(app)
@@ -233,8 +247,12 @@ class MainHostActivity : AppCompatActivity() {
             signOutStep { localEncryption.onSignedOut(userId.id) }
             signOutStep { cleanup.clearPending(app, userId.id) }
         } finally {
+            hiddenVaultJournal.endSignOut()
             cleanup.release(userId.id)
         }
+        // A file the sign-out left in the vault without a record is filed into the index now, so the
+        // Hidden screen shows it in this process rather than after a restart.
+        signOutStep { hiddenVaultJournal.reconcileAgain() }
     }
 
     private suspend inline fun signOutStep(block: () -> Unit) {

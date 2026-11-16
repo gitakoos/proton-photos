@@ -69,7 +69,7 @@ class HiddenStorageManagerTest {
         context = ApplicationProvider.getApplicationContext()
         storage = HiddenStorageManager(context)
         // Robolectric can reuse filesDir across tests in a run; start every case from an empty vault.
-        storage.clearVault()
+        File(context.filesDir, "hidden").deleteRecursively()
     }
 
     private fun hiddenDir() = File(context.filesDir, "hidden")
@@ -193,36 +193,50 @@ class HiddenStorageManagerTest {
         assertEquals(1, vaultNames().size)
     }
 
-    // ── an involuntary sign-out emptying the vault ───────────────────────────────────────────────
+    // ── a sign-out emptying the vault ───────────────────────────────────────────────────────────
 
     @Test
-    fun `clearing the vault except named files keeps those untouched and removes the rest`() = runBlocking {
+    fun `a sign-out wipe deletes the named files and leaves every other one untouched`() = runBlocking {
         val kept = vaultFile(bytes = byteArrayOf(7, 7))
-        vaultFile(bytes = byteArrayOf(1))
-        vaultFile(bytes = byteArrayOf(2))
+        val gone1 = vaultFile(bytes = byteArrayOf(1))
+        val gone2 = vaultFile(bytes = byteArrayOf(2))
 
-        storage.clearVault(keep = setOf(kept))
+        storage.deleteVaultFiles(setOf(gone1, gone2))
 
         assertEquals(listOf(fileOf(kept).name), vaultNames())
-        assertArrayEquals(byteArrayOf(7, 7), fileOf(kept).readBytes())
+        assertEquals(2L, eu.akoos.photos.data.localcrypto.VaultFiles.plainLength(fileOf(kept)))
     }
 
     @Test
-    fun `clearing the vault with nothing to keep empties it`() = runBlocking {
+    fun `a file that reached the vault after the wipe was planned survives it`() = runBlocking {
+        val planned = vaultFile(bytes = byteArrayOf(1))
+        val plan = setOf(planned)
+        // A hide lands a file between the plan and the wipe: it is the only copy of its photo.
+        val late = vaultFile(bytes = byteArrayOf(9, 9, 9))
+
+        storage.deleteVaultFiles(plan)
+
+        assertEquals(listOf(fileOf(late).name), vaultNames())
+    }
+
+    @Test
+    fun `a wipe naming nothing deletes nothing`() = runBlocking {
         vaultFile()
         vaultFile(bytes = byteArrayOf(5))
 
-        storage.clearVault()
+        storage.deleteVaultFiles(emptySet())
 
-        assertTrue(vaultNames().isEmpty())
+        assertEquals(2, vaultNames().size)
     }
 
     @Test
-    fun `a kept uri the vault does not hold spares nothing else`() = runBlocking {
-        vaultFile()
+    fun `a wipe never deletes a file outside the vault, whatever uri names it`() = runBlocking {
+        val outside = File(context.filesDir, "elsewhere.jpg").apply { writeBytes(byteArrayOf(1, 2)) }
+        val inVault = vaultFile()
 
-        storage.clearVault(keep = setOf("file:///data/missing.jpg"))
+        storage.deleteVaultFiles(setOf(Uri.fromFile(outside).toString(), "file:///data/missing.jpg"))
 
-        assertTrue(vaultNames().isEmpty())
+        assertTrue(outside.exists())
+        assertTrue(fileOf(inVault).exists())
     }
 }

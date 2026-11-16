@@ -1422,6 +1422,10 @@
     <string name="vault_rescue_kept_text">Heslo ke skrytým fotkám nešlo přečíst, a tak skryté fotky bez kopie na Drive zůstaly v aplikaci, místo aby šly nechráněné do galerie. Otevřete Skryté fotky a zadejte heslo, abyste je viděli.</string>
     <string name="vault_signout_kept_title">Skryté fotky zůstaly v aplikaci</string>
     <string name="vault_signout_kept_text">Některé skryté fotky bez kopie na Drive nešlo přesunout do galerie, a tak zůstaly v aplikaci. Otevřete Skryté fotky, abyste je viděli.</string>
+    <string name="vault_rescue_partial_text">Některé skryté fotky bez kopie na Drive byly přesunuty zpět do galerie, do složky %1$s. Ostatní nešlo přesunout, a tak zůstaly v aplikaci. Otevřete Skryté fotky, abyste je viděli.</string>
+    <string name="vault_rescue_not_moved_text">Vaše skryté fotky bez kopie na Drive nešlo přesunout zpět do galerie, a tak zůstaly v aplikaci. Otevřete Skryté fotky, abyste je viděli.</string>
+    <string name="vault_rescue_zip_failed_text">Vaše skryté fotky bez kopie na Drive nešlo uložit do zip archivu chráněného heslem ve složce Stažené soubory, a tak zůstaly v aplikaci. Otevřete Skryté fotky, abyste je viděli.</string>
+    <string name="vault_signout_kept_drive_text">Drive nepotvrdil, že některé vaše skryté fotky stále má, a tak nebyly smazány a zůstaly v aplikaci. Otevřete Skryté fotky, abyste je viděli.</string>
     <string name="update_notification_text">Klepnutím nainstalujete verzi %1$s.</string>
     <string name="settings_backup_how_section">Jak zálohování probíhá</string>
     <string name="settings_theme_palette">Motiv a paleta</string>

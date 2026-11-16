@@ -27,35 +27,47 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A session the server ended must not take the only copy of a device-only hidden photo with it.
- * These pin what the sign-out may destroy afterwards: nothing it could not move to the gallery,
- * and nothing at all when the rescue cannot say what is safe.
+ * A session the server ended must not take the only copy of a hidden photo with it. These pin what
+ * the sign-out may destroy afterwards: exactly what the rescue says is safe elsewhere, never what
+ * stayed behind or what a hide was still moving, and nothing at all when the rescue cannot say.
  */
 class VaultSignOutPolicyTest {
 
     private var rescues = 0
-    private var notices = 0
-    private var lastZipName: String? = null
-
-    private var keptNotices = 0
+    private var lastBusy: Set<String>? = null
+    private val notices = mutableListOf<RescueNotice>()
 
     private fun policy(rescue: suspend () -> HiddenRescue) = VaultSignOutPolicy(
-        rescue = { rescues++; rescue() },
-        notifyMoved = { zipName -> notices++; lastZipName = zipName },
-        notifyKept = { keptNotices++ },
+        rescue = { _, busy -> rescues++; lastBusy = busy; rescue() },
+        notify = { notices += it },
     )
 
     @Test
     fun `a sign-out the user asked for tells them when photos stayed in the vault`() {
-        assertTrue(VaultSignOutPolicy.keptAfterUserSignOut(HiddenVaultDecisions.keptForPassword(listOf("file:///v/a")), 3))
-        assertTrue(VaultSignOutPolicy.keptAfterUserSignOut(HiddenRescue(moved = 2, stillInVault = setOf("file:///v/b")), 3))
-        assertTrue("a rescue that could not run leaves the whole vault", VaultSignOutPolicy.keptAfterUserSignOut(null, 3))
-        assertFalse(VaultSignOutPolicy.keptAfterUserSignOut(HiddenRescue(moved = 3, stillInVault = emptySet()), 3))
-        assertFalse(VaultSignOutPolicy.keptAfterUserSignOut(null, 0))
+        assertEquals(
+            RescueNotice.KeptForPassword,
+            VaultSignOutPolicy.userSignOutNotice(HiddenVaultDecisions.keptForPassword(listOf("file:///v/a")), 3),
+        )
+        assertEquals(
+            RescueNotice.MovedPartly,
+            VaultSignOutPolicy.userSignOutNotice(HiddenRescue(moved = 2, stillInVault = setOf("file:///v/b")), 3),
+        )
+        assertEquals(
+            RescueNotice.NotMoved,
+            VaultSignOutPolicy.userSignOutNotice(HiddenRescue(moved = 0, stillInVault = setOf("file:///v/b")), 3),
+        )
+        assertEquals(
+            RescueNotice.ZipFailed,
+            VaultSignOutPolicy.userSignOutNotice(HiddenVaultDecisions.zipFailed(listOf("file:///v/a")), 3),
+        )
+        assertEquals("a rescue that could not run leaves the whole vault", RescueNotice.NotMoved, VaultSignOutPolicy.userSignOutNotice(null, 3))
+        assertNull(VaultSignOutPolicy.userSignOutNotice(HiddenRescue(moved = 3, stillInVault = emptySet()), 3))
+        assertNull(VaultSignOutPolicy.userSignOutNotice(null, 0))
     }
 
     @Test
@@ -64,24 +76,72 @@ class VaultSignOutPolicyTest {
         assertEquals(RescueRoute.ZIP, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.Readable(charArrayOf('p'))))
         assertEquals(RescueRoute.GALLERY, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.None))
         val targets = listOf("file:///v/a", "file:///v/b")
-        val policy = policy { HiddenVaultDecisions.keptForPassword(targets) }
+        val policy = policy { HiddenVaultDecisions.keptForPassword(targets, wipeable = setOf("file:///v/drive")) }
 
         val wipe = policy.afterSignOut("u1")
 
-        assertEquals("every photo is spared by the wipe", VaultWipe.Except(targets.toSet()), wipe)
-        assertEquals(0, notices)
-        assertEquals("the user is told where the photos are", 1, keptNotices)
+        assertEquals("only the confirmed Drive photo goes", VaultWipe.Only(setOf("file:///v/drive")), wipe)
+        assertEquals("the user is told where the photos are", listOf(RescueNotice.KeptForPassword), notices)
     }
 
     @Test
-    fun `a forced logout takes the device-only photos back, says so, and spares only what stayed`() = runTest {
+    fun `a zip that could not be made is reported as such, not as an unreadable password`() = runTest {
+        val targets = listOf("file:///v/a", "file:///v/b")
+        val policy = policy { HiddenVaultDecisions.zipFailed(targets) }
+
+        val wipe = policy.afterSignOut("u1")
+
+        assertEquals(VaultWipe.Only(emptySet()), wipe)
+        assertEquals(listOf(RescueNotice.ZipFailed), notices)
+        assertEquals("vault kept 2, zip not made", VaultSignOutPolicy.vaultNote(HiddenVaultDecisions.zipFailed(targets)))
+    }
+
+    @Test
+    fun `a forced logout takes the device-only photos back, says so, and destroys only what is safe`() = runTest {
+        val policy = policy {
+            HiddenRescue(moved = 2, stillInVault = emptySet(), wipeable = setOf("file:///v/drive"))
+        }
+
+        val wipe = policy.afterSignOut("u1")
+
+        assertEquals(VaultWipe.Only(setOf("file:///v/drive")), wipe)
+        assertEquals(1, rescues)
+        assertEquals("the user is told why photos appeared in the gallery", listOf(RescueNotice.Moved(null)), notices)
+    }
+
+    @Test
+    fun `a gallery move that only partly worked says the rest stayed, never that none is lost`() = runTest {
         val policy = policy { HiddenRescue(moved = 2, stillInVault = setOf("file:///v/stuck")) }
 
         val wipe = policy.afterSignOut("u1")
 
-        assertEquals(VaultWipe.Except(setOf("file:///v/stuck")), wipe)
-        assertEquals(1, rescues)
-        assertEquals("the user is told why photos appeared in the gallery", 1, notices)
+        assertEquals(VaultWipe.Only(emptySet()), wipe)
+        assertEquals(listOf(RescueNotice.MovedPartly), notices)
+    }
+
+    @Test
+    fun `a gallery move that failed for every photo still posts a notice`() = runTest {
+        val policy = policy { HiddenRescue(moved = 0, stillInVault = setOf("file:///v/a", "file:///v/b")) }
+
+        policy.afterSignOut("u1")
+
+        assertEquals(listOf(RescueNotice.NotMoved), notices)
+    }
+
+    @Test
+    fun `a file that stayed or that a hide is moving is never wiped, even if offered`() = runTest {
+        val policy = policy {
+            HiddenRescue(
+                moved = 1,
+                stillInVault = setOf("file:///v/stuck"),
+                wipeable = setOf("file:///v/drive", "file:///v/stuck", "file:///v/moving"),
+            )
+        }
+
+        val wipe = policy.afterSignOut("u1", busy = setOf("file:///v/moving"))
+
+        assertEquals(VaultWipe.Only(setOf("file:///v/drive")), wipe)
+        assertEquals("the rescue learns the files to leave alone", setOf("file:///v/moving"), lastBusy)
     }
 
     @Test
@@ -90,8 +150,8 @@ class VaultSignOutPolicyTest {
 
         val wipe = policy.afterSignOut("u1")
 
-        assertEquals(VaultWipe.Except(emptySet()), wipe)
-        assertEquals(0, notices)
+        assertEquals(VaultWipe.Only(emptySet()), wipe)
+        assertTrue(notices.isEmpty())
     }
 
     @Test
@@ -101,7 +161,7 @@ class VaultSignOutPolicyTest {
         val wipe = policy.afterSignOut("u1")
 
         assertEquals(VaultWipe.None, wipe)
-        assertEquals(0, notices)
+        assertTrue(notices.isEmpty())
     }
 
     @Test
@@ -127,7 +187,7 @@ class VaultSignOutPolicyTest {
 
         assertEquals(VaultWipe.None, wipe)
         assertEquals(0, rescues)
-        assertFalse(notices > 0)
+        assertTrue(notices.isEmpty())
     }
 
     @Test
@@ -138,7 +198,7 @@ class VaultSignOutPolicyTest {
 
         val later = policy.afterSignOut("u1")
 
-        assertEquals("a later forced logout of the same account is rescued as usual", VaultWipe.Except(emptySet()), later)
+        assertEquals("a later forced logout of the same account is rescued as usual", VaultWipe.Only(emptySet()), later)
         assertEquals(1, rescues)
     }
 
@@ -153,20 +213,12 @@ class VaultSignOutPolicyTest {
     }
 
     @Test
-    fun `a chosen move out spares only the files that stayed in the vault`() {
+    fun `a chosen move out destroys only what the rescue says is safe`() {
         val wipe = VaultSignOutPolicy.wipeAfterRescue(
-            HiddenRescue(moved = 4, stillInVault = setOf("file:///v/stuck")),
+            HiddenRescue(moved = 4, stillInVault = setOf("file:///v/stuck"), wipeable = setOf("file:///v/zipped")),
         )
 
-        assertEquals(VaultWipe.Except(setOf("file:///v/stuck")), wipe)
-    }
-
-    @Test
-    fun `a chosen move out that moved everything spares nothing`() {
-        assertEquals(
-            VaultWipe.Except(emptySet()),
-            VaultSignOutPolicy.wipeAfterRescue(HiddenRescue(moved = 4, stillInVault = emptySet())),
-        )
+        assertEquals(VaultWipe.Only(setOf("file:///v/zipped")), wipe)
     }
 
     @Test
@@ -183,7 +235,7 @@ class VaultSignOutPolicyTest {
 
         assertEquals(VaultWipe.None, wipe)
         assertEquals(0, rescues)
-        assertEquals(0, notices)
+        assertTrue(notices.isEmpty())
     }
 
     @Test
@@ -194,19 +246,25 @@ class VaultSignOutPolicyTest {
 
         val later = policy.afterSignOut("user-twice")
 
-        assertEquals(VaultWipe.Except(emptySet()), later)
+        assertEquals(VaultWipe.Only(emptySet()), later)
         assertEquals(1, rescues)
     }
 
     @Test
-    fun `a zipped rescue tells the notice which zip holds the photos and wipes the whole vault`() = runTest {
-        val policy = policy { HiddenRescue(moved = 2, stillInVault = emptySet(), zipName = "PFPVault_ForcedLogout_1.zip") }
+    fun `a zipped rescue tells the notice which zip holds the photos and wipes what went into it`() = runTest {
+        val policy = policy {
+            HiddenRescue(
+                moved = 2,
+                stillInVault = emptySet(),
+                zipName = "PFPVault_ForcedLogout_1.zip",
+                wipeable = setOf("file:///v/a", "file:///v/b"),
+            )
+        }
 
         val wipe = policy.afterSignOut("u1")
 
-        assertEquals(VaultWipe.Except(emptySet()), wipe)
-        assertEquals(1, notices)
-        assertEquals("PFPVault_ForcedLogout_1.zip", lastZipName)
+        assertEquals(VaultWipe.Only(setOf("file:///v/a", "file:///v/b")), wipe)
+        assertEquals(listOf(RescueNotice.Moved("PFPVault_ForcedLogout_1.zip")), notices)
     }
 
     @Test

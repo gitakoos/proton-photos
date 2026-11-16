@@ -1422,6 +1422,10 @@
     <string name="vault_rescue_kept_text">Nie udało się odczytać hasła do ukrytych zdjęć, więc ukryte zdjęcia bez kopii na Drive zostały w aplikacji, zamiast trafić bez ochrony do galerii. Otwórz Ukryte zdjęcia i wpisz hasło, aby je zobaczyć.</string>
     <string name="vault_signout_kept_title">Ukryte zdjęcia zostały w aplikacji</string>
     <string name="vault_signout_kept_text">Części ukrytych zdjęć bez kopii na Drive nie udało się przenieść do galerii, więc zostały w aplikacji. Otwórz Ukryte zdjęcia, aby je zobaczyć.</string>
+    <string name="vault_rescue_partial_text">Część ukrytych zdjęć bez kopii na Drive została przeniesiona z powrotem do galerii, do folderu %1$s. Pozostałych nie udało się przenieść, więc zostały w aplikacji. Otwórz Ukryte zdjęcia, aby je zobaczyć.</string>
+    <string name="vault_rescue_not_moved_text">Nie udało się przenieść ukrytych zdjęć bez kopii na Drive z powrotem do galerii, więc zostały w aplikacji. Otwórz Ukryte zdjęcia, aby je zobaczyć.</string>
+    <string name="vault_rescue_zip_failed_text">Nie udało się zapisać ukrytych zdjęć bez kopii na Drive w archiwum zip chronionym hasłem w folderze Pobrane, więc zostały w aplikacji. Otwórz Ukryte zdjęcia, aby je zobaczyć.</string>
+    <string name="vault_signout_kept_drive_text">Drive nie potwierdził, że nadal ma część ukrytych zdjęć, więc nie zostały usunięte i pozostały w aplikacji. Otwórz Ukryte zdjęcia, aby je zobaczyć.</string>
     <string name="update_notification_text">Dotknij, aby zainstalować wersję %1$s.</string>
     <string name="settings_backup_how_section">Jak działa kopia</string>
     <string name="settings_theme_palette">Motyw i paleta</string>

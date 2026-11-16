@@ -511,7 +511,7 @@ interface DrivePhotoRepository {
      *
      * [vault] says how much of the hidden vault goes with it; see [VaultWipe].
      */
-    suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe = VaultWipe.All)
+    suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe)
 
     // ── Lazy thumbnail decrypt ────────────────────────────────────────────
     //

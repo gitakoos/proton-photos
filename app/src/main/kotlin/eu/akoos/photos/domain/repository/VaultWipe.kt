@@ -30,13 +30,14 @@ package eu.akoos.photos.domain.repository
  */
 sealed interface VaultWipe {
 
-    /** Every vault file goes. The deliberate sign-out, whose confirmation names the photos it costs. */
-    data object All : VaultWipe
-
-    /** The vault is left as it is: a sign-in that gave up before it made a session owns nothing in it. */
+    /** The vault is left as it is: a sign-in that gave up before it made a session owns nothing in it,
+     *  and a rescue that could not run cannot say which files are safe to destroy. */
     data object None : VaultWipe
 
-    /** Every vault file goes except [uris], the ones an involuntary sign-out could not take back to
-     *  the device. */
-    data class Except(val uris: Set<String>) : VaultWipe
+    /**
+     * Exactly the vault files [uris] names go, and no other. The caller names only files it has dealt
+     * with: taken back to the device, saved in a zip, confirmed in Drive, or named in the sign-out confirmation. A
+     * file that appeared after the caller looked, or one a hide was still moving, is never among them.
+     */
+    data class Only(val uris: Set<String>) : VaultWipe
 }

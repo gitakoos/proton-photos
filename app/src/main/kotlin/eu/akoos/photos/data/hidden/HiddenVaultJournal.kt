@@ -48,8 +48,6 @@ import eu.akoos.photos.util.FolderCoverMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
@@ -94,12 +92,10 @@ class HiddenVaultJournal @Inject constructor(
         val cloudLinkId: String? = null,
     )
 
-    /** Vault URIs this process is actively hiding, so [reconcile] cannot mistake a hide that is
-     *  merely waiting on the system delete dialog for one an interruption abandoned. Lost on process
-     *  death, which is exactly right: after a restart there IS no in-flight hide. */
-    private val inFlight = mutableSetOf<String>()
-
-    private val inFlightLock = Mutex()
+    /** The vault uris this process is actively hiding, so [reconcile] cannot mistake a hide that is
+     *  merely waiting on the system delete dialog for one an interruption abandoned, and the gate a
+     *  sign-out shuts so that no hide deletes an original while the vault is being emptied. */
+    private val gate = VaultHideGate()
 
     /** [reconcile] repairs a durable state, so once per process is enough; running it again on every
      *  vault open would re-walk the directory for nothing. */
@@ -134,7 +130,13 @@ class HiddenVaultJournal @Inject constructor(
     suspend fun journal(entries: List<Entry>): Boolean {
         if (entries.isEmpty()) return true
         val startedAt = SystemClock.elapsedRealtime()
-        inFlightLock.withLock { inFlight += entries.map { it.privateUri } }
+        // Refused while a sign-out runs: the caller then drops its copies and deletes no original, so
+        // the sign-out never has to answer for a file whose original goes after it looked.
+        if (!gate.admit(entries.map { it.privateUri })) {
+            Log.w(TAG, "journal: refused ${entries.size} hide(s), a sign-out is running")
+            HiddenVaultDiagnostics.refusedForSignOut(entries.size)
+            return false
+        }
         return try {
             val albumsBySource = albumTargetsFor(entries)
             val userTagsBySource = userTagsFor(entries)
@@ -192,7 +194,7 @@ class HiddenVaultJournal @Inject constructor(
             if (e is CancellationException) throw e
             Log.w(TAG, "journal: failed to record ${entries.size} pending hide(s): ${e.message}")
             HiddenVaultDiagnostics.journalFailed(e.javaClass.simpleName)
-            inFlightLock.withLock { inFlight -= entries.map { it.privateUri }.toSet() }
+            gate.release(entries.map { it.privateUri })
             false
         }
     }
@@ -264,7 +266,7 @@ class HiddenVaultJournal @Inject constructor(
             // publishes these itself. Nothing is lost by the failure.
             Log.w(TAG, "confirm: failed for ${privateUris.size} hidden photo(s): ${e.message}")
         } finally {
-            inFlightLock.withLock { inFlight -= privateUris.toSet() }
+            gate.release(privateUris)
         }
         return survivorsKept
     }
@@ -427,8 +429,32 @@ class HiddenVaultJournal @Inject constructor(
             forget(privateUris)
             HiddenVaultDiagnostics.discarded(privateUris.size)
         } finally {
-            inFlightLock.withLock { inFlight -= privateUris.toSet() }
+            gate.release(privateUris)
         }
+    }
+
+    /**
+     * Shuts the vault to new hides for a sign-out and answers the vault files a hide was already
+     * admitted for. Their originals may still be deleted after this returns, so the sign-out neither
+     * rescues nor destroys them; they stay in the vault with their records. Every call is paired with
+     * [endSignOut].
+     */
+    fun beginSignOut(): Set<String> = gate.beginSignOut()
+
+    /** Ends what [beginSignOut] started, admitting hides again once no sign-out runs. */
+    fun endSignOut() = gate.endSignOut()
+
+    /** Whether a sign-out is running, so a hide still copying can stop rather than copy for nothing. */
+    fun signingOut(): Boolean = gate.signingOut()
+
+    /**
+     * Runs [reconcile] again even though this process already ran it: a sign-out changes the vault's
+     * records under a running process, and the files it kept have to reach the Hidden screen without
+     * waiting for a restart.
+     */
+    suspend fun reconcileAgain() {
+        reconciled.set(false)
+        reconcile()
     }
 
     /**
@@ -449,7 +475,7 @@ class HiddenVaultJournal @Inject constructor(
             // First, and outside the early returns below: a row the device contradicts is a repair of
             // its own, and it is due whether or not the vault's files and records agree with each other.
             repairRevealedRows()
-            val busy = inFlightLock.withLock { inFlight.toSet() }
+            val busy = gate.inFlight()
             val prefs = context.settingsDataStore.data.first()
             val journal = HiddenVaultLeftovers
                 .parseJournal(prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet())

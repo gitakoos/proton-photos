@@ -1197,6 +1197,10 @@
     <string name="vault_rescue_kept_text">Je wachtwoord voor verborgen foto\'s kon niet worden gelezen, dus je verborgen foto\'s zonder kopie in Drive zijn in de app gebleven in plaats van onbeschermd naar de galerij te gaan. Open Verborgen foto\'s en voer het wachtwoord in om ze te zien.</string>
     <string name="vault_signout_kept_title">Verborgen foto\'s in de app gebleven</string>
     <string name="vault_signout_kept_text">Een deel van je verborgen foto\'s zonder kopie in Drive kon niet naar de galerij, dus die zijn in de app gebleven. Open Verborgen foto\'s om ze te zien.</string>
+    <string name="vault_rescue_partial_text">Een deel van je verborgen foto\'s zonder kopie in Drive is terug in de galerij gezet, in de map %1$s. De rest kon niet worden verplaatst en is in de app gebleven. Open Verborgen foto\'s om ze te zien.</string>
+    <string name="vault_rescue_not_moved_text">Je verborgen foto\'s zonder kopie in Drive konden niet terug naar de galerij, dus ze zijn in de app gebleven. Open Verborgen foto\'s om ze te zien.</string>
+    <string name="vault_rescue_zip_failed_text">Je verborgen foto\'s zonder kopie in Drive konden niet worden opgeslagen in een met een wachtwoord beveiligde zip in je map Downloads, dus ze zijn in de app gebleven. Open Verborgen foto\'s om ze te zien.</string>
+    <string name="vault_signout_kept_drive_text">Drive kon niet bevestigen dat het een deel van je verborgen foto\'s nog heeft, dus die zijn niet verwijderd en in de app gebleven. Open Verborgen foto\'s om ze te zien.</string>
     <string name="update_notification_text">Tik om versie %1$s te installeren.</string>
     <string name="settings_backup_how_section">Hoe back-up verloopt</string>
     <string name="settings_theme_palette">Thema &amp; palet</string>

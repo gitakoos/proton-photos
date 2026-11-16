@@ -75,16 +75,18 @@ class HiddenStorageManager @Inject constructor(
     private val hiddenDir: File
         get() = File(context.filesDir, "hidden").also { it.mkdirs() }
 
-    /** Deletes the blobs in the vault, except the files [keep] names. Used on sign-out, so the
-     *  now-orphaned photos do not linger on disk for the next account on this device; [keep] is the
-     *  files a sign-out could not take back to the device and so must not destroy. */
-    fun clearVault(keep: Set<String> = emptySet()) {
-        if (keep.isEmpty()) {
-            hiddenDir.deleteRecursively()
-            return
-        }
-        hiddenDir.listFiles()?.forEach { file ->
-            if (Uri.fromFile(file).toString() !in keep) file.deleteRecursively()
+    /**
+     * Deletes the vault files [uris] names and nothing else, for a sign-out, so the photos it has dealt
+     * with do not linger on disk for the next account on this device. A uri naming no file inside the
+     * vault is skipped, and a file the caller did not name stays whatever it is: it may be one a hide
+     * put there after the caller looked, and then it is the only copy of its photo.
+     */
+    fun deleteVaultFiles(uris: Set<String>) {
+        val dir = hiddenDir
+        for (uri in uris) {
+            val file = Uri.parse(uri).path?.let { File(it) } ?: continue
+            if (file.parentFile?.absolutePath != dir.absolutePath || !file.isFile) continue
+            deleteVaultFile(file)
         }
     }
 
@@ -487,12 +489,20 @@ class HiddenStorageManager @Inject constructor(
             // .mkv) by THROWING IllegalArgumentException instead of returning null. Retry under the
             // generic video/* (or image/*) mime so the file still lands, and skip gracefully rather
             // than crashing the unhide if even that is refused.
+            //
+            // Before Android 10 the insert needs the storage permission, and a provider without it THROWS
+            // a SecurityException. That too is this photo's failure and nobody else's: it stays in the
+            // vault, and a rescue walking every photo goes on to the next one.
             val target = try {
                 context.contentResolver.insert(collection, values)
             } catch (e: IllegalArgumentException) {
                 Log.w(TAG, "restore: insert rejected mime '$mime', retrying generic: ${e.message}")
                 values.put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/*" else "image/*")
                 runCatching { context.contentResolver.insert(collection, values) }.getOrNull()
+            } catch (e: SecurityException) {
+                Log.w(TAG, "restore: insert refused for $ref: ${e.javaClass.simpleName}")
+                eu.akoos.photos.util.SyncDiagnostics.log("reveal $ref: media store refused the insert")
+                null
             } ?: return@withContext null
             try {
                 // Through a descriptor rather than a plain stream, so the copy can be forced to the storage
@@ -512,8 +522,14 @@ class HiddenStorageManager @Inject constructor(
                 // the sync pass it wakes comes to look.
                 val settled = onRestoredUri(target.toString())
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // A row left pending is visible to no gallery and is cleaned away by the system, so
+                    // the vault copy must not go for it: a publish that did not land rolls back below.
                     val finalize = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-                    context.contentResolver.update(target, finalize, null, null)
+                    val updated = context.contentResolver.update(target, finalize, null, null)
+                    val pendingAfter = if (updated == 1) null else pendingFlagOf(target)
+                    if (!HiddenVaultDecisions.restorePublished(updated, pendingAfter)) {
+                        throw java.io.IOException("restored copy still pending")
+                    }
                 }
                 recordDateOverrideIfRefused(target, captureTimeMs)
                 // The private copy goes only once the records naming the photo are right. While they
@@ -531,6 +547,14 @@ class HiddenStorageManager @Inject constructor(
                 work.delete()
             }
         }
+
+    /** The IS_PENDING column of [target] read back, or null when the row cannot be read. */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private fun pendingFlagOf(target: Uri): Int? = runCatching {
+        context.contentResolver.query(
+            target, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null,
+        )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getInt(0) else null }
+    }.getOrNull()
 
     /**
      * Records the capture date for a restored row the provider refused to date, so the photo comes back

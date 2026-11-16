@@ -621,15 +621,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // keyed by volume-unique linkId (not user-partitioned), so this clears every pin's bytes;
         // a still-signed-in account simply re-downloads its pins on demand.
         runCatching { offlineStore.clearAllAndUnpin() }
-        // Empty the Hidden vault as far as the caller decided. A deliberate sign-out has confirmed it
-        // and takes everything; an involuntary one has first taken the photos with no Drive copy back to
-        // the gallery and spares only what could not be moved, since a vault file is the only copy a
-        // device-only photo has.
+        // Empty the Hidden vault as far as the caller decided, file by named file. A vault file is the
+        // only copy a device-only photo has, so only the files the caller has dealt with go: a file it
+        // never looked at, such as one a hide was still moving, stays.
         runCatching {
             when (vault) {
-                VaultWipe.All -> hiddenStore.clearVault()
                 VaultWipe.None -> Unit
-                is VaultWipe.Except -> hiddenStore.clearVault(keep = vault.uris)
+                is VaultWipe.Only -> hiddenStore.deleteVaultFiles(vault.uris)
             }
         }
         // Drop the cached perceptual fingerprints so one account's near-duplicate prints don't
