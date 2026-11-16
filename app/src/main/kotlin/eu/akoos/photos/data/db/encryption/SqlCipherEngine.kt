@@ -130,6 +130,15 @@ internal class SqlCipherEngine(
         return ExportReport(tables = before.rowCounts.size, rows = before.rowCounts.values.sum())
     }
 
+    override fun liveWorkRows(live: File, liveKeySpec: String, checks: Map<String, String>): Long {
+        SqlCipherLibrary.ensureLoaded()
+        open(live, liveKeySpec, SQLiteDatabase.OPEN_READONLY).use { db ->
+            val tables = firstColumn(db, "SELECT name FROM sqlite_master WHERE type = 'table'").toSet()
+            return checks.entries.filter { it.key in tables }
+                .sumOf { (_, query) -> firstColumn(db, query).firstOrNull()?.toLongOrNull() ?: 0L }
+        }
+    }
+
     override fun restoreTables(
         live: File,
         liveKeySpec: String,

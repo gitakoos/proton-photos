@@ -55,6 +55,12 @@ interface CipherEngine {
     fun export(plain: File, partial: File, keySpec: String): ExportReport
 
     /**
+     * How many rows of the user's own work the live database [live] holds, counted by [checks] (table name to a
+     * `SELECT count(*)` over it); a table the database does not have counts nothing.
+     */
+    fun liveWorkRows(live: File, liveKeySpec: String, checks: Map<String, String>): Long
+
+    /**
      * Copies [tables] from the set-aside database [old] into the live database [live] in one transaction: every
      * row of each table is replaced, columns matched by name. Skips (changing nothing) when the two schema
      * versions differ, when [accountHash] is given and the live database does not hold that account, or when
@@ -115,6 +121,7 @@ class DatabaseOpenGate(
     private val recoveredKey: (File) -> ByteArray? = { null },
     private val appTables: List<String> = AppOwnedTables.NAMES,
     private val hashOf: (String) -> String = LocalKeyOwner::userHash,
+    private val userWork: Map<String, String> = AppOwnedTables.USER_WORK,
 ) {
     val plain = File(databasesDir, PLAIN_NAME)
     val encrypted = File(databasesDir, ENCRYPTED_NAME)
@@ -254,11 +261,25 @@ class DatabaseOpenGate(
      * for a while). Removes that set-aside folder once done. Runs on every start, so a set-aside database comes back
      * as soon as its key does. Anything that does not fit (another account, another schema version, an error)
      * leaves both databases as they were, to be tried again.
+     *
+     * The copy replaces whole tables, so it runs only into a live database that holds none of the user's own work
+     * yet ([userWork]: edits waiting, uploads queued or done, imports, face and label decisions, album order). Once
+     * it does, the set-aside database is never copied over it and stays where it is, kept.
      */
     private fun restoreRecovered() {
         val dirs = setAsideDir.listFiles()?.filter { File(it, ENCRYPTED_NAME).exists() } ?: return
         if (dirs.isEmpty()) return
         val live = keys.load() as? DatabaseKeyState.Ready ?: return
+        val work = try {
+            engine.liveWorkRows(encrypted, rawKeySpec(live.key), userWork)
+        } catch (e: Exception) {
+            log("db: live database not checked (${e.javaClass.simpleName}), set-aside copies kept")
+            return
+        }
+        if (work > 0) {
+            log("db: live database holds newer work, ${dirs.size} set-aside copies kept, not restored")
+            return
+        }
         for (dir in dirs) {
             val old = File(dir, ENCRYPTED_NAME)
             val recovered = File(dir, RECOVERED_DIR).isDirectory

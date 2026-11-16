@@ -70,6 +70,36 @@ object AppOwnedTables {
         "album_order_state",
     )
 
+    /**
+     * The user's own work, by table: what a set-aside database must never be copied over. Rows that a fresh
+     * listing, scan or index rebuilds count for nothing; an upload counts once it is queued or has gone through.
+     */
+    val USER_WORK: Map<String, String> = listOf(
+        "pending_metadata_edit",
+        "pending_cloud_compress",
+        "upload_album_target",
+        "import_staged",
+        "import_history",
+        "import_uploaded",
+        "import_album_member",
+        "local_tag",
+        "person",
+        "person_manual_photo",
+        "not_person",
+        "person_cover",
+        "person_name_state",
+        "person_hidden",
+        "person_name_change",
+        "face_curation_time",
+        "photo_label",
+        "photo_label_name",
+        "photo_label_state",
+        "photo_label_deleted",
+        "album_photo_order",
+        "album_order_state",
+    ).associateWith { "SELECT count(*) FROM \"$it\"" } +
+        ("sync_state" to "SELECT count(*) FROM sync_state WHERE queued = 1 OR lastSyncSuccessMs IS NOT NULL")
+
     /** The Proton core tables, never restored from a set-aside database. */
     val PROTON_CORE: List<String> = listOf(
         "AccountEntity",

@@ -79,6 +79,10 @@ class DatabaseOpenGateTest {
         val restoreKeys = mutableListOf<String>()
         val sameAccountChecks = mutableListOf<Boolean>()
 
+        var liveWork = 0L
+
+        override fun liveWorkRows(live: File, liveKeySpec: String, checks: Map<String, String>): Long = liveWork
+
         override fun restoreTables(
             live: File,
             liveKeySpec: String,
@@ -462,6 +466,43 @@ class DatabaseOpenGateTest {
         assertEquals(listOf(oldKey), engine.restoreKeys)
         assertEquals("a key the Keystore gave back names no account", listOf(true), engine.sameAccountChecks)
         assertFalse("restored, so it goes", kept.exists())
+    }
+
+    @Test
+    fun `a set-aside database is never copied over a live one that holds newer work, both are kept`() {
+        installEncrypted("library")
+        wrapper.failure = java.security.InvalidKeyException("Keystore operation failed", ProviderException("busy"))
+        repeat(2) {
+            runCatching { launch() }
+            now += 6 * 60_000
+        }
+        launch()
+        val kept = aside.listFiles()!!.single()
+        val newer = "ENC|${rawKeySpec((keys.load() as DatabaseKeyState.Ready).key)}|days of new faces and edits"
+        encrypted.writeText(newer)
+        engine.liveWork = 7
+
+        wrapper.failure = null
+        now += 3L * 24 * 60 * 60 * 1000
+        launch()
+        launch()
+
+        assertTrue("never copied over the newer work", engine.restores.isEmpty())
+        assertEquals(newer, encrypted.readText())
+        assertTrue(File(kept, DatabaseOpenGate.ENCRYPTED_NAME).readText().endsWith("library"))
+        assertEquals(listOf(kept), aside.listFiles()!!.toList())
+    }
+
+    @Test
+    fun `the user's own work is what blocks a restore, rebuilt listings do not`() {
+        val work = AppOwnedTables.USER_WORK
+        for (table in listOf("pending_metadata_edit", "import_history", "person", "photo_label", "sync_state")) {
+            assertTrue(table, table in work)
+        }
+        for (table in listOf("photo_listing", "face", "image_embedding", "perceptual_hash")) {
+            assertFalse(table, table in work)
+        }
+        assertTrue(work.keys.all { it in AppOwnedTables.NAMES })
     }
 
     @Test
