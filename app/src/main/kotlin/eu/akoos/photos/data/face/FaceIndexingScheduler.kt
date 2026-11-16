@@ -46,6 +46,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -623,6 +624,11 @@ class FaceIndexingScheduler @Inject constructor(
 ) {
     /** Own scope so an unpause kick and the settings watcher outlive the caller that triggered them. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Cancels every job this scheduler started and waits for them to end, so none runs on after a test has
+     *  taken its doubles away (the settings watcher started here would otherwise reach the real store). */
+    @androidx.annotation.VisibleForTesting
+    internal suspend fun stopForTest() = scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin()
 
     /** Photos whose last load failed transiently, each with its attempts and when it is due again, so a
      *  pass tries never-tried photos first and a failing one waits out its backoff. Saved to [stateStore]

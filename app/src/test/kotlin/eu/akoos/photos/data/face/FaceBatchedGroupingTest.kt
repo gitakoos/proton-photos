@@ -127,7 +127,11 @@ class FaceBatchedGroupingTest {
     }
 
     @After
-    fun tearDown() = InMemoryPreferencesDataStore.uninstall()
+    fun tearDown() {
+        // The scheduler's own jobs stop before the settings double goes, so none reaches the real store.
+        runBlocking { scheduler.stopForTest() }
+        InMemoryPreferencesDataStore.uninstall()
+    }
 
     private fun runGrouping(full: Int, failOn: Int = 0): Boolean {
         fullBatches = full
