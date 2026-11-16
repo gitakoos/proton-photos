@@ -2830,6 +2830,14 @@
     <string name="whats_new_260_emptyshared_body">Herunterziehen aktualisiert die Seite Geteilt auch dann, wenn sie noch nichts zeigt.</string>
     <string name="whats_new_260_albumrename_title">Umbenannte Alben sofort aktuell</string>
     <string name="whats_new_260_albumrename_body">Ein Album, das du darin umbenennst, zeigt seinen neuen Namen auf dem Tab Alben und in der Albumauswahl ohne Aktualisieren.</string>
+    <string name="whats_new_260_cancelone_title">Einen Upload oder Download abbrechen</string>
+    <string name="whats_new_260_cancelone_body">In der Aktivität hat jeder Upload und jedes Foto eines Downloads einen eigenen Abbrechen-Knopf, und der Rest läuft weiter.</string>
+    <string name="whats_new_260_hiddendrive_title">Versteckte Fotos bleiben, wenn Proton dich abmeldet</string>
+    <string name="whats_new_260_hiddendrive_body">Meldet Proton dich ab und kann Drive nicht bestätigen, dass es einige deiner versteckten Fotos noch hat, bleiben sie versteckt in der App, statt gelöscht zu werden, und erscheinen nach der Anmeldung wieder unter Versteckte Fotos. Benachrichtigungen sagen dir außerdem, wenn versteckte Fotos nicht in die Galerie oder in eine ZIP-Datei konnten.</string>
+    <string name="whats_new_260_hideonce_title">Verstecken von anderen Geräten wirkt einmal</string>
+    <string name="whats_new_260_hideonce_body">Ein Foto, das auf einem anderen Gerät versteckt wurde, kommt hier nur einmal in Versteckte Fotos, so bringt das Einblenden eine Kopie zurück statt mehrerer.</string>
+    <string name="whats_new_260_newalbumpicker_title">Neue Alben sofort in Zum Album hinzufügen</string>
+    <string name="whats_new_260_newalbumpicker_body">Ein Album, das du gerade erstellt hast, erscheint sofort in „Zum Album hinzufügen“, ohne Aktualisieren.</string>
     <string name="viewer_save_to_drive">In meinem Drive speichern</string>
     <string name="viewer_saved_to_drive">In Drive gespeichert</string>
     <string name="viewer_already_in_drive">Bereits in Drive</string>

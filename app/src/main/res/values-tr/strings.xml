@@ -2747,6 +2747,14 @@
     <string name="whats_new_260_emptyshared_body">Paylaşılanlar sayfasını aşağı çekmek, henüz gösterecek bir şey olmasa da sayfayı yeniler.</string>
     <string name="whats_new_260_albumrename_title">Yeniden adlandırılan albümler hemen güncel</string>
     <string name="whats_new_260_albumrename_body">İçinden yeniden adlandırılan bir albüm, yenilemeye gerek kalmadan Albümler sekmesinde ve albüm seçicilerde yeni adını gösterir.</string>
+    <string name="whats_new_260_cancelone_title">Tek bir yüklemeyi veya indirmeyi iptal et</string>
+    <string name="whats_new_260_cancelone_body">Etkinlik ekranında her yüklemenin ve bir indirmenin her fotoğrafının kendi iptal düğmesi var, geri kalanlar devam eder.</string>
+    <string name="whats_new_260_hiddendrive_title">Proton oturumunu kapatırsa gizli fotoğraflar kalır</string>
+    <string name="whats_new_260_hiddendrive_body">Proton oturumunu kapatır ve Drive gizli fotoğraflarının bazılarını hâlâ sakladığını doğrulayamazsa, bunlar silinmek yerine uygulamada gizli kalır ve oturum açtıktan sonra Gizli Fotoğraflar bölümünde yeniden görünür. Bildirimler, gizli fotoğraflar galeriye veya bir zip dosyasına gidemediğinde de sana söyler.</string>
+    <string name="whats_new_260_hideonce_title">Diğer cihazlarda gizleme bir kez uygulanır</string>
+    <string name="whats_new_260_hideonce_body">Başka bir cihazda gizlenen bir fotoğraf burada Gizli Fotoğraflar\'a yalnızca bir kez girer, böylece yeniden gösterildiğinde birkaç değil tek kopya geri gelir.</string>
+    <string name="whats_new_260_newalbumpicker_title">Yeni albümler Albüme ekle\'de hemen görünür</string>
+    <string name="whats_new_260_newalbumpicker_body">Yeni oluşturduğun bir albüm, yenilemeye gerek kalmadan “Albüme ekle” içinde hemen görünür.</string>
     <string name="viewer_save_to_drive">Drive\'ıma kaydet</string>
     <string name="viewer_saved_to_drive">Drive\'a kaydedildi</string>
     <string name="viewer_already_in_drive">Zaten Drive\'da</string>

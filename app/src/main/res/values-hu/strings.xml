@@ -2829,6 +2829,14 @@
     <string name="whats_new_260_emptyshared_body">A Megosztott oldal lehúzása akkor is frissít, ha még nincs rajta semmi.</string>
     <string name="whats_new_260_albumrename_title">Átnevezett albumok azonnal</string>
     <string name="whats_new_260_albumrename_body">Az albumon belül átnevezett album az Albumok fülön és az albumválasztókban is frissítés nélkül az új nevét mutatja.</string>
+    <string name="whats_new_260_cancelone_title">Egy feltöltés vagy letöltés leállítása</string>
+    <string name="whats_new_260_cancelone_body">A Tevékenység képernyőn minden feltöltésnek és egy letöltés minden fotójának saját leállító gombja van, a többi pedig folytatódik.</string>
+    <string name="whats_new_260_hiddendrive_title">Rejtett fotók maradnak, ha a Proton kijelentkeztet</string>
+    <string name="whats_new_260_hiddendrive_body">Ha a Proton kijelentkeztet, és a Drive nem tudja megerősíteni, hogy néhány rejtett fotód még megvan rajta, ezek törlés helyett rejtve maradnak az alkalmazásban, és bejelentkezés után újra megjelennek a Rejtett fotók között. Az értesítések azt is megmondják, ha rejtett fotók nem kerülhettek a galériába vagy zipbe.</string>
+    <string name="whats_new_260_hideonce_title">Más eszközön elrejtett fotó egyszer kerül át</string>
+    <string name="whats_new_260_hideonce_body">A másik eszközön elrejtett fotó itt csak egyszer kerül a Rejtett fotók közé, így a felfedése egy példányt hoz vissza, nem többet.</string>
+    <string name="whats_new_260_newalbumpicker_title">Új albumok azonnal az Albumhoz adásban</string>
+    <string name="whats_new_260_newalbumpicker_body">A most létrehozott album frissítés nélkül, azonnal megjelenik az „Albumhoz adás” listában.</string>
     <string name="viewer_save_to_drive">Mentés a Drive-omra</string>
     <string name="viewer_saved_to_drive">Elmentve a Drive-ra</string>
     <string name="viewer_already_in_drive">Már a Drive-on van</string>

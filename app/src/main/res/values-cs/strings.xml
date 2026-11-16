@@ -2967,6 +2967,14 @@
     <string name="whats_new_260_emptyshared_body">Stažení stránky Sdílené dolů ji obnoví, i když ještě nic neobsahuje.</string>
     <string name="whats_new_260_albumrename_title">Přejmenované album hned s novým názvem</string>
     <string name="whats_new_260_albumrename_body">Album přejmenované zevnitř ukáže nový název na kartě Alba i ve výběru alb bez obnovení.</string>
+    <string name="whats_new_260_cancelone_title">Zrušení jednoho nahrávání nebo stahování</string>
+    <string name="whats_new_260_cancelone_body">Na obrazovce Aktivita má každé nahrávání i každá fotka stahování vlastní tlačítko pro zrušení a ostatní pokračují dál.</string>
+    <string name="whats_new_260_hiddendrive_title">Skryté fotky zůstanou, když vás Proton odhlásí</string>
+    <string name="whats_new_260_hiddendrive_body">Když vás Proton odhlásí a Drive nepotvrdí, že některé vaše skryté fotky stále má, zůstanou skryté v aplikaci místo smazání a po přihlášení se znovu objeví ve Skrytých fotkách. Upozornění vám také řeknou, když se skryté fotky nepodařilo přesunout do galerie nebo uložit do zipu.</string>
+    <string name="whats_new_260_hideonce_title">Skrytí z jiných zařízení proběhne jednou</string>
+    <string name="whats_new_260_hideonce_body">Fotka skrytá na jiném zařízení se tu do Skrytých fotek přesune jen jednou, takže po zrušení skrytí se vrátí jedna kopie, ne několik.</string>
+    <string name="whats_new_260_newalbumpicker_title">Nová alba hned v Přidat do alba</string>
+    <string name="whats_new_260_newalbumpicker_body">Album, které jste právě vytvořili, se v „Přidat do alba“ objeví hned, bez obnovení.</string>
     <string name="viewer_save_to_drive">Uložit na můj Drive</string>
     <string name="viewer_saved_to_drive">Uloženo na Drive</string>
     <string name="viewer_already_in_drive">Už je na Drive</string>

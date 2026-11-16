@@ -2961,6 +2961,14 @@
     <string name="whats_new_260_emptyshared_body">Przeciągnięcie w dół strony Udostępnione odświeża ją, nawet gdy nie ma jeszcze nic do pokazania.</string>
     <string name="whats_new_260_albumrename_title">Zmieniona nazwa albumu od razu</string>
     <string name="whats_new_260_albumrename_body">Album, którego nazwę zmieniono w jego wnętrzu, pokazuje nową nazwę na karcie Albumy i w wyborze albumów bez odświeżania.</string>
+    <string name="whats_new_260_cancelone_title">Anulowanie jednego przesyłania lub pobierania</string>
+    <string name="whats_new_260_cancelone_body">Na ekranie Aktywność każde przesyłanie i każde zdjęcie pobierania ma własny przycisk anulowania, a reszta trwa dalej.</string>
+    <string name="whats_new_260_hiddendrive_title">Ukryte zdjęcia zostają, gdy Proton cię wyloguje</string>
+    <string name="whats_new_260_hiddendrive_body">Gdy Proton cię wyloguje, a Drive nie potwierdzi, że nadal ma część ukrytych zdjęć, zostają one ukryte w aplikacji zamiast zostać usunięte i po zalogowaniu pojawiają się ponownie w Ukrytych zdjęciach. Powiadomienia mówią też, kiedy ukryte zdjęcia nie mogły trafić do galerii ani do pliku zip.</string>
+    <string name="whats_new_260_hideonce_title">Ukrycie z innego urządzenia działa raz</string>
+    <string name="whats_new_260_hideonce_body">Zdjęcie ukryte na innym urządzeniu trafia tu do Ukrytych zdjęć tylko raz, więc po odkryciu wraca jedna kopia zamiast kilku.</string>
+    <string name="whats_new_260_newalbumpicker_title">Nowe albumy od razu w Dodaj do albumu</string>
+    <string name="whats_new_260_newalbumpicker_body">Album, który właśnie utworzono, pojawia się od razu w „Dodaj do albumu”, bez odświeżania.</string>
     <string name="viewer_save_to_drive">Zapisz na moim Drive</string>
     <string name="viewer_saved_to_drive">Zapisano na Drive</string>
     <string name="viewer_already_in_drive">Już jest na Drive</string>

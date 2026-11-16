@@ -2854,6 +2854,14 @@
     <string name="whats_new_260_emptyshared_body">De pagina Gedeeld omlaag trekken vernieuwt hem ook als er nog niets te zien is.</string>
     <string name="whats_new_260_albumrename_title">Hernoemde albums meteen bijgewerkt</string>
     <string name="whats_new_260_albumrename_body">Een album dat je van binnenuit hernoemt, toont zijn nieuwe naam op het tabblad Albums en in de albumkiezers zonder te vernieuwen.</string>
+    <string name="whats_new_260_cancelone_title">Eén upload of download annuleren</string>
+    <string name="whats_new_260_cancelone_body">In het scherm Activiteit heeft elke upload en elke foto van een download een eigen annuleerknop, en de rest gaat door.</string>
+    <string name="whats_new_260_hiddendrive_title">Verborgen foto\'s blijven als Proton je uitlogt</string>
+    <string name="whats_new_260_hiddendrive_body">Als Proton je uitlogt en Drive niet kan bevestigen dat het een deel van je verborgen foto\'s nog heeft, blijven die verborgen in de app in plaats van verwijderd te worden, en verschijnen ze na het inloggen weer in Verborgen foto\'s. Meldingen laten je ook weten wanneer verborgen foto\'s niet naar de galerij of in een zip konden.</string>
+    <string name="whats_new_260_hideonce_title">Verbergen op andere apparaten gebeurt één keer</string>
+    <string name="whats_new_260_hideonce_body">Een foto die op een ander apparaat is verborgen, gaat hier maar één keer naar Verborgen foto\'s, dus weer tonen brengt één kopie terug in plaats van meerdere.</string>
+    <string name="whats_new_260_newalbumpicker_title">Nieuwe albums staan meteen in Aan album toevoegen</string>
+    <string name="whats_new_260_newalbumpicker_body">Een album dat je net hebt gemaakt, staat meteen in “Aan album toevoegen”, zonder te vernieuwen.</string>
     <string name="viewer_save_to_drive">Opslaan in mijn Drive</string>
     <string name="viewer_saved_to_drive">Opgeslagen in Drive</string>
     <string name="viewer_already_in_drive">Staat al in Drive</string>

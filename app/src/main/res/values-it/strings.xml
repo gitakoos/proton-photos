@@ -2869,6 +2869,14 @@
     <string name="whats_new_260_emptyshared_body">Trascinare in basso la pagina Condivisi la aggiorna anche quando non ha ancora nulla da mostrare.</string>
     <string name="whats_new_260_albumrename_title">Album rinominati subito aggiornati</string>
     <string name="whats_new_260_albumrename_body">Un album rinominato dal suo interno mostra il nuovo nome nella scheda Album e nei selettori di album senza aggiornare.</string>
+    <string name="whats_new_260_cancelone_title">Annulla un solo caricamento o download</string>
+    <string name="whats_new_260_cancelone_body">Nella schermata Attività, ogni caricamento e ogni foto di un download ha il suo pulsante per annullare, e il resto continua.</string>
+    <string name="whats_new_260_hiddendrive_title">Foto nascoste al sicuro se Proton ti disconnette</string>
+    <string name="whats_new_260_hiddendrive_body">Se Proton ti disconnette e Drive non può confermare di avere ancora alcune delle tue foto nascoste, restano nascoste nell\'app invece di essere eliminate, e riappaiono in Foto nascoste dopo l\'accesso. Le notifiche ti dicono anche quando le foto nascoste non sono potute andare nella galleria o in uno zip.</string>
+    <string name="whats_new_260_hideonce_title">Ciò che nascondi su altri dispositivi vale una volta</string>
+    <string name="whats_new_260_hideonce_body">Una foto nascosta su un altro dispositivo entra qui in Foto nascoste una sola volta, così mostrarla di nuovo riporta una copia invece di diverse.</string>
+    <string name="whats_new_260_newalbumpicker_title">I nuovi album compaiono in Aggiungi all\'album</string>
+    <string name="whats_new_260_newalbumpicker_body">Un album appena creato compare subito in “Aggiungi all\'album”, senza aggiornare.</string>
     <string name="viewer_save_to_drive">Salva nel mio Drive</string>
     <string name="viewer_saved_to_drive">Salvato su Drive</string>
     <string name="viewer_already_in_drive">Già su Drive</string>

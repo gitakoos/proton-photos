@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
@@ -320,10 +321,13 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Computer, R.string.whats_new_260_otherpeople_title, R.string.whats_new_260_otherpeople_body),
             WhatsNewFeature(Icons.Default.Search, R.string.whats_new_260_othersearch_title, R.string.whats_new_260_othersearch_body),
             WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_260_multiperson_title, R.string.whats_new_260_multiperson_body),
+            WhatsNewFeature(Icons.Default.Cancel, R.string.whats_new_260_cancelone_title, R.string.whats_new_260_cancelone_body),
             WhatsNewFeature(Icons.Default.Build, R.string.whats_new_260_sdkswitches_title, R.string.whats_new_260_sdkswitches_body),
             WhatsNewFeature(Icons.Default.Lock, R.string.whats_new_260_fastcrypto_title, R.string.whats_new_260_fastcrypto_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_guesthide_title, R.string.whats_new_260_guesthide_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.VisibilityOff, R.string.whats_new_260_hiddenkept_title, R.string.whats_new_260_hiddenkept_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_hiddendrive_title, R.string.whats_new_260_hiddendrive_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.VisibilityOff, R.string.whats_new_260_hideonce_title, R.string.whats_new_260_hideonce_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_manualdetails_title, R.string.whats_new_260_manualdetails_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_backupswitch_title, R.string.whats_new_260_backupswitch_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Sync, R.string.whats_new_260_syncsooner_title, R.string.whats_new_260_syncsooner_body, WhatsNewCategory.Improved),
@@ -354,6 +358,7 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_260_editedcopy_title, R.string.whats_new_260_editedcopy_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_albumrefresh_title, R.string.whats_new_260_albumrefresh_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_albumrename_title, R.string.whats_new_260_albumrename_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_newalbumpicker_title, R.string.whats_new_260_newalbumpicker_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_260_trash999_title, R.string.whats_new_260_trash999_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_260_hidealbumsync_title, R.string.whats_new_260_hidealbumsync_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Settings, R.string.whats_new_260_sdkdefault_title, R.string.whats_new_260_sdkdefault_body, WhatsNewCategory.Improved),

@@ -2961,6 +2961,14 @@
     <string name="whats_new_260_emptyshared_body">Poteg navzdol na strani V skupni rabi jo osveži, tudi ko še nima ničesar za prikaz.</string>
     <string name="whats_new_260_albumrename_title">Preimenovani albumi takoj posodobljeni</string>
     <string name="whats_new_260_albumrename_body">Album, preimenovan od znotraj, pokaže novo ime na zavihku Albumi in v izbirnikih albumov brez osvežitve.</string>
+    <string name="whats_new_260_cancelone_title">Preklic enega nalaganja ali prenosa</string>
+    <string name="whats_new_260_cancelone_body">Na zaslonu Dejavnost ima vsako nalaganje in vsaka fotografija prenosa svoj gumb za preklic, ostalo pa teče naprej.</string>
+    <string name="whats_new_260_hiddendrive_title">Skrite fotografije ostanejo, ko vas Proton odjavi</string>
+    <string name="whats_new_260_hiddendrive_body">Ko vas Proton odjavi in Drive ne more potrditi, da še hrani nekatere vaše skrite fotografije, te namesto izbrisa ostanejo skrite v aplikaciji in se po prijavi znova prikažejo med Skritimi fotografijami. Obvestila vam povedo tudi, kdaj skrite fotografije niso mogle v galerijo ali v zip.</string>
+    <string name="whats_new_260_hideonce_title">Skrivanje z drugih naprav se izvede enkrat</string>
+    <string name="whats_new_260_hideonce_body">Fotografija, skrita na drugi napravi, gre tukaj med Skrite fotografije samo enkrat, zato razkritje vrne eno kopijo namesto več.</string>
+    <string name="whats_new_260_newalbumpicker_title">Novi albumi takoj v Dodaj v album</string>
+    <string name="whats_new_260_newalbumpicker_body">Album, ki ste ga pravkar ustvarili, se takoj prikaže v „Dodaj v album“, brez osvežitve.</string>
     <string name="viewer_save_to_drive">Shrani v moj Drive</string>
     <string name="viewer_saved_to_drive">Shranjeno v Drive</string>
     <string name="viewer_already_in_drive">Že v Drive</string>

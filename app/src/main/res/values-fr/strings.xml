@@ -2832,6 +2832,14 @@
     <string name="whats_new_260_emptyshared_body">Tirer vers le bas la page Partagés l\'actualise même lorsqu\'elle n\'a encore rien à afficher.</string>
     <string name="whats_new_260_albumrename_title">Albums renommés mis à jour aussitôt</string>
     <string name="whats_new_260_albumrename_body">Un album renommé depuis l\'intérieur affiche son nouveau nom dans l\'onglet Albums et dans les sélecteurs d\'album sans actualisation.</string>
+    <string name="whats_new_260_cancelone_title">Annuler un seul envoi ou téléchargement</string>
+    <string name="whats_new_260_cancelone_body">Dans l\'écran Activité, chaque envoi et chaque photo d\'un téléchargement a son propre bouton d\'annulation, et le reste continue.</string>
+    <string name="whats_new_260_hiddendrive_title">Photos masquées gardées si Proton vous déconnecte</string>
+    <string name="whats_new_260_hiddendrive_body">Si Proton vous déconnecte et que Drive ne peut pas confirmer qu\'il conserve encore certaines de vos photos masquées, elles restent masquées dans l\'app au lieu d\'être supprimées, et réapparaissent dans Photos masquées une fois reconnecté. Les notifications vous disent aussi quand des photos masquées n\'ont pas pu aller dans la galerie ou dans un zip.</string>
+    <string name="whats_new_260_hideonce_title">Un masquage venu d\'un autre appareil s\'applique une fois</string>
+    <string name="whats_new_260_hideonce_body">Une photo masquée sur un autre appareil n\'entre qu\'une fois dans Photos masquées ici, donc l\'afficher à nouveau ramène une seule copie au lieu de plusieurs.</string>
+    <string name="whats_new_260_newalbumpicker_title">Les nouveaux albums apparaissent dans Ajouter à l\'album</string>
+    <string name="whats_new_260_newalbumpicker_body">Un album que vous venez de créer apparaît tout de suite dans « Ajouter à l\'album », sans actualisation.</string>
     <string name="viewer_save_to_drive">Enregistrer dans mon Drive</string>
     <string name="viewer_saved_to_drive">Enregistré dans Drive</string>
     <string name="viewer_already_in_drive">Déjà dans Drive</string>
