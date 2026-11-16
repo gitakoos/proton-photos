@@ -57,16 +57,12 @@ class CachedOriginal(val storedFile: File) {
         return copied
     }
 
-    /** Whether the stored file holds the photo's bytes as they are (written before the cache was encrypted). */
-    val isPlain: Boolean get() = LocalCryptoFormat.formOf(storedFile) == LocalFileForm.PLAIN
-
     /**
-     * Runs [block] with a plaintext file of the photo, for tools that need a path: the stored file itself when it is
-     * plain, else a scratch copy proved whole, deleted afterwards (and by the scratch sweep at the next start). A
-     * block that writes changes the stored file in the first case, so only one whose caller deletes it after may.
+     * Runs [block] with a plaintext scratch copy of the photo, for tools that need a path, proved whole and deleted
+     * afterwards (and by the scratch sweep at the next start). Never the stored file itself, even a plain one: it
+     * may be encrypted in place while [block] reads it.
      */
     inline fun <T> withPlainFile(context: Context? = null, block: (File) -> T): T {
-        if (isPlain) return block(storedFile)
         val ctx = CacheFiles.contextOf(context) ?: throw LocalKeyUnavailableException(null)
         return VaultFiles.withPlainFile(ctx, storedFile, block)
     }

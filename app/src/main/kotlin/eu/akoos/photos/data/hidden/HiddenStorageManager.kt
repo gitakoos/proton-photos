@@ -354,8 +354,9 @@ class HiddenStorageManager @Inject constructor(
             // Everything below reads, stamps and copies out a plaintext scratch copy proved whole against the
             // vault file, never the vault file itself, which is removed only once the copy that left landed
             // byte for byte.
+            // Under the vault lock, so the vault's encryption in place never meets the copy being made.
             val work = try {
-                VaultFiles.materialize(context, srcFile)
+                VaultFiles.lock.withLock { VaultFiles.materialize(context, srcFile) }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "restore: vault file does not open for $ref: ${e.javaClass.simpleName}")
@@ -498,7 +499,7 @@ class HiddenStorageManager @Inject constructor(
                 // before the vault file is deleted below.
                 context.contentResolver.openFileDescriptor(target, "w")?.let { pfd ->
                     android.os.ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { out ->
-                        work.inputStream().use { DurableCopy.copy(it, out) }
+                        work.inputStream().use { DurableCopy.copy(eu.akoos.photos.data.localcrypto.LocalCryptoFormat.guardPlain(it), out) }
                     }
                 } ?: return@withContext null
                 // Read back before anything trusts the copy: the vault file goes only once the device holds
@@ -597,7 +598,10 @@ class HiddenStorageManager @Inject constructor(
                 HiddenVaultDecisions.uniqueRestoreName(name) { candidate -> File(destDir, candidate).exists() },
             )
             try {
-                srcFile.inputStream().use { input -> written.outputStream().use { DurableCopy.copy(input, it) } }
+                srcFile.inputStream().use { input ->
+                    val checked = eu.akoos.photos.data.localcrypto.LocalCryptoFormat.guardPlain(input)
+                    written.outputStream().use { DurableCopy.copy(checked, it) }
+                }
                 DurableCopy.syncDir(destDir)
                 val expected = srcFile.inputStream().use { PlainDigest.of(it) }
                 check(written.inputStream().use { PlainDigest.of(it) }.sameAs(expected)) { "restored copy differs" }

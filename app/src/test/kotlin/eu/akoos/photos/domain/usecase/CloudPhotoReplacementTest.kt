@@ -135,11 +135,13 @@ class CloudPhotoReplacementTest {
     }
 
     @Test
-    fun `a preparation that only reads gets the downloaded file, which is never changed`() = runTest {
+    fun `a preparation that only reads gets a private copy of the downloaded file, removed after`() = runTest {
+        var read: ByteArray? = null
         var source: File? = null
-        replacement.replace(userId, photo, { s -> source = s; null }, prepareWrites = false)
+        replacement.replace(userId, photo, { s -> source = s; read = s.readBytes(); null }, prepareWrites = false)
 
-        assertArrayEquals(ByteArray(4096) { it.toByte() }, source?.readBytes() ?: cloud.downloadBytes)
+        assertArrayEquals(ByteArray(4096) { it.toByte() }, read)
+        assertEquals("a copy in the work folder, never the cache file by its path", workDir, source?.parentFile)
         assertTrue(workDir.listFiles().orEmpty().isEmpty())
     }
 

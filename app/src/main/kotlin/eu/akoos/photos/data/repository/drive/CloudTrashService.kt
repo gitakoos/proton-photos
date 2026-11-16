@@ -761,6 +761,8 @@ class CloudTrashService @Inject constructor(
         // hash". The hex string is what PhotoUploadService passes into both
         // `Common.Digests.SHA1` of the xAttr blob and the HMAC that produces the
         // wire ContentHash.
+        // The hash and the upload read this same scratch copy, checked to hold no encrypted bytes.
+        eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(fullResFile)
         val hash = run {
             val digest = MessageDigest.getInstance("SHA-1")
             fullResFile.inputStream().use { stream ->

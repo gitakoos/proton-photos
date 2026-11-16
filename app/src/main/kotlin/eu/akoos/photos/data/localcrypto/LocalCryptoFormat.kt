@@ -244,6 +244,40 @@ object LocalCryptoFormat {
         }
     }
 
+    /**
+     * Throws [EncryptedBytesException] when [file] starts like one of these files. The last check before bytes
+     * leave the app (into the gallery, an upload, a content hash): whatever went wrong before, they never go out
+     * encrypted, and the caller keeps its source.
+     */
+    fun requirePlain(file: File) {
+        val head = ByteArray(5)
+        val read = java.io.FileInputStream(file).use { readUpTo(it, head) }
+        if (looksEncrypted(head, read)) throw EncryptedBytesException()
+    }
+
+    /** [input] as it is, checked as [requirePlain] checks a file before its first byte is handed on. */
+    fun guardPlain(input: InputStream): InputStream {
+        val pushback = java.io.PushbackInputStream(input, 5)
+        val head = ByteArray(5)
+        val read = readUpTo(pushback, head)
+        if (looksEncrypted(head, read)) {
+            runCatching { input.close() }
+            throw EncryptedBytesException()
+        }
+        if (read > 0) pushback.unread(head, 0, read)
+        return pushback
+    }
+
+    private fun readUpTo(input: InputStream, into: ByteArray): Int {
+        var total = 0
+        while (total < into.size) {
+            val n = input.read(into, total, into.size - total)
+            if (n < 0) break
+            total += n
+        }
+        return total
+    }
+
     fun keyIdHex(id: ByteArray): String = id.joinToString("") { "%02x".format(it) }
 
     fun keyIdBytes(hex: String): ByteArray =
@@ -520,8 +554,14 @@ interface RandomSource : Closeable {
     fun readFully(position: Long, into: ByteArray, offset: Int, length: Int)
 }
 
+/** Bytes about to leave the app start like a local encrypted file; nothing was written or sent. */
+class EncryptedBytesException : IOException("local encrypted bytes refused")
+
 /** A file opened once by [LocalCryptoFormat.openOnce]: its [form], and its bytes read from the same open file. */
 class OpenedFile internal constructor(val form: LocalFileForm, private val channel: java.nio.channels.FileChannel) : Closeable {
+
+    /** The size of the file as opened. */
+    val size: Long get() = channel.size()
 
     /** The bytes as they are, from the start (for a plaintext file). Closing the stream closes the file. */
     fun rawStream(): InputStream = java.nio.channels.Channels.newInputStream(channel.position(0))

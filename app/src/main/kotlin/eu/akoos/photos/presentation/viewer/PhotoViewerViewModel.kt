@@ -1986,8 +1986,9 @@ class PhotoViewerViewModel @Inject constructor(
         val target = context.contentResolver.insert(collection, values)
             ?: error("MediaStore insert failed")
         context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))?.use { input ->
+            val checked = eu.akoos.photos.data.localcrypto.LocalCryptoFormat.guardPlain(input)
             context.contentResolver.openOutputStream(target)?.use { output ->
-                input.copyTo(output)
+                checked.copyTo(output)
             } ?: error("openOutputStream returned null")
         } ?: error("openInputStream returned null for $uri")
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {

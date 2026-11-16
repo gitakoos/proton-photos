@@ -166,16 +166,12 @@ class CloudPhotoReplacement(
             if (resume == null) {
                 val cachedOriginal = cloudRepo.downloadFullResPhoto(userId, photo)
                 val original = cachedOriginal.storedFile
-                // A preparation that writes gets a private copy: the download cache file is shared with the
-                // viewer and swept by age, so nothing here may change it in place. The cache file is kept
-                // encrypted, so a preparation that only reads gets a plaintext private copy of it too.
-                val source = if (prepareWrites || !cachedOriginal.isPlain) {
-                    File(workDir, "cloud_${photo.linkId.take(24)}_${System.currentTimeMillis()}").also { file ->
-                        working = file
-                        cachedOriginal.copyPlainTo(file, context)
-                    }
-                } else {
-                    original
+                // Every preparation gets a plaintext private copy: the download cache file is shared with the
+                // viewer, swept by age and kept encrypted (a plain one may be encrypted in place at any start),
+                // so nothing here reads or changes it by its path.
+                val source = File(workDir, "cloud_${photo.linkId.take(24)}_${System.currentTimeMillis()}").also { file ->
+                    working = file
+                    cachedOriginal.copyPlainTo(file, context)
                 }
 
                 val copy = prepare.prepare(source) ?: return Result.Skipped
@@ -305,6 +301,7 @@ class CloudPhotoReplacement(
 
     private fun sha1(file: File): String {
         val digest = MessageDigest.getInstance("SHA-1")
+        eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(file)
         file.inputStream().use { stream ->
             val buf = ByteArray(8192)
             var read: Int

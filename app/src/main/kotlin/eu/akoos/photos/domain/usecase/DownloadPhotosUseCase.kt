@@ -429,6 +429,8 @@ class DownloadPhotosUseCase @Inject constructor(
         captureTimeSeconds: Long = 0L,
         gps: Pair<Double, Double>? = null,
     ): Uri? {
+        // Never writes a local encrypted file's bytes into the gallery as the photo.
+        if (runCatching { eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(file) }.isFailure) return null
         val isVideo = mimeType.startsWith("video/")
 
         // Stamp the original capture date into the file's EXIF BEFORE handing it to MediaStore.

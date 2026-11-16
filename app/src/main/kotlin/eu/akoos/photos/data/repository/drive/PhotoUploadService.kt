@@ -622,6 +622,12 @@ class PhotoUploadService @Inject constructor(
                 try {
                     FileInputStream(sourcePfd.fileDescriptor).use { fis ->
                         val sourceChannel: FileChannel = fis.channel
+                        // Never uploads a local encrypted file's bytes as the photo.
+                        val head = java.nio.ByteBuffer.allocate(5)
+                        while (head.hasRemaining() && sourceChannel.read(head, head.position().toLong()) > 0) Unit
+                        if (eu.akoos.photos.data.localcrypto.LocalCryptoFormat.looksEncrypted(head.array(), head.position())) {
+                            throw eu.akoos.photos.data.localcrypto.EncryptedBytesException()
+                        }
                         coroutineScope {
                             remainingIndices.map { idx ->
                                 async(Dispatchers.IO) {

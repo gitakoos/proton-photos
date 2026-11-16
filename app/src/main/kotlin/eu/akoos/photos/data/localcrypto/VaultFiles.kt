@@ -96,11 +96,7 @@ object VaultFiles {
 
     /** The plaintext of a vault file. Throws [LocalKeyLockedException], [LocalKeyUnavailableException] or
      *  [LocalFileDamagedException] for an encrypted file that does not open. */
-    fun openPlain(context: Context, file: File): InputStream {
-        if (plainForm(file)) return FileInputStream(file)
-        val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
-        return LocalCryptoFormat.openFile(file, keyring).inputStream()
-    }
+    fun openPlain(context: Context, file: File): InputStream = LocalFiles.openPlain(context, file)
 
     fun openReader(context: Context, file: File): LocalFileReader {
         val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
@@ -132,19 +128,20 @@ object VaultFiles {
         return keyring.state(keyId) !is DatabaseKeyState.Ready
     }
 
-    /** A plaintext copy of [file] in the scratch folder, proved whole; the caller deletes it. */
+    /**
+     * A plaintext copy of [file] in the scratch folder, proved whole and checked to hold no encrypted bytes; the
+     * caller deletes it. Read from one open of [file], so an encryption in place at the same moment cannot mix the
+     * two forms.
+     */
     fun materialize(context: Context, file: File): File {
         val dir = workDir(context).apply { mkdirs() }
         val work = File(dir, "${UUID.randomUUID()}.${file.extension.ifBlank { "bin" }}")
         try {
-            if (!plainForm(file)) {
-                val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
-                val digest = FileOutputStream(work).use { LocalCryptoFormat.decryptFile(file, keyring, it) }
-                if (work.length() != digest.bytes) throw IOException("scratch copy incomplete")
-            } else {
-                file.copyTo(work, overwrite = true)
-                if (work.length() != file.length()) throw IOException("scratch copy incomplete")
+            val copied = CacheFiles.inPlaceLock.readLock().withLock {
+                FileOutputStream(work).use { LocalFiles.copyPlain(context, file, it) }
             }
+            if (work.length() != copied) throw IOException("scratch copy incomplete")
+            LocalCryptoFormat.requirePlain(work)
         } catch (e: Throwable) {
             work.delete()
             throw e
@@ -152,10 +149,9 @@ object VaultFiles {
         return work
     }
 
-    /** Runs [block] with a plaintext file holding [file]'s bytes: the file itself when it is not encrypted, else a
-     *  scratch copy that is deleted afterwards. [block] must only read. */
+    /** Runs [block] with a plaintext scratch copy of [file] ([materialize]), deleted afterwards, never with [file]
+     *  itself, which may be encrypted in place while it runs. */
     inline fun <T> withPlainFile(context: Context, file: File, block: (File) -> T): T {
-        if (plainForm(file)) return block(file)
         val work = materialize(context, file)
         try {
             return block(work)

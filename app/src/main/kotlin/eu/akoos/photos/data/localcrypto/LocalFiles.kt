@@ -35,6 +35,7 @@ import java.io.FilterOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import kotlin.concurrent.withLock
 
 /**
  * The app folders whose files are kept encrypted: the hidden vault, the full-size and thumbnail caches, the
@@ -125,6 +126,29 @@ object LocalFiles {
         } catch (e: Throwable) {
             runCatching { opened.close() }
             throw e
+        }
+    }
+
+    /**
+     * Writes the plaintext of [file] into [out] from one open of it, and answers how many bytes that was. Throws
+     * when it does not open or the copy comes out short.
+     */
+    fun copyPlain(context: Context?, file: File, out: OutputStream): Long {
+        val opened = LocalCryptoFormat.openOnce(file) ?: throw LocalFileUnreadableException(file)
+        afterOpenForTest?.invoke()
+        opened.use {
+            if (opened.form == LocalFileForm.PLAIN) {
+                val expected = opened.size
+                val copied = opened.rawStream().copyTo(out)
+                if (copied != expected) throw IOException("copy incomplete")
+                return copied
+            }
+            val ctx = CacheFiles.contextOf(context) ?: throw LocalKeyUnavailableException(null)
+            val keyring = LocalCrypto.keyringOrNull(ctx) ?: throw LocalKeyUnavailableException(null)
+            val reader = opened.reader(keyring)
+            val copied = reader.inputStream().copyTo(out)
+            if (copied != reader.plainSize) throw IOException("copy incomplete")
+            return copied
         }
     }
 
@@ -252,6 +276,12 @@ object LocalFiles {
  */
 object CacheFiles {
     @Volatile private var appContext: Context? = null
+
+    /**
+     * Held for writing while a cache file is encrypted in place at start, and for reading while a plaintext copy
+     * of a local file is made, so the two never meet on one file.
+     */
+    val inPlaceLock = java.util.concurrent.locks.ReentrantReadWriteLock()
 
     /** Lets writers without a context of their own reach the keyring. */
     fun init(context: Context) {
@@ -412,7 +442,7 @@ object CacheFiles {
         return complete
     }
 
-    private fun encryptInPlace(file: File, sealing: LocalCryptoFormat.Sealing) {
+    private fun encryptInPlace(file: File, sealing: LocalCryptoFormat.Sealing) = inPlaceLock.writeLock().withLock {
         val temp = File.createTempFile(".cache_", ".tmp", file.parentFile)
         try {
             FileOutputStream(temp).use { out ->
