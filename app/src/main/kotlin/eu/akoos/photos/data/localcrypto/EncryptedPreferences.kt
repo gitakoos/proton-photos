@@ -232,15 +232,17 @@ object LocalStores {
     fun named(name: String): DataStore<Preferences>? = stores[name]
 
     /**
-     * Merges every locked copy of [storeName] whose key opens now into [store], then deletes that copy. Values the
-     * copy holds win over the live ones, except sets, which are joined, so a photo hidden in the meantime stays
-     * listed. Answers how many copies were merged.
+     * Merges every locked copy of [storeName] whose key opens now into [store], then deletes that copy. A value set
+     * since then wins: the copy only fills the keys the live file does not have, and sets are joined, so a photo
+     * hidden in either stays listed. [keepOut] names, per copy, keys it must not bring back at all (a Hidden
+     * password the user removed after that copy was set aside). Answers how many copies were merged.
      */
     suspend fun restoreLocked(
         storeName: String,
         store: DataStore<Preferences>,
         keyring: LocalKeyring,
         locked: LockedStoreFiles,
+        keepOut: (File) -> Set<String> = { emptySet() },
         log: (String) -> Unit,
     ): Int {
         var merged = 0
@@ -255,7 +257,8 @@ object LocalStores {
                 log("$storeName: locked copy unreadable (${e.javaClass.simpleName}), kept")
                 continue
             }
-            store.updateData { current -> mergeRecovered(recovered, current) }
+            val excluded = keepOut(file)
+            store.updateData { current -> mergeRecovered(recovered, current, excluded) }
             file.delete()
             merged++
         }
@@ -264,11 +267,16 @@ object LocalStores {
     }
 
     @Suppress("UNCHECKED_CAST")
-    internal fun mergeRecovered(recovered: Preferences, current: Preferences): Preferences {
+    internal fun mergeRecovered(recovered: Preferences, current: Preferences, keepOut: Set<String> = emptySet()): Preferences {
         val out: MutablePreferences = current.toMutablePreferences()
         for ((key, value) in recovered.asMap()) {
+            if (key.name in keepOut) continue
             val live = current.asMap()[key]
-            val mergedValue: Any = if (value is Set<*> && live is Set<*>) value + live else value
+            val mergedValue: Any = when {
+                live == null -> value
+                value is Set<*> && live is Set<*> -> value + live
+                else -> continue
+            }
             out[key as Preferences.Key<Any>] = mergedValue
         }
         return out.toPreferences()

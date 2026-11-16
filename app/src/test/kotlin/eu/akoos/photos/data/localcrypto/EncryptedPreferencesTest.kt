@@ -142,7 +142,7 @@ class EncryptedPreferencesTest {
     }
 
     @Test
-    fun `settings lost to a locked key merge back once the key opens, newer sets joined`() {
+    fun `settings lost to a locked key merge back once the key opens, newer values kept and sets joined`() {
         val old = keyring.current()
         val bytes = write(sample)
         wrapper.key = null
@@ -153,7 +153,7 @@ class EncryptedPreferencesTest {
         val store = InMemoryStore(live)
         val merged = runBlocking { LocalStores.restoreLocked("settings", store, fresh, locked) { log += it } }
         assertEquals(1, merged)
-        assertEquals("Ada", store.value[name])
+        assertEquals("a value set since wins", "new", store.value[name])
         assertEquals(setOf("a", "b", "c"), store.value[hidden])
         assertTrue(locked.pending("settings").isEmpty())
     }
@@ -192,6 +192,22 @@ class EncryptedPreferencesTest {
             eu.akoos.photos.data.db.encryption.KeystoreStrikes.currentStart = { "test" }
             eu.akoos.photos.data.db.encryption.KeystoreStrikes.clock = System::currentTimeMillis
         }
+    }
+
+    @Test
+    fun `a merge only fills what the live settings lack, and never brings back a key kept out`() {
+        val password = androidx.datastore.preferences.core.stringPreferencesKey("vault_password_blob")
+        val old = preferencesOf(name to "Ada", flag to true, hidden to setOf("a"), password to "old blob")
+
+        val reset = LocalStores.mergeRecovered(old, preferencesOf(password to "new blob", hidden to setOf("b")))
+        assertEquals("a Hidden password set again stays", "new blob", reset[password])
+        assertEquals("Ada", reset[name])
+        assertEquals(true, reset[flag])
+        assertEquals(setOf("a", "b"), reset[hidden])
+
+        val removed = LocalStores.mergeRecovered(old, preferencesOf(), keepOut = setOf("vault_password_blob"))
+        assertEquals("a Hidden password removed since is not brought back", null, removed[password])
+        assertEquals("Ada", removed[name])
     }
 
     @Test

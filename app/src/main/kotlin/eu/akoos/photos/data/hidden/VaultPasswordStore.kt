@@ -72,6 +72,7 @@ class VaultPasswordStore @Inject constructor(
 
     suspend fun clear() {
         context.settingsDataStore.edit { it.remove(SettingsKeys.VAULT_PASSWORD_BLOB) }
+        eu.akoos.photos.data.localcrypto.LocalCrypto.markPasswordRemoved(context)
         localEncryption.get().onPasswordChanged(null)
     }
 

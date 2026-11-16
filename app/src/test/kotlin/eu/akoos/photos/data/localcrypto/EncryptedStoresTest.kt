@@ -25,7 +25,9 @@ package eu.akoos.photos.data.localcrypto
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -44,5 +46,14 @@ class EncryptedStoresTest {
 
         assertEquals(LocalEncryptionCoordinator.STORE_NAMES.toSet(), stores.keys)
         for ((name, store) in stores) assertSame(name, store, LocalStores.named(name))
+    }
+
+    @Test
+    fun `a Hidden password removed after a copy was set aside is known to be newer than it`() {
+        val before = System.currentTimeMillis() - 60_000
+        LocalCrypto.markPasswordRemoved(context)
+
+        assertTrue(LocalCrypto.passwordRemovedAfter(context, before))
+        assertFalse(LocalCrypto.passwordRemovedAfter(context, System.currentTimeMillis() + 60_000))
     }
 }

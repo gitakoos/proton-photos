@@ -47,6 +47,7 @@ object LocalCrypto {
     private const val NOTICE_MARKER = "notice_due"
     private const val LEGACY_MARKER = "legacy_data"
     private const val GUEST_HIDE_WARNED = "guest_hide_warned"
+    private const val PASSWORD_REMOVED = "vault_password_removed"
 
     @Volatile private var keyring: LocalKeyring? = null
     @Volatile private var supported: Boolean? = null
@@ -137,6 +138,20 @@ object LocalCrypto {
 
     /** Whether a guest was already told that hidden photos without a password cannot be recovered. */
     fun isGuestHideWarned(context: Context): Boolean = File(root(context), GUEST_HIDE_WARNED).exists()
+
+    /** Records that the user removed the Hidden password, so a settings copy set aside before never brings it back. */
+    fun markPasswordRemoved(context: Context) {
+        runCatching {
+            root(context).mkdirs()
+            writeWhole(File(root(context), PASSWORD_REMOVED), System.currentTimeMillis().toString().toByteArray())
+        }
+    }
+
+    /** Whether the user removed the Hidden password after [time]. */
+    fun passwordRemovedAfter(context: Context, time: Long): Boolean {
+        val at = runCatching { File(root(context), PASSWORD_REMOVED).readText().trim().toLong() }.getOrNull() ?: return false
+        return at >= time
+    }
 
     fun markGuestHideWarned(context: Context) {
         runCatching {

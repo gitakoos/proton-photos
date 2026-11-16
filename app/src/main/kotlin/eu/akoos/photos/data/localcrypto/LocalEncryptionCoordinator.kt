@@ -293,7 +293,18 @@ class LocalEncryptionCoordinator @Inject constructor(
         val keyring = LocalCrypto.keyringOrNull(context) ?: return
         val locked = LocalCrypto.lockedStores(context)
         for ((name, store) in encryptedStores(context)) {
-            runCatching { LocalStores.restoreLocked(name, store, keyring, locked, LocalCrypto::log) }
+            runCatching {
+                LocalStores.restoreLocked(
+                    name,
+                    store,
+                    keyring,
+                    locked,
+                    keepOut = { copy ->
+                        if (LocalCrypto.passwordRemovedAfter(context, copy.lastModified())) setOf(SettingsKeys.VAULT_PASSWORD_BLOB.name) else emptySet()
+                    },
+                    log = LocalCrypto::log,
+                )
+            }
                 .onFailure { logFailure("$name restore", it) }
         }
     }
