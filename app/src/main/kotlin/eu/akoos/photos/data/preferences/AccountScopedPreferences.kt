@@ -168,8 +168,9 @@ object AccountScopedPreferences {
 
     /**
      * The vault's records, kept for the files [kept] names and dropped for every other: the index, the
-     * four per-photo maps, the pending hides, the hidden folder names and the favourites. Null keeps
-     * them all. A favourite naming no vault file is the account's own and goes unless [keepFavorites].
+     * four per-photo maps, the pending hides and their delete requests, the hidden folder names and the
+     * favourites. Null keeps them all. A favourite naming no vault file is the account's own and goes
+     * unless [keepFavorites].
      */
     private fun clearVaultRecords(
         prefs: MutablePreferences,
@@ -191,6 +192,7 @@ object AccountScopedPreferences {
             SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
             SettingsKeys.HIDDEN_URI_CARRIED_MAP,
             SettingsKeys.HIDDEN_PENDING_HIDES,
+            SettingsKeys.HIDDEN_DELETE_REQUESTS,
         )) {
             val entries = prefs[key] ?: continue
             keepOnly(prefs, key, entries.filterTo(HashSet()) { it.substringBefore('|') in kept })

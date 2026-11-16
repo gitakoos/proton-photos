@@ -141,6 +141,12 @@ object HiddenVaultDiagnostics {
         SyncDiagnostics.log("vault: reconcile found nothing")
     }
 
+    /** Copies the reconciliation kept because their original is still there and the delete prompt their
+     *  hide opened may still be answered. A later pass decides them. */
+    fun waitingOnDelete(count: Int) {
+        SyncDiagnostics.log("vault: reconcile kept $count waiting on a delete prompt")
+    }
+
     /** What the reconciliation decided for the leftovers of an interrupted hide, one count per
      *  outcome — the one line that says whether a tester's vault is self-consistent. */
     fun reconciled(confirm: Int, adopt: Int, discard: Int, forget: Int) {

@@ -45,7 +45,8 @@ class HiddenVaultLeftoverTest {
         recorded: Boolean,
         journalled: Boolean,
         sourcePresent: Boolean?,
-    ) = HiddenLeftover(vaultUri, blobPresent, recorded, journalled, sourcePresent)
+        deletePending: Boolean = false,
+    ) = HiddenLeftover(vaultUri, blobPresent, recorded, journalled, sourcePresent, deletePending)
 
     /** Every point of the input space, and the action each one must produce. */
     private fun expected(
@@ -53,9 +54,11 @@ class HiddenVaultLeftoverTest {
         recorded: Boolean,
         journalled: Boolean,
         sourcePresent: Boolean?,
+        deletePending: Boolean,
     ): HiddenLeftoverAction = when {
         // A hide that never confirmed.
         journalled && !blobPresent -> HiddenLeftoverAction.FORGET
+        journalled && sourcePresent == true && deletePending -> HiddenLeftoverAction.WAIT
         journalled && sourcePresent == true -> HiddenLeftoverAction.DISCARD
         journalled -> HiddenLeftoverAction.CONFIRM
         // No journal: only an unreferenced blob needs anything.
@@ -70,18 +73,21 @@ class HiddenVaultLeftoverTest {
             for (recorded in listOf(true, false)) {
                 for (journalled in listOf(true, false)) {
                     for (sourcePresent in listOf(true, false, null)) {
-                        val case = leftover(blobPresent, recorded, journalled, sourcePresent)
-                        assertEquals(
-                            "blob=$blobPresent recorded=$recorded journalled=$journalled source=$sourcePresent",
-                            expected(blobPresent, recorded, journalled, sourcePresent),
-                            HiddenVaultLeftovers.decide(case),
-                        )
-                        checked++
+                        for (deletePending in listOf(true, false)) {
+                            val case = leftover(blobPresent, recorded, journalled, sourcePresent, deletePending)
+                            assertEquals(
+                                "blob=$blobPresent recorded=$recorded journalled=$journalled source=$sourcePresent " +
+                                    "pending=$deletePending",
+                                expected(blobPresent, recorded, journalled, sourcePresent, deletePending),
+                                HiddenVaultLeftovers.decide(case),
+                            )
+                            checked++
+                        }
                     }
                 }
             }
         }
-        assertEquals(24, checked)
+        assertEquals(48, checked)
     }
 
     @Test
@@ -92,13 +98,16 @@ class HiddenVaultLeftoverTest {
             for (recorded in listOf(true, false)) {
                 for (journalled in listOf(true, false)) {
                     for (sourcePresent in listOf(true, false, null)) {
-                        val action = HiddenVaultLeftovers.decide(
-                            leftover(blobPresent, recorded, journalled, sourcePresent),
-                        )
-                        if (action == HiddenLeftoverAction.DISCARD) {
-                            assertTrue(sourcePresent == true)
-                            assertTrue(journalled)
-                            assertTrue(blobPresent)
+                        for (deletePending in listOf(true, false)) {
+                            val action = HiddenVaultLeftovers.decide(
+                                leftover(blobPresent, recorded, journalled, sourcePresent, deletePending),
+                            )
+                            if (action == HiddenLeftoverAction.DISCARD) {
+                                assertTrue(sourcePresent == true)
+                                assertTrue(journalled)
+                                assertTrue(blobPresent)
+                                assertTrue(!deletePending)
+                            }
                         }
                     }
                 }
@@ -116,6 +125,83 @@ class HiddenVaultLeftoverTest {
                 leftover(blobPresent = true, recorded = false, journalled = true, sourcePresent = true),
             ),
         )
+    }
+
+    @Test
+    fun `a copy whose original survived is kept while its delete prompt may still be answered`() {
+        // The screen or the process that opened the prompt is gone, but an Allow tapped now still removes
+        // the original: dropping the copy here would leave the photo nowhere.
+        assertEquals(
+            HiddenLeftoverAction.WAIT,
+            HiddenVaultLeftovers.decide(
+                leftover(blobPresent = true, recorded = false, journalled = true, sourcePresent = true, deletePending = true),
+            ),
+        )
+    }
+
+    @Test
+    fun `a pending delete that did land publishes the copy`() {
+        assertEquals(
+            HiddenLeftoverAction.CONFIRM,
+            HiddenVaultLeftovers.decide(
+                leftover(blobPresent = true, recorded = false, journalled = true, sourcePresent = false, deletePending = true),
+            ),
+        )
+    }
+
+    @Test
+    fun `a delete prompt is answerable inside the window and over after it`() {
+        val at = 1_000_000L
+        val window = HiddenVaultLeftovers.DELETE_PROMPT_WINDOW_MS
+        assertTrue(HiddenVaultLeftovers.deleteMayBePending(at, at))
+        assertTrue(HiddenVaultLeftovers.deleteMayBePending(at, at + window - 1))
+        assertTrue(!HiddenVaultLeftovers.deleteMayBePending(at, at + window))
+        // A clock set back reads as recent, and an entry with no time as one whose wait starts now.
+        assertTrue(HiddenVaultLeftovers.deleteMayBePending(at, at - 5_000L))
+        assertTrue(HiddenVaultLeftovers.deleteMayBePending(null, at))
+    }
+
+    @Test
+    fun `a delete request round-trips and a broken one is dropped`() {
+        val entry = HiddenVaultLeftovers.deleteRequestEntry(vaultUri, 42L)
+        assertEquals(
+            mapOf(vaultUri to 42L),
+            HiddenVaultLeftovers.parseDeleteRequests(setOf(entry, "file:///hidden/x.jpg|", "|7", "plain")),
+        )
+    }
+
+    @Test
+    fun `only journalled copies inside their window are awaiting a delete`() {
+        val now = 10L * HiddenVaultLeftovers.DELETE_PROMPT_WINDOW_MS
+        val fresh = "file:///hidden/fresh.jpg"
+        val stale = "file:///hidden/stale.jpg"
+        val unstamped = "file:///hidden/unstamped.jpg"
+        val published = "file:///hidden/published.jpg"
+        val awaiting = HiddenVaultLeftovers.awaitingDelete(
+            journal = mapOf(fresh to sourceUri, stale to sourceUri, unstamped to sourceUri),
+            requests = mapOf(
+                fresh to now - 1_000L,
+                stale to now - HiddenVaultLeftovers.DELETE_PROMPT_WINDOW_MS,
+                published to now,
+            ),
+            nowMs = now,
+        )
+        assertEquals(setOf(fresh, unstamped), awaiting)
+    }
+
+    @Test
+    fun `leftovers carry the pending delete only for a journalled copy`() {
+        val orphan = "file:///hidden/orphan.jpg"
+        val result = HiddenVaultLeftovers.leftovers(
+            blobUris = setOf(vaultUri, orphan),
+            recordedUris = emptySet(),
+            journal = mapOf(vaultUri to sourceUri),
+            sourcePresence = mapOf(sourceUri to true),
+            pendingDeletes = setOf(vaultUri, orphan),
+        ).associateBy { it.privateUri }
+        assertEquals(HiddenLeftoverAction.WAIT, HiddenVaultLeftovers.decide(result.getValue(vaultUri)))
+        assertEquals(HiddenLeftoverAction.ADOPT, HiddenVaultLeftovers.decide(result.getValue(orphan)))
+        assertTrue(!result.getValue(orphan).deletePending)
     }
 
     @Test

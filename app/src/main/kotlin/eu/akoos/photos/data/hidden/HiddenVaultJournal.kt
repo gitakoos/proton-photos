@@ -151,6 +151,13 @@ class HiddenVaultJournal @Inject constructor(
                 prefs[SettingsKeys.HIDDEN_PENDING_HIDES] =
                     HiddenVaultRecords.dropped(prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet(), keys) +
                         entries.map { HiddenVaultLeftovers.journalEntry(it.privateUri, it.sourceUri) }
+                // The delete of each original is asked for right after this write, and from then on it may
+                // land at any time, even after this process is gone: the time is what lets a later pass tell
+                // a copy whose prompt may still be answered from one whose prompt is long over.
+                val requestedAt = System.currentTimeMillis()
+                prefs[SettingsKeys.HIDDEN_DELETE_REQUESTS] =
+                    (prefs[SettingsKeys.HIDDEN_DELETE_REQUESTS] ?: emptySet()) +
+                        entries.map { HiddenVaultLeftovers.deleteRequestEntry(it.privateUri, requestedAt) }
                 val folders = entries.mapNotNull { e ->
                     e.sourceFolder?.takeIf { it.isNotBlank() }?.let { "${e.privateUri}|$it" }
                 }
@@ -257,6 +264,7 @@ class HiddenVaultJournal @Inject constructor(
                         (prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet())
                             .filterNot { it.substringBefore('|') in publish }
                             .toSet()
+                    dropDeleteRequests(prefs, publish.toSet())
                 }
                 dropLabelsOf(publish, sourceByVaultUri)
             }
@@ -462,12 +470,38 @@ class HiddenVaultJournal @Inject constructor(
     }
 
     /**
-     * Shuts the vault to new hides for a sign-out and answers the vault files a hide was already
-     * admitted for. Their originals may still be deleted after this returns, so the sign-out neither
-     * rescues nor destroys them; they stay in the vault with their records. Every call is paired with
-     * [endSignOut].
+     * Shuts the vault to new hides for a sign-out and answers the vault files whose originals may still be
+     * deleted after this returns: the ones a hide in this process was admitted for, and the journalled ones
+     * whose delete prompt, opened by a screen or a process that is gone, may still be answered. The sign-out
+     * neither rescues nor destroys them; they stay in the vault with their records. Every call is paired
+     * with [endSignOut], and one cancelled here ends its own.
      */
-    fun beginSignOut(): Set<String> = gate.beginSignOut()
+    suspend fun beginSignOut(): Set<String> {
+        val inFlight = gate.beginSignOut()
+        return try {
+            inFlight + awaitingDelete()
+        } catch (e: CancellationException) {
+            gate.endSignOut()
+            throw e
+        }
+    }
+
+    /**
+     * The journalled vault copies whose original's delete may still be carried out. A journal that cannot be
+     * read answers every vault file, since nothing then says which of them a prompt could still empty.
+     */
+    private suspend fun awaitingDelete(): Set<String> = try {
+        val prefs = context.settingsDataStore.data.first()
+        HiddenVaultLeftovers.awaitingDelete(
+            journal = HiddenVaultLeftovers.parseJournal(prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet()),
+            requests = HiddenVaultLeftovers.parseDeleteRequests(prefs[SettingsKeys.HIDDEN_DELETE_REQUESTS] ?: emptySet()),
+            nowMs = System.currentTimeMillis(),
+        )
+    } catch (e: Exception) {
+        if (e is CancellationException) throw e
+        Log.w(TAG, "sign-out: pending deletes unreadable, sparing the whole vault: ${e.javaClass.simpleName}")
+        withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+    }
 
     /** Ends what [beginSignOut] started, admitting hides again once no sign-out runs. */
     fun endSignOut() = gate.endSignOut()
@@ -564,25 +598,44 @@ class HiddenVaultJournal @Inject constructor(
             val presence = withContext(Dispatchers.IO) {
                 journal.values.distinct().mapNotNull { src -> sourceExists(src)?.let { src to it } }.toMap()
             }
-            val leftovers = HiddenVaultLeftovers.leftovers(blobs, recorded, journal, presence)
+            val requests = HiddenVaultLeftovers.parseDeleteRequests(prefs[SettingsKeys.HIDDEN_DELETE_REQUESTS] ?: emptySet())
+            val pendingDeletes = HiddenVaultLeftovers.awaitingDelete(journal, requests, System.currentTimeMillis())
+            val leftovers = HiddenVaultLeftovers.leftovers(blobs, recorded, journal, presence, pendingDeletes)
 
             val discard = mutableListOf<String>()
             val confirm = mutableListOf<String>()
             val adopt = mutableListOf<String>()
             val forget = mutableListOf<String>()
+            val waiting = mutableListOf<String>()
             for (leftover in leftovers) {
                 val action = HiddenVaultLeftovers.decide(leftover)
                 trace("reconcile ${logRef(leftover.privateUri)}: $action")
                 when (action) {
                     HiddenLeftoverAction.DISCARD -> discard += leftover.privateUri
+                    HiddenLeftoverAction.WAIT -> waiting += leftover.privateUri
                     HiddenLeftoverAction.CONFIRM -> confirm += leftover.privateUri
                     HiddenLeftoverAction.ADOPT -> adopt += leftover.privateUri
                     HiddenLeftoverAction.FORGET -> forget += leftover.privateUri
                     HiddenLeftoverAction.NONE -> Unit
                 }
             }
+            if (waiting.isNotEmpty()) {
+                // A copy kept for a prompt that may still be answered is decided by a later pass, in this
+                // process too: the next screen that asks reconciles again rather than finding the run claimed.
+                // One an earlier version journalled has no request time and gets one now, so its wait can end.
+                val unstamped = waiting.filter { it !in requests }
+                if (unstamped.isNotEmpty()) {
+                    val now = System.currentTimeMillis()
+                    context.settingsDataStore.edit { p ->
+                        p[SettingsKeys.HIDDEN_DELETE_REQUESTS] = (p[SettingsKeys.HIDDEN_DELETE_REQUESTS] ?: emptySet()) +
+                            unstamped.map { HiddenVaultLeftovers.deleteRequestEntry(it, now) }
+                    }
+                }
+                HiddenVaultDiagnostics.waitingOnDelete(waiting.size)
+                reconciled.set(false)
+            }
             if (discard.isEmpty() && confirm.isEmpty() && adopt.isEmpty() && forget.isEmpty()) {
-                HiddenVaultDiagnostics.reconciledNothing()
+                if (waiting.isEmpty()) HiddenVaultDiagnostics.reconciledNothing()
                 return
             }
 
@@ -634,6 +687,7 @@ class HiddenVaultJournal @Inject constructor(
                         .toSet()
                 val dropped = (discard + forget).toSet()
                 if (dropped.isNotEmpty()) pruneMaps(p, dropped)
+                if (confirm.isNotEmpty()) dropDeleteRequests(p, confirm.toSet())
             }
             if (confirm.isNotEmpty()) dropLabelsOf(confirm, journal)
             HiddenVaultDiagnostics.reconciled(
@@ -897,7 +951,7 @@ class HiddenVaultJournal @Inject constructor(
         HiddenSyncTimes.setRemoteHideQueue(prefs, queue)
     }
 
-    /** Drops every `"uri|value"` entry keyed by one of [keys] from the four per-uri maps. */
+    /** Drops every `"uri|value"` entry keyed by one of [keys] from the four per-uri maps and the delete requests. */
     private fun pruneMaps(prefs: MutablePreferences, keys: Set<String>) {
         for (key in listOf(
             SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
@@ -908,6 +962,15 @@ class HiddenVaultJournal @Inject constructor(
             val existing = prefs[key] ?: continue
             prefs[key] = HiddenVaultRecords.dropped(existing, keys)
         }
+        dropDeleteRequests(prefs, keys)
+    }
+
+    /** Drops the delete requests of [keys], whose hides have been published or undone. */
+    private fun dropDeleteRequests(prefs: MutablePreferences, keys: Set<String>) {
+        val existing = prefs[SettingsKeys.HIDDEN_DELETE_REQUESTS] ?: return
+        val left = HiddenVaultRecords.dropped(existing, keys)
+        if (left.isEmpty()) prefs.remove(SettingsKeys.HIDDEN_DELETE_REQUESTS)
+        else prefs[SettingsKeys.HIDDEN_DELETE_REQUESTS] = left
     }
 
     /**

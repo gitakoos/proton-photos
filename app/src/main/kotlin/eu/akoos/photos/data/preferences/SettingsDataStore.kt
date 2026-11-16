@@ -409,6 +409,15 @@ object SettingsKeys {
     val HIDDEN_PENDING_HIDES = stringSetPreferencesKey("hidden_pending_hides")
 
     /**
+     * When each journalled hide asked for its original to be deleted, as "hiddenUri|epochMs" strings.
+     *
+     * The system delete prompt outlives the screen and even the process that opened it, and tapping
+     * Allow later still removes the original. While a prompt may still be answered, a vault copy whose
+     * original is still on the device is kept: dropping it then would leave the photo nowhere.
+     */
+    val HIDDEN_DELETE_REQUESTS = stringSetPreferencesKey("hidden_delete_requests")
+
+    /**
      * mediaUri → capture-date-ms mapping for files whose MediaStore DATE_TAKEN is missing or
      * wrong, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
      * MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and video

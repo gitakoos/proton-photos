@@ -41,6 +41,11 @@ enum class HiddenLeftoverAction {
      *  everything recorded for it, leaving the photo exactly where the user can already see it. */
     DISCARD,
 
+    /** The original is still there, but the delete prompt the hide opened may still be answered: an
+     *  Allow tapped later removes the original even after the screen or the process that asked is gone.
+     *  The copy and its journal entry stay, and a later pass decides once the prompt can no longer act. */
+    WAIT,
+
     /** The original is gone, so the delete did take effect. Publish the record so the photo shows in
      *  the vault and can be restored, instead of sitting there invisible. */
     CONFIRM,
@@ -62,6 +67,8 @@ enum class HiddenLeftoverAction {
  * @param journalled a hide wrote its intent for [privateUri] and never reached its confirm step
  * @param sourcePresent the MediaStore original the journal names still resolves; null when there is
  *   no journal entry, or when its source could not be checked
+ * @param deletePending the delete the hide asked for may still be carried out (see
+ *   [HiddenVaultLeftovers.deleteMayBePending])
  */
 data class HiddenLeftover(
     val privateUri: String,
@@ -69,6 +76,7 @@ data class HiddenLeftover(
     val recorded: Boolean,
     val journalled: Boolean,
     val sourcePresent: Boolean?,
+    val deletePending: Boolean = false,
 )
 
 object HiddenVaultLeftovers {
@@ -78,6 +86,41 @@ object HiddenVaultLeftovers {
 
     /** Flattens one journal entry, holding the vault copy against the original it came from. */
     fun journalEntry(privateUri: String, sourceUri: String): String = "$privateUri$SEPARATOR$sourceUri"
+
+    /**
+     * How long after a hide asked for its original's delete the prompt is still taken to be answerable. The
+     * prompt is the system's own screen: it stays in the task when the app's screen or process goes away, and
+     * an Allow tapped on it later still removes the original. Past this, a copy whose original is still there
+     * is taken as declined and dropped; until then the cost of waiting is one duplicate nobody sees.
+     */
+    const val DELETE_PROMPT_WINDOW_MS: Long = 7L * 24L * 60L * 60L * 1000L
+
+    /** Flattens one delete request, holding the vault copy against the time its original's delete was asked for. */
+    fun deleteRequestEntry(privateUri: String, requestedAtMs: Long): String = "$privateUri$SEPARATOR$requestedAtMs"
+
+    /** privateUri → requestedAtMs for a stored delete-request set; an entry whose time does not parse is dropped. */
+    fun parseDeleteRequests(entries: Set<String>): Map<String, Long> =
+        entries.mapNotNull { entry ->
+            val key = entry.substringBefore(SEPARATOR)
+            val at = entry.substringAfter(SEPARATOR, "").toLongOrNull()
+            if (key.isBlank() || at == null) null else key to at
+        }.toMap()
+
+    /**
+     * Whether the delete asked for at [requestedAtMs] may still remove the original at [nowMs]. No recorded time
+     * (an entry an earlier version journalled) answers yes, so the caller stamps one and the window starts there.
+     * A time in the future, a clock set back, also answers yes.
+     */
+    fun deleteMayBePending(requestedAtMs: Long?, nowMs: Long): Boolean =
+        requestedAtMs == null || nowMs - requestedAtMs < DELETE_PROMPT_WINDOW_MS
+
+    /**
+     * The journalled vault copies whose original's delete may still be carried out, from the journal
+     * ([journal], privateUri → sourceUri) and the recorded delete requests ([requests]). A sign-out spares them,
+     * and a reconciliation keeps them while their original is still there.
+     */
+    fun awaitingDelete(journal: Map<String, String>, requests: Map<String, Long>, nowMs: Long): Set<String> =
+        journal.keys.filterTo(HashSet()) { deleteMayBePending(requests[it], nowMs) }
 
     /**
      * privateUri → sourceUri for a stored journal set. An entry with no separator keeps a blank
@@ -124,10 +167,12 @@ object HiddenVaultLeftovers {
      *
      * Order matters: a missing blob settles the case before the source is consulted, because bytes
      * that are gone cannot be published whatever the original did. Past that, only a source proven
-     * to still exist authorises destroying a copy.
+     * to still exist authorises destroying a copy, and only once no delete prompt can still remove that
+     * source: an Allow tapped after the copy was dropped would leave the photo nowhere.
      */
     fun decide(leftover: HiddenLeftover): HiddenLeftoverAction = when {
         leftover.journalled && !leftover.blobPresent -> HiddenLeftoverAction.FORGET
+        leftover.journalled && leftover.sourcePresent == true && leftover.deletePending -> HiddenLeftoverAction.WAIT
         leftover.journalled && leftover.sourcePresent == true -> HiddenLeftoverAction.DISCARD
         leftover.journalled -> HiddenLeftoverAction.CONFIRM
         leftover.blobPresent && !leftover.recorded -> HiddenLeftoverAction.ADOPT
@@ -143,12 +188,14 @@ object HiddenVaultLeftovers {
      *
      * @param sourcePresence sourceUri → exists, holding only the sources that could be checked; a
      *   source missing from the map stays unknown.
+     * @param pendingDeletes the journalled copies whose original's delete may still be carried out
      */
     fun leftovers(
         blobUris: Set<String>,
         recordedUris: Set<String>,
         journal: Map<String, String>,
         sourcePresence: Map<String, Boolean>,
+        pendingDeletes: Set<String> = emptySet(),
     ): List<HiddenLeftover> =
         (blobUris + journal.keys).map { uri ->
             val source = journal[uri]
@@ -158,6 +205,7 @@ object HiddenVaultLeftovers {
                 recorded = uri in recordedUris,
                 journalled = source != null,
                 sourcePresent = source?.let { sourcePresence[it] },
+                deletePending = source != null && uri in pendingDeletes,
             )
         }
 }
