@@ -493,8 +493,12 @@ class HiddenStorageManager @Inject constructor(
                 runCatching { context.contentResolver.insert(collection, values) }.getOrNull()
             } ?: return@withContext null
             try {
-                context.contentResolver.openOutputStream(target)?.use { out ->
-                    work.inputStream().use { it.copyTo(out) }
+                // Through a descriptor rather than a plain stream, so the copy can be forced to the storage
+                // before the vault file is deleted below.
+                context.contentResolver.openFileDescriptor(target, "w")?.let { pfd ->
+                    android.os.ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { out ->
+                        work.inputStream().use { DurableCopy.copy(it, out) }
+                    }
                 } ?: return@withContext null
                 // Read back before anything trusts the copy: the vault file goes only once the device holds
                 // exactly the bytes it held.
@@ -592,7 +596,8 @@ class HiddenStorageManager @Inject constructor(
                 HiddenVaultDecisions.uniqueRestoreName(name) { candidate -> File(destDir, candidate).exists() },
             )
             try {
-                srcFile.inputStream().use { input -> written.outputStream().use { input.copyTo(it) } }
+                srcFile.inputStream().use { input -> written.outputStream().use { DurableCopy.copy(input, it) } }
+                DurableCopy.syncDir(destDir)
                 val expected = srcFile.inputStream().use { PlainDigest.of(it) }
                 check(written.inputStream().use { PlainDigest.of(it) }.sameAs(expected)) { "restored copy differs" }
             } catch (e: Exception) {
