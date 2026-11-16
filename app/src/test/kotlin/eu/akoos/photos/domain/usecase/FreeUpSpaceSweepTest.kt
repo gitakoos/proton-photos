@@ -30,7 +30,11 @@ import eu.akoos.photos.data.api.dto.LinkCoreDto
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.data.api.dto.LinkPhotoDto
+import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -63,6 +67,7 @@ class FreeUpSpaceSweepTest {
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var linkDetailHelpers: LinkDetailHelpers
     private lateinit var resolver: ContentResolver
+    private lateinit var localRepo: LocalMediaRepository
     private lateinit var useCase: FreeUpSpaceUseCase
 
     private fun eligible(i: Int) = SyncState(
@@ -90,10 +95,24 @@ class FreeUpSpaceSweepTest {
         repo = mockk(relaxed = true)
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers)
+        localRepo = mockk(relaxed = true)
+        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo)
+        // By default every device file is exactly what was backed up: its size, and the SHA-1 its row recorded.
+        coEvery { localRepo.queryByUri(any()) } answers { deviceFile(firstArg(), sizeBytes = 1024L) }
+        coEvery { localRepo.sha1(any()) } answers { "hash-" + firstArg<String>().substringAfterLast('/') }
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
         every { resolver.delete(any(), any(), any()) } returns 1
     }
+
+    private fun deviceFile(uri: String, sizeBytes: Long, modifiedSec: Long = 0L) = LocalMediaItem(
+        uri = uri,
+        dateTaken = 0L,
+        displayName = "IMG.jpg",
+        mimeType = "image/jpeg",
+        sizeBytes = sizeBytes,
+        bucketName = "Camera",
+        dateModified = modifiedSec,
+    )
 
     @After
     fun tearDown() {
@@ -222,5 +241,65 @@ class FreeUpSpaceSweepTest {
 
         assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
         coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a photo edited in place since its backup is kept and queued to be backed up again`() = runTest {
+        val row = eligible(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.queryByUri(row.localUri) } returns deviceFile(row.localUri, sizeBytes = 2048L)
+        coEvery { localRepo.sha1(row.localUri) } returns "edited"
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        verify(exactly = 0) { resolver.delete(any(), any(), any()) }
+        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any(), any()) }
+        coVerify {
+            repo.upsert(
+                match {
+                    it.localUri == row.localUri && it.status == SyncStatus.LOCAL_ONLY &&
+                        it.cloudFileId == null && it.backedUpAtMs == null && it.localHash == "edited"
+                },
+                userId,
+            )
+        }
+        coVerify { repo.markQueued(row.localUri, QueueSource.MANUAL, any()) }
+    }
+
+    @Test
+    fun `a device file that cannot be read is kept and left as it is`() = runTest {
+        val row = eligible(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.sha1(row.localUri) } returns null
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        verify(exactly = 0) { resolver.delete(any(), any(), any()) }
+        coVerify(exactly = 0) { repo.upsert(any(), any()) }
+        coVerify(exactly = 0) { repo.markQueued(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a device file whose bytes Drive holds as they are is reclaimed`() = runTest {
+        val row = eligible(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf(
+            "cloud-1" to BatchLinkDto(
+                link = LinkCoreDto(linkId = "cloud-1", type = 2, state = 1),
+                photo = LinkPhotoDto(contentHash = "drive-hash"),
+            ),
+        )
+        coEvery { localRepo.sha1(row.localUri) } returns "rewritten-by-this-app"
+        every { cloudRepo.cloudContentHash("rewritten-by-this-app") } returns "drive-hash"
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(1, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
     }
 }
