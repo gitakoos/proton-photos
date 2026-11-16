@@ -112,25 +112,47 @@ class LocalKeyCustody(
         }
     }
 
-    /** Writes the account copies [userId] is due and lacks. Answers how many were written. */
+    /**
+     * Writes the account copies [userId] is due and lacks, and seals again every copy of a key that opens now
+     * whose recorded sealing key is not the account's current one: after a key rotation or a password reset the
+     * old address key may stop opening, so the copies move to the new one while this phone still holds the keys.
+     * Answers how many were written.
+     */
     fun ensureAccountCopies(userId: String, sealer: AccountSealer): Int {
         val hash = LocalKeyOwner.userHash(userId)
+        fun stale(copies: KeyRecoveryCopies, name: String): Boolean =
+            sealer.sealId != null && copies.accountCopySealId(name, hash) != sealer.sealId
         var written = 0
         val info = keyring.currentInfo()
-        if (info != null && info.second == LocalKeyOwner.account(userId) && !masterCopies.hasAccountCopy(info.first, hash)) {
+        if (info != null && info.second == LocalKeyOwner.account(userId) &&
+            (!masterCopies.hasAccountCopy(info.first, hash) || stale(masterCopies, info.first))
+        ) {
             val current = keyring.current()
             if (current.keyId == info.first) {
                 masterCopies.writeAccountCopy(current.keyId, current.key, hash, sealer)
                 written++
             }
         }
+        for (name in masterCopies.namesWithAccountCopy(hash)) {
+            if (name == info?.first || !stale(masterCopies, name)) continue
+            val ready = keyring.state(name) as? DatabaseKeyState.Ready ?: continue
+            masterCopies.writeAccountCopy(name, ready.key, hash, sealer)
+            written++
+        }
         val dbKey = database.currentKey()
-        if (dbKey != null && !database.copies.hasAccountCopy(DATABASE_NAME, hash)) {
+        if (dbKey != null && (!database.copies.hasAccountCopy(DATABASE_NAME, hash) || stale(database.copies, DATABASE_NAME))) {
             database.copies.writeAccountCopy(DATABASE_NAME, dbKey, hash, sealer)
             written++
         }
         if (written > 0) log("local keys: $written account copies written")
         return written
+    }
+
+    /** Whether a key this phone cannot open has an account copy for [userId] (worth a fresh look at its keys). */
+    fun lockedWithAccountCopy(userId: String): Boolean {
+        val hash = LocalKeyOwner.userHash(userId)
+        return keyring.lockedKeyIds().any { masterCopies.hasAccountCopy(it, hash) } ||
+            database.waitingSetAsides().any { it.copies.hasAccountCopy(DATABASE_NAME, hash) }
     }
 
     /** Opens every locked key and set-aside database [userId]'s account copies open. */

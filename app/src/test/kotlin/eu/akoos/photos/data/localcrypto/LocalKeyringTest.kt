@@ -157,4 +157,15 @@ class LocalKeyringTest {
         assertNotEquals(old.keyId, fresh.keyId)
         assertTrue(File(tmp.root, "permanent/keyring/${old.keyId}").isDirectory)
     }
+
+    @Test
+    fun `every key made is announced at once, so its copies follow`() {
+        val ring = ring()
+        val minted = mutableListOf<String>()
+        ring.onMinted = { minted += it.keyId }
+        val first = ring.current()
+        ring.current()
+        val second = ring.rotate(LocalKeyOwner.GUEST)
+        assertEquals(listOf(first.keyId, second.keyId), minted)
+    }
 }

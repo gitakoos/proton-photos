@@ -39,6 +39,9 @@ interface AccountSealer {
 
     /** The payload, or null when this account's keys do not open [blob] or it is damaged. */
     fun open(blob: ByteArray): ByteArray?
+
+    /** Names the key [seal] seals to now (it changes when the account's primary key does), or null when unknown. */
+    val sealId: String? get() = null
 }
 
 /**
@@ -62,19 +65,29 @@ class KeyRecoveryCopies(
 
     /** Every key name with an account copy for [userHash]. */
     fun namesWithAccountCopy(userHash: String): List<String> =
-        dir.listFiles()?.map { it.name }?.filter { it.endsWith("$ACCOUNT_INFIX$userHash") }
+        dir.listFiles()?.filter { it.isFile }?.map { it.name }?.filter { it.endsWith("$ACCOUNT_INFIX$userHash") }
             ?.map { it.substringBefore(ACCOUNT_INFIX) } ?: emptyList()
 
     fun hasAnyAccountCopy(name: String): Boolean =
         dir.listFiles()?.any { it.name.startsWith("$name$ACCOUNT_INFIX") } ?: false
 
-    /** Writes the account copy of [key] and proves it opens before it replaces any earlier one. */
+    /** Writes the account copy of [key] and proves it opens before it replaces any earlier one. The key it was
+     *  sealed to ([AccountSealer.sealId]) is recorded beside it. */
     fun writeAccountCopy(name: String, key: ByteArray, userHash: String, sealer: AccountSealer) {
         val blob = sealer.seal(payload(name, key))
         check(readPayload(sealer.open(blob), name)?.contentEquals(key) == true) { "account copy did not open" }
         dir.mkdirs()
         writeWhole(accountCopy(name, userHash), blob)
+        val sealId = sealer.sealId
+        val record = sealIdFile(name, userHash)
+        if (sealId != null) writeWhole(record, sealId.toByteArray(Charsets.UTF_8)) else record.delete()
     }
+
+    /** The key the account copy of [name] was sealed to, or null when not recorded. */
+    fun accountCopySealId(name: String, userHash: String): String? =
+        runCatching { sealIdFile(name, userHash).readText(Charsets.UTF_8).trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    private fun sealIdFile(name: String, userHash: String) = File(dir, "$name$ACCOUNT_INFIX$userHash$SEAL_ID_SUFFIX")
 
     /** The key in the account copy of [name] for [userHash], or null when there is none or it does not open. */
     fun openAccountCopy(name: String, userHash: String, sealer: AccountSealer): ByteArray? {
@@ -150,6 +163,7 @@ class KeyRecoveryCopies(
         private const val VERSION: Byte = 1
         private const val ACCOUNT_INFIX = ".acct."
         private const val PASSWORD_SUFFIX = ".pwd"
+        private const val SEAL_ID_SUFFIX = ".sealid"
         private val PAYLOAD_MAGIC = "PFRK".toByteArray(Charsets.US_ASCII)
         private val PASSWORD_MAGIC = "PFRP".toByteArray(Charsets.US_ASCII)
         private val PASSWORD_HEAD = PASSWORD_MAGIC.size + 1 + 4 + SALT_BYTES

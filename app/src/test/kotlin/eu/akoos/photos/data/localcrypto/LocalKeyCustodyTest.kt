@@ -57,18 +57,25 @@ class LocalKeyCustodyTest {
     private lateinit var custody: LocalKeyCustody
 
     /** An account's address key stand-in: AES-GCM under a key only that account's sealer holds. */
-    class FakeSealer(private val key: SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()) : AccountSealer {
+    class FakeSealer(
+        private val key: SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey(),
+        /** Older keys of the same account, which still open what they sealed (a key rotation). */
+        private val older: List<SecretKey> = emptyList(),
+        override val sealId: String? = null,
+    ) : AccountSealer {
         override fun seal(payload: ByteArray): ByteArray {
             val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
             val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv)) }
             return iv + c.doFinal(payload)
         }
 
-        override fun open(blob: ByteArray): ByteArray? = runCatching {
-            val c = Cipher.getInstance("AES/GCM/NoPadding")
-                .apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, blob.copyOfRange(0, 12))) }
-            c.doFinal(blob, 12, blob.size - 12)
-        }.getOrNull()
+        override fun open(blob: ByteArray): ByteArray? = (listOf(key) + older).firstNotNullOfOrNull { candidate ->
+            runCatching {
+                val c = Cipher.getInstance("AES/GCM/NoPadding")
+                    .apply { init(Cipher.DECRYPT_MODE, candidate, GCMParameterSpec(128, blob.copyOfRange(0, 12))) }
+                c.doFinal(blob, 12, blob.size - 12)
+            }.getOrNull()
+        }
     }
 
     class FakeDatabase(root: File) : DatabaseKeyAccess {
@@ -164,6 +171,29 @@ class LocalKeyCustodyTest {
         assertArrayEquals(ByteArray(32) { 7 }, database.recovered[dbAside.dir]!!.first)
         assertEquals(LocalKeyOwner.userHash("alice"), database.recovered[dbAside.dir]!!.second)
         assertFalse(custody.status().locked)
+    }
+
+    @Test
+    fun `after the account's primary key changes, every account copy is sealed again to the new one`() {
+        val oldKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val newKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        custody.onOccupant("alice")
+        val first = keyring.current()
+        custody.ensureAccountCopies("alice", FakeSealer(oldKey, sealId = "old"))
+        custody.onSignedOut("alice")
+        custody.onOccupant("alice")
+        val second = keyring.current()
+        custody.ensureAccountCopies("alice", FakeSealer(oldKey, sealId = "old"))
+
+        // The account rotated its key: the new one seals, the old one still opens.
+        custody.ensureAccountCopies("alice", FakeSealer(newKey, older = listOf(oldKey), sealId = "new"))
+
+        // Once the old key cannot be opened any more (a password reset), the copies still open with the new one.
+        val newOnly = FakeSealer(newKey, sealId = "new")
+        val hash = LocalKeyOwner.userHash("alice")
+        assertArrayEquals(first.key, copies.openAccountCopy(first.keyId, hash, newOnly))
+        assertArrayEquals(second.key, copies.openAccountCopy(second.keyId, hash, newOnly))
+        assertArrayEquals(database.key, database.copies.openAccountCopy(LocalKeyCustody.DATABASE_NAME, hash, newOnly))
     }
 
     @Test

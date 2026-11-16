@@ -72,6 +72,10 @@ class LocalKeyring(
     private val currentBackup get() = File(keyringDir, CURRENT_BACKUP)
     private val unavailableFile get() = File(dir, UNAVAILABLE)
     private val cache = ConcurrentHashMap<String, ByteArray>()
+
+    /** Told about every key made, right after it is written, so its recovery copies follow at once. It must
+     *  return quickly and never use this keyring's lock: it runs while that lock is held. */
+    @Volatile var onMinted: ((Current) -> Unit)? = null
     @Volatile private var unavailableNotedThisProcess = false
 
     private fun storeOf(keyId: String) = DatabaseKeyStore(File(keyringDir, keyId), wrapper, random)
@@ -185,7 +189,7 @@ class LocalKeyring(
         }
         cache[id] = key
         writeCurrent(id, owner)
-        return Current(id, key, owner)
+        return Current(id, key, owner).also { minted -> runCatching { onMinted?.invoke(minted) } }
     }
 
     private fun readCurrent(): Pair<String, String>? {

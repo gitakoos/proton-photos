@@ -94,7 +94,8 @@ class LocalEncryptionCoordinator @Inject constructor(
     fun start() {
         // Leftover scratch plaintext of an earlier process goes before any reader can make new scratch copies.
         runCatching { VaultFiles.clearScratch(context) }
-        if (LocalCrypto.keyringOrNull(context) == null) return
+        val keyring = LocalCrypto.keyringOrNull(context) ?: return
+        keyring.onMinted = { scope.launch { afterMint() } }
         scope.launch {
             // The settings file is encrypted the first time it is opened, before any vault file is: an older
             // version installed over this one then stops at the settings rather than run with a vault it can
@@ -186,18 +187,45 @@ class LocalEncryptionCoordinator @Inject constructor(
         keysLock.withLock { custody.onOccupant(userId?.id) }
         if (userId == null) return
         // The address keys answer only once the account is ready; a failure here is tried again on the next start.
-        val sealer = runCatching { EnvelopeAccountSealer.open(envelopeCrypto, userId) }.getOrNull() ?: return
-        sealer.use {
-            val outcome = keysLock.withLock {
-                runCatching { custody.recoverWithAccount(userId.id, it) }
-                    .onFailure { e -> logFailure("account recovery", e) }
-                    .getOrNull()
+        var sealer = runCatching { EnvelopeAccountSealer.open(envelopeCrypto, userId) }.getOrNull() ?: return
+        try {
+            var outcome = recoverWithAccount(custody, userId, sealer)
+            // A copy sealed to a key this phone has not listed yet (made on another device) needs a fresh list.
+            if (outcome?.any != true && keysLock.withLock { runCatching { custody.lockedWithAccountCopy(userId.id) }.getOrDefault(false) }) {
+                val fresh = runCatching { EnvelopeAccountSealer.open(envelopeCrypto, userId, refresh = true) }.getOrNull()
+                if (fresh != null) {
+                    sealer.close()
+                    sealer = fresh
+                    outcome = recoverWithAccount(custody, userId, sealer)
+                }
             }
-            keysLock.withLock {
-                runCatching { custody.ensureAccountCopies(userId.id, it) }.onFailure { e -> logFailure("account copies", e) }
-            }
+            writeAccountCopies(custody, userId, sealer)
             if ((outcome?.keys ?: 0) > 0) restoreLockedStores()
+        } finally {
+            sealer.close()
         }
+    }
+
+    private suspend fun recoverWithAccount(custody: LocalKeyCustody, userId: UserId, sealer: AccountSealer): RecoveryOutcome? =
+        keysLock.withLock {
+            runCatching { custody.recoverWithAccount(userId.id, sealer) }
+                .onFailure { e -> logFailure("account recovery", e) }
+                .getOrNull()
+        }
+
+    private suspend fun writeAccountCopies(custody: LocalKeyCustody, userId: UserId, sealer: AccountSealer) {
+        keysLock.withLock {
+            runCatching { custody.ensureAccountCopies(userId.id, sealer) }.onFailure { e -> logFailure("account copies", e) }
+        }
+    }
+
+    /** A key was just made: its password copy and its account copy are written now, not on the next start. */
+    private suspend fun afterMint() {
+        runCatching { writeMissingPasswordCopies() }.onFailure { logFailure("password copies", it) }
+        val userId = runCatching { accountManager.getPrimaryUserId().first() }.getOrNull() ?: return
+        val custody = LocalCrypto.custody(context) ?: return
+        val sealer = runCatching { EnvelopeAccountSealer.open(envelopeCrypto, userId) }.getOrNull() ?: return
+        sealer.use { writeAccountCopies(custody, userId, it) }
     }
 
     private suspend fun restoreLockedStores() {
@@ -291,6 +319,13 @@ internal class EnvelopeAccountSealer(
         return if (result is EnvelopeOpenResult.Opened) out.toByteArray() else null
     }
 
+    /** The current sealing key, named by a digest of its public key. */
+    override val sealId: String by lazy {
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(sealKeys.recipientPublicKey.toByteArray(Charsets.UTF_8))
+            .take(SEAL_ID_BYTES).joinToString("") { "%02x".format(it) }
+    }
+
     override fun close() {
         sealKeys.close()
         openKeys.close()
@@ -298,11 +333,14 @@ internal class EnvelopeAccountSealer(
 
     companion object {
         private const val CHUNK_BYTES = 4096
+        private const val SEAL_ID_BYTES = 16
 
-        suspend fun open(crypto: AddressKeyEnvelopeCrypto, userId: UserId): EnvelopeAccountSealer {
+        /** Seals to the account's current address key and opens with every key of every address it has, the
+         *  disabled ones and the old ones of a rotation included. [refresh] refetches the address list first. */
+        suspend fun open(crypto: AddressKeyEnvelopeCrypto, userId: UserId, refresh: Boolean = false): EnvelopeAccountSealer {
             val seal = crypto.sealKeys(userId)
             val open = try {
-                crypto.openKeys(userId)
+                crypto.openKeys(userId, refreshAddresses = refresh, includeDisabled = true)
             } catch (e: Exception) {
                 seal.close()
                 throw e
