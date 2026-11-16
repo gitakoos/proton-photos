@@ -337,6 +337,39 @@ class DatabaseOpenGateTest {
     }
 
     @Test
+    fun `a database file that cannot be set aside is never deleted, the open fails instead`() {
+        installEncrypted()
+        encrypted.writeText("garbage")
+        File(encrypted.path + "-wal").writeText("wal")
+        // The main file moves, its journal does not (something already sits where it would go), so it moves back.
+        File(File(aside, "$now/${DatabaseOpenGate.ENCRYPTED_NAME}-wal"), "in-the-way").apply { parentFile!!.mkdirs(); writeText("x") }
+
+        try {
+            gate().prepare()
+            fail("expected the open to fail")
+        } catch (e: java.io.IOException) {
+            assertEquals("garbage", encrypted.readText())
+            assertEquals("wal", File(encrypted.path + "-wal").readText())
+            assertFalse(rebuilt.exists())
+        }
+    }
+
+    @Test
+    fun `a set-aside folder that cannot be made deletes nothing and fails the open`() {
+        installEncrypted()
+        encrypted.writeText("garbage")
+        aside.parentFile!!.mkdirs()
+        aside.writeText("a file where the folder goes")
+
+        try {
+            gate().prepare()
+            fail("expected the open to fail")
+        } catch (e: java.io.IOException) {
+            assertEquals("garbage", encrypted.readText())
+        }
+    }
+
+    @Test
     fun `a keystore that does not answer moves nothing and fails the open`() {
         installEncrypted()
         wrapper.failure = ProviderException("busy")

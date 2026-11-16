@@ -24,6 +24,7 @@ package eu.akoos.photos.data.db.encryption
 
 import eu.akoos.photos.data.localcrypto.LocalKeyOwner
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
 import java.nio.file.Files
@@ -242,11 +243,26 @@ class DatabaseOpenGate(
         }
     }
 
+    /**
+     * Moves the encrypted database files into a set-aside folder of their own. Never deletes one: when the folder
+     * cannot be made or a file cannot be moved, the files already moved go back and the open fails like an I/O
+     * error, leaving every file where it was to be tried again at the next start.
+     */
     private fun setAside(reason: String, moveKey: Boolean) {
         val target = File(setAsideDir, "${clock()}")
-        target.mkdirs()
+        if (!target.mkdirs() && !target.isDirectory) throw IOException("set-aside folder not made")
+        val moved = mutableListOf<Pair<File, File>>()
         for (file in databaseFiles(encrypted)) {
-            if (file.exists() && !file.renameTo(File(target, file.name))) file.delete()
+            if (!file.exists()) continue
+            val dest = File(target, file.name)
+            if (file.renameTo(dest)) {
+                moved += file to dest
+                continue
+            }
+            // A file that went back stays in the set-aside folder otherwise, which is kept too.
+            for ((from, to) in moved.asReversed()) to.renameTo(from)
+            log("db: encrypted file not set aside ($reason), kept in place")
+            throw IOException("database file not set aside")
         }
         if (moveKey) keys.moveTo(target)
         corruptMarker.delete()
