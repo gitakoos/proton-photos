@@ -390,6 +390,7 @@ class DatabaseOpenGateTest {
         installEncrypted()
         wrapper.failure = ProviderException("busy")
         repeat(2) {
+            start++
             assertTrue(runCatching { gate().prepare() }.exceptionOrNull() is DatabaseKeyUnavailableException)
             assertTrue(encrypted.exists())
             now += 40 * 60 * 1000L
@@ -404,6 +405,21 @@ class DatabaseOpenGateTest {
         wrapper.failure = null
         assertTrue(launch() is OpenTarget.Encrypted)
         assertFalse(plain.exists())
+    }
+
+    @Test
+    fun `opens of the database in one process count as one silent start`() {
+        installEncrypted()
+        wrapper.failure = ProviderException("busy")
+        start++
+        repeat(5) {
+            assertTrue(runCatching { gate().prepare() }.exceptionOrNull() is DatabaseKeyUnavailableException)
+            now += 40 * 60 * 1000L
+        }
+
+        assertTrue("one start, never three", runCatching { gate().prepare() }.exceptionOrNull() is DatabaseKeyUnavailableException)
+        assertTrue(encrypted.exists())
+        assertFalse(aside.exists() && aside.listFiles()!!.isNotEmpty())
     }
 
     @Test

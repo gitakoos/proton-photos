@@ -399,15 +399,24 @@ class DatabaseOpenGate(
         writePair(attemptsFile, versionCode.toLong(), next)
     }
 
-    /** Three launches over at least an hour of real time ([RealTime]); a wall-clock change does not count. */
+    /**
+     * Three separate process starts over at least an hour of real time ([RealTime]); a wall-clock change does not
+     * count, and further opens in the same process count once.
+     */
     private fun unavailableLongEnough(): Boolean {
         val now = elapsed()
-        val parts = runCatching { unavailableFile.readText().trim().split(' ').map { it.toLong() } }.getOrNull()
-            ?.takeIf { it.size == 3 }
-        val count = (parts?.get(2) ?: 0L) + 1
-        val span = if (parts == null) 0L else RealTime.advance(parts[0], parts[1], now)
+        val start = KeystoreStrikes.currentStart()
+        val parts = runCatching { unavailableFile.readText().trim().split(' ') }.getOrNull()
+            ?.takeIf { it.size == 4 }
+        val span0 = parts?.get(0)?.toLongOrNull()
+        val last = parts?.get(1)?.toLongOrNull()
+        val count0 = parts?.get(2)?.toLongOrNull()
+        val known = span0 != null && last != null && count0 != null
+        if (known && parts!![3] == start) return count0!! >= UNAVAILABLE_LAUNCHES && span0!! >= UNAVAILABLE_SPAN_MS
+        val count = (if (known) count0!! else 0L) + 1
+        val span = if (known) RealTime.advance(span0!!, last!!, now) else 0L
         stateDir.mkdirs()
-        runCatching { writeWhole(unavailableFile, "$span $now $count".toByteArray()) }
+        runCatching { writeWhole(unavailableFile, "$span $now $count $start".toByteArray()) }
         return count >= UNAVAILABLE_LAUNCHES && span >= UNAVAILABLE_SPAN_MS
     }
 
