@@ -147,9 +147,16 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // First: clears scratch plaintext of an earlier process, then encrypts what an earlier version left plain.
         localEncryption.start()
         // A metadata write this app makes to a backed-up device photo records the bytes it left on the
-        // photo's backup row, so free-up does not take that write for an edit to back up again.
+        // photo's backup row, so free-up does not take that write for an edit to back up again. One queue
+        // records them in the order they landed, so a second write chains on the first.
+        val ownDeviceWrites = kotlinx.coroutines.channels.Channel<Triple<String, String, String>>(
+            kotlinx.coroutines.channels.Channel.UNLIMITED,
+        )
+        appScope.launch {
+            for ((uri, before, after) in ownDeviceWrites) ownDeviceWriteRecorderLazy.get().record(uri, before, after)
+        }
         eu.akoos.photos.data.upload.OwnDeviceWrites.install { uri, before, after ->
-            appScope.launch { ownDeviceWriteRecorderLazy.get().record(uri, before, after) }
+            ownDeviceWrites.trySend(Triple(uri, before, after))
         }
         delegatingFactory.addFactory(workerFactory)
         sweepMlSyncScratch(processStartMs)
