@@ -135,7 +135,7 @@ internal suspend fun concatMultiSourceToTemp(
         val start = clip.startMs.coerceAtLeast(0L)
         val end = clip.endMs.coerceAtLeast(start + 1L)
         val mediaItem = MediaItem.Builder()
-            .setUri(Uri.parse(uri))
+            .setUri(concatSourceUri(appContext, uri))
             .setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(start)
@@ -160,7 +160,7 @@ internal suspend fun concatMultiSourceToTemp(
     // Optional background-music item (audio only), clipped to the chosen slice and scaled to musicGain.
     val musicItem: EditedMediaItem? = if (overlayUri != null && musicGain > 0.001f && overlayEndMs > overlayStartMs) {
         val mediaItem = MediaItem.Builder()
-            .setUri(overlayUri)
+            .setUri(eu.akoos.photos.data.localcrypto.LocalFiles.readableUri(appContext, overlayUri))
             .setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(overlayStartMs.coerceAtLeast(0L))
@@ -318,3 +318,10 @@ private fun pollProgress(
         }
     }, PROGRESS_POLL_MS)
 }
+
+/**
+ * The uri the Transformer reads a joined clip from. A cloud original or a hidden video is kept encrypted, so it is
+ * read through the decrypting provider; any other uri is used as it is.
+ */
+internal fun concatSourceUri(context: Context, uri: String): Uri =
+    eu.akoos.photos.data.localcrypto.LocalFiles.readableUri(context, Uri.parse(uri))
