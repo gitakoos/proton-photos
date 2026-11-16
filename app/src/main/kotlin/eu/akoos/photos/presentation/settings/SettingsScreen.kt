@@ -2500,6 +2500,10 @@ fun PrivacySecuritySettingsScreen(
         Spacer(Modifier.height(20.dp))
 
         // ── Security ─────────────────────────────────────────────────────────
+        var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
+        val localEncryptionViewModel: LocalEncryptionViewModel = hiltViewModel()
+        val localEncryptionState by localEncryptionViewModel.state.collectAsStateWithLifecycle()
+        var localEncryptionSheet by remember { mutableStateOf(false) }
         SectionLabel(stringResource(R.string.settings_security))
         Spacer(Modifier.height(8.dp))
         SettingsCard {
@@ -2523,11 +2527,25 @@ fun PrivacySecuritySettingsScreen(
                     },
                 )
             }
+            if (localEncryptionState.available) {
+                RowDivider()
+                LocalEncryptionRow(localEncryptionState, onClick = { localEncryptionSheet = true })
+            }
+        }
+        if (localEncryptionSheet) {
+            LocalEncryptionSheet(
+                state = localEncryptionState,
+                onSetPassword = {
+                    localEncryptionSheet = false
+                    vaultPasswordStep = VaultPasswordStep.Set
+                },
+                onUnlock = localEncryptionViewModel::unlock,
+                onDismiss = { localEncryptionSheet = false },
+            )
         }
 
         Spacer(Modifier.height(20.dp))
         // Hidden vault, a lock/biometric-gated photo collection, so it belongs with the app lock.
-        var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
         val vaultPasswordViewModel: VaultPasswordViewModel = hiltViewModel()
         val vaultPasswordSet by vaultPasswordViewModel.isSet.collectAsStateWithLifecycle()
         SettingsCard {

@@ -804,6 +804,8 @@ fun NavGraph(
             // session and renders nothing of its own until there is actually a queue
             // to surface to the user.
             PendingDeleteHandler()
+            // Once, after the first start that found every hidden photo encrypted: what local encryption covers.
+            eu.akoos.photos.presentation.settings.LocalEncryptionNotice()
             // One-time post-update highlights. The startup router only lands here once the user is
             // fully Ready (logged in AND onboarded), so reaching this composable already implies
             // that gate. We read the seen-version pref once and, if this build's versionCode is
