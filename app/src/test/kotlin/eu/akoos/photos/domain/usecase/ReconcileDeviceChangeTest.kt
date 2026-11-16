@@ -74,6 +74,8 @@ class ReconcileDeviceChangeTest {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     private val userId = UserId("test-user")
     private val written = slot<List<SyncState>>()
+    private lateinit var prefs: Preferences
+    private lateinit var store: DataStore<Preferences>
 
     @Before
     fun setUp() {
@@ -88,8 +90,8 @@ class ReconcileDeviceChangeTest {
         syncStateRepo.answerReadsFromObserveAll()
         listingDao = mockk()
 
-        val prefs = mockk<Preferences>(relaxed = true)
-        val store = mockk<DataStore<Preferences>>()
+        prefs = mockk<Preferences>(relaxed = true)
+        store = mockk<DataStore<Preferences>>()
         mockkStatic("eu.akoos.photos.data.preferences.SettingsDataStoreKt")
         val context = mockk<Context>()
         every { context.settingsDataStore } returns store
@@ -320,6 +322,26 @@ class ReconcileDeviceChangeTest {
         assertNull(out.getValue("uri://a").backedUpAtMs)
         assertEquals(1024L, out.getValue("uri://b").sizeBytes)
         assertEquals(STAMP, out.getValue("uri://b").backedUpAtMs)
+    }
+
+    @Test
+    fun `a stamped download row is never hashed and keeps the bytes it recorded once the listing is complete`() = runTest {
+        // A complete listing is when a row missing its hash would have it recomputed and adopted.
+        every { prefs.asMap() } returns mapOf<Preferences.Key<*>, Any>(
+            kotlin.Pair(androidx.datastore.preferences.core.booleanPreferencesKey("photo_listing_ever_complete_${userId.id}_x"), true),
+        )
+        coEvery { store.updateData(any()) } returns prefs
+
+        val out = pass(
+            listOf(device("uri://dl", 1024L)),
+            listOf(row("uri://dl", "L1", "", 1024L).copy(originalHash = "downloaded")),
+            listOf(cloud("L1", "hmac-drive")),
+        )
+
+        coVerify(exactly = 0) { localRepo.sha1(any()) }
+        val dl = out.getValue("uri://dl")
+        assertEquals("", dl.localHash)
+        assertEquals(STAMP, dl.backedUpAtMs)
     }
 
     private companion object {

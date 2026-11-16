@@ -58,12 +58,26 @@ class OwnDeviceWriteRecorderTest {
     private val afterBackupSec = backedUpAtMs / 1000L + 3600L
 
     @Test
-    fun `a rewrite of the bytes the row recorded is recorded`() = runTest {
-        coEvery { syncRepo.getByUri(uri) } returns row(localHash = "orig")
+    fun `a rewrite of the device bytes the row recorded is recorded`() = runTest {
+        coEvery { syncRepo.getByUri(uri) } returns row(localHash = "uploaded", originalHash = "orig")
 
         recorder.record(OwnDeviceWrite(uri, "ORIG", DeviceFileStamp(1000L, afterBackupSec), "written"))
 
         coVerify { syncRepo.recordOwnDeviceWrite(uri, "ORIG", "written") }
+    }
+
+    @Test
+    fun `a row hash with no device bytes recorded counts only for a file written as the row was stamped`() = runTest {
+        coEvery { syncRepo.getByUri(uri) } returns row(localHash = "device")
+        val longBefore = backedUpAtMs / 1000L - 30L * 24 * 3600
+
+        recorder.record(OwnDeviceWrite(uri, "device", DeviceFileStamp(1000L, longBefore), "written"))
+        coVerify(exactly = 0) { syncRepo.recordOwnDeviceWriteOverRow(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { syncRepo.recordOwnDeviceWrite(any(), any(), any()) }
+
+        val asStamped = backedUpAtMs / 1000L - 60L
+        recorder.record(OwnDeviceWrite(uri, "device", DeviceFileStamp(1000L, asStamped), "written"))
+        coVerify { syncRepo.recordOwnDeviceWriteOverRow(uri, "written", "device", backedUpAtMs) }
     }
 
     @Test

@@ -513,14 +513,17 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // it, recompute from the file once (persisted below) when the cloud library is fully
             // listed so there's a complete set to match against. This also pairs a renamed cloud copy.
             val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
-            var recomputedHash: String? = null
-            val localHashHex: String? = storedHash
-                ?: if (initialListingComplete && cloudByHash.isNotEmpty())
-                    localRepo.sha1(local.uri).also { recomputedHash = it } else null
             // A row its cloud id already pairs, and already stamped backed up, comes out the same whatever the
             // hash match says (the id wins the match and the stamp is kept), so its hash is not looked up:
-            // turning a hash into the Drive form is a keyed HMAC per photo, every pass.
+            // turning a hash into the Drive form is a keyed HMAC per photo, every pass. Nor is a missing hash
+            // recomputed for it: adopting the file's hash as the row's would vouch for whatever the file holds
+            // (a download row records its bytes apart, and an older version linked some by name and size
+            // alone), and a new hash would drop the bytes the row recorded.
             val hashDecides = byId == null || existingSync?.backedUpAtMs == null
+            var recomputedHash: String? = null
+            val localHashHex: String? = storedHash
+                ?: if (hashDecides && initialListingComplete && cloudByHash.isNotEmpty())
+                    localRepo.sha1(local.uri).also { recomputedHash = it } else null
             val byContentHash = localHashHex?.takeIf { hashDecides }
                 ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
 

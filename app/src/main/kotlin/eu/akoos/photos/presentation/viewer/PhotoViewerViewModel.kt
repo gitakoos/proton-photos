@@ -1038,7 +1038,7 @@ class PhotoViewerViewModel @Inject constructor(
                 }
                 val syncedRelinks = pending.itemsBeingDeleted.mapNotNull { di ->
                     (di as? GalleryItem.Synced)?.let {
-                        UndoAction.Delete.Relink(it.local.uri, it.cloud.linkId, it.cloud.sizeBytes)
+                        UndoAction.Delete.Relink(it.local.uri, it.cloud.linkId, it.cloud.sizeBytes, it.cloud.contentHash)
                     }
                 }
                 if (pending.cloudLinkIds.isNotEmpty() || localTrashed.isNotEmpty()) {

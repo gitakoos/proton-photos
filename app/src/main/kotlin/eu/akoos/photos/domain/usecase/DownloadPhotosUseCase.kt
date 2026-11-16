@@ -478,6 +478,22 @@ class DownloadPhotosUseCase @Inject constructor(
         return null
     }
 
+    /** [verifiedOnDevice] for the downloaded [file] before anything is stamped into it; null when no
+     *  gallery file of its name and size is there, without reading it. */
+    private suspend fun verifiedUnstamped(file: File, displayName: String, mimeType: String, driveHash: String?): SavedCopy? {
+        if (sameNameAndSizeInMediaStore(displayName, mimeType, file.length()).isEmpty()) return null
+        val sha1 = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file) }.getOrNull()
+        } ?: return null
+        return verifiedOnDevice(probe(displayName, mimeType, file.length()), driveHash, sha1)
+    }
+
+    /** A stand-in photo of [displayName], [mimeType] and [sizeBytes], for the save-time checks. */
+    private fun probe(displayName: String, mimeType: String, sizeBytes: Long) = CloudPhoto(
+        linkId = "", shareId = "", volumeId = "", captureTime = 0L, displayName = displayName,
+        mimeType = mimeType, sizeBytes = sizeBytes, thumbnailUrl = null, revisionId = "",
+    )
+
     private suspend fun sha1Of(uri: Uri): String? = withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri.toString()) }.getOrNull()
     }
@@ -554,6 +570,12 @@ class DownloadPhotosUseCase @Inject constructor(
         // limited to formats ExifInterface can write; any failure leaves the column write as the
         // fallback. Changing the bytes is dedup-safe because the download pairs by cloud id
         // (linkSyncState -> reconcile byId), not by content hash.
+        // A gallery file holding these bytes as they came from Drive, before the stamps below change them,
+        // is the photo itself (the camera original, say): checked here, since no Drive hash is needed for it.
+        verifiedUnstamped(file, displayName, mimeType, driveHash)?.let { existing ->
+            Log.d(TAG, "Skipped duplicate: $displayName already in MediaStore")
+            return existing
+        }
         if (shouldStampExifDate(mimeType, captureTimeSeconds)) {
             ExifHelper.stampDateTakenIfMissing(file, captureTimeSeconds * 1000L)
         }
@@ -591,11 +613,7 @@ class DownloadPhotosUseCase @Inject constructor(
             val savingSha1 = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file) }.getOrNull()
             }
-            val probe = CloudPhoto(
-                linkId = "", shareId = "", volumeId = "", captureTime = 0L, displayName = displayName,
-                mimeType = mimeType, sizeBytes = file.length(), thumbnailUrl = null, revisionId = "",
-            )
-            verifiedOnDevice(probe, driveHash, savingSha1)?.let { existing ->
+            verifiedOnDevice(probe(displayName, mimeType, file.length()), driveHash, savingSha1)?.let { existing ->
                 Log.d(TAG, "Skipped duplicate: $displayName already in MediaStore")
                 return existing
             }

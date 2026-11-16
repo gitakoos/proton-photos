@@ -82,6 +82,8 @@ class FreeUpSpaceSweepTest {
         lastSyncSuccessMs = 1L,
         backedUpAtMs = 1L,
         sizeBytes = 1024L,
+        // The device bytes the backup read, as every row backed up since they are recorded holds them.
+        originalHash = "hash-$i",
     )
 
     private fun linkAt(linkId: String, state: Int) =
@@ -365,7 +367,8 @@ class FreeUpSpaceSweepTest {
     // ── Copies that cannot be checked ─────────────────────────────────────────────────────────────────
 
     /** A download from before its saved bytes were recorded: the stamp grew it past the Drive size. */
-    private fun oldDownload(i: Int) = eligible(i).copy(localHash = "", sizeBytes = 1000L, backedUpAtMs = 5_000_000L)
+    private fun oldDownload(i: Int) =
+        eligible(i).copy(localHash = "", sizeBytes = 1000L, backedUpAtMs = 5_000_000L, originalHash = null)
 
     @Test
     fun `a copy that cannot be checked is kept, reported, and left out of the next list`() = runTest {
@@ -430,7 +433,7 @@ class FreeUpSpaceSweepTest {
 
     @Test
     fun `a same-size edit of a row with no original hash is queued to be backed up again`() = runTest {
-        val row = eligible(1).copy(backedUpAtMs = 5_000_000L)
+        val row = eligible(1).copy(backedUpAtMs = 5_000_000L, originalHash = null)
         coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
         coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to linkAt("cloud-1", state = 1))

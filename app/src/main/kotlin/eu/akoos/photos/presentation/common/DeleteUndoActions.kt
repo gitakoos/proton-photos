@@ -55,7 +55,7 @@ fun buildDeleteUndoAction(
     val trashed = localTrashedUris.toHashSet()
     val syncedRelinks = items.mapNotNull { item ->
         (item as? GalleryItem.Synced)?.takeIf { it.local.uri in trashed }?.let {
-            UndoAction.Delete.Relink(it.local.uri, it.cloud.linkId, it.cloud.sizeBytes)
+            UndoAction.Delete.Relink(it.local.uri, it.cloud.linkId, it.cloud.sizeBytes, it.cloud.contentHash)
         }
     }
     return if (targets.cloudLinkIds.isNotEmpty() || localTrashedUris.isNotEmpty()) {

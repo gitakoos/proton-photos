@@ -446,7 +446,8 @@ class FreeUpSpaceUseCase @Inject constructor(
          *
          * In order:
          * - bytes that could not be read are UNREADABLE;
-         * - bytes Drive holds as they are, or with the hash the row recorded, are UNCHANGED;
+         * - bytes Drive holds as they are are UNCHANGED, and so are bytes with the hash the row recorded,
+         *   on a row from before device bytes were recorded only when written as the row was stamped;
          * - a Drive copy whose content hash is no longer the one paired is UNCHECKED: the device copy may
          *   be the only one of what was backed up;
          * - a row that recorded what the device file held ([SyncState.originalHash]: as the backup read
@@ -475,7 +476,16 @@ class FreeUpSpaceUseCase @Inject constructor(
                 return DeviceCopyCheck.UNCHECKED
             }
             if (row.localHash.isNotEmpty() && deviceSha1.equals(row.localHash, ignoreCase = true)) {
-                return DeviceCopyCheck.UNCHANGED
+                if (!row.originalHash.isNullOrEmpty()) return DeviceCopyCheck.UNCHANGED
+                // Rows from before device bytes were recorded: an older version adopted the file's own
+                // hash for a download row, also for a file it had linked by name and size alone, so the
+                // match counts only for a file written as its row was stamped.
+                val stampedAt = row.backedUpAtMs ?: return DeviceCopyCheck.UNCHECKED
+                return if (deviceModifiedSec > 0L && deviceModifiedSec * 1000L >= stampedAt - LINKED_WRITE_WINDOW_MS) {
+                    DeviceCopyCheck.UNCHANGED
+                } else {
+                    DeviceCopyCheck.UNCHECKED
+                }
             }
             val originalHash = row.originalHash
             if (!originalHash.isNullOrEmpty()) {

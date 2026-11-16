@@ -337,4 +337,28 @@ class FreeUpSpaceDeviceCheckTest {
             deviceCopyVerdict(relinked, 1000L, beforeBackupSec, "stamped", deviceOnDrive = false, driveHash = "d"),
         )
     }
+
+    @Test
+    fun `a row hash adopted from the file before device bytes were recorded counts only for a file written as it was stamped`() {
+        val adopted = row(localHash = "device", originalHash = null)
+        val longBefore = backedUpAtMs / 1000L - 30L * 24 * 3600
+        assertEquals(
+            DeviceCopyCheck.UNCHECKED,
+            deviceCopyVerdict(adopted, 1000L, longBefore, "device", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(adopted, 1000L, beforeBackupSec, "device", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            "with the device bytes recorded the hash decides",
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(row(localHash = "device", originalHash = "orig"), 1000L, longBefore, "device", false, "d"),
+        )
+        assertEquals(
+            "bytes Drive holds need no modified time",
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(adopted, 1000L, longBefore, "device", deviceOnDrive = true, driveHash = "d"),
+        )
+    }
 }

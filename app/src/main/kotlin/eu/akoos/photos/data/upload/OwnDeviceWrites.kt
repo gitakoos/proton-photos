@@ -74,9 +74,9 @@ object OwnDeviceWrites {
  * and put a second copy on Drive. A file that held anything else before the write (an edit made
  * elsewhere, a pixel edit) is left to read as changed.
  *
- * The old bytes were the backed-up ones when the row recorded them (its hash, or bytes recorded before).
- * A row backed up before such a record existed, with the original kept beside a stripped upload, recorded
- * only the uploaded bytes; for it the old file counts as backed up exactly when free-up would have
+ * The old bytes were the backed-up ones when the row recorded them (its device bytes, or its hash beside
+ * them). A row backed up before device bytes were recorded (an original kept beside a stripped upload, a
+ * download) holds no such record; for it the old file counts as backed up exactly when free-up would have
  * deleted it as such ([FreeUpSpaceUseCase.deviceCopyVerdict] on the measures taken before the write), and
  * the record is taken only if the row is still as it was read.
  */
@@ -88,8 +88,8 @@ class OwnDeviceWriteRecorder @Inject constructor(
     suspend fun record(write: OwnDeviceWrite) {
         try {
             val row = syncStateRepo.getByUri(write.uri) ?: return
-            val recorded = write.before.equals(row.localHash, ignoreCase = true) ||
-                write.before.equals(row.originalHash, ignoreCase = true)
+            val recorded = write.before.equals(row.originalHash, ignoreCase = true) ||
+                (write.before.equals(row.localHash, ignoreCase = true) && !row.originalHash.isNullOrEmpty())
             if (recorded) {
                 syncStateRepo.recordOwnDeviceWrite(write.uri, write.before, write.after)
                 return

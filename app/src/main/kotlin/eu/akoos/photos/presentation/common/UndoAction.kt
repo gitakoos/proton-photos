@@ -62,7 +62,13 @@ sealed class UndoAction {
          */
         val syncedRelinks: List<Relink> = emptyList(),
     ) : UndoAction() {
-        data class Relink(val localUri: String, val cloudLinkId: String, val sizeBytes: Long)
+        data class Relink(
+            val localUri: String,
+            val cloudLinkId: String,
+            val sizeBytes: Long,
+            /** Drive's content hash of the cloud copy, when the listing carries one. */
+            val contentHash: String? = null,
+        )
         override val count: Int get() = maxOf(cloudLinkIds.size, localTrashedUris.size)
     }
 

@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -225,26 +226,55 @@ class UndoController @Inject constructor(
         val now = System.currentTimeMillis()
         for (r in relinks) {
             runCatching {
-                syncStateRepo.upsert(
-                    SyncState(
-                        localUri = r.localUri,
-                        cloudFileId = r.cloudLinkId,
-                        localHash = "",
-                        cloudHash = null,
-                        status = SyncStatus.SYNCED,
-                        lastSyncAttemptMs = now,
-                        lastSyncSuccessMs = now,
-                        backedUpAtMs = now,
-                        sizeBytes = r.sizeBytes,
-                    ),
-                    userId,
-                )
+                val prior = syncStateRepo.getByUri(r.localUri)
+                val sha1 = if (relinkKeeps(prior, r)) {
+                    null
+                } else {
+                    withContext(Dispatchers.IO) {
+                        runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, r.localUri) }.getOrNull()
+                    }
+                }
+                val onDrive = sha1 != null && !r.contentHash.isNullOrEmpty() && cloudRepo.cloudContentHash(sha1) == r.contentHash
+                syncStateRepo.upsert(relinkedRow(prior, r, sha1, onDrive, now), userId)
             }.onFailure { Log.w(TAG, "re-link SyncState skipped for one uri: ${it.message}") }
         }
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "UndoController"
+
+        /** Whether the row the delete left behind, [prior], still describes [relink]'s restored file. */
+        fun relinkKeeps(prior: SyncState?, relink: UndoAction.Delete.Relink): Boolean =
+            prior != null && prior.cloudFileId == relink.cloudLinkId && prior.backedUpAtMs != null
+
+        /**
+         * The row a restored synced photo goes back to. The delete only changed its row's status, so a row
+         * still paired to the same cloud copy keeps its hashes and backup stamp. Without it, the photo is
+         * paired again so the backup skips it, but stamped backed up only when its bytes are Drive's
+         * ([onDrive], from its SHA-1 [sha1]): free-up must never take a file nothing verified for backed up.
+         */
+        fun relinkedRow(
+            prior: SyncState?,
+            relink: UndoAction.Delete.Relink,
+            sha1: String?,
+            onDrive: Boolean,
+            now: Long,
+        ): SyncState =
+            if (prior != null && relinkKeeps(prior, relink)) {
+                prior.copy(status = SyncStatus.SYNCED, lastSyncAttemptMs = now, lastSyncSuccessMs = now)
+            } else {
+                SyncState(
+                    localUri = relink.localUri,
+                    cloudFileId = relink.cloudLinkId,
+                    localHash = if (onDrive) sha1.orEmpty() else "",
+                    cloudHash = relink.contentHash,
+                    status = SyncStatus.SYNCED,
+                    lastSyncAttemptMs = now,
+                    lastSyncSuccessMs = now,
+                    backedUpAtMs = if (onDrive) now else null,
+                    sizeBytes = relink.sizeBytes,
+                )
+            }
     }
 }
 

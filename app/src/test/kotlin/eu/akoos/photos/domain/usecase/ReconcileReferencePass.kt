@@ -168,8 +168,10 @@ internal class ReconcileReferencePass(
 
             val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
             var recomputedHash: String? = null
+            // A row its cloud id pairs and stamps never adopts the file's own hash.
+            val hashDecides = byId == null || existingSync?.backedUpAtMs == null
             val localHashHex: String? = storedHash
-                ?: if (initialListingComplete && cloudByHash.isNotEmpty())
+                ?: if (hashDecides && initialListingComplete && cloudByHash.isNotEmpty())
                     localRepo.sha1(local.uri).also { recomputedHash = it } else null
             val byContentHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
 
