@@ -49,6 +49,7 @@ object VaultFiles {
     const val VAULT_DIR = "hidden"
     private const val STAGING_DIR = ".hidden_staging"
     private const val WORK_DIR = "vault_work"
+    private const val SEAL_SUFFIX = ".seal-tmp"
 
     /** Held for every change to a vault file's bytes or name, so the migration never races an edit or a reveal. */
     val lock = ReentrantLock()
@@ -158,51 +159,51 @@ object VaultFiles {
     }
 
     /**
-     * Encrypts [plain] into a new vault file named [name] (or replacing it): written to the staging folder, synced,
-     * decrypted again and compared, then moved into the vault in one step. Without a keyring (no Keystore on this
-     * platform) the plaintext is moved in as it is. With [requireExisting] the file must still be in the vault when
-     * the new one replaces it (an edit of a file renamed meanwhile writes nothing). Throws on any failure; the vault
-     * is unchanged then.
+     * Encrypts [plain] into a new vault file named [name] (or replacing it): written to a temp of its own in the
+     * staging folder, synced, decrypted again and compared, then moved into the vault in one step. The whole of it
+     * runs under the vault lock, so two writes of the same vault file never share or interleave. Without a keyring
+     * (no Keystore on this platform) the plaintext is moved in as it is. With [requireExisting] the file must still
+     * be in the vault when the new one replaces it (an edit of a file renamed meanwhile writes nothing). Throws on
+     * any failure; the vault is unchanged then.
      */
-    fun sealInto(context: Context, plain: File, name: String, meta: LocalFileMeta, requireExisting: Boolean = false): File {
-        val keyring = LocalCrypto.keyringOrNull(context)
-        val staging = stagingDir(context).apply { mkdirs() }
-        val temp = File(staging, name)
-        try {
-            val written = FileOutputStream(temp).use { out ->
-                val digest = if (keyring == null) {
-                    FileInputStream(plain).use { input -> PlainDigest.of(TeeInput(input, out)) }
-                } else {
-                    val current = keyring.current()
-                    FileInputStream(plain).use { input ->
-                        LocalCryptoFormat.encrypt(
-                            input,
-                            out,
-                            LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.VAULT, meta),
-                        )
+    fun sealInto(context: Context, plain: File, name: String, meta: LocalFileMeta, requireExisting: Boolean = false): File =
+        lock.withLock {
+            val keyring = LocalCrypto.keyringOrNull(context)
+            val staging = stagingDir(context).apply { mkdirs() }
+            val temp = File(staging, "${UUID.randomUUID()}$SEAL_SUFFIX")
+            try {
+                val written = FileOutputStream(temp).use { out ->
+                    val digest = if (keyring == null) {
+                        FileInputStream(plain).use { input -> PlainDigest.of(TeeInput(input, out)) }
+                    } else {
+                        val current = keyring.current()
+                        FileInputStream(plain).use { input ->
+                            LocalCryptoFormat.encrypt(
+                                input,
+                                out,
+                                LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.VAULT, meta),
+                            )
+                        }
                     }
+                    out.flush()
+                    out.fd.sync()
+                    digest
                 }
-                out.flush()
-                out.fd.sync()
-                digest
-            }
-            val source = FileInputStream(plain).use { PlainDigest.of(it) }
-            check(written.sameAs(source)) { "plaintext changed while sealing" }
-            val readBack = if (keyring == null) FileInputStream(temp).use { PlainDigest.of(it) }
-            else LocalCryptoFormat.decryptFile(temp, keyring, null)
-            check(readBack.sameAs(source)) { "sealed copy did not verify" }
-            val dest = File(vaultDir(context).apply { mkdirs() }, name)
-            lock.withLock {
+                val source = FileInputStream(plain).use { PlainDigest.of(it) }
+                check(written.sameAs(source)) { "plaintext changed while sealing" }
+                val readBack = if (keyring == null) FileInputStream(temp).use { PlainDigest.of(it) }
+                else LocalCryptoFormat.decryptFile(temp, keyring, null)
+                check(readBack.sameAs(source)) { "sealed copy did not verify" }
+                val dest = File(vaultDir(context).apply { mkdirs() }, name)
                 if (requireExisting && !dest.exists()) throw IOException("vault file went away")
                 Files.move(temp.toPath(), dest.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
                 syncDirectory(dest.parentFile)
+                dest
+            } catch (e: Throwable) {
+                temp.delete()
+                throw e
             }
-            return dest
-        } catch (e: Throwable) {
-            temp.delete()
-            throw e
         }
-    }
 
     /**
      * Runs an in-place editor [edit] (EXIF, a new date) on [uri]. A uri outside the vault is handed to it as it is.
