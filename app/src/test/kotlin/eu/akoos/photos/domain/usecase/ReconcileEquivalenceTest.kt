@@ -53,7 +53,9 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.repository.SyncStatePage
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -75,6 +77,11 @@ import kotlin.time.Duration.Companion.seconds
  *
  * Timestamps a pass stamps differ between two runs by nature; each is compared as "now" when it is
  * no older than the fixture, while every timestamp the fixture carries is compared as is.
+ *
+ * The pass reads the table a page or a uri lookup at a time where the reference reads it whole. Every
+ * read is logged as the whole-table read it stands for, and a run of reads with no write between them
+ * counts as one, so the two logs line up read for read. Each fixture runs the pass at several page
+ * sizes, small ones included, so every page boundary falls somewhere in the fixture.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -130,6 +137,8 @@ class ReconcileEquivalenceTest {
         val sha1Reads: List<String>,
         val total: Int,
         val settled: Boolean?,
+        val reads: List<RecordingSyncStateRepository.Read>,
+        val tableRows: Int,
     )
 
     private val variants = listOf(
@@ -177,6 +186,51 @@ class ReconcileEquivalenceTest {
     }
 
     @Test
+    fun `libraries past one page and past the host-variable limit decide and write the same`() = runTest(timeout = 600.seconds) {
+        // Device files, SYNCED rows and LOCAL_ONLY rows each run past a page of 500 (and past 999 in the
+        // large one), some an exact multiple of the page, so lookups and page walks cross every boundary.
+        for ((seed, files) in listOf(21 to 700, 22 to 1000, 23 to 1500, 24 to 2600)) {
+            val fixture = randomFixture(seed, files)
+            val reference = assertSamePass(fixture, pageSizes = listOf(SQL_CHUNK_SIZE))
+            assertTrue("${fixture.name}: the fixture must hold more than a page of rows", fixture.rows.size > SQL_CHUNK_SIZE)
+            if (files >= 1500) {
+                assertTrue("${fixture.name}: the fixture must pass the host-variable limit", fixture.rows.size > 999)
+            }
+            if (files >= 2600) {
+                for (status in listOf(SyncStatus.SYNCED, SyncStatus.LOCAL_ONLY)) {
+                    val count = fixture.rows.count { it.userId == userId.id && it.status == status }
+                    assertTrue("${fixture.name}: $count $status rows, the walk must cross a page", count > SQL_CHUNK_SIZE)
+                }
+            }
+            // The reference holds the whole table in one read; the pass holds a page at most.
+            assertTrue(
+                "${fixture.name}: the reference read must hold the whole account",
+                reference.reads.maxOf { it.rows } >= fixture.rows.count { it.userId == userId.id },
+            )
+        }
+    }
+
+    @Test
+    fun `a row another account holds on a device file counts as no row`() = runTest(timeout = 60.seconds) {
+        val now = System.currentTimeMillis()
+        val device = listOf(
+            deviceFile("content://f/1", "IMG_F1.jpg"),
+            deviceFile("content://f/2", "IMG_F2.jpg"),
+            deviceFile("content://f/3", "IMG_F3.jpg"),
+        )
+        val listing = listOf(listed("LF2", "IMG_F2.jpg"))
+        val rows = listOf(
+            row("content://f/1", SyncStatus.LOCAL_ONLY, queued = true, source = QueueSource.MANUAL, user = otherUser),
+            row("content://f/2", SyncStatus.SYNCED, cloudId = "LF2", user = otherUser),
+            row("content://f/3", SyncStatus.LOCAL_ONLY, user = userId.id),
+        )
+        val reference = assertSamePass(Fixture("foreign rows", now, device, listing, rows, emptyMap(), variants.first()))
+        // The foreign rows take the plain upsert, never the guarded update an own row would get.
+        assertTrue(reference.calls.none { it.startsWith("guardedUpdate ${userId.id} content://f/1|") })
+        assertTrue(reference.calls.any { it.startsWith("guardedUpdate ${userId.id} content://f/3|") })
+    }
+
+    @Test
     fun `an incomplete scan demotes nothing and drops no queued row under any setting`() = runTest(timeout = 120.seconds) {
         // The rules fixture's vanished files (m/99 SYNCED, m/98 and m/97 queued) are demoted and dropped
         // on a complete scan; a scan that missed part of the device must leave every one of them.
@@ -205,19 +259,34 @@ class ReconcileEquivalenceTest {
         assertTrue(reference.table.any { it.startsWith("content://m/91|") && "|LOCAL_ONLY|" in it })
     }
 
-    /** Runs both passes on [fixture] and fails on the first difference. Returns the reference run. */
-    private suspend fun assertSamePass(fixture: Fixture): Outcome {
-        val reference = runPass(fixture, production = false)
-        val production = runPass(fixture, production = true)
-        assertEquals("${fixture.name}: repository calls", reference.calls, production.calls)
-        assertEquals("${fixture.name}: sync_state after the pass", reference.table, production.table)
-        assertEquals("${fixture.name}: files hashed", reference.sha1Reads, production.sha1Reads)
-        assertEquals("${fixture.name}: total", reference.total, production.total)
-        assertEquals("${fixture.name}: pairing settled", reference.settled, production.settled)
+    /** Runs the reference on [fixture], then the pass at each of [pageSizes], and fails on the first
+     *  difference. Returns the reference run. */
+    private suspend fun assertSamePass(fixture: Fixture, pageSizes: List<Int> = PAGE_SIZES): Outcome {
+        val reference = runPass(fixture, pageRows = null)
+        for (pageRows in pageSizes) {
+            val production = runPass(fixture, pageRows)
+            val name = "${fixture.name}, pages of $pageRows"
+            assertEquals("$name: repository calls", reference.calls, production.calls)
+            assertEquals("$name: sync_state after the pass", reference.table, production.table)
+            assertEquals("$name: files hashed", reference.sha1Reads, production.sha1Reads)
+            assertEquals("$name: total", reference.total, production.total)
+            assertEquals("$name: pairing settled", reference.settled, production.settled)
+            assertBoundedReads(name, production, pageRows)
+        }
         return reference
     }
 
-    private suspend fun runPass(fixture: Fixture, production: Boolean): Outcome {
+    /** The pass never reads the whole table, and no read returns more than one page of rows. */
+    private fun assertBoundedReads(name: String, run: Outcome, pageRows: Int) {
+        val whole = run.reads.filter { it.method == "observeAll" }
+        assertTrue("$name: the pass read the whole table: $whole", whole.isEmpty())
+        val largest = run.reads.maxOfOrNull { it.rows } ?: 0
+        assertTrue("$name: a read returned $largest rows, more than a page of $pageRows", largest <= pageRows)
+    }
+
+    /** One pass on a fresh database seeded with [fixture]: the reference when [pageRows] is null, else the
+     *  pass reading pages of [pageRows] rows. */
+    private suspend fun runPass(fixture: Fixture, pageRows: Int?): Outcome {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .setQueryExecutor { it.run() }
@@ -237,8 +306,9 @@ class ReconcileEquivalenceTest {
         }
         every { cloud.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
 
-        val progress = if (production) {
-            ReconcileSyncStateUseCase(device, cloud, recording, db.photoListingDao(), context, passScope)(userId).toList()
+        val progress = if (pageRows != null) {
+            ReconcileSyncStateUseCase(device, cloud, recording, db.photoListingDao(), context, passScope)
+                .apply { readPageRows = pageRows }(userId).toList()
         } else {
             ReconcileReferencePass(device, cloud, recording, context)(userId).toList()
         }
@@ -247,7 +317,10 @@ class ReconcileEquivalenceTest {
             .map { describe(it, since) }
             .sorted()
         val settled = context.settingsDataStore.data.first()[SettingsKeys.pairingSettledKey(userId.id)]
-        return Outcome(recording.calls.toList(), table, device.sha1Reads.toList(), progress.last().total, settled)
+        return Outcome(
+            recording.calls.toList(), table, device.sha1Reads.toList(), progress.last().total, settled,
+            recording.reads.toList(), fixture.rows.size,
+        )
     }
 
     private suspend fun seed(settings: Settings) {
@@ -437,7 +510,7 @@ class ReconcileEquivalenceTest {
 
     /** A library drawn from small pools of names, capture seconds, sizes and hashes, so keys collide
      *  everywhere, with every status and queue source on the table. */
-    private fun randomFixture(seed: Int): Fixture {
+    private fun randomFixture(seed: Int, files: Int? = null): Fixture {
         val random = Random(seed)
         val now = System.currentTimeMillis()
         val names = List(6) { "IMG_$it.jpg" }
@@ -448,10 +521,10 @@ class ReconcileEquivalenceTest {
         val sources = listOf(null, QueueSource.AUTO_FOLDER, QueueSource.MANUAL, QueueSource.ALBUM_ADD, QueueSource.EDITOR)
         val successes = listOf(null, now - 60 * 60_000L, now - 60_000L)
 
-        val device = List(random.nextInt(40, 90)) { i ->
+        val device = List(files ?: random.nextInt(40, 90)) { i ->
             deviceFile("content://r/$i", names.random(random), buckets.random(random), seconds.random(random), sizes.random(random))
         }
-        val listing = List(random.nextInt(30, 80)) { j ->
+        val listing = List(files?.let { it * 3 / 4 } ?: random.nextInt(30, 80)) { j ->
             listed(
                 linkId = "L$j",
                 name = names.random(random),
@@ -463,11 +536,22 @@ class ReconcileEquivalenceTest {
             )
         }
         val cloudIds: List<String?> = listing.map { it.linkId } + listOf("Lmissing1", "Lmissing2", null, null, null)
-        val uris = device.map { it.uri } + List(15) { "content://gone/$it" }
-        val rows = uris.filter { random.nextInt(3) != 0 }.map { uri ->
+        val uris = device.map { it.uri } + List(files?.let { it / 4 } ?: 15) { "content://gone/$it" }
+        // A large library is mostly SYNCED and LOCAL_ONLY rows, so each runs past a page.
+        val statuses = if (files == null) {
+            SyncStatus.entries
+        } else {
+            List(4) { SyncStatus.SYNCED } + List(4) { SyncStatus.LOCAL_ONLY } + SyncStatus.entries
+        }
+        val (owned, unowned) = uris.partition { random.nextInt(3) != 0 }
+        // Some device files without a row of this account's carry another account's row instead.
+        val foreign = unowned.filter { random.nextInt(4) == 0 }.map { uri ->
+            row(uri, statuses.random(random), cloudId = cloudIds.random(random), user = otherUser)
+        }
+        val rows = foreign + owned.map { uri ->
             row(
                 uri = uri,
-                status = SyncStatus.entries.random(random),
+                status = statuses.random(random),
                 cloudId = cloudIds.random(random),
                 localHash = listOf("", "", "a", "b", "c").random(random),
                 backedUpAtMs = listOf(null, 12_345L).random(random),
@@ -477,6 +561,11 @@ class ReconcileEquivalenceTest {
             )
         }
         val sha1 = device.filter { random.nextInt(4) != 0 }.associate { it.uri to listOf("a", "b", "c", "z").random(random) }
+        if (files != null) {
+            // A large library always has files in scope and a whole-device scan, so every step pages.
+            val inScope = listOf(variants[0], variants[6], variants[5], variants[2])
+            return Fixture("random seed $seed, $files files", now, device, listing, rows, sha1, inScope[seed % inScope.size])
+        }
         return Fixture(
             "random seed $seed", now, device, listing, rows, sha1, variants.random(random),
             scanComplete = random.nextInt(4) != 0,
@@ -530,7 +619,20 @@ class ReconcileEquivalenceTest {
         private val real: SyncStateRepository,
         private val stamp: (Long?) -> String,
     ) : SyncStateRepository by real {
-        val calls = mutableListOf<String>()
+        /** One read of the table: which method, and how many rows it returned. */
+        data class Read(val method: String, val rows: Int)
+
+        private val log = mutableListOf<String>()
+
+        /** Every call, a run of reads with no write between them logged once, as the whole-table read. */
+        val calls: List<String> get() = log
+        val reads = mutableListOf<Read>()
+
+        private fun logRead(userId: UserId, method: String, rows: Int) {
+            reads += Read(method, rows)
+            val entry = "observeAll ${userId.id}"
+            if (log.lastOrNull() != entry) log += entry
+        }
 
         private fun describe(state: SyncState): String = listOf(
             state.localUri, state.cloudFileId, state.localHash, state.cloudHash, state.status,
@@ -538,113 +640,121 @@ class ReconcileEquivalenceTest {
             state.sizeBytes, state.queued, state.queueSource,
         ).joinToString("|")
 
-        override fun observeAll(userId: UserId): Flow<List<SyncState>> {
-            calls += "observeAll ${userId.id}"
-            return real.observeAll(userId)
+        override fun observeAll(userId: UserId): Flow<List<SyncState>> =
+            real.observeAll(userId).map { rows -> rows.also { logRead(userId, "observeAll", it.size) } }
+
+        override suspend fun pageByStatus(userId: UserId, status: SyncStatus, afterKey: Long, limit: Int): SyncStatePage =
+            real.pageByStatus(userId, status, afterKey, limit).also { logRead(userId, "pageByStatus $status", it.rows.size) }
+
+        override suspend fun getOwnByUris(userId: UserId, localUris: List<String>): List<SyncState> {
+            assertTrue("a lookup of ${localUris.size} uris is past the host-variable limit", localUris.size <= SQL_CHUNK_SIZE)
+            return real.getOwnByUris(userId, localUris).also { logRead(userId, "getOwnByUris", it.size) }
+        }
+
+        override suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> {
+            assertTrue("a lookup of ${cloudFileIds.size} ids is past the host-variable limit", cloudFileIds.size <= SQL_CHUNK_SIZE)
+            return real.syncedCloudIdsAmong(userId, cloudFileIds).also { logRead(userId, "syncedCloudIdsAmong", it.size) }
         }
 
         override suspend fun upsert(state: SyncState, userId: UserId) {
-            calls += "upsert ${userId.id} ${describe(state)}"
+            log += "upsert ${userId.id} ${describe(state)}"
             real.upsert(state, userId)
         }
 
         override suspend fun upsertAll(states: List<SyncState>, userId: UserId) {
-            calls += "upsertAll ${userId.id} ${states.map { describe(it) }}"
+            log += "upsertAll ${userId.id} ${states.map { describe(it) }}"
             real.upsertAll(states, userId)
         }
 
         override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int =
             real.updateDomainColumnsIfNotSyncedWithCloud(state, userId)
-                .also { calls += "guardedUpdate ${userId.id} ${describe(state)} changed=$it" }
+                .also { log += "guardedUpdate ${userId.id} ${describe(state)} changed=$it" }
 
         override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int =
             real.demoteToLocalIfCloudIdMatches(localUri, expectedCloudId)
-                .also { calls += "demote $localUri $expectedCloudId changed=$it" }
+                .also { log += "demote $localUri $expectedCloudId changed=$it" }
 
         override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {
-            calls += "updateStatus $localUri $newStatus"
+            log += "updateStatus $localUri $newStatus"
             real.updateStatusAndDeleteLocal(localUri, newStatus)
         }
 
         override suspend fun getByUri(localUri: String): SyncState? {
-            calls += "getByUri $localUri"
+            log += "getByUri $localUri"
             return real.getByUri(localUri)
         }
 
         override suspend fun claimForUpload(localUri: String): Int =
-            real.claimForUpload(localUri).also { calls += "claimForUpload $localUri changed=$it" }
+            real.claimForUpload(localUri).also { log += "claimForUpload $localUri changed=$it" }
 
         override suspend fun resetStaleUploadingClaims() {
-            calls += "resetStaleUploadingClaims"
+            log += "resetStaleUploadingClaims"
             real.resetStaleUploadingClaims()
         }
 
         override suspend fun clearHiddenForCloudId(cloudFileId: String) {
-            calls += "clearHidden $cloudFileId"
+            log += "clearHidden $cloudFileId"
             real.clearHiddenForCloudId(cloudFileId)
         }
 
         override suspend fun deleteLocalOnlyByUris(localUris: List<String>) {
-            calls += "deleteLocalOnly $localUris"
+            log += "deleteLocalOnly $localUris"
             real.deleteLocalOnlyByUris(localUris)
         }
 
         override suspend fun delete(localUri: String) {
-            calls += "delete $localUri"
+            log += "delete $localUri"
             real.delete(localUri)
         }
 
         override suspend fun markQueued(localUri: String, source: String, at: Long) {
-            calls += "markQueued $localUri $source ${stamp(at)}"
+            log += "markQueued $localUri $source ${stamp(at)}"
             real.markQueued(localUri, source, at)
         }
 
         override suspend fun clearQueued(localUri: String) {
-            calls += "clearQueued $localUri"
+            log += "clearQueued $localUri"
             real.clearQueued(localUri)
         }
 
         override suspend fun markRemovedFromDrive(localUri: String) {
-            calls += "markRemovedFromDrive $localUri"
+            log += "markRemovedFromDrive $localUri"
             real.markRemovedFromDrive(localUri)
         }
 
         override suspend fun clearQueuedForSynced(localUri: String) {
-            calls += "clearQueuedForSynced $localUri"
+            log += "clearQueuedForSynced $localUri"
             real.clearQueuedForSynced(localUri)
         }
 
         override suspend fun clearManualQueue(): Int =
-            real.clearManualQueue().also { calls += "clearManualQueue changed=$it" }
+            real.clearManualQueue().also { log += "clearManualQueue changed=$it" }
 
         // The batched writes are logged one entry per row, as the per-row calls the reference pass makes,
         // so the logs still line up row by row; the tables compared after the pass check what they wrote.
         override suspend fun updateDomainColumnsIfNotSyncedWithCloudAll(states: List<SyncState>, userId: UserId): Set<String> =
             real.updateDomainColumnsIfNotSyncedWithCloudAll(states, userId).also { untouched ->
                 for (state in states) {
-                    calls += "guardedUpdate ${userId.id} ${describe(state)} changed=${if (state.localUri in untouched) 0 else 1}"
+                    log += "guardedUpdate ${userId.id} ${describe(state)} changed=${if (state.localUri in untouched) 0 else 1}"
                 }
             }
 
         override suspend fun markQueuedAll(localUris: List<String>, source: String, at: Long) {
-            for (uri in localUris) calls += "markQueued $uri $source ${stamp(at)}"
+            for (uri in localUris) log += "markQueued $uri $source ${stamp(at)}"
             real.markQueuedAll(localUris, source, at)
         }
 
         override suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
-            for (uri in localUris) calls += "clearQueuedForSynced $uri"
+            for (uri in localUris) log += "clearQueuedForSynced $uri"
             real.clearQueuedForSyncedAll(localUris)
         }
 
-        // A read of the rows the queue clean-up filters to, where the reference reads the whole table and
-        // filters it the same way; logged as that read so the two logs line up.
-        override suspend fun getLocalOnly(userId: UserId): List<SyncState> {
-            calls += "observeAll ${userId.id}"
-            return real.getLocalOnly(userId)
-        }
     }
 
     private companion object {
+        /** The page sizes each fixture runs the pass at: one row, two, an odd few, and the real size. */
+        val PAGE_SIZES = listOf(1, 2, 7, SQL_CHUNK_SIZE)
+
         /** A capture second in the range a camera writes, so every name+date key is a real one. */
         const val BASE_SEC = 1_600_000_000L
     }

@@ -106,9 +106,32 @@ interface SyncStateRepository {
         states.filterTo(ArrayList()) { updateDomainColumnsIfNotSyncedWithCloud(it, userId) == 0 }
             .mapTo(HashSet()) { it.localUri }
 
-    /** [userId]'s LOCAL_ONLY rows, the ones still to back up. */
-    suspend fun getLocalOnly(userId: UserId): List<SyncState> =
-        observeAll(userId).first().filter { it.status == SyncStatus.LOCAL_ONLY }
+    /**
+     * Up to [limit] of [userId]'s rows at [status] that come after [afterKey] in the order [observeAll]
+     * lists them, with the key of the last one. A walk starts at [Long.MIN_VALUE] and passes each page's
+     * [SyncStatePage.lastKey] on, so a pass over every row holds one page at a time, not the whole table.
+     */
+    suspend fun pageByStatus(userId: UserId, status: SyncStatus, afterKey: Long, limit: Int): SyncStatePage {
+        val rows = observeAll(userId).first().filter { it.status == status }
+        val from = afterKey.coerceIn(0L, rows.size.toLong())
+        val page = rows.drop(from.toInt()).take(limit)
+        return SyncStatePage(page, from + page.size)
+    }
+
+    /** [userId]'s own rows for [localUris]: a uri with no row, or with another account's row, is absent.
+     *  The caller keeps the list within the host-variable limit. */
+    suspend fun getOwnByUris(userId: UserId, localUris: List<String>): List<SyncState> {
+        val wanted = localUris.toHashSet()
+        return observeAll(userId).first().filter { it.localUri in wanted }
+    }
+
+    /** Which of [cloudFileIds] a SYNCED row of [userId]'s is paired to. The caller keeps the list within
+     *  the host-variable limit. */
+    suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
+        observeAll(userId).first().asSequence()
+            .filter { it.status == SyncStatus.SYNCED }
+            .mapNotNull { it.cloudFileId }
+            .filterTo(HashSet()) { it in cloudFileIds }
 
     /** [userId]'s rows that are queued or whose uri is in [extraUris], in the order [observeAll] lists them:
      *  the only rows an upload pass selects from, without reading every row of a large library. */
@@ -162,3 +185,6 @@ interface SyncStateRepository {
     /** Puts the `QueueSource.CANCELLED` mark back on [localUri] after a write that cleared the queue columns. */
     suspend fun keepCancelled(localUri: String) {}
 }
+
+/** One page of a [SyncStateRepository.pageByStatus] walk: its rows, and the key the next page starts after. */
+class SyncStatePage(val rows: List<SyncState>, val lastKey: Long)

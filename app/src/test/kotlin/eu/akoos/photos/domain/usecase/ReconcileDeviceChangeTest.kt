@@ -85,6 +85,7 @@ class ReconcileDeviceChangeTest {
         every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
         syncStateRepo = mockk(relaxed = true)
         coEvery { syncStateRepo.upsertAll(capture(written), userId) } returns Unit
+        syncStateRepo.answerReadsFromObserveAll()
         listingDao = mockk()
 
         val prefs = mockk<Preferences>(relaxed = true)

@@ -102,9 +102,7 @@ class ReconcileSyncStateUseCaseTest {
             firstArg<List<SyncState>>().filter { syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(it, secondArg()) == 0 }
                 .mapTo(HashSet()) { it.localUri }
         }
-        coEvery { syncStateRepo.getLocalOnly(any()) } coAnswers {
-            syncStateRepo.observeAll(firstArg()).first().filter { it.status == SyncStatus.LOCAL_ONLY }
-        }
+        syncStateRepo.answerReadsFromObserveAll()
         // Strict: the pairing rows are the only listing read a pass may make.
         listingDao = mockk()
 

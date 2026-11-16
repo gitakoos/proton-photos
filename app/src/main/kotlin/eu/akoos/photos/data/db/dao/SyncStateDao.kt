@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.db.dao
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -232,10 +233,6 @@ interface SyncStateDao {
         }
         return untouched
     }
-
-    /** [userId]'s rows still to back up. Every queue clean-up step of reconcile reads only these. */
-    @Query("SELECT * FROM sync_state WHERE userId = :userId AND status = 'LOCAL_ONLY'")
-    suspend fun getLocalOnly(userId: String): List<SyncStateEntity>
 
     @Query("SELECT * FROM sync_state WHERE localUri = :localUri LIMIT 1")
     suspend fun getByUri(localUri: String): SyncStateEntity?
@@ -461,4 +458,30 @@ interface SyncStateDao {
     /** Wipe a user's sync-state on sign-out so a re-login starts from a clean local↔cloud pairing. */
     @Query("DELETE FROM sync_state WHERE userId = :userId")
     suspend fun deleteAll(userId: String)
+
+    /**
+     * Up to [limit] of [userId]'s rows at [status] whose rowid is above [afterRowId], in rowid order, each
+     * with its rowid. The order [observeAll] lists the rows in, read a page at a time: a walk passes the
+     * last rowid of a page on as the next [afterRowId]. The table is never written with REPLACE, so a
+     * row keeps its rowid for as long as it exists.
+     */
+    @Query(
+        "SELECT rowid AS pageKey, * FROM sync_state " +
+            "WHERE userId = :userId AND status = :status AND rowid > :afterRowId ORDER BY rowid LIMIT :limit"
+    )
+    suspend fun pageByStatus(userId: String, status: SyncStatus, afterRowId: Long, limit: Int): List<SyncStatePageRow>
+
+    /** Which of [cloudFileIds] a SYNCED row of [userId]'s is paired to. The caller keeps the list within the
+     *  host-variable limit. */
+    @Query(
+        "SELECT DISTINCT cloudFileId FROM sync_state " +
+            "WHERE userId = :userId AND status = 'SYNCED' AND cloudFileId IN (:cloudFileIds)"
+    )
+    suspend fun syncedCloudIdsAmong(userId: String, cloudFileIds: List<String>): List<String>
 }
+
+/** A row of a [SyncStateDao.pageByStatus] page and its rowid, the key the next page starts after. */
+data class SyncStatePageRow(
+    @Embedded val row: SyncStateEntity,
+    val pageKey: Long,
+)

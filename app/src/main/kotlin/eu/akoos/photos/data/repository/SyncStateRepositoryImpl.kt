@@ -29,6 +29,7 @@ import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.entity.toEntity
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.SyncStatePage
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.flatMapSqlChunks
 import eu.akoos.photos.util.forEachSqlChunk
@@ -180,8 +181,18 @@ class SyncStateRepositoryImpl @Inject constructor(
         return untouched
     }
 
-    override suspend fun getLocalOnly(userId: UserId): List<SyncState> =
-        dao.getLocalOnly(userId.id).map { it.toDomain() }
+    override suspend fun pageByStatus(userId: UserId, status: SyncStatus, afterKey: Long, limit: Int): SyncStatePage {
+        val page = dao.pageByStatus(userId.id, status, afterKey, limit)
+        return SyncStatePage(page.map { it.row.toDomain() }, page.lastOrNull()?.pageKey ?: afterKey)
+    }
+
+    // A lookup by primary key, the account checked here: a filter on the account in SQL could steer the
+    // query onto the account index, a scan of the account's rows per call.
+    override suspend fun getOwnByUris(userId: UserId, localUris: List<String>): List<SyncState> =
+        dao.getByUris(localUris).mapNotNull { row -> row.takeIf { it.userId == userId.id }?.toDomain() }
+
+    override suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
+        cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedCloudIdsAmong(userId.id, chunk) }.toHashSet()
 
     override suspend fun getQueueSource(localUri: String): String? = dao.getQueueSource(localUri)
 
