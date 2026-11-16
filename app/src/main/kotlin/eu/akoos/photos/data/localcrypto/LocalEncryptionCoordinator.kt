@@ -117,6 +117,9 @@ class LocalEncryptionCoordinator @Inject constructor(
         scope.launch {
             runCatching { CacheFiles.dropAfterKeyLoss(context, keyring, LocalCrypto::log) }
                 .onFailure { logFailure("cache drop", it) }
+            // A little before this process started, so a temp it is writing now is never taken.
+            runCatching { CacheFiles.sweepWriteTemps(context, before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS) }
+                .onFailure { logFailure("temp sweep", it) }
         }
         scope.launch {
             // The settings file is encrypted the first time it is opened, before any vault file is: an older
@@ -344,6 +347,8 @@ class LocalEncryptionCoordinator @Inject constructor(
     companion object {
         /** The private stores whose files are encrypted, by their file name. */
         val STORE_NAMES = listOf("settings", "transfer_history")
+
+        private const val TEMP_SWEEP_MARGIN_MS = 2_000L
     }
 }
 

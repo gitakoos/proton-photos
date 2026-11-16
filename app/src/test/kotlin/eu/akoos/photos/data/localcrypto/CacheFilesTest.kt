@@ -204,6 +204,33 @@ class CacheFilesTest {
     }
 
     @Test
+    fun `temps an earlier process left mid-write are swept, a temp of this one and finished files are kept`() {
+        val started = 1_800_000_000_000L
+        val fullres = LocalFiles.dir(context, LocalFiles.Area.FULLRES).apply { mkdirs() }
+        fun file(dir: File, name: String, modified: Long) = File(dir, name).apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+            setLastModified(modified)
+        }
+        val stale = listOf(
+            file(fullres, "dec_seal_123.tmp", started - 60_000),
+            file(context.cacheDir, ".widget_tmp_9.tmp", started - 60_000),
+            file(thumbs, "thumb_dec_abc_77.tmp", started - 60_000),
+            file(thumbs, ".cache_5.tmp", started - 60_000),
+        )
+        val kept = listOf(
+            file(fullres, "dec_seal_456.tmp", started + 1_000),
+            file(fullres, "abc.jpg", started - 60_000),
+            file(fullres, "dec_abc_0", started - 60_000),
+            file(context.cacheDir, "other.tmp", started - 60_000),
+        )
+
+        CacheFiles.sweepWriteTemps(context, before = started)
+
+        assertTrue(stale.none { it.exists() })
+        assertTrue(kept.all { it.exists() })
+    }
+
+    @Test
     fun `a vault file that does not open is never deleted by a reader`() {
         val vault = VaultFiles.vaultDir(context).apply { mkdirs() }
         val file = File(vault, "kept.jpg")

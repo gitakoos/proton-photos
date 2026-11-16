@@ -109,12 +109,15 @@ object LocalCrypto {
      * from an earlier version: a plaintext database, a database from before this process started, a settings file
      * not yet encrypted, or files in the vault. Later starts keep the first answer.
      */
+    /** When this process started, on the wall clock. */
+    fun processStartedAt(): Long = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime() +
+        android.os.Process.getStartElapsedRealtime()
+
     fun recordLegacyData(context: Context) {
         val marker = File(root(context), LEGACY_MARKER)
         if (marker.exists()) return
         val app = context.applicationContext ?: context
-        val processStartedAt = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime() +
-            android.os.Process.getStartElapsedRealtime()
+        val processStartedAt = processStartedAt()
         val found = runCatching {
             legacyDataIn(
                 filesDir = app.filesDir,

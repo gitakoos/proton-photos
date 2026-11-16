@@ -342,6 +342,25 @@ object CacheFiles {
         override fun skip(n: Long): Long = dropping { super.skip(n) }
     }
 
+    /** The temp name prefixes [write] is given across the app; a temp of one is never a finished cache file. */
+    private val WRITE_TEMP_PREFIXES = listOf(".cache_", "dec_seal_", "thumb_dec_", ".widget_tmp_")
+
+    /**
+     * Removes the temps of [write] that an earlier process left when it stopped mid-write (written before
+     * [before], the start of this one, so never a temp this process is still writing): in the cache folder and in
+     * each regenerable folder. An earlier version wrote them in plain.
+     */
+    fun sweepWriteTemps(context: Context, before: Long) {
+        val app = context.applicationContext ?: context
+        val dirs = listOf(app.cacheDir) + LocalFiles.Area.entries.filter { it.regenerable }.map { LocalFiles.dir(app, it) }
+        for (dir in dirs.distinct()) {
+            dir.listFiles()?.forEach { f ->
+                val temp = f.name.endsWith(".tmp") && WRITE_TEMP_PREFIXES.any { f.name.startsWith(it) }
+                if (temp && f.isFile && f.lastModified() < before) runCatching { f.delete() }
+            }
+        }
+    }
+
     /** Deletes a cache file whose key is gone or whose bytes are damaged. A Keystore that is only slow to answer
      *  leaves it in place. */
     fun dropIfUnreadable(file: File, error: Throwable) {
