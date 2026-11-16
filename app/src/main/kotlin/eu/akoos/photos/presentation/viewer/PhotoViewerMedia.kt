@@ -137,6 +137,21 @@ private fun displaySizeOf(v: androidx.media3.common.VideoSize): IntSize {
     return if (rotated) IntSize(v.height, w) else IntSize(w, v.height)
 }
 
+/** True when a layout gave the video surface a non-empty size it did not have before. */
+internal fun surfaceGainedSize(oldWidth: Int, oldHeight: Int, newWidth: Int, newHeight: Int): Boolean =
+    newWidth > 0 && newHeight > 0 && (newWidth != oldWidth || newHeight != oldHeight)
+
+/**
+ * A SurfaceView creates its surface only in a pre-draw pass that finds it with a size. Inside Compose the PlayerView
+ * is laid out in the frame that adds it, after that frame's pre-draw, so on a screen where nothing else redraws (an
+ * inline motion clip over its still) no later pass comes: the clip decodes to no surface and the page stays black
+ * until something else repaints. Once the surface has its size, one more frame is asked for, posted so it lands after
+ * the current pass, so the SurfaceView makes its surface at once.
+ */
+private val surfaceFrameRequest = android.view.View.OnLayoutChangeListener { v, l, t, r, b, ol, ot, or, ob ->
+    if (surfaceGainedSize(or - ol, ob - ot, r - l, b - t)) v.post { v.rootView.invalidate() }
+}
+
 /**
  * Plays a video file or content URI using ExoPlayer (Media3).
  * Released automatically when the composable leaves the composition.
@@ -246,6 +261,7 @@ internal fun VideoPlayer(
                     player = exoPlayer
                     setShutterBackgroundColor(shutterColor)
                     setBackgroundColor(shutterColor)
+                    videoSurfaceView?.addOnLayoutChangeListener(surfaceFrameRequest)
                 }
         },
         update = { view ->
