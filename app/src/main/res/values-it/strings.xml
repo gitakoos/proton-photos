@@ -2863,7 +2863,9 @@
     <string name="whats_new_260_guesthide_title">Foto nascoste recuperabili</string>
     <string name="whats_new_260_guesthide_body">Senza account, la prima foto che nascondi porta un promemoria per impostare una password delle foto nascoste: senza, non si possono recuperare se il telefono perde la sua chiave.</string>
     <string name="whats_new_260_hiddenkept_title">Foto nascoste al sicuro all\'uscita</string>
-    <string name="whats_new_260_hiddenkept_body">Le foto nascoste senza copia su Drive che non possono andare nella galleria quando esci dall\'account ora restano in Foto nascoste, e una notifica te lo dice.</string>
+    <string name="whats_new_260_hiddenkept_body">Uscire dall\'account non elimina mai una foto nascosta, a meno che non ci sia di sicuro un\'altra copia o tu scelga di eliminarla. Le foto che non possono andare nella galleria o nello zip, e quelle la cui copia su Drive non si può confermare, restano in Foto nascoste e tornano dopo l\'accesso. Una notifica ti dice che fine hanno fatto.</string>
+    <string name="whats_new_260_hiddentip_title">Suggerimento password in Foto nascoste</string>
+    <string name="whats_new_260_hiddentip_body">Foto nascoste ti suggerisce di impostare una password quando non c\'è, così le foto nascoste solo su questo telefono vanno in uno zip protetto invece che nella galleria se Proton ti disconnette.</string>
     <string name="whats_new_260_snackbars_title">I messaggi non coprono i pulsanti</string>
     <string name="whats_new_260_snackbars_body">Anche gli altri brevi messaggi in fondo allo schermo stanno sopra le barre in basso e i pulsanti mobili, come il pulsante filtro della ricerca e quello per tornare su, invece di coprirli.</string>
     <string name="whats_new_260_emptyshared_title">Aggiornare la pagina Condivisi vuota</string>
@@ -2872,8 +2874,6 @@
     <string name="whats_new_260_albumrename_body">Un album rinominato dal suo interno mostra il nuovo nome nella scheda Album e nei selettori di album senza aggiornare.</string>
     <string name="whats_new_260_cancelone_title">Annulla un solo caricamento o download</string>
     <string name="whats_new_260_cancelone_body">Nella schermata Attività, ogni caricamento e ogni foto di un download ha il suo pulsante per annullare, e il resto continua.</string>
-    <string name="whats_new_260_hiddendrive_title">Foto nascoste al sicuro se Proton ti disconnette</string>
-    <string name="whats_new_260_hiddendrive_body">Se Proton ti disconnette e Drive non può confermare di avere ancora alcune delle tue foto nascoste, restano nascoste nell\'app invece di essere eliminate, e riappaiono in Foto nascoste dopo l\'accesso. Le notifiche ti dicono anche quando le foto nascoste non sono potute andare nella galleria o in uno zip.</string>
     <string name="whats_new_260_hideonce_title">Ciò che nascondi su altri dispositivi vale una volta</string>
     <string name="whats_new_260_hideonce_body">Una foto nascosta su un altro dispositivo entra qui in Foto nascoste una sola volta, così mostrarla di nuovo riporta una copia invece di diverse.</string>
     <string name="whats_new_260_newalbumpicker_title">I nuovi album compaiono in Aggiungi all\'album</string>

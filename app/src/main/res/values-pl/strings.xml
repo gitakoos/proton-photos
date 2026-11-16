@@ -2955,7 +2955,9 @@
     <string name="whats_new_260_guesthide_title">Ukryte zdjęcia do odzyskania</string>
     <string name="whats_new_260_guesthide_body">Bez konta pierwsze ukryte zdjęcie przypomina o ustawieniu hasła do ukrytych zdjęć: bez niego nie da się ich odzyskać, jeśli telefon kiedyś straci swój klucz.</string>
     <string name="whats_new_260_hiddenkept_title">Ukryte zdjęcia bezpieczne przy wylogowaniu</string>
-    <string name="whats_new_260_hiddenkept_body">Ukryte zdjęcia bez kopii w Drive, które przy wylogowaniu nie mogą trafić do galerii, zostają teraz w Ukrytych zdjęciach, a powiadomienie cię o tym informuje.</string>
+    <string name="whats_new_260_hiddenkept_body">Wylogowanie nigdy nie usuwa ukrytego zdjęcia, chyba że na pewno istnieje inna kopia albo wybierzesz usunięcie. Zdjęcia, które nie mogą trafić do galerii ani do pliku zip, oraz zdjęcia, których kopii w Drive nie da się potwierdzić, zostają w Ukrytych zdjęciach i wracają po zalogowaniu. Powiadomienie mówi, co się z nimi stało.</string>
+    <string name="whats_new_260_hiddentip_title">Podpowiedź hasła w Ukrytych zdjęciach</string>
+    <string name="whats_new_260_hiddentip_body">Ukryte zdjęcia proponują ustawienie hasła, gdy go nie ma, aby zdjęcia ukryte tylko na tym telefonie trafiły do chronionego pliku zip zamiast do galerii, jeśli Proton cię wyloguje.</string>
     <string name="whats_new_260_snackbars_title">Komunikaty nie zasłaniają przycisków</string>
     <string name="whats_new_260_snackbars_body">Inne krótkie komunikaty na dole ekranu też są nad dolnymi paskami i pływającymi przyciskami, na przykład nad przyciskiem filtru wyszukiwania i przyciskiem powrotu na górę, zamiast je zasłaniać.</string>
     <string name="whats_new_260_emptyshared_title">Odświeżanie pustej strony Udostępnione</string>
@@ -2964,8 +2966,6 @@
     <string name="whats_new_260_albumrename_body">Album, którego nazwę zmieniono w jego wnętrzu, pokazuje nową nazwę na karcie Albumy i w wyborze albumów bez odświeżania.</string>
     <string name="whats_new_260_cancelone_title">Anulowanie jednego przesyłania lub pobierania</string>
     <string name="whats_new_260_cancelone_body">Na ekranie Aktywność każde przesyłanie i każde zdjęcie pobierania ma własny przycisk anulowania, a reszta trwa dalej.</string>
-    <string name="whats_new_260_hiddendrive_title">Ukryte zdjęcia zostają, gdy Proton cię wyloguje</string>
-    <string name="whats_new_260_hiddendrive_body">Gdy Proton cię wyloguje, a Drive nie potwierdzi, że nadal ma część ukrytych zdjęć, zostają one ukryte w aplikacji zamiast zostać usunięte i po zalogowaniu pojawiają się ponownie w Ukrytych zdjęciach. Powiadomienia mówią też, kiedy ukryte zdjęcia nie mogły trafić do galerii ani do pliku zip.</string>
     <string name="whats_new_260_hideonce_title">Ukrycie z innego urządzenia działa raz</string>
     <string name="whats_new_260_hideonce_body">Zdjęcie ukryte na innym urządzeniu trafia tu do Ukrytych zdjęć tylko raz, więc po odkryciu wraca jedna kopia zamiast kilku.</string>
     <string name="whats_new_260_newalbumpicker_title">Nowe albumy od razu w Dodaj do albumu</string>

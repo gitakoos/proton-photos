@@ -2955,7 +2955,9 @@
     <string name="whats_new_260_guesthide_title">Skrite fotografije, ki jih je mogoče obnoviti</string>
     <string name="whats_new_260_guesthide_body">Brez računa vas prva skrita fotografija opomni, da nastavite geslo za skrite fotografije: brez njega jih ni mogoče obnoviti, če telefon kdaj izgubi svoj ključ.</string>
     <string name="whats_new_260_hiddenkept_title">Skrite fotografije varne ob odjavi</string>
-    <string name="whats_new_260_hiddenkept_body">Skrite fotografije brez kopije v Drive, ki ob odjavi ne morejo v galerijo, zdaj ostanejo v Skritih fotografijah, obvestilo pa vam to sporoči.</string>
+    <string name="whats_new_260_hiddenkept_body">Odjava skrito fotografijo izbriše le, če je druga kopija zagotovo na voljo ali če izberete izbris. Fotografije, ki ne morejo v galerijo ali v zip, in fotografije, katerih kopije v Drive ni mogoče potrditi, ostanejo v Skritih fotografijah in se po prijavi vrnejo. Obvestilo vam pove, kaj se je zgodilo z njimi.</string>
+    <string name="whats_new_260_hiddentip_title">Namig za geslo v Skritih fotografijah</string>
+    <string name="whats_new_260_hiddentip_body">Ko gesla ni, vam Skrite fotografije predlagajo, da ga nastavite, da gredo fotografije, skrite le v tem telefonu, v zaščiten zip namesto v galerijo, če vas Proton odjavi.</string>
     <string name="whats_new_260_snackbars_title">Sporočila ne prekrivajo gumbov</string>
     <string name="whats_new_260_snackbars_body">Tudi druga kratka sporočila na dnu zaslona so nad spodnjimi vrsticami in plavajočimi gumbi, na primer nad gumbom za filter iskanja in gumbom za na vrh, namesto da bi jih prekrivala.</string>
     <string name="whats_new_260_emptyshared_title">Osvežitev prazne strani V skupni rabi</string>
@@ -2964,8 +2966,6 @@
     <string name="whats_new_260_albumrename_body">Album, preimenovan od znotraj, pokaže novo ime na zavihku Albumi in v izbirnikih albumov brez osvežitve.</string>
     <string name="whats_new_260_cancelone_title">Preklic enega nalaganja ali prenosa</string>
     <string name="whats_new_260_cancelone_body">Na zaslonu Dejavnost ima vsako nalaganje in vsaka fotografija prenosa svoj gumb za preklic, ostalo pa teče naprej.</string>
-    <string name="whats_new_260_hiddendrive_title">Skrite fotografije ostanejo, ko vas Proton odjavi</string>
-    <string name="whats_new_260_hiddendrive_body">Ko vas Proton odjavi in Drive ne more potrditi, da še hrani nekatere vaše skrite fotografije, te namesto izbrisa ostanejo skrite v aplikaciji in se po prijavi znova prikažejo med Skritimi fotografijami. Obvestila vam povedo tudi, kdaj skrite fotografije niso mogle v galerijo ali v zip.</string>
     <string name="whats_new_260_hideonce_title">Skrivanje z drugih naprav se izvede enkrat</string>
     <string name="whats_new_260_hideonce_body">Fotografija, skrita na drugi napravi, gre tukaj med Skrite fotografije samo enkrat, zato razkritje vrne eno kopijo namesto več.</string>
     <string name="whats_new_260_newalbumpicker_title">Novi albumi takoj v Dodaj v album</string>

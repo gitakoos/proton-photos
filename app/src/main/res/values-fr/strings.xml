@@ -2826,7 +2826,9 @@
     <string name="whats_new_260_guesthide_title">Des photos masquées récupérables</string>
     <string name="whats_new_260_guesthide_body">Sans compte, la première photo que vous masquez s\'accompagne d\'un rappel pour définir un mot de passe des photos masquées : sans lui, elles ne peuvent pas être récupérées si le téléphone perd un jour sa clé.</string>
     <string name="whats_new_260_hiddenkept_title">Photos masquées protégées à la déconnexion</string>
-    <string name="whats_new_260_hiddenkept_body">Les photos masquées sans copie dans Drive qui ne peuvent pas aller dans la galerie lors d\'une déconnexion restent désormais dans Photos masquées, et une notification vous le signale.</string>
+    <string name="whats_new_260_hiddenkept_body">La déconnexion ne supprime jamais une photo masquée, sauf si une autre copie est certaine ou si vous choisissez de la supprimer. Les photos qui ne peuvent pas aller dans la galerie ou dans le zip, et celles dont la copie dans Drive ne peut pas être confirmée, restent dans Photos masquées et reviennent après votre reconnexion. Une notification vous indique ce qui leur est arrivé.</string>
+    <string name="whats_new_260_hiddentip_title">Suggestion de mot de passe dans Photos masquées</string>
+    <string name="whats_new_260_hiddentip_body">Photos masquées vous propose de définir un mot de passe s\'il n\'y en a pas, pour que les photos masquées uniquement sur ce téléphone aillent dans un zip protégé plutôt que dans la galerie si Proton vous déconnecte.</string>
     <string name="whats_new_260_snackbars_title">Les messages ne couvrent plus les boutons</string>
     <string name="whats_new_260_snackbars_body">Les autres messages courts en bas de l\'écran se placent aussi au-dessus des barres du bas et des boutons flottants, comme le bouton de filtre de la recherche et celui pour revenir en haut, au lieu de les couvrir.</string>
     <string name="whats_new_260_emptyshared_title">Actualiser la page Partagés vide</string>
@@ -2835,8 +2837,6 @@
     <string name="whats_new_260_albumrename_body">Un album renommé depuis l\'intérieur affiche son nouveau nom dans l\'onglet Albums et dans les sélecteurs d\'album sans actualisation.</string>
     <string name="whats_new_260_cancelone_title">Annuler un seul envoi ou téléchargement</string>
     <string name="whats_new_260_cancelone_body">Dans l\'écran Activité, chaque envoi et chaque photo d\'un téléchargement a son propre bouton d\'annulation, et le reste continue.</string>
-    <string name="whats_new_260_hiddendrive_title">Photos masquées gardées si Proton vous déconnecte</string>
-    <string name="whats_new_260_hiddendrive_body">Si Proton vous déconnecte et que Drive ne peut pas confirmer qu\'il conserve encore certaines de vos photos masquées, elles restent masquées dans l\'app au lieu d\'être supprimées, et réapparaissent dans Photos masquées une fois reconnecté. Les notifications vous disent aussi quand des photos masquées n\'ont pas pu aller dans la galerie ou dans un zip.</string>
     <string name="whats_new_260_hideonce_title">Un masquage venu d\'un autre appareil s\'applique une fois</string>
     <string name="whats_new_260_hideonce_body">Une photo masquée sur un autre appareil n\'entre qu\'une fois dans Photos masquées ici, donc l\'afficher à nouveau ramène une seule copie au lieu de plusieurs.</string>
     <string name="whats_new_260_newalbumpicker_title">Les nouveaux albums apparaissent dans Ajouter à l\'album</string>

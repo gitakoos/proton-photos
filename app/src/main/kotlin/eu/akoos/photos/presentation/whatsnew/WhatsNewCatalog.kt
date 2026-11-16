@@ -326,7 +326,7 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Lock, R.string.whats_new_260_fastcrypto_title, R.string.whats_new_260_fastcrypto_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_guesthide_title, R.string.whats_new_260_guesthide_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.VisibilityOff, R.string.whats_new_260_hiddenkept_title, R.string.whats_new_260_hiddenkept_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_hiddendrive_title, R.string.whats_new_260_hiddendrive_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Lock, R.string.whats_new_260_hiddentip_title, R.string.whats_new_260_hiddentip_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.VisibilityOff, R.string.whats_new_260_hideonce_title, R.string.whats_new_260_hideonce_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_manualdetails_title, R.string.whats_new_260_manualdetails_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_backupswitch_title, R.string.whats_new_260_backupswitch_body, WhatsNewCategory.Improved),

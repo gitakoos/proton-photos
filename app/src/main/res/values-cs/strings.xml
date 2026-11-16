@@ -2961,7 +2961,9 @@
     <string name="whats_new_260_guesthide_title">Skryté fotky, které jde obnovit</string>
     <string name="whats_new_260_guesthide_body">Bez účtu vám první skrytá fotka připomene nastavit heslo pro skryté fotky: bez něj je nelze obnovit, pokud telefon někdy ztratí svůj klíč.</string>
     <string name="whats_new_260_hiddenkept_title">Skryté fotky v bezpečí při odhlášení</string>
-    <string name="whats_new_260_hiddenkept_body">Skryté fotky bez kopie na Drive, které se při odhlášení nemohou přesunout do galerie, nyní zůstanou ve Skrytých fotkách a upozornění vám to oznámí.</string>
+    <string name="whats_new_260_hiddenkept_body">Odhlášení smaže skrytou fotku jen tehdy, když je jistá jiná kopie, nebo když zvolíte smazání. Fotky, které se nemohou přesunout do galerie ani uložit do zipu, a fotky, jejichž kopii na Drive nelze potvrdit, zůstanou ve Skrytých fotkách a po přihlášení se vrátí. Upozornění vám řekne, co se s nimi stalo.</string>
+    <string name="whats_new_260_hiddentip_title">Tip na heslo ve Skrytých fotkách</string>
+    <string name="whats_new_260_hiddentip_body">Když nemáte nastavené heslo, Skryté fotky vám ho navrhnou nastavit, aby se fotky skryté jen v tomto telefonu uložily do chráněného zipu místo do galerie, pokud vás Proton odhlásí.</string>
     <string name="whats_new_260_snackbars_title">Zprávy nezakrývají tlačítka</string>
     <string name="whats_new_260_snackbars_body">I ostatní krátké zprávy u spodního okraje obrazovky jsou nad spodními lištami a plovoucími tlačítky, třeba nad tlačítkem filtru ve vyhledávání a tlačítkem pro návrat nahoru, a nezakrývají je.</string>
     <string name="whats_new_260_emptyshared_title">Obnovení prázdné stránky Sdílené</string>
@@ -2970,8 +2972,6 @@
     <string name="whats_new_260_albumrename_body">Album přejmenované zevnitř ukáže nový název na kartě Alba i ve výběru alb bez obnovení.</string>
     <string name="whats_new_260_cancelone_title">Zrušení jednoho nahrávání nebo stahování</string>
     <string name="whats_new_260_cancelone_body">Na obrazovce Aktivita má každé nahrávání i každá fotka stahování vlastní tlačítko pro zrušení a ostatní pokračují dál.</string>
-    <string name="whats_new_260_hiddendrive_title">Skryté fotky zůstanou, když vás Proton odhlásí</string>
-    <string name="whats_new_260_hiddendrive_body">Když vás Proton odhlásí a Drive nepotvrdí, že některé vaše skryté fotky stále má, zůstanou skryté v aplikaci místo smazání a po přihlášení se znovu objeví ve Skrytých fotkách. Upozornění vám také řeknou, když se skryté fotky nepodařilo přesunout do galerie nebo uložit do zipu.</string>
     <string name="whats_new_260_hideonce_title">Skrytí z jiných zařízení proběhne jednou</string>
     <string name="whats_new_260_hideonce_body">Fotka skrytá na jiném zařízení se tu do Skrytých fotek přesune jen jednou, takže po zrušení skrytí se vrátí jedna kopie, ne několik.</string>
     <string name="whats_new_260_newalbumpicker_title">Nová alba hned v Přidat do alba</string>

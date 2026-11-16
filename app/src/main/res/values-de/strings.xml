@@ -2824,7 +2824,9 @@
     <string name="whats_new_260_guesthide_title">Versteckte Fotos wiederherstellbar halten</string>
     <string name="whats_new_260_guesthide_body">Ohne Konto erinnert dich das erste versteckte Foto daran, ein Passwort für versteckte Fotos festzulegen: Ohne eines lassen sie sich nicht wiederherstellen, wenn das Telefon einmal seinen Schlüssel verliert.</string>
     <string name="whats_new_260_hiddenkept_title">Versteckte Fotos bleiben beim Abmelden sicher</string>
-    <string name="whats_new_260_hiddenkept_body">Versteckte Fotos ohne Kopie in Drive, die beim Abmelden nicht in die Galerie können, bleiben jetzt in Versteckte Fotos, und eine Benachrichtigung sagt dir das.</string>
+    <string name="whats_new_260_hiddenkept_body">Beim Abmelden wird ein verstecktes Foto nur gelöscht, wenn eine andere Kopie sicher ist oder du das Löschen wählst. Fotos, die nicht in die Galerie oder in die ZIP-Datei können, und Fotos, deren Kopie in Drive sich nicht bestätigen lässt, bleiben in Versteckte Fotos und sind nach der Anmeldung wieder da. Eine Benachrichtigung sagt dir, was mit ihnen passiert ist.</string>
+    <string name="whats_new_260_hiddentip_title">Passwort-Tipp in Versteckte Fotos</string>
+    <string name="whats_new_260_hiddentip_body">Versteckte Fotos schlägt ein Passwort vor, wenn keines festgelegt ist, damit nur auf diesem Telefon versteckte Fotos in eine geschützte ZIP-Datei statt in die Galerie kommen, falls Proton dich abmeldet.</string>
     <string name="whats_new_260_snackbars_title">Meldungen verdecken keine Knöpfe</string>
     <string name="whats_new_260_snackbars_body">Auch andere kurze Meldungen unten auf dem Bildschirm sitzen über den unteren Leisten und schwebenden Knöpfen, etwa dem Filterknopf der Suche und dem Knopf nach oben, statt sie zu verdecken.</string>
     <string name="whats_new_260_emptyshared_title">Leere Seite Geteilt aktualisieren</string>
@@ -2833,8 +2835,6 @@
     <string name="whats_new_260_albumrename_body">Ein Album, das du darin umbenennst, zeigt seinen neuen Namen auf dem Tab Alben und in der Albumauswahl ohne Aktualisieren.</string>
     <string name="whats_new_260_cancelone_title">Einen Upload oder Download abbrechen</string>
     <string name="whats_new_260_cancelone_body">In der Aktivität hat jeder Upload und jedes Foto eines Downloads einen eigenen Abbrechen-Knopf, und der Rest läuft weiter.</string>
-    <string name="whats_new_260_hiddendrive_title">Versteckte Fotos bleiben, wenn Proton dich abmeldet</string>
-    <string name="whats_new_260_hiddendrive_body">Meldet Proton dich ab und kann Drive nicht bestätigen, dass es einige deiner versteckten Fotos noch hat, bleiben sie versteckt in der App, statt gelöscht zu werden, und erscheinen nach der Anmeldung wieder unter Versteckte Fotos. Benachrichtigungen sagen dir außerdem, wenn versteckte Fotos nicht in die Galerie oder in eine ZIP-Datei konnten.</string>
     <string name="whats_new_260_hideonce_title">Verstecken von anderen Geräten wirkt einmal</string>
     <string name="whats_new_260_hideonce_body">Ein Foto, das auf einem anderen Gerät versteckt wurde, kommt hier nur einmal in Versteckte Fotos, so bringt das Einblenden eine Kopie zurück statt mehrerer.</string>
     <string name="whats_new_260_newalbumpicker_title">Neue Alben sofort in Zum Album hinzufügen</string>

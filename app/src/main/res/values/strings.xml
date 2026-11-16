@@ -2861,7 +2861,9 @@
     <string name="whats_new_260_guesthide_title">Keep hidden photos recoverable</string>
     <string name="whats_new_260_guesthide_body">Without an account, the first photo you hide brings a reminder to set a password for hidden photos: without one, they cannot be recovered if the phone ever loses its key.</string>
     <string name="whats_new_260_hiddenkept_title">Hidden photos stay safe at sign-out</string>
-    <string name="whats_new_260_hiddenkept_body">Hidden photos with no copy in Drive that cannot go to the gallery at a sign-out now stay in Hidden Photos, and a notification tells you so.</string>
+    <string name="whats_new_260_hiddenkept_body">Signing out never deletes a hidden photo unless another copy is certain or you choose to delete it. Photos that cannot go to the gallery or into the zip, and photos whose copy in Drive cannot be confirmed, stay in Hidden Photos and come back after you sign in. A notification says what happened to them.</string>
+    <string name="whats_new_260_hiddentip_title">Password tip in Hidden Photos</string>
+    <string name="whats_new_260_hiddentip_body">Hidden Photos suggests setting a password when there is none, so photos hidden only on this phone go into a protected zip instead of the gallery if Proton signs you out.</string>
     <string name="whats_new_260_snackbars_title">Messages stay clear of buttons</string>
     <string name="whats_new_260_snackbars_body">Other short messages at the bottom of the screen also sit above the bottom bars and floating buttons, such as the search filter button and the jump to top button, instead of covering them.</string>
     <string name="whats_new_260_emptyshared_title">Pull to refresh on an empty Shared page</string>
@@ -2870,8 +2872,6 @@
     <string name="whats_new_260_albumrename_body">An album renamed from inside it shows its new name on the Albums tab and in the album pickers without a refresh.</string>
     <string name="whats_new_260_cancelone_title">Cancel one upload or download</string>
     <string name="whats_new_260_cancelone_body">In the Activity screen, each upload and each photo of a download has its own cancel button, and the rest keep going.</string>
-    <string name="whats_new_260_hiddendrive_title">Hidden photos kept when Proton signs you out</string>
-    <string name="whats_new_260_hiddendrive_body">If Proton signs you out and Drive cannot confirm it still holds some of your hidden photos, they stay hidden in the app instead of being deleted, and show in Hidden Photos again after you sign in. Notifications also tell you when hidden photos could not go to the gallery or into a zip.</string>
     <string name="whats_new_260_hideonce_title">Hides from other devices apply once</string>
     <string name="whats_new_260_hideonce_body">A photo hidden on another device goes into Hidden Photos here only once, so unhiding it brings back one copy instead of several.</string>
     <string name="whats_new_260_newalbumpicker_title">New albums show up in Add to album</string>

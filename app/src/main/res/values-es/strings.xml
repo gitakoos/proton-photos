@@ -2861,7 +2861,9 @@
     <string name="whats_new_260_guesthide_title">Fotos ocultas recuperables</string>
     <string name="whats_new_260_guesthide_body">Sin cuenta, la primera foto que ocultas trae un recordatorio para establecer una contraseña de fotos ocultas: sin ella, no se pueden recuperar si el teléfono pierde alguna vez su clave.</string>
     <string name="whats_new_260_hiddenkept_title">Fotos ocultas a salvo al cerrar sesión</string>
-    <string name="whats_new_260_hiddenkept_body">Las fotos ocultas sin copia en Drive que no pueden ir a la galería al cerrar sesión ahora se quedan en Fotos ocultas, y una notificación te lo indica.</string>
+    <string name="whats_new_260_hiddenkept_body">Cerrar sesión nunca borra una foto oculta salvo que haya otra copia segura o elijas borrarla. Las fotos que no pueden ir a la galería ni al zip, y las fotos cuya copia en Drive no se puede confirmar, se quedan en Fotos ocultas y vuelven cuando inicias sesión. Una notificación te dice qué ha pasado con ellas.</string>
+    <string name="whats_new_260_hiddentip_title">Sugerencia de contraseña en Fotos ocultas</string>
+    <string name="whats_new_260_hiddentip_body">Fotos ocultas te sugiere establecer una contraseña cuando no hay ninguna, para que las fotos ocultas solo en este teléfono vayan a un zip protegido en lugar de a la galería si Proton cierra tu sesión.</string>
     <string name="whats_new_260_snackbars_title">Los avisos no tapan botones</string>
     <string name="whats_new_260_snackbars_body">Los demás avisos breves de la parte inferior de la pantalla también quedan por encima de las barras inferiores y los botones flotantes, como el botón de filtro de la búsqueda y el de volver arriba, en vez de taparlos.</string>
     <string name="whats_new_260_emptyshared_title">Actualizar la página Compartidos vacía</string>
@@ -2870,8 +2872,6 @@
     <string name="whats_new_260_albumrename_body">Un álbum renombrado desde dentro muestra su nuevo nombre en la pestaña Álbumes y en los selectores de álbum sin actualizar.</string>
     <string name="whats_new_260_cancelone_title">Cancela una subida o descarga</string>
     <string name="whats_new_260_cancelone_body">En la pantalla Actividad, cada subida y cada foto de una descarga tiene su propio botón para cancelar, y el resto sigue adelante.</string>
-    <string name="whats_new_260_hiddendrive_title">Fotos ocultas a salvo si Proton cierra tu sesión</string>
-    <string name="whats_new_260_hiddendrive_body">Si Proton cierra tu sesión y Drive no puede confirmar que aún tiene algunas de tus fotos ocultas, se quedan ocultas en la app en lugar de borrarse, y vuelven a aparecer en Fotos ocultas cuando inicias sesión. Las notificaciones también te avisan cuando las fotos ocultas no pudieron ir a la galería ni a un zip.</string>
     <string name="whats_new_260_hideonce_title">Lo ocultado en otros dispositivos se aplica una vez</string>
     <string name="whats_new_260_hideonce_body">Una foto ocultada en otro dispositivo pasa a Fotos ocultas aquí una sola vez, así que al mostrarla vuelve una copia en lugar de varias.</string>
     <string name="whats_new_260_newalbumpicker_title">Los álbumes nuevos aparecen en Añadir al álbum</string>
