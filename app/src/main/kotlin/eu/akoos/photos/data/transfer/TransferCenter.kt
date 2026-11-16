@@ -43,7 +43,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Own DataStore so the transfer log lives apart from the app settings and can be cleared alone. */
-private val Context.transferHistoryDataStore: DataStore<Preferences> by
+internal val Context.transferHistoryDataStore: DataStore<Preferences> by
     encryptedPreferencesDataStore(name = "transfer_history")
 
 /**

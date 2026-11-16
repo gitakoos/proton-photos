@@ -24,6 +24,8 @@ package eu.akoos.photos.data.localcrypto
 
 import android.content.Context
 import android.net.Uri
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.hidden.StoredVaultPassword
 import eu.akoos.photos.data.hidden.VaultPasswordStore
@@ -35,6 +37,7 @@ import eu.akoos.photos.data.mlsync.EnvelopeSealKeys
 import eu.akoos.photos.data.mlsync.MlSnapshotEnvelope
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.transfer.transferHistoryDataStore
 import eu.akoos.photos.util.HiddenCaptureTime
 import eu.akoos.photos.util.mimeFromPath
 import eu.akoos.photos.util.sweepLegacyShareCopies
@@ -287,8 +290,7 @@ class LocalEncryptionCoordinator @Inject constructor(
     private suspend fun restoreLockedStores() {
         val keyring = LocalCrypto.keyringOrNull(context) ?: return
         val locked = LocalCrypto.lockedStores(context)
-        for (name in STORE_NAMES) {
-            val store = LocalStores.named(name) ?: continue
+        for ((name, store) in encryptedStores(context)) {
             runCatching { LocalStores.restoreLocked(name, store, keyring, locked, LocalCrypto::log) }
                 .onFailure { logFailure("$name restore", it) }
         }
@@ -380,6 +382,15 @@ class LocalEncryptionCoordinator @Inject constructor(
         private const val PLAIN_CACHES_DONE_MARKER = "plain_caches_encrypted"
     }
 }
+
+/**
+ * Every settings file kept encrypted, by name, opened here (which registers it), so a locked copy of each comes back
+ * on the start its key answers, even before anything else has opened that file.
+ */
+internal fun encryptedStores(context: Context): Map<String, DataStore<Preferences>> = mapOf(
+    "settings" to context.settingsDataStore,
+    "transfer_history" to context.transferHistoryDataStore,
+)
 
 /** The migration that encrypts the plaintext offline copies in place, sharing the offline store's lock. */
 internal fun offlineMigration(context: Context, keyring: LocalKeyring, log: (String) -> Unit = LocalCrypto::log) = VaultMigration(
