@@ -131,6 +131,10 @@ interface SyncStateRepository {
     /** Unguarded queued clear for the success / pairing path, where the row is known backed up. */
     suspend fun clearQueuedForSynced(localUri: String)
 
+    /** Records the device file's SHA-1 as the backup that just landed read it ([SyncState.originalHash]),
+     *  or clears it when null. Called right after that backup's SYNCED write. */
+    suspend fun setOriginalHash(localUri: String, originalHash: String?) {}
+
     /** Drops the upload a device photo was given only to join an album, once no album is left for it to join.
      *  Only a still pending LOCAL_ONLY row queued for an album add. */
     suspend fun clearAlbumAddIntent(localUri: String) {}

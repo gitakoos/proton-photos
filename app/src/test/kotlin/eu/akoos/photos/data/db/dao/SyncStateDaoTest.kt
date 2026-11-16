@@ -664,4 +664,93 @@ class SyncStateDaoTest {
             repo.getQueuedOrIn(user, many).map { it.localUri },
         )
     }
+
+    private fun backedUp(uri: String, localHash: String = "up", cloudFileId: String? = "cloud-1") =
+        entity(uri, status = SyncStatus.SYNCED, cloudFileId = cloudFileId, backedUpAtMs = 5L).copy(localHash = localHash)
+
+    @Test
+    fun `a recorded original hash is read back and a new row starts without one`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+
+        dao.setOriginalHash("uri://1", "orig")
+
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a domain row written back never writes an original hash it carries`() = runTest {
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+        val user = me.proton.core.domain.entity.UserId("user1")
+        // A copy of a row read before, carrying a hash that belonged to an older backup.
+        repo.upsert(backedUp("uri://1").toDomain().copy(originalHash = "stale"), user)
+
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `the original hash survives a write that keeps the row's hash and pairing`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+
+        // A reconcile pass rewrites the same pairing with a fresh attempt time and no original hash of its own.
+        dao.upsert(backedUp("uri://1").copy(lastSyncAttemptMs = 99L))
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+
+        assertEquals(1, dao.updateDomainColumnsIfNotSyncedWithCloudAll(listOf(backedUp("uri://1"))).size)
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a new hash or a new pairing clears the original hash`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+        dao.upsert(backedUp("uri://1", localHash = "edited"))
+        assertNull("a new device hash", dao.getByUri("uri://1")!!.originalHash)
+
+        dao.setOriginalHash("uri://1", "orig")
+        dao.upsert(backedUp("uri://1", localHash = "edited", cloudFileId = "cloud-2"))
+        assertNull("a new Drive pairing", dao.getByUri("uri://1")!!.originalHash)
+
+        dao.setOriginalHash("uri://1", "orig")
+        dao.upsert(backedUp("uri://1", localHash = "edited", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
+        assertNull("the pairing taken off", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `the guarded update clears the original hash of a row it rewrites with a new hash`() = runTest {
+        dao.upsert(backedUp("uri://1", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
+        dao.setOriginalHash("uri://1", "orig")
+
+        val untouched = dao.updateDomainColumnsIfNotSyncedWithCloudAll(
+            listOf(backedUp("uri://1", localHash = "edited", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY)),
+        )
+
+        assertTrue(untouched.isEmpty())
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a demotion off Drive clears the original hash`() = runTest {
+        dao.upsert(backedUp("uri://1", cloudFileId = "cloud-1"))
+        dao.upsert(backedUp("uri://2", cloudFileId = "cloud-2"))
+        dao.setOriginalHash("uri://1", "orig-1")
+        dao.setOriginalHash("uri://2", "orig-2")
+
+        dao.demoteSyncedByCloudIds(listOf("cloud-1"))
+        assertEquals(1, dao.demoteToLocalIfCloudIdMatches("uri://2", "cloud-2"))
+
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+        assertNull(dao.getByUri("uri://2")!!.originalHash)
+    }
+
+    @Test
+    fun `clearing the original hash takes it off`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+
+        dao.setOriginalHash("uri://1", null)
+
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+    }
 }

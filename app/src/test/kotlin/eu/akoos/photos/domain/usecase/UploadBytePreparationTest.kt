@@ -72,9 +72,11 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import me.proton.core.domain.entity.UserId
 import org.junit.After
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -480,4 +482,130 @@ class UploadBytePreparationTest {
         assertEquals(1, sent.size)
         assertEquals(SyncStatus.SYNCED, syncRepo.getByUri(item.uri)!!.status)
     }
+
+    // ── The device file's own hash beside a stripped upload ─────────────────────────────────────────
+
+    private suspend fun stripWithoutMirror() = prefs {
+        it[SettingsKeys.STRIP_ON_UPLOAD] = true
+        it[SettingsKeys.STRIP_GPS] = true
+    }
+
+    @Test
+    fun `a stripped upload records the device original's own hash beside the uploaded bytes' hash`() = runTest {
+        stripWithoutMirror()
+        val original = ByteArray(30) { 1 }
+        val (file, item) = deviceFile("IMG_O1.jpg", "image/jpeg", original)
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } returns strippedTemp
+
+        useCase(userId)
+
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals(sha1(ByteArray(28) { 6 }), row.localHash)
+        assertEquals(sha1(original), row.originalHash)
+        assertArrayEquals("the device file is left as it was", original, file.readBytes())
+    }
+
+    @Test
+    fun `the original hash is read before the strip, so an edit during it leaves the file unlike the record`() = runTest {
+        stripWithoutMirror()
+        val original = ByteArray(30) { 1 }
+        val edited = ByteArray(30) { 9 }
+        val (file, item) = deviceFile("IMG_O2.jpg", "image/jpeg", original)
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } answers {
+            file.writeBytes(edited)
+            strippedTemp
+        }
+
+        useCase(userId)
+
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(sha1(original), row.originalHash)
+        assertTrue("free-up then sees bytes the backup never read", sha1(file.readBytes()) != row.originalHash)
+    }
+
+    @Test
+    fun `an original that cannot be read before the strip is not uploaded and its claim is released`() = runTest {
+        stripWithoutMirror()
+        val original = ByteArray(30) { 1 }
+        val (file, item) = deviceFile("IMG_O3.jpg", "image/jpeg", original)
+        file.delete()
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        // The file is back by the time the strip reads it, so only the read before the strip failed.
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } answers {
+            file.writeBytes(original)
+            strippedTemp
+        }
+
+        useCase(userId)
+
+        assertEquals(0, sent.size)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertTrue(row.queued)
+    }
+
+    @Test
+    fun `delete after backup keeps a stripped original edited after the upload and queues it again`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true
+        }
+        val original = ByteArray(30) { 1 }
+        val edited = ByteArray(30) { 9 }
+        val (file, item) = deviceFile("IMG_O4.jpg", "image/jpeg", original)
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } returns strippedTemp
+        coEvery { cloud.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            val uri = arg<String>(3)
+            sent += Sent(arg(1), arg(2), uri, context.contentResolver.openInputStream(Uri.parse(uri))!!.use { it.readBytes() })
+            // Another app edits the device file, size and all kept, while the upload finishes.
+            file.writeBytes(edited)
+            "cloud-1"
+        }
+
+        useCase(userId)
+
+        assertArrayEquals("the edited file stays on the device", edited, file.readBytes())
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertNull(row.cloudFileId)
+        assertNull(row.backedUpAtMs)
+        assertEquals(sha1(edited), row.localHash)
+        assertTrue(row.queued)
+        assertEquals(QueueSource.MANUAL, row.queueSource)
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        assertTrue(item.uri !in pending)
+    }
+
+    @Test
+    fun `delete after backup goes ahead for a stripped original still as the upload read it`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true
+        }
+        val (_, item) = deviceFile("IMG_O5.jpg", "image/jpeg", ByteArray(30) { 1 })
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } returns strippedTemp
+
+        useCase(userId)
+
+        assertEquals(
+            "the trash is asked for",
+            1,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        val row = syncRepo.getByUri(item.uri)!!
+        assertTrue("not queued to be backed up again", row.cloudFileId != null && row.backedUpAtMs != null)
+    }
 }
+

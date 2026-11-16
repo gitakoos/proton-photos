@@ -254,6 +254,108 @@ class UploadPipelineIntegrationTest {
         }
     }
 
+    // ── Delete after backup: the device file is checked again right before it goes ───────────────
+
+    private val unreadable = object : java.io.InputStream() {
+        override fun read(): Int = throw java.io.IOException("unreadable")
+    }
+
+    /** Serves [uri]'s bytes from [bytes] on every read, so a test can change the file between reads. */
+    private fun serveContent(uri: String, bytes: () -> java.io.InputStream) {
+        org.robolectric.Shadows.shadowOf(context.contentResolver)
+            .registerInputStreamSupplier(android.net.Uri.parse(uri)) { bytes() }
+    }
+
+    private fun sha1Of(bytes: ByteArray): String =
+        eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(java.io.ByteArrayInputStream(bytes))
+
+    private fun trashRequestsFor(uri: String) =
+        org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == uri }
+
+    private suspend fun uploadWithDeleteAfterBackup(uri: String, afterUpload: () -> java.io.InputStream) {
+        context.settingsDataStore.edit { it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true }
+        local.add(localItem(uri))
+        val original = "original bytes".toByteArray()
+        // The file reads as it did for the upload until the Drive copy exists, then as [afterUpload] says.
+        serveContent(uri) {
+            if (cloud.photos.value.isEmpty()) java.io.ByteArrayInputStream(original) else afterUpload()
+        }
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+        assertEquals("the upload itself lands", 1, cloud.photos.value.size)
+    }
+
+    @Test
+    fun `delete after backup removes a device file that still holds the bytes the upload read`() = runTest {
+        val uri = "content://media/40"
+        uploadWithDeleteAfterBackup(uri) { java.io.ByteArrayInputStream("original bytes".toByteArray()) }
+
+        assertEquals("the device file is sent to the trash", 1, trashRequestsFor(uri))
+        // The test resolver has no media provider, so the trash comes back refused and the file waits in the
+        // consent queue, exactly as a refused trash on a device does; the row keeps its pairing either way.
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        row(uri)!!.let {
+            assertTrue(it.status == SyncStatus.CLOUD_ONLY || uri in pending)
+            assertNotNull("not queued to be backed up again", it.cloudFileId)
+            assertNotNull(it.backedUpAtMs)
+        }
+    }
+
+    @Test
+    fun `delete after backup keeps a device file edited after the upload read it and queues it again`() = runTest {
+        val uri = "content://media/41"
+        val edited = "edited bytes".toByteArray()
+        uploadWithDeleteAfterBackup(uri) { java.io.ByteArrayInputStream(edited) }
+
+        assertEquals("the edited file is never trashed", 0, trashRequestsFor(uri))
+        row(uri)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertNull("the pairing to the Drive copy of the old bytes is taken off", it.cloudFileId)
+            assertNull(it.backedUpAtMs)
+            assertEquals(sha1Of(edited), it.localHash)
+            assertNull(it.originalHash)
+            assertTrue("queued to be backed up again", it.queued)
+            assertEquals(QueueSource.MANUAL, it.queueSource)
+        }
+        assertEquals("the Drive copy stays", 1, cloud.photos.value.size)
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        assertTrue("not left for the consent dialog either", uri !in pending)
+    }
+
+    @Test
+    fun `delete after backup keeps a device file it cannot read again and queues it again`() = runTest {
+        val uri = "content://media/42"
+        uploadWithDeleteAfterBackup(uri) { unreadable }
+
+        assertEquals(0, trashRequestsFor(uri))
+        row(uri)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertNull(it.cloudFileId)
+            assertNull(it.backedUpAtMs)
+            assertEquals("the hash it was read with stays", sha1Of("original bytes".toByteArray()), it.localHash)
+            assertTrue(it.queued)
+        }
+    }
+
+    @Test
+    fun `an upload records the device file's own hash and reconcile keeps it`() = runTest {
+        val uri = "content://media/43"
+        local.add(localItem(uri))
+        val bytes = "device bytes".toByteArray()
+        serveContent(uri) { java.io.ByteArrayInputStream(bytes) }
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        assertEquals(sha1Of(bytes), row(uri)!!.originalHash)
+
+        reconcileUseCase(userId).collectToEnd()
+
+        row(uri)!!.let {
+            assertEquals(SyncStatus.SYNCED, it.status)
+            assertEquals("a reconcile pass that keeps the pairing keeps the hash", sha1Of(bytes), it.originalHash)
+        }
+    }
+
     // ── Scenario 1: manual upload ───────────────────────────────────────────────────
 
     @Test

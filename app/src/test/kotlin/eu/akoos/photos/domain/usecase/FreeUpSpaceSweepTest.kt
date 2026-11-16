@@ -302,4 +302,67 @@ class FreeUpSpaceSweepTest {
 
         assertEquals(1, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
     }
+
+    /** A row backed up from stripped bytes: its hash is the upload's, the original's is recorded beside it. */
+    private fun strippedOriginal(i: Int) = eligible(i).copy(localHash = "uploaded-$i", originalHash = "original-$i")
+
+    @Test
+    fun `an original kept beside a stripped upload and unchanged since is reclaimed`() = runTest {
+        val row = strippedOriginal(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.sha1(row.localUri) } returns "original-1"
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(1, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        coVerify(exactly = 1) { repo.updateStatusAndDeleteLocal(row.localUri, SyncStatus.CLOUD_ONLY) }
+    }
+
+    @Test
+    fun `an original edited in place with its size and time kept is kept and queued to be backed up again`() = runTest {
+        val row = strippedOriginal(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        // Same size as recorded and written long before the backup: only the bytes differ.
+        coEvery { localRepo.queryByUri(row.localUri) } returns deviceFile(row.localUri, sizeBytes = 1024L, modifiedSec = 0L)
+        coEvery { localRepo.sha1(row.localUri) } returns "edited"
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        verify(exactly = 0) { resolver.delete(any(), any(), any()) }
+        coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any(), any()) }
+        coVerify {
+            repo.upsert(
+                match {
+                    it.localUri == row.localUri && it.status == SyncStatus.LOCAL_ONLY &&
+                        it.cloudFileId == null && it.backedUpAtMs == null && it.localHash == "edited"
+                },
+                userId,
+            )
+        }
+        coVerify { repo.markQueued(row.localUri, QueueSource.MANUAL, any()) }
+    }
+
+    @Test
+    fun `the pending delete check passes an unchanged original and drops an edited one`() = runTest {
+        // confirmForDeletion is what the stored delete queue is checked with before the trash dialog.
+        val same = strippedOriginal(1)
+        val edited = strippedOriginal(2)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf(
+            "cloud-1" to linkAt("cloud-1", state = 1),
+            "cloud-2" to linkAt("cloud-2", state = 1),
+        )
+        coEvery { localRepo.sha1(same.localUri) } returns "original-1"
+        coEvery { localRepo.sha1(edited.localUri) } returns "edited"
+
+        val confirmed = useCase.confirmForDeletion(userId, listOf(same, edited))
+
+        assertEquals(listOf(same), confirmed)
+        coVerify { repo.markQueued(edited.localUri, QueueSource.MANUAL, any()) }
+        coVerify(exactly = 0) { repo.markQueued(same.localUri, any(), any()) }
+    }
 }

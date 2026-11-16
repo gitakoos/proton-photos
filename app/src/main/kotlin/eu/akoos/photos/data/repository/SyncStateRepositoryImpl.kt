@@ -157,6 +157,9 @@ class SyncStateRepositoryImpl @Inject constructor(
 
     override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
 
+    override suspend fun setOriginalHash(localUri: String, originalHash: String?) =
+        dao.setOriginalHash(localUri, originalHash)
+
     override suspend fun clearAlbumAddIntent(localUri: String) {
         dao.clearAlbumAddIntent(localUri)
     }

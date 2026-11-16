@@ -32,6 +32,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -971,6 +972,19 @@ class UploadPendingUseCase @Inject constructor(
                 )
             )
 
+            // The device file's SHA-1 read BEFORE a strip or compression reads the file, when either may
+            // send other bytes than the device holds. Taken first so an edit at any later point leaves the
+            // device file unlike it, and free-up and delete-after-backup then keep the file. Without a
+            // rewrite the upload hash below is that very read, so nothing extra is read.
+            val readsRewritten = uploadRewritesBytes(
+                localItem.mimeType, stripOnUpload, compression.photos, compression.videos,
+            )
+            val sourceHash: String? = if (readsRewritten) {
+                withContext(Dispatchers.IO) { deviceFiles.computeSha1(state.localUri) }
+            } else {
+                null
+            }
+
             val strippedUploadUri: String = bytePreparer.strip(
                 userId, state, localItem, stripOnUpload, stripConfig, mirrorStripToLocal, compression, temps,
             )
@@ -990,7 +1004,7 @@ class UploadPendingUseCase @Inject constructor(
             eu.akoos.photos.util.SyncDiagnostics.log(
                 "upload $logRef: sha1 in ${System.currentTimeMillis() - sha1StartMs}ms"
             )
-            if (hash == null) {
+            if (hash == null || (readsRewritten && sourceHash == null)) {
                 // The content could not be read this pass. Never upload with a bogus/empty hash (it
                 // would land a Drive duplicate that never content-pairs on reconcile): release the
                 // claim back to LOCAL_ONLY so the row stays claimable and retries next pass, and skip
@@ -1122,11 +1136,17 @@ class UploadPendingUseCase @Inject constructor(
             // The row records the device file as it is now, so reconcile can tell a later edit by another
             // app from this upload's own mirror rewrite: the hash and the length of the rewritten device
             // bytes, or the size the device reported when this upload read a file it left alone.
-            val deviceHash = if (temps.deviceRewritten && finalUploadUri != state.localUri) {
-                deviceFiles.computeSha1(state.localUri) ?: hash
+            val rewrittenHash = if (temps.deviceRewritten && finalUploadUri != state.localUri) {
+                deviceFiles.computeSha1(state.localUri)
             } else {
-                hash
+                null
             }
+            val deviceHash = rewrittenHash ?: hash
+            val sentDeviceBytes = finalUploadUri == state.localUri
+            val originalHash = recordedOriginalHash(temps.deviceRewritten, sentDeviceBytes, hash, sourceHash)
+            val expectedDeviceHash = expectedDeviceHashBeforeDelete(
+                originalHash, temps.deviceRewritten, sentDeviceBytes, hash, rewrittenHash,
+            )
             val syncedState = state.copy(
                 cloudFileId = cloudId,
                 localHash = deviceHash,
@@ -1138,6 +1158,7 @@ class UploadPendingUseCase @Inject constructor(
             )
             withContext(NonCancellable) {
                 syncStateRepo.upsert(syncedState, userId)
+                syncStateRepo.setOriginalHash(state.localUri, originalHash)
                 // RULE 1: clear the queued flag now the row is SYNCED, so a later grace-window demotion
                 // can't leave it flagged and re-queued for a duplicate. Unguarded because the row is
                 // known backed up. Same non-cancellable window as the SYNCED upsert so an interrupt
@@ -1170,7 +1191,33 @@ class UploadPendingUseCase @Inject constructor(
                 deleteLocalAfterBackup = deleteLocalAfterBackup,
                 uploadSucceeded = cloudId.isNotBlank(),
             )
-            if (removal != Removal.NONE) {
+            // The device file is read once more right before the removal: it may have changed since the
+            // upload read it, and then the only copy of those bytes is the device file. A file that no
+            // longer holds what the upload read, or cannot be read, is kept and queued to be backed up again.
+            val recheck = if (removal != Removal.NONE) {
+                val currentHash = withContext(Dispatchers.IO) { deviceFiles.computeSha1(state.localUri) }
+                deleteAfterBackupRecheck(expectedDeviceHash, currentHash).also { verdict ->
+                    if (verdict != DeleteRecheck.DELETE) {
+                        Log.w(UPLOAD_TAG, "Delete after backup: kept $logRef, device file ${verdict.name.lowercase()}")
+                        withContext(NonCancellable) {
+                            try {
+                                syncStateRepo.requeueChangedDeviceCopy(
+                                    userId, syncedState, currentHash,
+                                    deviceFiles.deviceFileLength(state.localUri) ?: syncedState.sizeBytes,
+                                )
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                // The file stays on the device either way; free-up checks it again too.
+                                Log.w(UPLOAD_TAG, "Delete after backup: re-queue failed: ${e::class.simpleName}")
+                            }
+                        }
+                    }
+                }
+            } else {
+                null
+            }
+            if (recheck == DeleteRecheck.DELETE) {
                 withContext(NonCancellable) {
                     val uri = runCatching { Uri.parse(state.localUri) }.getOrNull()
                     if (uri == null) {
@@ -1359,7 +1406,57 @@ class UploadPendingUseCase @Inject constructor(
         NONE,
     }
 
+    /** What the device file holds right before delete-after-backup removes it, see [deleteAfterBackupRecheck]. */
+    enum class DeleteRecheck { DELETE, CHANGED, UNREADABLE }
+
     companion object {
+        /**
+         * The device file's own SHA-1 as an upload read it, recorded on its row ([SyncState.originalHash]):
+         * [uploadHash] when the upload sent the device file's bytes as they are ([sentDeviceBytes]), else
+         * [sourceHash], read before the strip or compression. Null when a mirror rewrote the device file
+         * ([deviceRewritten]), whose bytes are then its own. Pure.
+         */
+        fun recordedOriginalHash(
+            deviceRewritten: Boolean,
+            sentDeviceBytes: Boolean,
+            uploadHash: String,
+            sourceHash: String?,
+        ): String? = when {
+            deviceRewritten -> null
+            sentDeviceBytes -> uploadHash
+            else -> sourceHash
+        }
+
+        /**
+         * What the device file must still hold for delete-after-backup to remove it: [originalHash] when
+         * one was recorded; after a mirror rewrite the bytes it wrote, [rewrittenHash] (null when they
+         * could not be read back), or the upload's own [uploadHash] when the rewrite was the file the
+         * upload sent. Pure.
+         */
+        fun expectedDeviceHashBeforeDelete(
+            originalHash: String?,
+            deviceRewritten: Boolean,
+            sentDeviceBytes: Boolean,
+            uploadHash: String,
+            rewrittenHash: String?,
+        ): String? = when {
+            originalHash != null -> originalHash
+            deviceRewritten && !sentDeviceBytes -> rewrittenHash
+            else -> uploadHash
+        }
+
+        /**
+         * Whether delete-after-backup may remove the device file: only when its SHA-1 read now,
+         * [currentSha1], is [expectedSha1], the hash of the bytes the upload read (or a mirror wrote).
+         * Other bytes are CHANGED; a file that cannot be read now, or bytes that could not be read back
+         * after a mirror, are UNREADABLE. Pure.
+         */
+        fun deleteAfterBackupRecheck(expectedSha1: String?, currentSha1: String?): DeleteRecheck = when {
+            currentSha1 == null || expectedSha1.isNullOrEmpty() -> DeleteRecheck.UNREADABLE
+            currentSha1.equals(expectedSha1, ignoreCase = true) -> DeleteRecheck.DELETE
+            else -> DeleteRecheck.CHANGED
+        }
+
         /**
          * Whether an upload's device copy is trashed, permanently removed, or kept, the single
          * safety decision of the delete-after-backup path. Pure and side-effect-free so it can be

@@ -111,6 +111,9 @@ interface SyncStateDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(entity: SyncStateEntity): Long
 
+    // Both domain-column updates keep originalHash only while the row keeps the same localHash and
+    // cloudFileId (SQLite reads the old row on the right-hand side), so a hash recorded for one backup
+    // never vouches for another; any other change of either clears it.
     @Query(
         """
         UPDATE sync_state SET
@@ -122,7 +125,9 @@ interface SyncStateDao {
             lastSyncAttemptMs = :lastSyncAttemptMs,
             lastSyncSuccessMs = :lastSyncSuccessMs,
             backedUpAtMs = :backedUpAtMs,
-            sizeBytes = :sizeBytes
+            sizeBytes = :sizeBytes,
+            originalHash = CASE WHEN localHash = :localHash AND cloudFileId IS :cloudFileId
+                THEN originalHash ELSE NULL END
         WHERE localUri = :localUri
         """
     )
@@ -158,7 +163,9 @@ interface SyncStateDao {
             lastSyncAttemptMs = :lastSyncAttemptMs,
             lastSyncSuccessMs = :lastSyncSuccessMs,
             backedUpAtMs = :backedUpAtMs,
-            sizeBytes = :sizeBytes
+            sizeBytes = :sizeBytes,
+            originalHash = CASE WHEN localHash = :localHash AND cloudFileId IS :cloudFileId
+                THEN originalHash ELSE NULL END
         WHERE localUri = :localUri AND NOT (status = 'SYNCED' AND cloudFileId IS NOT NULL)
         """
     )
@@ -193,6 +200,10 @@ interface SyncStateDao {
             )
         }
     }
+
+    /** Records [originalHash] (or clears it, when null) on [localUri]'s row; see [SyncStateEntity.originalHash]. */
+    @Query("UPDATE sync_state SET originalHash = :originalHash WHERE localUri = :localUri")
+    suspend fun setOriginalHash(localUri: String, originalHash: String?)
 
     @Transaction
     suspend fun upsertAll(entities: List<SyncStateEntity>) {
@@ -290,7 +301,7 @@ interface SyncStateDao {
      *  the dead cloudFileId right away (no 15-minute grace-window wait). Re-adding the on-device copy
      *  to an album then uploads it fresh instead of trying to re-link the trashed id and doing nothing. */
     @Query(
-        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, queued = 0, " +
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, originalHash = NULL, queued = 0, " +
             "queueSource = 'REMOVED_FROM_DRIVE', queuedAt = NULL WHERE cloudFileId IN (:cloudFileIds) AND status = 'SYNCED'"
     )
     suspend fun demoteSyncedByCloudIds(cloudFileIds: List<String>)
@@ -300,9 +311,13 @@ interface SyncStateDao {
      * the id reconcile saw in its snapshot - returning the rows changed. A twin that genuinely
      * vanished still carries that id and is demoted (returns 1); a row an upload re-promoted in
      * between now carries a DIFFERENT id and is skipped (returns 0), so the newer pairing is not
-     * dropped. Same demotion write as [demoteSyncedByCloudIds]: status + cloudFileId only.
+     * dropped. Same demotion write as [demoteSyncedByCloudIds]: status + cloudFileId (and the
+     * original hash, which belonged to that pairing) only.
      */
-    @Query("UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL WHERE localUri = :localUri AND status = 'SYNCED' AND cloudFileId = :expectedCloudId")
+    @Query(
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, originalHash = NULL " +
+            "WHERE localUri = :localUri AND status = 'SYNCED' AND cloudFileId = :expectedCloudId"
+    )
     suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int
 
     // Only rows this app actually uploaded carry a backedUpAtMs, so requiring it non-null keeps

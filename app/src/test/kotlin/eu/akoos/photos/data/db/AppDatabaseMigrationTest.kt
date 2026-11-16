@@ -1751,8 +1751,61 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrations_registerEveryStepUpToV58() {
-        for (from in 48..57) {
+    fun migrate_v58_to_v59_addsTheOriginalHashColumn_existingRowsHaveNone() {
+        // sync_state as v58 leaves it: the v14 columns plus the queue columns MIGRATION_14_15 added.
+        db.execSQL(
+            """
+            CREATE TABLE sync_state (
+              localUri TEXT NOT NULL PRIMARY KEY,
+              userId TEXT NOT NULL,
+              cloudFileId TEXT,
+              localHash TEXT NOT NULL,
+              cloudHash TEXT,
+              status TEXT NOT NULL,
+              lastSyncAttemptMs INTEGER NOT NULL,
+              lastSyncSuccessMs INTEGER,
+              backedUpAtMs INTEGER,
+              sizeBytes INTEGER NOT NULL,
+              queued INTEGER NOT NULL DEFAULT 0,
+              queueSource TEXT DEFAULT NULL,
+              queuedAt INTEGER DEFAULT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "INSERT INTO sync_state (localUri, userId, cloudFileId, localHash, cloudHash, status, " +
+                "lastSyncAttemptMs, lastSyncSuccessMs, backedUpAtMs, sizeBytes) " +
+                "VALUES ('uri-synced', 'u1', 'cloud-1', 'h1', 'c1', 'SYNCED', 20, 21, 22, 200)"
+        )
+
+        Migrations.MIGRATION_58_59.migrate(db)
+
+        db.query("SELECT localHash, backedUpAtMs, originalHash FROM sync_state WHERE localUri = 'uri-synced'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the row keeps its columns", "h1", cur.getString(0))
+            assertEquals(22L, cur.getLong(1))
+            assertTrue("a row backed up before the column has no original hash", cur.isNull(2))
+        }
+        db.execSQL("UPDATE sync_state SET originalHash = 'o1' WHERE localUri = 'uri-synced'")
+        db.query("SELECT originalHash FROM sync_state WHERE localUri = 'uri-synced'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("o1", cur.getString(0))
+        }
+        db.query("PRAGMA table_info(sync_state)").use { cur ->
+            var notNull: Int? = null
+            while (cur.moveToNext()) {
+                if (cur.getString(cur.getColumnIndexOrThrow("name")) == "originalHash") {
+                    notNull = cur.getInt(cur.getColumnIndexOrThrow("notnull"))
+                    assertEquals("TEXT", cur.getString(cur.getColumnIndexOrThrow("type")))
+                }
+            }
+            assertEquals("the column is nullable", 0, notNull)
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV59() {
+        for (from in 48..58) {
             assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }

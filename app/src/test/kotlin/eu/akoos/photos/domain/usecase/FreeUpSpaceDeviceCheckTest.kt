@@ -38,7 +38,12 @@ class FreeUpSpaceDeviceCheckTest {
 
     private val backedUpAtMs = 1_700_000_000_000L
 
-    private fun row(localHash: String = "abc", cloudHash: String? = null, sizeBytes: Long = 1000L) = SyncState(
+    private fun row(
+        localHash: String = "abc",
+        cloudHash: String? = null,
+        sizeBytes: Long = 1000L,
+        originalHash: String? = null,
+    ) = SyncState(
         localUri = "content://media/external/images/media/1",
         cloudFileId = "cloud-1",
         localHash = localHash,
@@ -48,6 +53,7 @@ class FreeUpSpaceDeviceCheckTest {
         lastSyncSuccessMs = backedUpAtMs,
         backedUpAtMs = backedUpAtMs,
         sizeBytes = sizeBytes,
+        originalHash = originalHash,
     )
 
     private val beforeBackupSec = backedUpAtMs / 1000L - 60L
@@ -132,6 +138,83 @@ class FreeUpSpaceDeviceCheckTest {
         assertEquals(
             DeviceCopyCheck.UNKNOWN,
             deviceCopyVerdict(row(cloudHash = "paired"), 1000L, beforeBackupSec, "abc", deviceOnDrive = false, driveHash = "new"),
+        )
+    }
+
+    // An original kept beside a stripped or compressed upload: the row's hash is the upload's, and
+    // originalHash is the device file's own as the backup read it.
+    private fun stripped() = row(localHash = "uploaded", originalHash = "original")
+
+    @Test
+    fun `an original whose bytes are the ones the backup read is unchanged`() {
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(stripped(), 1000L, afterBackupSec, "original", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            "the hash compares in either case",
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(row(localHash = "uploaded", originalHash = "ABC"), 1000L, afterBackupSec, "abc", false, "d"),
+        )
+    }
+
+    @Test
+    fun `an original edited in place with its size and time kept is changed`() {
+        // Size and modified time say nothing changed; only the bytes tell.
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(stripped(), 1000L, beforeBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `a recorded original hash outranks size and time, which are not read for it`() {
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(stripped(), 0L, 0L, "edited", deviceOnDrive = false, driveHash = null),
+        )
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(stripped(), 0L, 0L, "original", deviceOnDrive = false, driveHash = null),
+        )
+    }
+
+    @Test
+    fun `an original that cannot be read is unknown even with its hash recorded`() {
+        assertEquals(
+            DeviceCopyCheck.UNKNOWN,
+            deviceCopyVerdict(stripped(), 1000L, beforeBackupSec, null, deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `a row with no original hash keeps the size and time rule`() {
+        // A row backed up before the original hash was recorded.
+        val old = row(localHash = "uploaded", originalHash = null)
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(old, 1000L, beforeBackupSec, "original", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(old, 1000L, afterBackupSec, "original", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `the device holding the uploaded bytes is unchanged whatever the original hash`() {
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(stripped(), 1000L, afterBackupSec, "uploaded", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `a Drive copy no longer the one paired stays unknown with an original hash recorded`() {
+        val paired = row(localHash = "uploaded", cloudHash = "paired", originalHash = "original")
+        assertEquals(
+            DeviceCopyCheck.UNKNOWN,
+            deviceCopyVerdict(paired, 1000L, beforeBackupSec, "edited", deviceOnDrive = false, driveHash = "new"),
         )
     }
 }

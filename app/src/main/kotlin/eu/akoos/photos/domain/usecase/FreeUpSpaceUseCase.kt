@@ -33,7 +33,6 @@ import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
-import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -166,7 +165,7 @@ class FreeUpSpaceUseCase @Inject constructor(
         val verdict = deviceCopyVerdict(row, item.sizeBytes, item.dateModified, sha1, onDrive, driveHash)
         if (verdict == DeviceCopyCheck.CHANGED) {
             try {
-                markForRebackup(userId, row, sha1, item.sizeBytes)
+                syncStateRepo.requeueChangedDeviceCopy(userId, row, sha1, item.sizeBytes)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -174,23 +173,6 @@ class FreeUpSpaceUseCase @Inject constructor(
             }
         }
         return verdict
-    }
-
-    /** Takes [row]'s backup stamp and cloud pairing off and queues the file to be backed up again. */
-    private suspend fun markForRebackup(userId: UserId, row: SyncState, sha1: String, sizeBytes: Long) {
-        syncStateRepo.upsert(
-            row.copy(
-                status = SyncStatus.LOCAL_ONLY,
-                cloudFileId = null,
-                cloudHash = null,
-                localHash = sha1,
-                backedUpAtMs = null,
-                lastSyncSuccessMs = null,
-                sizeBytes = sizeBytes.takeIf { it > 0L } ?: row.sizeBytes,
-            ),
-            userId,
-        )
-        syncStateRepo.markQueued(row.localUri, QueueSource.MANUAL, System.currentTimeMillis())
     }
 
     /**
@@ -400,9 +382,12 @@ class FreeUpSpaceUseCase @Inject constructor(
          *
          * Bytes Drive holds as they are, or bytes with the SHA-1 recorded at backup, are UNCHANGED. A
          * Drive copy whose content hash is no longer the one paired is UNKNOWN: the device copy may be
-         * the only one of what was backed up. Otherwise the recorded hash is that of rewritten upload
-         * bytes (strip or compress without a mirror) or the file changed: a different size, or a write
-         * after the backup, is CHANGED; the same size, written before the backup, is UNCHANGED.
+         * the only one of what was backed up. A row that recorded the device file's own SHA-1 as the
+         * backup read it ([SyncState.originalHash]) is decided by that alone: the same bytes are
+         * UNCHANGED, any others CHANGED. A row without it (backed up before it was recorded, or rewritten
+         * by a mirror since) falls back to size and time: the recorded hash is that of rewritten upload
+         * bytes or the file changed, so a different size, or a write after the backup, is CHANGED; the
+         * same size, written before the backup, is UNCHANGED.
          */
         fun deviceCopyVerdict(
             row: SyncState,
@@ -420,6 +405,14 @@ class FreeUpSpaceUseCase @Inject constructor(
             }
             if (row.localHash.isNotEmpty() && deviceSha1.equals(row.localHash, ignoreCase = true)) {
                 return DeviceCopyCheck.UNCHANGED
+            }
+            val originalHash = row.originalHash
+            if (!originalHash.isNullOrEmpty()) {
+                return if (deviceSha1.equals(originalHash, ignoreCase = true)) {
+                    DeviceCopyCheck.UNCHANGED
+                } else {
+                    DeviceCopyCheck.CHANGED
+                }
             }
             val backedUpAtMs = row.backedUpAtMs ?: return DeviceCopyCheck.UNKNOWN
             if (row.sizeBytes > 0L && deviceSizeBytes > 0L && deviceSizeBytes != row.sizeBytes) {
