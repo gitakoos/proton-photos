@@ -53,9 +53,11 @@ data class SyncStateEntity(
     val queued: Boolean = false,
     val queueSource: String? = null,
     val queuedAt: Long? = null,
-    // The device file's SHA-1 as the backup read it, set only through SyncStateDao.setOriginalHash after
-    // an upload; the domain-column updates keep it while the row's hash and pairing stay as they are and
-    // clear it when either changes. Never written by an insert of a domain SyncState.
+    // The device file's SHA-1 as backed up: as the backup read it, or as this app last wrote it itself.
+    // Set only through SyncStateDao.setOriginalHash after an upload or a download and through
+    // SyncStateDao.recordOwnDeviceWrite; the domain-column updates keep it while the row's hash and
+    // pairing stay as they are and clear it when either changes. Never written by an insert of a domain
+    // SyncState.
     val originalHash: String? = null,
 ) {
     fun toDomain() = SyncState(

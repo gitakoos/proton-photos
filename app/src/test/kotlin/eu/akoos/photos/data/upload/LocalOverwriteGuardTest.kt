@@ -55,7 +55,16 @@ class LocalOverwriteGuardTest {
         photo = File(context.cacheDir, "guarded.jpg").also { it.writeBytes(original) }
         journalDir().deleteRecursively()
         LocalRewrites.clear()
+        announced.clear()
+        OwnDeviceWrites.install { announced += it }
     }
+
+    @org.junit.After
+    fun tearDown() {
+        OwnDeviceWrites.clear()
+    }
+
+    private val announced = mutableListOf<String>()
 
     private fun journalDir() = File(context.filesDir, MirrorOverwriteJournal.DIR_NAME)
 
@@ -146,5 +155,27 @@ class LocalOverwriteGuardTest {
         assertTrue(thrown is MirrorOverwriteJournal.StagingFailedException)
         assertFalse(ran)
         assertEquals(0, journalFiles())
+    }
+
+    @Test
+    fun `a metadata rewrite that lands is announced so its bytes are recorded`() {
+        guard().run(uri) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("stamped".toByteArray()) }
+        }
+        assertEquals(listOf(uri), announced)
+    }
+
+    @Test
+    fun `a pixel edit is not announced, so it reads as a change to back up`() {
+        guard().run(uri, contentEdit = true) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("edited".toByteArray()) }
+        }
+        assertEquals(emptyList<String>(), announced)
+    }
+
+    @Test
+    fun `a rewrite that fails is not announced`() {
+        runCatching { guard().run<Unit>(uri) { throw SecurityException("needs consent") } }
+        assertEquals(emptyList<String>(), announced)
     }
 }

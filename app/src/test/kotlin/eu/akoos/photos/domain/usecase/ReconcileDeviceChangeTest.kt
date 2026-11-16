@@ -269,6 +269,26 @@ class ReconcileDeviceChangeTest {
     }
 
     @Test
+    fun `a rewrite this app recorded on the row keeps the stamp after a restart`() = runTest {
+        // Nothing noted in this process: the row's own record of the bytes the app wrote is what tells.
+        coEvery { localRepo.sha1("uri://own") } returns "metadata-written"
+        coEvery { localRepo.sha1("uri://other") } returns "edited"
+
+        val out = pass(
+            listOf(device("uri://own", 2048L), device("uri://other", 2048L)),
+            listOf(
+                row("uri://own", "L1", "orig", 1024L).copy(originalHash = "METADATA-WRITTEN"),
+                row("uri://other", "L2", "orig2", 1024L).copy(originalHash = "metadata-written"),
+            ),
+            listOf(cloud("L1", "hmac-orig"), cloud("L2", "hmac-orig2")),
+        )
+
+        assertEquals(STAMP, out.getValue("uri://own").backedUpAtMs)
+        assertEquals("metadata-written", out.getValue("uri://own").localHash)
+        assertNull("bytes other than the recorded ones lose the stamp", out.getValue("uri://other").backedUpAtMs)
+    }
+
+    @Test
     fun `a pass hashes at most its cap and leaves the rest for the next one`() = runTest {
         val count = DEVICE_CHANGE_HASHES_PER_PASS + 1
         val devices = List(count) { device("uri://$it", 2048L) }

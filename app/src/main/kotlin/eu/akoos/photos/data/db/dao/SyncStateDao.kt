@@ -206,6 +206,17 @@ interface SyncStateDao {
     @Query("UPDATE sync_state SET originalHash = :originalHash WHERE localUri = :localUri")
     suspend fun setOriginalHash(localUri: String, originalHash: String?)
 
+    /**
+     * Records [sha1] as what [localUri]'s device file holds after this app rewrote it itself, on a row
+     * backed up and paired to Drive only; see
+     * [eu.akoos.photos.domain.repository.SyncStateRepository.recordOwnDeviceWrite].
+     */
+    @Query(
+        "UPDATE sync_state SET originalHash = :sha1 WHERE localUri = :localUri AND status = 'SYNCED' " +
+            "AND cloudFileId IS NOT NULL AND backedUpAtMs IS NOT NULL"
+    )
+    suspend fun recordOwnDeviceWrite(localUri: String, sha1: String)
+
     @Transaction
     suspend fun upsertAll(entities: List<SyncStateEntity>) {
         for (entity in entities) upsert(entity)

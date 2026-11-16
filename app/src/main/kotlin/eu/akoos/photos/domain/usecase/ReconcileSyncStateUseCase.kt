@@ -487,7 +487,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
             // A backed-up file another app edited in place keeps its uri and so its pairing; only its size
             // shows the change. Such a file is re-hashed: bytes that match the stored hash or the cloud
-            // copy, or a rewrite this process made, keep the backup stamp, anything else loses it so free-up
+            // copy, or a rewrite this app made (noted in this process, or recorded on the row as the bytes it
+            // left, which outlives a restart), keep the backup stamp, anything else loses it so free-up
             // space never deletes bytes Drive does not hold. Nothing is re-uploaded. A file this pass does
             // not hash keeps its old stored size, so a later pass looks again.
             val changeCheck = byId != null && existingSync != null && sizeChangedSinceBackup(existingSync, local.sizeBytes)
@@ -502,6 +503,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val deviceChanged = deviceHash != null &&
                 !LocalRewrites.consume(local.uri, local.sizeBytes) &&
                 deviceHash != existingSync?.localHash &&
+                !deviceHash.equals(existingSync?.originalHash, ignoreCase = true) &&
                 cloudRepo.cloudContentHash(deviceHash)?.let { it == byId?.contentHash } != true
 
             // Content hash is the AUTHORITATIVE matcher: it compares the actual file bytes (the local

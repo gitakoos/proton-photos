@@ -753,4 +753,29 @@ class SyncStateDaoTest {
 
         assertNull(dao.getByUri("uri://1")!!.originalHash)
     }
+
+    @Test
+    fun `a rewrite this app made is recorded only on a backed-up row paired to Drive`() = runTest {
+        dao.upsert(backedUp("uri://synced"))
+        dao.upsert(backedUp("uri://local", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
+        dao.upsert(entity("uri://paired-only", status = SyncStatus.SYNCED, cloudFileId = "cloud-2", backedUpAtMs = null))
+
+        dao.recordOwnDeviceWrite("uri://synced", "written")
+        dao.recordOwnDeviceWrite("uri://local", "written")
+        dao.recordOwnDeviceWrite("uri://paired-only", "written")
+
+        assertEquals("written", dao.getByUri("uri://synced")!!.originalHash)
+        assertNull(dao.getByUri("uri://local")!!.originalHash)
+        assertNull(dao.getByUri("uri://paired-only")!!.originalHash)
+    }
+
+    @Test
+    fun `a recorded own write survives a reconcile pass that keeps the row's hash and pairing`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.recordOwnDeviceWrite("uri://1", "written")
+
+        dao.upsert(backedUp("uri://1").copy(sizeBytes = 2048L))
+
+        assertEquals("written", dao.getByUri("uri://1")!!.originalHash)
+    }
 }

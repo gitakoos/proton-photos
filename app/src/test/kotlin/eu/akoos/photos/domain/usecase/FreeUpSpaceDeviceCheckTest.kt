@@ -76,9 +76,9 @@ class FreeUpSpaceDeviceCheckTest {
     }
 
     @Test
-    fun `a file that could not be read is unknown`() {
+    fun `a file that could not be read is unreadable`() {
         assertEquals(
-            DeviceCopyCheck.UNKNOWN,
+            DeviceCopyCheck.UNREADABLE,
             deviceCopyVerdict(row(), 1000L, beforeBackupSec, null, deviceOnDrive = false, driveHash = null),
         )
     }
@@ -122,21 +122,21 @@ class FreeUpSpaceDeviceCheckTest {
     }
 
     @Test
-    fun `no modified time or no recorded size is unknown, not changed`() {
+    fun `no modified time or no recorded size is unchecked, not changed`() {
         assertEquals(
-            DeviceCopyCheck.UNKNOWN,
+            DeviceCopyCheck.UNCHECKED,
             deviceCopyVerdict(row(), 1000L, 0L, "edited", deviceOnDrive = false, driveHash = null),
         )
         assertEquals(
-            DeviceCopyCheck.UNKNOWN,
+            DeviceCopyCheck.UNCHECKED,
             deviceCopyVerdict(row(sizeBytes = 0L), 1000L, beforeBackupSec, "edited", deviceOnDrive = false, driveHash = null),
         )
     }
 
     @Test
-    fun `a Drive copy that is no longer the one paired leaves the device copy unknown`() {
+    fun `a Drive copy that is no longer the one paired leaves the device copy unchecked`() {
         assertEquals(
-            DeviceCopyCheck.UNKNOWN,
+            DeviceCopyCheck.UNCHECKED,
             deviceCopyVerdict(row(cloudHash = "paired"), 1000L, beforeBackupSec, "abc", deviceOnDrive = false, driveHash = "new"),
         )
     }
@@ -180,9 +180,9 @@ class FreeUpSpaceDeviceCheckTest {
     }
 
     @Test
-    fun `an original that cannot be read is unknown even with its hash recorded`() {
+    fun `an original that cannot be read is unreadable even with its hash recorded`() {
         assertEquals(
-            DeviceCopyCheck.UNKNOWN,
+            DeviceCopyCheck.UNREADABLE,
             deviceCopyVerdict(stripped(), 1000L, beforeBackupSec, null, deviceOnDrive = false, driveHash = "d"),
         )
     }
@@ -210,11 +210,110 @@ class FreeUpSpaceDeviceCheckTest {
     }
 
     @Test
-    fun `a Drive copy no longer the one paired stays unknown with an original hash recorded`() {
+    fun `a Drive copy no longer the one paired stays unchecked with an original hash recorded`() {
         val paired = row(localHash = "uploaded", cloudHash = "paired", originalHash = "original")
         assertEquals(
-            DeviceCopyCheck.UNKNOWN,
+            DeviceCopyCheck.UNCHECKED,
             deviceCopyVerdict(paired, 1000L, beforeBackupSec, "edited", deviceOnDrive = false, driveHash = "new"),
+        )
+    }
+
+    // ── Rows backed up before the original hash was recorded ───────────────────────────────────────
+
+    @Test
+    fun `a same-size edit of an old row is changed once the modified time is read`() {
+        // The edit keeps the size; before the modified time was read this stayed undecided forever.
+        val old = row(localHash = "uploaded", originalHash = null)
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(old, 1000L, afterBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `an uploaded row at another size is changed even with no modified time`() {
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(row(), 1200L, 0L, "edited", deviceOnDrive = false, driveHash = null),
+        )
+    }
+
+    // ── Bytes this app wrote itself ─────────────────────────────────────────────────────────────────
+
+    /** A download whose saved copy took the date and place the app stamped into it, as recorded now. */
+    private fun download(originalHash: String? = "stamped") =
+        row(localHash = "", sizeBytes = 1100L, originalHash = originalHash)
+
+    @Test
+    fun `a download the app stamped with its place and date is unchanged whatever its modified time`() {
+        for (modified in listOf(beforeBackupSec, afterBackupSec, 0L)) {
+            assertEquals(
+                DeviceCopyCheck.UNCHANGED,
+                deviceCopyVerdict(download(), 1100L, modified, "stamped", deviceOnDrive = false, driveHash = "d"),
+            )
+        }
+    }
+
+    @Test
+    fun `a same-size edit of a stamped download is changed`() {
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(download(), 1100L, beforeBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `an older download whose stamp grew the file is unchecked, not changed`() {
+        // Its row recorded the Drive size before the stamp wrote the place in; nothing was written since.
+        val old = row(localHash = "", sizeBytes = 1000L, originalHash = null)
+        assertEquals(
+            DeviceCopyCheck.UNCHECKED,
+            deviceCopyVerdict(old, 1100L, beforeBackupSec, "stamped", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            "a write after the backup still tells",
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(old, 1100L, afterBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `a metadata write the app recorded after the backup is unchanged`() {
+        val written = row(localHash = "abc", originalHash = "after-metadata-write")
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(written, 1040L, afterBackupSec, "after-metadata-write", false, driveHash = "d"),
+        )
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(written, 1040L, afterBackupSec, "edited", false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `a mirror rewrite is unchanged and a same-size edit after it is changed`() {
+        // The mirror wrote stripped bytes to the device; the row records them as its hash and as its original.
+        val mirrored = row(localHash = "mirrored", originalHash = "mirrored")
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(mirrored, 1000L, afterBackupSec, "mirrored", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(mirrored, 1000L, beforeBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
+
+    @Test
+    fun `a mirror whose bytes could not be read back is judged by its hash and then its modified time`() {
+        val mirrored = row(localHash = "uploaded", originalHash = null)
+        assertEquals(
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(mirrored, 1000L, beforeBackupSec, "uploaded", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            DeviceCopyCheck.CHANGED,
+            deviceCopyVerdict(mirrored, 1000L, afterBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
         )
     }
 }

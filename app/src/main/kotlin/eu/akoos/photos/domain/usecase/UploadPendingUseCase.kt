@@ -1143,7 +1143,9 @@ class UploadPendingUseCase @Inject constructor(
             }
             val deviceHash = rewrittenHash ?: hash
             val sentDeviceBytes = finalUploadUri == state.localUri
-            val originalHash = recordedOriginalHash(temps.deviceRewritten, sentDeviceBytes, hash, sourceHash)
+            val originalHash = recordedOriginalHash(
+                temps.deviceRewritten, sentDeviceBytes, hash, sourceHash, rewrittenHash,
+            )
             val expectedDeviceHash = expectedDeviceHashBeforeDelete(
                 originalHash, temps.deviceRewritten, sentDeviceBytes, hash, rewrittenHash,
             )
@@ -1415,19 +1417,21 @@ class UploadPendingUseCase @Inject constructor(
 
     companion object {
         /**
-         * The device file's own SHA-1 as an upload read it, recorded on its row ([SyncState.originalHash]):
-         * [uploadHash] when the upload sent the device file's bytes as they are ([sentDeviceBytes]), else
-         * [sourceHash], read before the strip or compression. Null when a mirror rewrote the device file
-         * ([deviceRewritten]), whose bytes are then its own. Pure.
+         * What the device file holds as this backup leaves it, recorded on its row
+         * ([SyncState.originalHash]): [uploadHash] when the upload sent the device file's bytes as they
+         * are ([sentDeviceBytes]); after a mirror rewrote the device file ([deviceRewritten]) the bytes the
+         * mirror wrote, [rewrittenHash], null when they could not be read back; else [sourceHash], read
+         * before the strip or compression. Pure.
          */
         fun recordedOriginalHash(
             deviceRewritten: Boolean,
             sentDeviceBytes: Boolean,
             uploadHash: String,
             sourceHash: String?,
+            rewrittenHash: String? = null,
         ): String? = when {
-            deviceRewritten -> null
             sentDeviceBytes -> uploadHash
+            deviceRewritten -> rewrittenHash
             else -> sourceHash
         }
 

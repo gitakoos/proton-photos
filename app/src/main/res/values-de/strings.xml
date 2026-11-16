@@ -1503,6 +1503,10 @@
     </plurals>
     <string name="settings_free_up_error">Speicher konnte nicht freigegeben werden: %1$s</string>
     <string name="free_up_skipped_pre_r">Einige Gerätekopien brauchen Android 11 oder neuer zum Entfernen und wurden übersprungen.</string>
+    <plurals name="free_up_kept_unchecked">
+        <item quantity="one">%1$d Foto wurde behalten, weil es nicht mit seiner Sicherung abgeglichen werden konnte.</item>
+        <item quantity="other">%1$d Fotos wurden behalten, weil sie nicht mit ihrer Sicherung abgeglichen werden konnten.</item>
+    </plurals>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Wird hochgeladen…</string>

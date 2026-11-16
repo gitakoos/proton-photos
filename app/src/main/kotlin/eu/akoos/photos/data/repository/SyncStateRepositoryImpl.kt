@@ -161,6 +161,9 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun setOriginalHash(localUri: String, originalHash: String?) =
         dao.setOriginalHash(localUri, originalHash)
 
+    override suspend fun recordOwnDeviceWrite(localUri: String, sha1: String) =
+        dao.recordOwnDeviceWrite(localUri, sha1)
+
     override suspend fun clearAlbumAddIntent(localUri: String) {
         dao.clearAlbumAddIntent(localUri)
     }

@@ -95,6 +95,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     private val pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter get() = pendingAlbumAddsImporterLazy.get()
 
     @Inject
+    lateinit var ownDeviceWriteRecorderLazy: dagger.Lazy<eu.akoos.photos.data.upload.OwnDeviceWriteRecorder>
+
+    @Inject
     lateinit var autoSaveCoordinatorLazy: dagger.Lazy<eu.akoos.photos.data.autosave.AutoSaveCoordinator>
     private val autoSaveCoordinator: eu.akoos.photos.data.autosave.AutoSaveCoordinator get() = autoSaveCoordinatorLazy.get()
 
@@ -143,6 +146,11 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         }
         // First: clears scratch plaintext of an earlier process, then encrypts what an earlier version left plain.
         localEncryption.start()
+        // A metadata write this app makes to a backed-up device photo records the bytes it left on the
+        // photo's backup row, so free-up does not take that write for an edit to back up again.
+        eu.akoos.photos.data.upload.OwnDeviceWrites.install { uri ->
+            appScope.launch { ownDeviceWriteRecorderLazy.get().record(uri) }
+        }
         delegatingFactory.addFactory(workerFactory)
         sweepMlSyncScratch(processStartMs)
         // Watches the data behind the automatic Drive saves and plans their next check, which a force stop drops.

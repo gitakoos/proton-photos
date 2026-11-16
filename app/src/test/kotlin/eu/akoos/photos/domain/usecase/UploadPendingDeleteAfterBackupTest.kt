@@ -149,13 +149,39 @@ class UploadPendingDeleteAfterBackupTest {
     }
 
     @Test
-    fun `no original hash is recorded once a mirror rewrote the device file`() {
-        for (sent in listOf(true, false)) {
+    fun `after a mirror rewrote the device file the bytes it wrote are recorded`() {
+        assertEquals(
+            "mirror",
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = true, sentDeviceBytes = false, uploadHash = "u", sourceHash = "s",
+                rewrittenHash = "mirror",
+            ),
+        )
+        assertEquals(
+            "an in-place strip uploads the rewritten device file itself",
+            "u",
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = true, sentDeviceBytes = true, uploadHash = "u", sourceHash = "s",
+            ),
+        )
+        assertEquals(
+            "mirror bytes that could not be read back are not recorded",
+            null,
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = true, sentDeviceBytes = false, uploadHash = "u", sourceHash = "s",
+                rewrittenHash = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `the hash checked before the delete is the one recorded, for every kind of upload`() {
+        for ((rewritten, sent) in listOf(false to true, false to false, true to true, true to false)) {
+            val recorded = UploadPendingUseCase.recordedOriginalHash(rewritten, sent, "u", "s", "mirror")
             assertEquals(
-                null,
-                UploadPendingUseCase.recordedOriginalHash(
-                    deviceRewritten = true, sentDeviceBytes = sent, uploadHash = "u", sourceHash = "s",
-                ),
+                "rewritten=$rewritten sent=$sent",
+                recorded,
+                UploadPendingUseCase.expectedDeviceHashBeforeDelete(recorded, rewritten, sent, "u", "mirror"),
             )
         }
     }

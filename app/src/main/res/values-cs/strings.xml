@@ -1370,6 +1370,12 @@
     </plurals>
     <string name="settings_free_up_error">Nepodařilo se uvolnit místo: %1$s</string>
     <string name="free_up_skipped_pre_r">Některé kopie v zařízení vyžadují k odstranění Android 11 nebo novější a byly přeskočeny.</string>
+    <plurals name="free_up_kept_unchecked">
+        <item quantity="one">%1$d fotka zůstala v zařízení, protože ji nešlo porovnat se zálohou.</item>
+        <item quantity="few">%1$d fotky zůstaly v zařízení, protože je nešlo porovnat se zálohou.</item>
+        <item quantity="many">%1$d fotky zůstalo v zařízení, protože je nešlo porovnat se zálohou.</item>
+        <item quantity="other">%1$d fotek zůstalo v zařízení, protože je nešlo porovnat se zálohou.</item>
+    </plurals>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nahrávání…</string>
     <string name="upload_status_encrypting">Šifrování…</string>

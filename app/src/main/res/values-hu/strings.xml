@@ -1526,6 +1526,10 @@
     </plurals>
     <string name="settings_free_up_error">Nem sikerült helyet felszabadítani: %1$s</string>
     <string name="free_up_skipped_pre_r">Egyes eszközön lévő másolatok eltávolításához Android 11 vagy újabb kell, ezek kimaradtak.</string>
+    <plurals name="free_up_kept_unchecked">
+        <item quantity="one">%1$d fotó megmaradt, mert nem lehetett összevetni a mentésével.</item>
+        <item quantity="other">%1$d fotó megmaradt, mert nem lehetett összevetni a mentésével.</item>
+    </plurals>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Feltöltés…</string>

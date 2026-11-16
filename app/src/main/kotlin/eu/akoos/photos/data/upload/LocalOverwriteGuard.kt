@@ -58,8 +58,17 @@ class LocalOverwriteGuard(private val context: Context) {
      * The rewritten file must still decode as an image of [expectedSize], or of the original's size when
      * that is null; one that does not is rolled back and reported as a failure. A container the platform
      * cannot decode to bounds is not checked.
+     *
+     * A rewrite that keeps the photo itself (a metadata write or strip) is announced through
+     * [OwnDeviceWrites] once it landed, so its backup row records the new bytes as backed up. [contentEdit]
+     * marks one that changes the picture, which is not: Drive does not hold it, so it must read as changed.
      */
-    fun <T> run(uri: String, expectedSize: Pair<Int, Int>? = null, mutate: () -> T): T {
+    fun <T> run(
+        uri: String,
+        expectedSize: Pair<Int, Int>? = null,
+        contentEdit: Boolean = false,
+        mutate: () -> T,
+    ): T {
         val parsed = Uri.parse(uri)
         val originalSize = imageSize(parsed)
         val wanted = expectedSize ?: originalSize
@@ -90,6 +99,7 @@ class LocalOverwriteGuard(private val context: Context) {
             verify = { wanted == null || imageSize(parsed) == wanted },
         )
         fileLength(parsed)?.let { LocalRewrites.note(uri, it) }
+        if (!contentEdit) OwnDeviceWrites.wrote(uri)
         return result
     }
 

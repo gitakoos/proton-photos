@@ -85,7 +85,10 @@ class FreeUpSpaceVerifyTest {
         linkDetailHelpers = mockk(relaxed = true)
         val context = mockk<Context>(relaxed = true)
         val syncStateRepo = mockk<SyncStateRepository>(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, syncStateRepo, cloudRepo, linkDetailHelpers, mockk(relaxed = true))
+        useCase = FreeUpSpaceUseCase(
+            context, syncStateRepo, cloudRepo, linkDetailHelpers, mockk(relaxed = true),
+            InMemoryFreeUpUncheckedStore(),
+        )
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
     }
 

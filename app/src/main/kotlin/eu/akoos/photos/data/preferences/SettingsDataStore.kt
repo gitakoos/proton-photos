@@ -705,6 +705,13 @@ object SettingsKeys {
     const val PENDING_DELETE_URIS_MAX = 200
 
     /**
+     * Device copies free-up kept because nothing could tell whether they still hold what was backed up,
+     * each as "size|modified|uri" with the stamp its file had then, so the free-up list leaves them out
+     * until the file changes. See [eu.akoos.photos.data.preferences.FreeUpUncheckedStoreImpl].
+     */
+    val FREE_UP_UNCHECKED = stringSetPreferencesKey("free_up_unchecked")
+
+    /**
      * Just-created but uncommitted Drive file nodes whose best-effort cleanup delete failed at the
      * time of a non-retryable upload failure. Each entry is "shareId|linkId" (the two ids the
      * share-scoped delete_multiple endpoint needs; '|' separator since a Drive linkId is base64 and

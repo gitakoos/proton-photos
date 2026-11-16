@@ -2960,7 +2960,7 @@ class PhotoEditorViewModel @Inject constructor(
             onError = { throw it },
         ) { target ->
             val targetUri = Uri.parse(target)
-            LocalOverwriteGuard(context).run(target, expectedSize = bitmap.width to bitmap.height) {
+            LocalOverwriteGuard(context).run(target, expectedSize = bitmap.width to bitmap.height, contentEdit = true) {
                 context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
                     requireEncoded(bitmap.compress(format, quality, out))
                 } ?: error("openOutputStream returned null for $targetUri")

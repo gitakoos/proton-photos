@@ -88,6 +88,7 @@ object AccountScopedPreferences {
             SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES,
             SettingsKeys.ALBUM_BUCKET_MAP,
             SettingsKeys.PENDING_DELETE_URIS,
+            SettingsKeys.FREE_UP_UNCHECKED,
             SettingsKeys.OFFLINE_PIN_IDS,
             SettingsKeys.RECENT_UPLOAD_IDS,
             // Hide-photos-in-albums is a per-user view preference. Without

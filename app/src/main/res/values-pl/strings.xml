@@ -1370,6 +1370,12 @@
     </plurals>
     <string name="settings_free_up_error">Nie udało się zwolnić miejsca: %1$s</string>
     <string name="free_up_skipped_pre_r">Niektóre kopie na urządzeniu wymagają Androida 11 lub nowszego do usunięcia i zostały pominięte.</string>
+    <plurals name="free_up_kept_unchecked">
+        <item quantity="one">Zachowano %1$d zdjęcie, bo nie dało się go porównać z kopią zapasową.</item>
+        <item quantity="few">Zachowano %1$d zdjęcia, bo nie dało się ich porównać z kopią zapasową.</item>
+        <item quantity="many">Zachowano %1$d zdjęć, bo nie dało się ich porównać z kopią zapasową.</item>
+        <item quantity="other">Zachowano %1$d zdjęcia, bo nie dało się ich porównać z kopią zapasową.</item>
+    </plurals>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Wysyłanie…</string>
     <string name="upload_status_encrypting">Szyfrowanie…</string>

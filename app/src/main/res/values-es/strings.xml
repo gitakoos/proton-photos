@@ -1522,6 +1522,11 @@
     </plurals>
     <string name="settings_free_up_error">No se pudo liberar espacio: %1$s</string>
     <string name="free_up_skipped_pre_r">Algunas copias del dispositivo requieren Android 11 o posterior para eliminarse y se omitieron.</string>
+    <plurals name="free_up_kept_unchecked">
+        <item quantity="one">Se conservó %1$d foto porque no se pudo comprobar con su copia de seguridad.</item>
+        <item quantity="many">Se conservaron %1$d fotos porque no se pudieron comprobar con su copia de seguridad.</item>
+        <item quantity="other">Se conservaron %1$d fotos porque no se pudieron comprobar con su copia de seguridad.</item>
+    </plurals>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Subiendo…</string>

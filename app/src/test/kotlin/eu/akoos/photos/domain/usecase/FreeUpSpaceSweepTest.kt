@@ -31,7 +31,7 @@ import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.data.api.dto.LinkPhotoDto
-import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.entity.DeviceFileStamp
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -69,6 +69,7 @@ class FreeUpSpaceSweepTest {
     private lateinit var resolver: ContentResolver
     private lateinit var localRepo: LocalMediaRepository
     private lateinit var useCase: FreeUpSpaceUseCase
+    private val unchecked = InMemoryFreeUpUncheckedStore()
 
     private fun eligible(i: Int) = SyncState(
         localUri = "content://media/external/images/media/$i",
@@ -96,23 +97,17 @@ class FreeUpSpaceSweepTest {
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
         localRepo = mockk(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo)
+        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo, unchecked)
         // By default every device file is exactly what was backed up: its size, and the SHA-1 its row recorded.
-        coEvery { localRepo.queryByUri(any()) } answers { deviceFile(firstArg(), sizeBytes = 1024L) }
+        coEvery { localRepo.fileStamp(any()) } answers { deviceFile(firstArg(), sizeBytes = 1024L) }
         coEvery { localRepo.sha1(any()) } answers { "hash-" + firstArg<String>().substringAfterLast('/') }
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
         every { resolver.delete(any(), any(), any()) } returns 1
     }
 
-    private fun deviceFile(uri: String, sizeBytes: Long, modifiedSec: Long = 0L) = LocalMediaItem(
-        uri = uri,
-        dateTaken = 0L,
-        displayName = "IMG.jpg",
-        mimeType = "image/jpeg",
-        sizeBytes = sizeBytes,
-        bucketName = "Camera",
-        dateModified = modifiedSec,
-    )
+    /** What the device reports for the file at [uri]; the uri only names which file the stub stands for. */
+    @Suppress("UNUSED_PARAMETER")
+    private fun deviceFile(uri: String, sizeBytes: Long, modifiedSec: Long = 0L) = DeviceFileStamp(sizeBytes, modifiedSec)
 
     @After
     fun tearDown() {
@@ -249,7 +244,7 @@ class FreeUpSpaceSweepTest {
         coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
         coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to linkAt("cloud-1", state = 1))
-        coEvery { localRepo.queryByUri(row.localUri) } returns deviceFile(row.localUri, sizeBytes = 2048L)
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, sizeBytes = 2048L)
         coEvery { localRepo.sha1(row.localUri) } returns "edited"
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
@@ -327,7 +322,7 @@ class FreeUpSpaceSweepTest {
         coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to linkAt("cloud-1", state = 1))
         // Same size as recorded and written long before the backup: only the bytes differ.
-        coEvery { localRepo.queryByUri(row.localUri) } returns deviceFile(row.localUri, sizeBytes = 1024L, modifiedSec = 0L)
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, sizeBytes = 1024L, modifiedSec = 0L)
         coEvery { localRepo.sha1(row.localUri) } returns "edited"
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
@@ -364,5 +359,97 @@ class FreeUpSpaceSweepTest {
         assertEquals(listOf(same), confirmed)
         coVerify { repo.markQueued(edited.localUri, QueueSource.MANUAL, any()) }
         coVerify(exactly = 0) { repo.markQueued(same.localUri, any(), any()) }
+    }
+
+    // ── Copies that cannot be checked ─────────────────────────────────────────────────────────────────
+
+    /** A download from before its saved bytes were recorded: the stamp grew it past the Drive size. */
+    private fun oldDownload(i: Int) = eligible(i).copy(localHash = "", sizeBytes = 1000L, backedUpAtMs = 5_000_000L)
+
+    @Test
+    fun `a copy that cannot be checked is kept, reported, and left out of the next list`() = runTest {
+        val row = oldDownload(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, 1100L, modifiedSec = 100L)
+        coEvery { localRepo.sha1(row.localUri) } returns "stamped"
+
+        val result = useCase.verifyAndReclaim(userId, useCase.candidates(userId, Long.MAX_VALUE))
+
+        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 0, unchecked = 1), result)
+        verify(exactly = 0) { resolver.delete(any(), any(), any()) }
+        coVerify(exactly = 0) { repo.upsert(any(), any()) }
+        coVerify(exactly = 0) { repo.markQueued(any(), any(), any()) }
+        assertEquals(DeviceFileStamp(1100L, 100L), unchecked.entries[row.localUri])
+        assertEquals(
+            "not listed again while the file is as it was",
+            emptyList<SyncState>(),
+            useCase.candidates(userId, Long.MAX_VALUE),
+        )
+    }
+
+    @Test
+    fun `a kept copy whose file was written since comes back and is checked again`() = runTest {
+        val row = oldDownload(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        unchecked.mark(row.localUri, DeviceFileStamp(1100L, 100L))
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, 1100L, modifiedSec = 9_000L)
+
+        assertEquals(listOf(row), useCase.candidates(userId, Long.MAX_VALUE))
+        assertTrue(row.localUri !in unchecked.entries)
+
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.sha1(row.localUri) } returns "edited"
+
+        val result = useCase.verifyAndReclaim(userId, listOf(row))
+
+        assertEquals("written after the backup, so it goes up again", FreeUpSpaceUseCase.FreeUpResult.Done(0), result)
+        coVerify { repo.markQueued(row.localUri, QueueSource.MANUAL, any()) }
+    }
+
+    @Test
+    fun `a same-size edit of a row with no original hash is queued to be backed up again`() = runTest {
+        val row = eligible(1).copy(backedUpAtMs = 5_000_000L)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, 1024L, modifiedSec = 9_000L)
+        coEvery { localRepo.sha1(row.localUri) } returns "edited"
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(0), result)
+        verify(exactly = 0) { resolver.delete(any(), any(), any()) }
+        coVerify { repo.markQueued(row.localUri, QueueSource.MANUAL, any()) }
+        assertTrue("never left in the list unchecked", unchecked.entries.isEmpty())
+    }
+
+    @Test
+    fun `an unreadable copy is reported but checked again on the next run`() = runTest {
+        val row = eligible(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.sha1(row.localUri) } returns null
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 0, unchecked = 1), result)
+        assertTrue(unchecked.entries.isEmpty())
+        assertEquals(listOf(row), useCase.candidates(userId, Long.MAX_VALUE))
+    }
+
+    @Test
+    fun `the pending delete check drops a copy it cannot check and leaves it out of the list`() = runTest {
+        val row = oldDownload(1)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, 1100L, modifiedSec = 100L)
+        coEvery { localRepo.sha1(row.localUri) } returns "stamped"
+
+        assertEquals(emptyList<SyncState>(), useCase.confirmForDeletion(userId, listOf(row)))
+        assertTrue(row.localUri in unchecked.entries)
     }
 }

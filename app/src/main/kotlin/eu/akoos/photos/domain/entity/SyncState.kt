@@ -47,10 +47,12 @@ data class SyncState(
     val queueSource: String? = null,
     val queuedAt: Long? = null,
     /**
-     * Read-only: the SHA-1 of the device file as the last backup read it, before any strip or
-     * compression, when that backup left the device file as it was. Null for a row backed up before it
-     * was recorded, one whose device file a mirror rewrote, and one whose hash or Drive pairing changed
-     * since (the DAO clears it then). Written only by [eu.akoos.photos.domain.repository.SyncStateRepository.setOriginalHash].
+     * Read-only: the SHA-1 of what the device file holds as backed up: as the last backup read it,
+     * before any strip or compression, or as this app wrote it itself since (a mirror rewrite at that
+     * backup, a download's saved copy, a metadata write). Null for a row backed up before it was
+     * recorded, and one whose hash or Drive pairing changed since (the DAO clears it then). Written only
+     * by [eu.akoos.photos.domain.repository.SyncStateRepository.setOriginalHash] and
+     * [eu.akoos.photos.domain.repository.SyncStateRepository.recordOwnDeviceWrite].
      */
     val originalHash: String? = null,
 )

@@ -1808,6 +1808,10 @@
     </plurals>
     <string name="settings_free_up_error">Yer açılamadı: %1$s</string>
     <string name="free_up_skipped_pre_r">Bazı cihaz kopyalarının kaldırılması için Android 11 veya üstü gerekiyor, bunlar atlandı.</string>
+    <plurals name="free_up_kept_unchecked">
+        <item quantity="one">%1$d fotoğraf yedeğiyle karşılaştırılamadığı için cihazda tutuldu.</item>
+        <item quantity="other">%1$d fotoğraf yedeğiyle karşılaştırılamadığı için cihazda tutuldu.</item>
+    </plurals>
     <string name="upload_status_uploading">Yükleniyor…</string>
     <string name="upload_status_encrypting">Şifreleniyor…</string>
     <string name="upload_status_queued">Sırada</string>

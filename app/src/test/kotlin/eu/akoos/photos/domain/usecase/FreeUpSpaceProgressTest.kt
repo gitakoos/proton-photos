@@ -83,7 +83,10 @@ class FreeUpSpaceProgressTest {
         repo = mockk(relaxed = true)
         // The reclaim path exercised here never touches the cloud collaborators; the manual verify
         // path is covered in FreeUpSpaceVerifyTest, so relaxed stand-ins are enough for construction.
-        useCase = FreeUpSpaceUseCase(context, repo, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
+        useCase = FreeUpSpaceUseCase(
+            context, repo, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
+            InMemoryFreeUpUncheckedStore(),
+        )
     }
 
     @Test

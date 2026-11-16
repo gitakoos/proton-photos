@@ -190,7 +190,7 @@ class DownloadPhotosUseCase @Inject constructor(
                             // The cache keeps the original encrypted; the save stamps and copies a plaintext
                             // scratch copy of it, deleted after.
                             val gps = resolveGpsForExif(userId, photo)
-                            val savedUri = file.withPlainFile(context) { plain ->
+                            val saved = file.withPlainFile(context) { plain ->
                                 saveFileToMediaStore(
                                     plain, photo.displayName, photo.mimeType, folder,
                                     captureTimeSeconds = photo.captureTime,
@@ -198,13 +198,13 @@ class DownloadPhotosUseCase @Inject constructor(
                                 )
                             }
                             file.delete()
-                            // A null uri means the file was never written: MediaStore refused the
+                            // A null copy means the file was never written: MediaStore refused the
                             // insert, or the copy failed part-way, which on a full volume is the
                             // common case. Counting it as done reported a photo saved that is not on
                             // the device, so a batch that ran out of space still read as complete.
-                            if (savedUri != null) {
-                                linkSyncState(userId, savedUri, photo)
-                                onSaved(savedUri.toString())
+                            if (saved != null) {
+                                linkSyncState(userId, saved.uri, photo, saved.writtenSize)
+                                onSaved(saved.uri.toString())
                                 done.incrementAndGet()
                             } else {
                                 failed.incrementAndGet()
@@ -292,7 +292,7 @@ class DownloadPhotosUseCase @Inject constructor(
                                 // The cache keeps the original encrypted; the save stamps and copies a
                                 // plaintext scratch copy of it. Both go on every exit, a cancel included,
                                 // so a stopped photo leaves neither behind.
-                                val savedUri = try {
+                                val saved = try {
                                     val gps = resolveGpsForExif(userId, photo)
                                     file.withPlainFile(context) { plain ->
                                         saveFileToMediaStore(
@@ -305,11 +305,11 @@ class DownloadPhotosUseCase @Inject constructor(
                                 } finally {
                                     file.delete()
                                 }
-                                // A null uri means the file was never written: MediaStore refused the
+                                // A null copy means the file was never written: MediaStore refused the
                                 // insert, or the copy failed part-way, which on a full volume is the
                                 // common case. Counting it as done reported a photo saved that is not on
                                 // the device, so a batch that ran out of space still read as complete.
-                                if (savedUri != null) {
+                                if (saved != null) {
                                     // A copy the save wrote reached the commit point as it was published, so
                                     // this answers true for it. A file the duplicate check found already in
                                     // the gallery is the user's own: a cancel that came first stops the item
@@ -317,8 +317,8 @@ class DownloadPhotosUseCase @Inject constructor(
                                     if (!ItemCommitPoint.reach()) {
                                         throw kotlinx.coroutines.CancellationException("download cancelled by the user")
                                     }
-                                    linkSyncState(userId, savedUri, photo)
-                                    onSaved(savedUri.toString())
+                                    linkSyncState(userId, saved.uri, photo, saved.writtenSize)
+                                    onSaved(saved.uri.toString())
                                     done.incrementAndGet()
                                     result = ItemResult.SAVED
                                 } else {
@@ -354,8 +354,14 @@ class DownloadPhotosUseCase @Inject constructor(
      * to [photo] in the cloud.  This makes the gallery merge the two into a single
      * [GalleryItem.Synced] entry with the green-cloud indicator instead of showing a separate
      * LocalOnly + CloudOnly pair after download.
+     *
+     * [writtenSize] is set for a copy this download wrote itself, [SavedCopy.writtenSize]. Its row then
+     * records that length and the copy's SHA-1 as backed up ([SyncState.originalHash]): the save stamps
+     * the capture date and place into the bytes, so they are no longer Drive's, and without the record
+     * free-up could not tell them from an edit made since. A file found already on the device records
+     * neither, since only its name and size were matched.
      */
-    private suspend fun linkSyncState(userId: UserId, savedUri: Uri, photo: CloudPhoto) {
+    private suspend fun linkSyncState(userId: UserId, savedUri: Uri, photo: CloudPhoto, writtenSize: Long? = null) {
         try {
             syncStateRepo.upsert(
                 SyncState(
@@ -371,10 +377,16 @@ class DownloadPhotosUseCase @Inject constructor(
                     // same as an uploaded photo. Without this stamp a downloaded-then-freed green photo
                     // could never be freed, since only content-certain rows carry it.
                     backedUpAtMs      = System.currentTimeMillis(),
-                    sizeBytes         = photo.sizeBytes,
+                    sizeBytes         = writtenSize?.takeIf { it > 0L } ?: photo.sizeBytes,
                 ),
                 userId,
             )
+            if (writtenSize != null) {
+                val sha1 = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, savedUri.toString())
+                }
+                if (sha1 != null) syncStateRepo.setOriginalHash(savedUri.toString(), sha1)
+            }
             Log.d(TAG, "SyncState linked: ${photo.displayName} → ${savedUri}")
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -492,7 +504,7 @@ class DownloadPhotosUseCase @Inject constructor(
         captureTimeSeconds: Long = 0L,
         gps: Pair<Double, Double>? = null,
         rowJournal: RowJournal? = null,
-    ): Uri? {
+    ): SavedCopy? {
         // Never writes a local encrypted file's bytes into the gallery as the photo.
         if (runCatching { eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(file) }.isFailure) return null
         val isVideo = mimeType.startsWith("video/")
@@ -541,7 +553,7 @@ class DownloadPhotosUseCase @Inject constructor(
         // meanwhile, return its URI instead of creating a duplicate.
         alreadyExistsInMediaStore(displayName, mimeType, file.length())?.let { existingUri ->
             Log.d(TAG, "Skipped duplicate: $displayName already in MediaStore")
-            return existingUri
+            return SavedCopy(existingUri, writtenSize = null)
         }
 
         // DATE_TAKEN is written ONLY when the capture date is known. When it is not, the column is
@@ -674,7 +686,7 @@ class DownloadPhotosUseCase @Inject constructor(
                     }
                 }
             }
-            uri
+            SavedCopy(uri, file.length())
         } catch (e: kotlinx.coroutines.CancellationException) {
             // A stopped download removes the row it was still writing. A published one is a whole photo in
             // the gallery by now and stays.
@@ -687,7 +699,7 @@ class DownloadPhotosUseCase @Inject constructor(
                 // The photo is whole and in the gallery; only a step after it (the date write or its
                 // record) failed. It stays and counts as saved, so a retry never makes a second copy.
                 Log.w(TAG, "saveFileToMediaStore: saved, but a step after it failed: ${e.javaClass.simpleName}")
-                return uri
+                return SavedCopy(uri, file.length())
             }
             // Clean up the pending MediaStore entry on failure
             runCatching { context.contentResolver.delete(uri, null, null) }
@@ -698,6 +710,12 @@ class DownloadPhotosUseCase @Inject constructor(
             rowJournal?.settled(uri)
         }
     }
+
+    /**
+     * Where a download's photo is on the device: [uri], and [writtenSize], the length of the bytes this
+     * download wrote there, or null for a file of the same name and size it found already in the gallery.
+     */
+    private class SavedCopy(val uri: Uri, val writtenSize: Long?)
 
     companion object {
         /**

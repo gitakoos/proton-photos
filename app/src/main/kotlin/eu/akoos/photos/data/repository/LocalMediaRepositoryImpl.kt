@@ -769,6 +769,31 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun fileStamp(uri: String): eu.akoos.photos.domain.entity.DeviceFileStamp? =
+        withContext(Dispatchers.IO) {
+            val parsed = Uri.parse(uri)
+            if (parsed.scheme == "file") {
+                val file = parsed.path?.let { java.io.File(it) }?.takeIf { it.exists() } ?: return@withContext null
+                return@withContext eu.akoos.photos.domain.entity.DeviceFileStamp(
+                    eu.akoos.photos.data.localcrypto.VaultFiles.plainLength(file),
+                    file.lastModified() / 1000L,
+                )
+            }
+            try {
+                val projection = arrayOf(MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_MODIFIED)
+                context.contentResolver.query(parsed, projection, null, null, null)?.use { cursor ->
+                    if (!cursor.moveToFirst()) return@use null
+                    eu.akoos.photos.domain.entity.DeviceFileStamp(
+                        sizeBytes = cursor.getLong(0),
+                        modifiedSec = if (cursor.isNull(1)) 0L else cursor.getLong(1),
+                    )
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                null
+            }
+        }
+
     override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
         withContext(Dispatchers.IO) {
             if (bucketName.isBlank()) return@withContext emptyList()

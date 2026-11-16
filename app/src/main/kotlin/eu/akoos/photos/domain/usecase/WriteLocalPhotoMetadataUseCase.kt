@@ -180,7 +180,12 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
             val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                 ?: return MetadataWriteResult.Failed("could not open $uri")
             val stamped = pfd.use { Mp4CreationTime.stamp(it.fileDescriptor, newDateTakenMs) }
-            if (!stamped) Log.w(TAG, "mvhd stamp did not complete for $uri")
+            if (stamped) {
+                // A video is rewritten without the guard the photos run behind, so it announces itself.
+                eu.akoos.photos.data.upload.OwnDeviceWrites.wrote(uri)
+            } else {
+                Log.w(TAG, "mvhd stamp did not complete for $uri")
+            }
             MetadataWriteResult.Success
         } catch (e: CancellationException) {
             throw e
