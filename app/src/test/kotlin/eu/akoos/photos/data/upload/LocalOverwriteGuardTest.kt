@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.upload
 
 import android.content.Context
+import eu.akoos.photos.data.localcrypto.PlainContent
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
@@ -56,7 +57,7 @@ class LocalOverwriteGuardTest {
         journalDir().deleteRecursively()
         LocalRewrites.clear()
         announced.clear()
-        OwnDeviceWrites.install { announced += it }
+        OwnDeviceWrites.install { u, before, after -> announced += Triple(u, before, after) }
     }
 
     @org.junit.After
@@ -64,7 +65,7 @@ class LocalOverwriteGuardTest {
         OwnDeviceWrites.clear()
     }
 
-    private val announced = mutableListOf<String>()
+    private val announced = mutableListOf<Triple<String, String, String>>()
 
     private fun journalDir() = File(context.filesDir, MirrorOverwriteJournal.DIR_NAME)
 
@@ -162,20 +163,33 @@ class LocalOverwriteGuardTest {
         guard().run(uri) {
             context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("stamped".toByteArray()) }
         }
-        assertEquals(listOf(uri), announced)
+        assertEquals(
+            "announced with the bytes it started from and the bytes it left",
+            listOf(Triple(uri, PlainContent.sha1Hex(original.inputStream()), PlainContent.sha1Hex("stamped".toByteArray().inputStream()))),
+            announced,
+        )
     }
 
     @Test
     fun `a pixel edit is not announced, so it reads as a change to back up`() {
-        guard().run(uri, contentEdit = true) {
+        guard().run(uri, announce = false) {
             context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("edited".toByteArray()) }
         }
-        assertEquals(emptyList<String>(), announced)
+        assertEquals(emptyList<Triple<String, String, String>>(), announced)
     }
 
     @Test
     fun `a rewrite that fails is not announced`() {
         runCatching { guard().run<Unit>(uri) { throw SecurityException("needs consent") } }
-        assertEquals(emptyList<String>(), announced)
+        assertEquals(emptyList<Triple<String, String, String>>(), announced)
+    }
+
+    @Test
+    fun `nothing is hashed or announced while nothing listens`() {
+        OwnDeviceWrites.clear()
+        guard().run(uri) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("stamped".toByteArray()) }
+        }
+        assertEquals(emptyList<Triple<String, String, String>>(), announced)
     }
 }

@@ -179,10 +179,14 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
         try {
             val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                 ?: return MetadataWriteResult.Failed("could not open $uri")
+            val before = if (eu.akoos.photos.data.upload.OwnDeviceWrites.listening) videoSha1(uri) else null
             val stamped = pfd.use { Mp4CreationTime.stamp(it.fileDescriptor, newDateTakenMs) }
             if (stamped) {
                 // A video is rewritten without the guard the photos run behind, so it announces itself.
-                eu.akoos.photos.data.upload.OwnDeviceWrites.wrote(uri)
+                val after = before?.let { videoSha1(uri) }
+                if (before != null && after != null) {
+                    eu.akoos.photos.data.upload.OwnDeviceWrites.wrote(uri, before, after)
+                }
             } else {
                 Log.w(TAG, "mvhd stamp did not complete for $uri")
             }
@@ -195,6 +199,10 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
             Log.w(TAG, "mvhd stamp failed for $uri: ${e.message}")
             MetadataWriteResult.Failed(e.message ?: "video date write failed")
         }
+
+    private fun videoSha1(uri: String): String? = runCatching {
+        eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
+    }.getOrNull()
 
     /** Writes [latitude] / [longitude] into the photo's GPS EXIF. Image-only: a video returns
      *  [MetadataWriteResult.Failed] because it carries no EXIF GPS block. */

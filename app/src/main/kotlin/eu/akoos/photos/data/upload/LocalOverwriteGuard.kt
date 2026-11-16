@@ -60,13 +60,15 @@ class LocalOverwriteGuard(private val context: Context) {
      * cannot decode to bounds is not checked.
      *
      * A rewrite that keeps the photo itself (a metadata write or strip) is announced through
-     * [OwnDeviceWrites] once it landed, so its backup row records the new bytes as backed up. [contentEdit]
-     * marks one that changes the picture, which is not: Drive does not hold it, so it must read as changed.
+     * [OwnDeviceWrites] once it landed, with the file's SHA-1 before and after, so its backup row records the
+     * new bytes as backed up when the old ones were. [announce] is false for one that changes the picture or
+     * whose bytes go to Drive on their own (a pixel edit, an upload's mirror strip): it must not be taken
+     * for the backed-up photo.
      */
     fun <T> run(
         uri: String,
         expectedSize: Pair<Int, Int>? = null,
-        contentEdit: Boolean = false,
+        announce: Boolean = true,
         mutate: () -> T,
     ): T {
         val parsed = Uri.parse(uri)
@@ -79,6 +81,7 @@ class LocalOverwriteGuard(private val context: Context) {
             if (wanted != null && imageSize(parsed) != wanted) throw java.io.IOException("rewritten image does not decode")
             return result
         }
+        val before = if (announce && OwnDeviceWrites.listening) sha1(uri) else null
         val result = MirrorOverwriteJournal.guardedMutation(
             stage = {
                 journal.stage(uri) { backup ->
@@ -99,9 +102,13 @@ class LocalOverwriteGuard(private val context: Context) {
             verify = { wanted == null || imageSize(parsed) == wanted },
         )
         fileLength(parsed)?.let { LocalRewrites.note(uri, it) }
-        if (!contentEdit) OwnDeviceWrites.wrote(uri)
+        if (before != null) sha1(uri)?.let { after -> OwnDeviceWrites.wrote(uri, before, after) }
         return result
     }
+
+    private fun sha1(uri: String): String? = runCatching {
+        eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
+    }.getOrNull()
 
     private fun open(uri: Uri): InputStream? = context.contentResolver.openInputStream(uri)
 

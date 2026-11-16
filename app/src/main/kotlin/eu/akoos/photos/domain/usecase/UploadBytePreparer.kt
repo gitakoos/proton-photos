@@ -153,7 +153,7 @@ internal class UploadBytePreparer(
                 }
                 android.net.Uri.fromFile(gainMapTemp).toString()
             } else if (mirrorStripToLocal &&
-                ExifHelper.stripFieldsInPlace(context, state.localUri, stripConfig)
+                ExifHelper.stripFieldsInPlace(context, state.localUri, stripConfig, announce = false)
                     is eu.akoos.photos.util.StripResult.Stripped
             ) {
                 // Confirmed neither a motion photo nor a verifiably preservable Ultra HDR (both

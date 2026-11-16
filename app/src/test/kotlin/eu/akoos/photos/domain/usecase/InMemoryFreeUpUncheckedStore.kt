@@ -22,17 +22,16 @@
 
 package eu.akoos.photos.domain.usecase
 
-import eu.akoos.photos.domain.entity.DeviceFileStamp
 import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
 
 /** A [FreeUpUncheckedStore] held in memory, for the free-up tests. */
 internal class InMemoryFreeUpUncheckedStore : FreeUpUncheckedStore {
-    val entries = LinkedHashMap<String, DeviceFileStamp>()
+    val entries = LinkedHashMap<String, FreeUpUncheckedStore.Kept>()
 
-    override suspend fun all(): Map<String, DeviceFileStamp> = entries.toMap()
+    override suspend fun all(): Map<String, FreeUpUncheckedStore.Kept> = entries.toMap()
 
-    override suspend fun mark(uri: String, stamp: DeviceFileStamp) {
-        entries[uri] = stamp
+    override suspend fun mark(uri: String, kept: FreeUpUncheckedStore.Kept) {
+        entries[uri] = kept
     }
 
     override suspend fun unmark(uris: Collection<String>) {

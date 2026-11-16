@@ -113,13 +113,18 @@ class FreeUpSpaceUseCase @Inject constructor(
         )
     }
 
+    /** What of [row] its UNCHECKED verdict was read from, so a row backed up or recorded again is checked again. */
+    private fun uncheckedRowKey(row: SyncState): String =
+        listOf(row.sizeBytes, row.localHash, row.originalHash, row.cloudFileId, row.backedUpAtMs)
+            .joinToString("/").hashCode().toUInt().toString(16)
+
     private suspend fun withoutUnchecked(rows: List<SyncState>): List<SyncState> {
         val kept = uncheckedStore.all()
         if (kept.isEmpty()) return rows
         val changed = mutableListOf<String>()
         val result = rows.filter { row ->
-            val stamp = kept[row.localUri] ?: return@filter true
-            if (localRepo.fileStamp(row.localUri) == stamp) {
+            val mark = kept[row.localUri] ?: return@filter true
+            if (mark.rowKey == uncheckedRowKey(row) && localRepo.fileStamp(row.localUri) == mark.stamp) {
                 false
             } else {
                 changed += row.localUri
@@ -221,7 +226,8 @@ class FreeUpSpaceUseCase @Inject constructor(
             when (verdict) {
                 DeviceCopyCheck.CHANGED ->
                     syncStateRepo.requeueChangedDeviceCopy(userId, row, sha1, stamp.sizeBytes)
-                DeviceCopyCheck.UNCHECKED -> uncheckedStore.mark(row.localUri, stamp)
+                DeviceCopyCheck.UNCHECKED ->
+                    uncheckedStore.mark(row.localUri, FreeUpUncheckedStore.Kept(stamp, uncheckedRowKey(row)))
                 DeviceCopyCheck.UNCHANGED, DeviceCopyCheck.UNREADABLE -> Unit
             }
         } catch (e: kotlinx.coroutines.CancellationException) {

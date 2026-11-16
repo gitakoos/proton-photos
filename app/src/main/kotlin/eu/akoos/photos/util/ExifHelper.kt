@@ -433,9 +433,16 @@ object ExifHelper {
      *    IntentSender from the [RecoverableSecurityException] so the caller can launch the system
      *    write-permission dialog and retry. (See PhotoViewerViewModel / GalleryViewModel.)
      *  - [StripResult.Failed] for a pre-flight no-op or any other I/O or EXIF error.
+     *
+     * [announce] is passed to [LocalOverwriteGuard.run]: false for a strip whose bytes go to Drive on their own.
      */
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
-    fun stripFieldsInPlace(context: Context, uri: String, config: MetadataStripConfig): StripResult {
+    fun stripFieldsInPlace(
+        context: Context,
+        uri: String,
+        config: MetadataStripConfig,
+        announce: Boolean = true,
+    ): StripResult {
         if (config.isNoOp) return StripResult.Failed
         // A hidden photo's vault file is encrypted: the strip runs on a plaintext copy that is sealed back.
         return eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
@@ -443,14 +450,19 @@ object ExifHelper {
             uri,
             changed = { it is StripResult.Stripped },
             onError = { StripResult.Failed },
-        ) { target -> stripFieldsInPlaceAt(context, target, config) }
+        ) { target -> stripFieldsInPlaceAt(context, target, config, announce) }
     }
 
     @Suppress("DEPRECATION")
-    private fun stripFieldsInPlaceAt(context: Context, uri: String, config: MetadataStripConfig): StripResult {
+    private fun stripFieldsInPlaceAt(
+        context: Context,
+        uri: String,
+        config: MetadataStripConfig,
+        announce: Boolean,
+    ): StripResult {
         return try {
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
-            LocalOverwriteGuard(context).run(uri) {
+            LocalOverwriteGuard(context).run(uri, announce = announce) {
                 val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                     ?: throw java.io.IOException("could not open $uri")
                 fd.use {

@@ -223,7 +223,7 @@ class UploadBytePreparationTest {
         val (file, item) = deviceFile("IMG_1.jpg", "image/jpeg", byteArrayOf(1, 2, 3, 4))
         val stripped = byteArrayOf(1, 2, 3)
         mockkObject(ExifHelper)
-        every { ExifHelper.stripFieldsInPlace(any(), any(), any()) } answers { file.writeBytes(stripped); StripResult.Stripped }
+        every { ExifHelper.stripFieldsInPlace(any(), any(), any(), any()) } answers { file.writeBytes(stripped); StripResult.Stripped }
 
         useCase(userId)
 
@@ -234,6 +234,8 @@ class UploadBytePreparationTest {
         assertEquals(SyncStatus.SYNCED, row.status)
         assertEquals(sha1(stripped), row.localHash)
         assertEquals(sha1(stripped), s.hash)
+        // The upload records these bytes itself; the strip must not also be announced as a rewrite of the backup.
+        verify { ExifHelper.stripFieldsInPlace(any(), item.uri, any(), announce = false) }
     }
 
     @Test

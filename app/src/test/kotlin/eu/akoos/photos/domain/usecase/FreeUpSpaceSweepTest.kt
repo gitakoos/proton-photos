@@ -32,6 +32,7 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.data.api.dto.LinkPhotoDto
 import eu.akoos.photos.domain.entity.DeviceFileStamp
+import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -381,7 +382,7 @@ class FreeUpSpaceSweepTest {
         verify(exactly = 0) { resolver.delete(any(), any(), any()) }
         coVerify(exactly = 0) { repo.upsert(any(), any()) }
         coVerify(exactly = 0) { repo.markQueued(any(), any(), any()) }
-        assertEquals(DeviceFileStamp(1100L, 100L), unchecked.entries[row.localUri])
+        assertEquals(DeviceFileStamp(1100L, 100L), unchecked.entries[row.localUri]?.stamp)
         assertEquals(
             "not listed again while the file is as it was",
             emptyList<SyncState>(),
@@ -390,10 +391,28 @@ class FreeUpSpaceSweepTest {
     }
 
     @Test
+    fun `a kept copy whose row was recorded again comes back with the same file`() = runTest {
+        val row = oldDownload(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, 1100L, modifiedSec = 100L)
+        coEvery { localRepo.sha1(row.localUri) } returns "stamped"
+        useCase.verifyAndReclaim(userId, useCase.candidates(userId, Long.MAX_VALUE))
+        assertTrue(row.localUri in unchecked.entries)
+
+        val recorded = row.copy(originalHash = "stamped")
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(recorded)
+
+        assertEquals(listOf(recorded), useCase.candidates(userId, Long.MAX_VALUE))
+        assertTrue(row.localUri !in unchecked.entries)
+    }
+
+    @Test
     fun `a kept copy whose file was written since comes back and is checked again`() = runTest {
         val row = oldDownload(1)
         coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
-        unchecked.mark(row.localUri, DeviceFileStamp(1100L, 100L))
+        unchecked.mark(row.localUri, FreeUpUncheckedStore.Kept(DeviceFileStamp(1100L, 100L), "any"))
         coEvery { localRepo.fileStamp(row.localUri) } returns deviceFile(row.localUri, 1100L, modifiedSec = 9_000L)
 
         assertEquals(listOf(row), useCase.candidates(userId, Long.MAX_VALUE))

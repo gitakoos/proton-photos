@@ -159,12 +159,13 @@ interface SyncStateRepository {
     suspend fun setOriginalHash(localUri: String, originalHash: String?) {}
 
     /**
-     * Records [sha1] as what [localUri]'s device file holds right after this app rewrote it itself (the
-     * date or place a download or the metadata editor writes into it, a metadata strip), so free-up and
-     * reconcile take those bytes as the backed-up photo rather than as an edit to back up again. Only a
-     * row that is backed up and paired to Drive takes it; any other row is left as it is.
+     * Records [after] as what [localUri]'s device file holds right after this app rewrote it itself (the
+     * date or place the metadata editor writes into it, a metadata strip), so free-up and reconcile take
+     * those bytes as the backed-up photo rather than as an edit to back up again. Only a row that is backed
+     * up, paired to Drive and recorded as holding [before] (the bytes the rewrite started from) takes it;
+     * any other row is left as it is, so a rewrite of a file edited since its backup still reads as changed.
      */
-    suspend fun recordOwnDeviceWrite(localUri: String, sha1: String) {}
+    suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String) {}
 
     /** Drops the upload a device photo was given only to join an album, once no album is left for it to join.
      *  Only a still pending LOCAL_ONLY row queued for an album add. */

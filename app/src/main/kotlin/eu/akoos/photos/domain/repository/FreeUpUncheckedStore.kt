@@ -26,16 +26,19 @@ import eu.akoos.photos.domain.entity.DeviceFileStamp
 
 /**
  * Device copies free-up kept because nothing could tell whether they still hold what was backed up,
- * each with the stamp its file had when that was found. Free-up leaves such a copy out of its list for as
- * long as the file keeps that stamp, so it is reported once rather than offered on every run; a file
- * written since is checked again.
+ * each with the stamp its file had and a key of its backup row as they were when that was found. Free-up
+ * leaves such a copy out of its list for as long as both stay the same, so it is reported once rather
+ * than offered on every run; a file written since, or a row backed up or recorded again, is checked again.
  */
 interface FreeUpUncheckedStore {
-    /** Every kept copy, by its device uri. */
-    suspend fun all(): Map<String, DeviceFileStamp>
+    /** A kept copy: its file's [stamp] and its backup row's [rowKey] when it was kept. */
+    data class Kept(val stamp: DeviceFileStamp, val rowKey: String)
 
-    /** Records [uri] as kept unchecked while its file has [stamp]. */
-    suspend fun mark(uri: String, stamp: DeviceFileStamp)
+    /** Every kept copy, by its device uri. */
+    suspend fun all(): Map<String, Kept>
+
+    /** Records [uri] as kept unchecked while its file and backup row stay as [kept] has them. */
+    suspend fun mark(uri: String, kept: Kept)
 
     /** Forgets [uris], which are checked again the next time they come up. */
     suspend fun unmark(uris: Collection<String>)

@@ -760,9 +760,9 @@ class SyncStateDaoTest {
         dao.upsert(backedUp("uri://local", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
         dao.upsert(entity("uri://paired-only", status = SyncStatus.SYNCED, cloudFileId = "cloud-2", backedUpAtMs = null))
 
-        dao.recordOwnDeviceWrite("uri://synced", "written")
-        dao.recordOwnDeviceWrite("uri://local", "written")
-        dao.recordOwnDeviceWrite("uri://paired-only", "written")
+        dao.recordOwnDeviceWrite("uri://synced", "up", "written")
+        dao.recordOwnDeviceWrite("uri://local", "up", "written")
+        dao.recordOwnDeviceWrite("uri://paired-only", "", "written")
 
         assertEquals("written", dao.getByUri("uri://synced")!!.originalHash)
         assertNull(dao.getByUri("uri://local")!!.originalHash)
@@ -772,10 +772,30 @@ class SyncStateDaoTest {
     @Test
     fun `a recorded own write survives a reconcile pass that keeps the row's hash and pairing`() = runTest {
         dao.upsert(backedUp("uri://1"))
-        dao.recordOwnDeviceWrite("uri://1", "written")
+        dao.recordOwnDeviceWrite("uri://1", "up", "written")
 
         dao.upsert(backedUp("uri://1").copy(sizeBytes = 2048L))
 
         assertEquals("written", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a rewrite of a file edited since its backup is not recorded`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+
+        dao.recordOwnDeviceWrite("uri://1", "edited-elsewhere", "written")
+
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a second own rewrite chains on the bytes the first one recorded`() = runTest {
+        dao.upsert(backedUp("uri://1", localHash = "UP"))
+
+        dao.recordOwnDeviceWrite("uri://1", "up", "first")
+        dao.recordOwnDeviceWrite("uri://1", "FIRST", "second")
+
+        assertEquals("second", dao.getByUri("uri://1")!!.originalHash)
     }
 }

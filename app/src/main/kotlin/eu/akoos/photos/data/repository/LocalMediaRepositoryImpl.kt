@@ -779,7 +779,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
                     file.lastModified() / 1000L,
                 )
             }
-            try {
+            val column = try {
                 val projection = arrayOf(MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_MODIFIED)
                 context.contentResolver.query(parsed, projection, null, null, null)?.use { cursor ->
                     if (!cursor.moveToFirst()) return@use null
@@ -791,7 +791,19 @@ class LocalMediaRepositoryImpl @Inject constructor(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 null
-            }
+            } ?: return@withContext null
+            // The column lags a write until the next scan, and a download sets it to the capture time, so the
+            // file's own modified time counts too: the later of the two is when its bytes last changed.
+            val stat = try {
+                context.contentResolver.openFileDescriptor(parsed, "r")?.use { android.system.Os.fstat(it.fileDescriptor) }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                null
+            } ?: return@withContext column
+            eu.akoos.photos.domain.entity.DeviceFileStamp(
+                sizeBytes = stat.st_size.takeIf { it > 0L } ?: column.sizeBytes,
+                modifiedSec = maxOf(column.modifiedSec, stat.st_mtime),
+            )
         }
 
     override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =

@@ -22,28 +22,31 @@
 
 package eu.akoos.photos.data.upload
 
-import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Where a rewrite this app makes of a user's device file on its own account (a metadata write or strip,
- * not a pixel edit) is announced, so the file's backup row can record the bytes it left
- * ([OwnDeviceWriteRecorder]). A rewrite that lands while nothing listens, as in a test, records nothing,
- * and the file is then judged by its modified time like any other change.
+ * not a pixel edit) is announced, with the file's SHA-1 just before and just after it, so the file's
+ * backup row can take the new bytes as backed up when the old ones were ([OwnDeviceWriteRecorder]). A
+ * rewrite that lands while nothing listens, as in a test, records nothing, and the file is then judged
+ * by its modified time like any other change.
  */
 object OwnDeviceWrites {
     @Volatile
-    private var sink: ((String) -> Unit)? = null
+    private var sink: ((uri: String, before: String, after: String) -> Unit)? = null
 
-    fun install(onWrite: (uri: String) -> Unit) {
+    /** Whether anything listens, so a writer hashes the file around its write only when it counts. */
+    val listening: Boolean get() = sink != null
+
+    fun install(onWrite: (uri: String, before: String, after: String) -> Unit) {
         sink = onWrite
     }
 
-    /** The device file at [uri] has just been rewritten by this app and is complete. */
-    fun wrote(uri: String) {
-        sink?.invoke(uri)
+    /** The device file at [uri] held [before] and now, rewritten by this app and complete, holds [after]. */
+    fun wrote(uri: String, before: String, after: String) {
+        sink?.invoke(uri, before, after)
     }
 
     internal fun clear() {
@@ -52,20 +55,19 @@ object OwnDeviceWrites {
 }
 
 /**
- * Records what each [OwnDeviceWrites] announcement left on the device: the file's SHA-1 read right after
- * the write goes on its row ([SyncStateRepository.recordOwnDeviceWrite]). Free-up then deletes those
- * bytes as backed up, and reconcile keeps the backup stamp, where the file's later modified time would
- * otherwise read as an edit and put a second copy on Drive.
+ * Records what each [OwnDeviceWrites] announcement left on the device on the file's backup row
+ * ([SyncStateRepository.recordOwnDeviceWrite]), only when the bytes it rewrote were the backed-up ones.
+ * Free-up then deletes the new bytes as backed up, and reconcile keeps the backup stamp, where the file's
+ * later modified time would otherwise read as an edit and put a second copy on Drive. A file that held
+ * anything else before the write (an edit made elsewhere, a pixel edit) is left to read as changed.
  */
 @Singleton
 class OwnDeviceWriteRecorder @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
-    private val localRepo: LocalMediaRepository,
 ) {
-    suspend fun record(uri: String) {
+    suspend fun record(uri: String, before: String, after: String) {
         try {
-            val sha1 = localRepo.sha1(uri) ?: return
-            syncStateRepo.recordOwnDeviceWrite(uri, sha1)
+            syncStateRepo.recordOwnDeviceWrite(uri, before, after)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: Exception) {

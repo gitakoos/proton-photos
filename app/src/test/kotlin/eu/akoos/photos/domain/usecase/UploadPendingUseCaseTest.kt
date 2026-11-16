@@ -929,7 +929,7 @@ class UploadPendingUseCaseTest {
         mockkObject(ExifHelper) {
             every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
             every {
-                ExifHelper.stripFieldsInPlace(any(), any(), any<MetadataStripConfig>())
+                ExifHelper.stripFieldsInPlace(any(), any(), any<MetadataStripConfig>(), any())
             } returns StripResult.Failed
             block()
         }

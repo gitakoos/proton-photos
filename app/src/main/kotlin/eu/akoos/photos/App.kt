@@ -148,8 +148,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         localEncryption.start()
         // A metadata write this app makes to a backed-up device photo records the bytes it left on the
         // photo's backup row, so free-up does not take that write for an edit to back up again.
-        eu.akoos.photos.data.upload.OwnDeviceWrites.install { uri ->
-            appScope.launch { ownDeviceWriteRecorderLazy.get().record(uri) }
+        eu.akoos.photos.data.upload.OwnDeviceWrites.install { uri, before, after ->
+            appScope.launch { ownDeviceWriteRecorderLazy.get().record(uri, before, after) }
         }
         delegatingFactory.addFactory(workerFactory)
         sweepMlSyncScratch(processStartMs)
