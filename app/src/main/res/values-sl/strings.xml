@@ -1420,6 +1420,7 @@
     <string name="vault_rescue_channel_desc">Obvesti, ko so se skrite fotografije po odjavi, ki je niste sprožili, vrnile v galerijo.</string>
     <string name="vault_rescue_title">Vaša seja se je končala</string>
     <string name="vault_rescue_text">Vaše skrite fotografije brez kopije v Drive so bile premaknjene nazaj v galerijo, v mapo %1$s, da nobena ne izgine.</string>
+    <string name="vault_rescue_kept_text">Gesla za skrite fotografije ni bilo mogoče prebrati, zato so skrite fotografije brez kopije v Drive ostale v aplikaciji, namesto da bi nezaščitene šle v galerijo. Odprite Skrite fotografije in vnesite geslo, da jih vidite.</string>
     <string name="update_notification_text">Tapnite za namestitev različice %1$s.</string>
     <string name="settings_backup_how_section">Kako poteka varnostno kopiranje</string>
     <string name="settings_theme_palette">Tema in paleta</string>

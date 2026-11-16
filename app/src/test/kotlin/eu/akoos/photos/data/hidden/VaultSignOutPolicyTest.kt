@@ -41,10 +41,28 @@ class VaultSignOutPolicyTest {
     private var notices = 0
     private var lastZipName: String? = null
 
+    private var keptNotices = 0
+
     private fun policy(rescue: suspend () -> HiddenRescue) = VaultSignOutPolicy(
         rescue = { rescues++; rescue() },
         notifyMoved = { zipName -> notices++; lastZipName = zipName },
+        notifyKept = { keptNotices++ },
     )
+
+    @Test
+    fun `a password that cannot be read keeps the photos in the vault, never in the gallery`() = runTest {
+        assertEquals(RescueRoute.KEEP_IN_VAULT, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.Unreadable))
+        assertEquals(RescueRoute.ZIP, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.Readable(charArrayOf('p'))))
+        assertEquals(RescueRoute.GALLERY, HiddenVaultDecisions.rescueRoute(StoredVaultPassword.None))
+        val targets = listOf("file:///v/a", "file:///v/b")
+        val policy = policy { HiddenVaultDecisions.keptForPassword(targets) }
+
+        val wipe = policy.afterSignOut("u1")
+
+        assertEquals("every photo is spared by the wipe", VaultWipe.Except(targets.toSet()), wipe)
+        assertEquals(0, notices)
+        assertEquals("the user is told where the photos are", 1, keptNotices)
+    }
 
     @Test
     fun `a forced logout takes the device-only photos back, says so, and spares only what stayed`() = runTest {

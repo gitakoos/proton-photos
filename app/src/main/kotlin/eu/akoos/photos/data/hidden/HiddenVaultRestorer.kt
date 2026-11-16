@@ -59,8 +59,15 @@ data class HiddenFolderProgress(val done: Int, val total: Int, val restoring: Bo
 
 /** What an involuntary sign-out took back to the device: how many photos, and which vault files are
  *  still there because the write failed. [zipName] is the password-protected zip in Downloads the photos
- *  went into when a vault password is set; they are then in that zip and not in the gallery. */
-data class HiddenRescue(val moved: Int, val stillInVault: Set<String>, val zipName: String? = null) {
+ *  went into when a vault password is set; they are then in that zip and not in the gallery.
+ *  [keptForPassword]: a password is set but the zip could not be made with it (it cannot be read now), so the
+ *  photos stayed in the vault rather than going to the gallery unprotected. */
+data class HiddenRescue(
+    val moved: Int,
+    val stillInVault: Set<String>,
+    val zipName: String? = null,
+    val keptForPassword: Boolean = false,
+) {
     companion object {
         /** The gallery folder rescued photos land in, apart from every folder the user chose. The suffix
          *  names why the folder exists, so another cause can later get a folder of its own. */
@@ -528,16 +535,22 @@ class HiddenVaultRestorer @Inject constructor(
         )
         if (targets.isEmpty()) return@detached HiddenRescue(moved = 0, stillInVault = emptySet())
         val buckets = recordedBucketsOf(targets)
-        // With a vault password the photos go into an encrypted zip and not back into the gallery. Any
-        // failure on that route falls through to the plain rescue below, so nothing is ever lost to it.
-        val password = vaultPassword.read()
-        if (password != null) {
-            val zipped = try {
-                zipRescue(targets, password, folder, buckets)
-            } finally {
-                password.fill('\u0000')
+        // With a vault password the photos go into an encrypted zip and never back into the gallery
+        // unprotected: a password that cannot be read now, or a zip that could not be made, leaves them in the
+        // vault, which the wipe then spares.
+        val stored = vaultPassword.readState()
+        when (HiddenVaultDecisions.rescueRoute(stored)) {
+            RescueRoute.ZIP -> {
+                val password = (stored as StoredVaultPassword.Readable).password
+                val zipped = try {
+                    zipRescue(targets, password, folder, buckets)
+                } finally {
+                    password.fill('\u0000')
+                }
+                return@detached zipped ?: HiddenVaultDecisions.keptForPassword(targets)
             }
-            if (zipped != null) return@detached zipped
+            RescueRoute.KEEP_IN_VAULT -> return@detached HiddenVaultDecisions.keptForPassword(targets)
+            RescueRoute.GALLERY -> Unit
         }
         val tally = RevealTally()
         HiddenVaultDiagnostics.revealStarted(targets.size)

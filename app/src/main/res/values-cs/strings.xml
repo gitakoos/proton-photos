@@ -1419,6 +1419,7 @@
     <string name="vault_rescue_channel_desc">Upozorní vás, když vaše skryté fotky po neočekávaném odhlášení skončily zpět v galerii.</string>
     <string name="vault_rescue_title">Došlo k vašemu odhlášení</string>
     <string name="vault_rescue_text">Vaše skryté fotky bez kopie na Drive byly přesunuty zpět do galerie, do složky %1$s, aby žádná nezmizela.</string>
+    <string name="vault_rescue_kept_text">Heslo ke skrytým fotkám nešlo přečíst, a tak skryté fotky bez kopie na Drive zůstaly v aplikaci, místo aby šly nechráněné do galerie. Otevřete Skryté fotky a zadejte heslo, abyste je viděli.</string>
     <string name="update_notification_text">Klepnutím nainstalujete verzi %1$s.</string>
     <string name="settings_backup_how_section">Jak zálohování probíhá</string>
     <string name="settings_theme_palette">Motiv a paleta</string>

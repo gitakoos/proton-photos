@@ -186,6 +186,7 @@ class MainHostActivity : AppCompatActivity() {
         VaultSignOutPolicy(
             rescue = { restorer.rescueDeviceOnly() },
             notifyMoved = { zipName -> notifier.notifyMoved(zipName) },
+            notifyKept = { notifier.notifyKeptInVault() },
         )
     }
 

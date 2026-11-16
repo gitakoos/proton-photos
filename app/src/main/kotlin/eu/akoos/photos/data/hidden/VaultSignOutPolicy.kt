@@ -39,6 +39,7 @@ import java.util.concurrent.ConcurrentHashMap
 class VaultSignOutPolicy(
     private val rescue: suspend () -> HiddenRescue,
     private val notifyMoved: (zipName: String?) -> Unit,
+    private val notifyKept: () -> Unit = {},
 ) {
     private val unfinishedSignIns = ConcurrentHashMap.newKeySet<String>()
 
@@ -69,6 +70,7 @@ class VaultSignOutPolicy(
         }
         SyncDiagnostics.log("sign-out: session ended, ${vaultNote(rescued)}")
         if (rescued.moved > 0) notifyMoved(rescued.zipName)
+        if (rescued.keptForPassword) notifyKept()
         return wipeAfterRescue(rescued)
     }
 
@@ -84,6 +86,7 @@ class VaultSignOutPolicy(
         /** What a rescue did, as counts only, for the diagnostics a tester copies out. */
         fun vaultNote(rescued: HiddenRescue?): String =
             if (rescued == null) "vault move failed, vault left alone"
+            else if (rescued.keptForPassword) "vault kept ${rescued.stillInVault.size}, password not readable for the zip"
             else if (rescued.zipName != null) "vault zipped ${rescued.moved}, ${rescued.stillInVault.size} left in vault"
             else "vault moved ${rescued.moved}, ${rescued.stillInVault.size} left in vault"
     }

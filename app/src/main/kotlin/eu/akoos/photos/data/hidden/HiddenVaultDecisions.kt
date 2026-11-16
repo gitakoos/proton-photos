@@ -99,7 +99,31 @@ enum class VaultedRowFix {
  * row still speaks for, expressed without Android so they can be reasoned about and tested on their
  * own.
  */
+/** Where a sign-out rescue puts the vault's device-only photos. */
+enum class RescueRoute {
+    /** No password: back into the gallery. */
+    GALLERY,
+
+    /** Into a zip protected with the password. */
+    ZIP,
+
+    /** A password is set but cannot be read: they stay in the vault, never in the gallery unprotected. */
+    KEEP_IN_VAULT,
+}
+
 object HiddenVaultDecisions {
+
+    fun rescueRoute(stored: StoredVaultPassword): RescueRoute = when (stored) {
+        StoredVaultPassword.None -> RescueRoute.GALLERY
+        is StoredVaultPassword.Readable -> RescueRoute.ZIP
+        StoredVaultPassword.Unreadable -> RescueRoute.KEEP_IN_VAULT
+    }
+
+    /** A sign-out rescue that leaves every one of [targets] in the vault, because a password is set and the
+     *  protected zip could not be made with it. */
+    fun keptForPassword(targets: Collection<String>): HiddenRescue =
+        HiddenRescue(moved = 0, stillInVault = targets.toSet(), keptForPassword = true)
+
 
     /**
      * The photo keys a published hide drops the labels of: for each of [vaultUris] the device uri it was hidden

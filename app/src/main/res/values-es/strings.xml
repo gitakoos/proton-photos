@@ -1196,6 +1196,7 @@
     <string name="vault_rescue_channel_desc">Te avisa cuando un cierre de sesión que no pediste devolvió tus fotos ocultas a la galería.</string>
     <string name="vault_rescue_title">Se cerró tu sesión</string>
     <string name="vault_rescue_text">Tus fotos ocultas sin copia en Drive se devolvieron a la galería, a la carpeta %1$s, para que no se pierda ninguna.</string>
+    <string name="vault_rescue_kept_text">No se pudo leer tu contraseña de fotos ocultas, así que tus fotos ocultas sin copia en Drive se quedaron en la app en lugar de ir sin protección a la galería. Abre Fotos ocultas e introduce la contraseña para verlas.</string>
     <string name="update_notification_text">Toca para instalar la versión %1$s.</string>
     <string name="settings_backup_how_section">Cómo se hace la copia</string>
     <string name="settings_theme_palette">Tema y paleta</string>
