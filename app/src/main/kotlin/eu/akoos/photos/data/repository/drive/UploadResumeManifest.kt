@@ -24,11 +24,14 @@ package eu.akoos.photos.data.repository.drive
 
 import android.util.Base64
 import android.util.Log
+import eu.akoos.photos.data.localcrypto.CacheFiles
+import eu.akoos.photos.data.localcrypto.LocalCryptoFormat
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -60,10 +63,10 @@ private const val TAG = "UploadResume"
  * # Why the session key is in the manifest
  * The encrypted blocks ARE the session key's ciphertext. To reuse them on the next
  * attempt we MUST keep the same session key, which means persisting it alongside the
- * blocks. The manifest lives in `context.cacheDir` (app-private storage), which Android
- * encrypts at rest on every supported device per file-based encryption (FBE). The
- * plaintext source media sits in the SAME sandbox the moment the user picks "Save",
- * so persisting the session key for the resume window does not move the threat model.
+ * blocks. The manifest is therefore written encrypted with the local keys, like the other
+ * cache files. One that cannot be read (its key gone or not answering) reads as missing,
+ * so that upload starts again from the first block; it never fails the upload. A manifest
+ * an earlier version wrote in plaintext is read once and written again encrypted.
  *
  * # Schema versioning
  * The schema field is the single source of truth for compatibility. A future change
@@ -176,7 +179,13 @@ internal data class UploadResumeManifest(
             val file = File(tempDir, FILENAME)
             if (!file.isFile) return null
             return try {
-                val text = file.readText(Charsets.UTF_8)
+                val plainOnDisk = !LocalCryptoFormat.isEncrypted(file)
+                // Null when its key is gone or not answering now: the upload then starts from the first block.
+                val bytes = CacheFiles.readBytesOrNull(file) ?: run {
+                    Log.d(TAG, "load: manifest cannot be read now, ignoring it")
+                    return null
+                }
+                val text = bytes.toString(Charsets.UTF_8)
                 val manifest = json.decodeFromString<UploadResumeManifest>(text)
                 if (manifest.version != SCHEMA_VERSION) {
                     Log.d(TAG, "load: schema mismatch (${manifest.version} vs $SCHEMA_VERSION) — ignoring")
@@ -192,6 +201,8 @@ internal data class UploadResumeManifest(
                     Log.d(TAG, "load: claimed block $missing absent on disk — ignoring manifest")
                     return null
                 }
+                // One an earlier version wrote in plaintext is written again encrypted, once.
+                if (plainOnDisk) save(tempDir, manifest)
                 manifest
             } catch (e: Exception) {
                 Log.w(TAG, "load: failed to parse ${file.absolutePath}: ${e.message}")
@@ -200,16 +211,18 @@ internal data class UploadResumeManifest(
         }
 
         /**
-         * Atomically writes [manifest] to [tempDir] via tempfile + rename. A crash mid-write
+         * Atomically writes [manifest] to [tempDir], encrypted, via tempfile + rename. A crash mid-write
          * leaves either the old manifest intact or no manifest (handled by the load path);
-         * never a corrupt half-written one.
+         * never a corrupt half-written one. When no key answers nothing is written, never a
+         * plaintext copy: the previous manifest (fewer blocks, same session key) or none stays.
          */
         fun save(tempDir: File, manifest: UploadResumeManifest) {
             tempDir.mkdirs()
             val finalFile = File(tempDir, FILENAME)
             val tmp = File(tempDir, FILENAME + TMP_SUFFIX)
             try {
-                tmp.writeText(json.encodeToString(manifest), Charsets.UTF_8)
+                val bytes = json.encodeToString(manifest).toByteArray(Charsets.UTF_8)
+                FileOutputStream(tmp).let { CacheFiles.encryptingStream(it) }.use { it.write(bytes) }
                 // File.renameTo on Android is atomic within a single mount; the cache dir
                 // sits on internal storage so we never cross mounts here.
                 if (!tmp.renameTo(finalFile)) {
