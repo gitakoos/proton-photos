@@ -195,6 +195,7 @@ internal fun LocalEncryptionSheet(
                     R.string.local_encryption_item_library,
                     R.string.local_encryption_item_hidden,
                     R.string.local_encryption_item_settings,
+                    R.string.local_encryption_item_cache,
                 )) {
                     Text("•  " + stringResource(item), color = colors.fgPrimary, fontSize = 14.sp)
                 }

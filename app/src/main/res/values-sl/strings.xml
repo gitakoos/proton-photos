@@ -2892,7 +2892,7 @@
     <string name="arrange_saved">Vrstni red shranjen</string>
     <string name="albums_sort_newest_photo">Najnovejša fotografija</string>
     <string name="local_encryption_title">Lokalno šifriranje</string>
-    <string name="local_encryption_desc">Knjižnica, skrite fotografije in nastavitve v tem telefonu</string>
+    <string name="local_encryption_desc">Knjižnica, skrite fotografije, sličice in nastavitve v tem telefonu</string>
     <string name="local_encryption_state_on">Vklopljeno</string>
     <string name="local_encryption_state_encrypting">Šifriranje…</string>
     <string name="local_encryption_state_locked">Zaklenjeno</string>
@@ -2901,7 +2901,8 @@
     <string name="local_encryption_item_library">Zbirka podatkov knjižnice</string>
     <string name="local_encryption_item_hidden">Skrite fotografije</string>
     <string name="local_encryption_item_settings">Nastavitve in zgodovina dejavnosti</string>
-    <string name="local_encryption_account_note">Ključ je vezan na vaš račun Proton. Če ga telefon kdaj izgubi, ponovna prijava vse odpre.</string>
+    <string name="local_encryption_item_cache">Sličice in fotografije, odprte iz Proton Drive</string>
+    <string name="local_encryption_account_note">Ključ je vezan na vaš račun Proton. Če ga telefon kdaj izgubi, prijava v isti račun znova odpre vaše podatke.</string>
     <string name="local_encryption_password_note">Vaše geslo za skrite fotografije te podatke prav tako odpre, če telefon kdaj izgubi ključ.</string>
     <string name="local_encryption_guest_title">Nastavite geslo za skrite fotografije.</string>
     <string name="local_encryption_guest_note">Brez računa je ključ le v varni shrambi tega telefona. Če ga telefon kdaj izgubi, skritih fotografij ne bo mogoče obnoviti, razen če zanje nastavite geslo.</string>

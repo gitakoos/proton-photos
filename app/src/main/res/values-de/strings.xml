@@ -2761,7 +2761,7 @@
     <string name="arrange_saved">Reihenfolge gespeichert</string>
     <string name="albums_sort_newest_photo">Neuestes Foto</string>
     <string name="local_encryption_title">Lokale Verschlüsselung</string>
-    <string name="local_encryption_desc">Mediathek, versteckte Fotos und Einstellungen auf diesem Telefon</string>
+    <string name="local_encryption_desc">Mediathek, versteckte Fotos, Vorschaubilder und Einstellungen auf diesem Telefon</string>
     <string name="local_encryption_state_on">An</string>
     <string name="local_encryption_state_encrypting">Wird verschlüsselt…</string>
     <string name="local_encryption_state_locked">Gesperrt</string>
@@ -2770,7 +2770,8 @@
     <string name="local_encryption_item_library">Mediathek-Datenbank</string>
     <string name="local_encryption_item_hidden">Versteckte Fotos</string>
     <string name="local_encryption_item_settings">Einstellungen und Aktivitätsverlauf</string>
-    <string name="local_encryption_account_note">Der Schlüssel ist an dein Proton-Konto gebunden. Verliert das Telefon ihn einmal, öffnet eine erneute Anmeldung alles wieder.</string>
+    <string name="local_encryption_item_cache">Vorschaubilder und aus Proton Drive geöffnete Fotos</string>
+    <string name="local_encryption_account_note">Der Schlüssel ist an dein Proton-Konto gebunden. Verliert das Telefon ihn einmal, öffnet eine Anmeldung beim selben Konto deine Daten wieder.</string>
     <string name="local_encryption_password_note">Dein Passwort für versteckte Fotos öffnet diese Daten ebenfalls, falls das Telefon den Schlüssel einmal verliert.</string>
     <string name="local_encryption_guest_title">Lege ein Passwort für versteckte Fotos fest.</string>
     <string name="local_encryption_guest_note">Ohne Konto liegt der Schlüssel nur im sicheren Speicher dieses Telefons. Verliert das Telefon ihn einmal, lassen sich deine versteckten Fotos nicht wiederherstellen, außer du legst ein Passwort für sie fest.</string>

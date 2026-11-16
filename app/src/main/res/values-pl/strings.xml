@@ -2892,7 +2892,7 @@
     <string name="arrange_saved">Kolejność zapisana</string>
     <string name="albums_sort_newest_photo">Najnowsze zdjęcie</string>
     <string name="local_encryption_title">Szyfrowanie lokalne</string>
-    <string name="local_encryption_desc">Biblioteka, ukryte zdjęcia i ustawienia na tym telefonie</string>
+    <string name="local_encryption_desc">Biblioteka, ukryte zdjęcia, miniatury i ustawienia na tym telefonie</string>
     <string name="local_encryption_state_on">Wł.</string>
     <string name="local_encryption_state_encrypting">Szyfrowanie…</string>
     <string name="local_encryption_state_locked">Zablokowane</string>
@@ -2901,7 +2901,8 @@
     <string name="local_encryption_item_library">Baza danych biblioteki</string>
     <string name="local_encryption_item_hidden">Ukryte zdjęcia</string>
     <string name="local_encryption_item_settings">Ustawienia i historia aktywności</string>
-    <string name="local_encryption_account_note">Klucz jest powiązany z Twoim kontem Proton. Jeśli telefon kiedyś go utraci, ponowne zalogowanie wszystko otworzy.</string>
+    <string name="local_encryption_item_cache">Miniatury i zdjęcia otwarte z Proton Drive</string>
+    <string name="local_encryption_account_note">Klucz jest powiązany z Twoim kontem Proton. Jeśli telefon kiedyś go utraci, zalogowanie się na to samo konto ponownie otworzy Twoje dane.</string>
     <string name="local_encryption_password_note">Twoje hasło do ukrytych zdjęć również otwiera te dane, jeśli telefon kiedyś utraci klucz.</string>
     <string name="local_encryption_guest_title">Ustaw hasło do ukrytych zdjęć.</string>
     <string name="local_encryption_guest_note">Bez konta klucz znajduje się tylko w bezpiecznym magazynie tego telefonu. Jeśli telefon kiedyś go utraci, ukrytych zdjęć nie da się odzyskać, chyba że ustawisz do nich hasło.</string>

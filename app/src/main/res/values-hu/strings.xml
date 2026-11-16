@@ -2760,7 +2760,7 @@
     <string name="arrange_saved">Sorrend mentve</string>
     <string name="albums_sort_newest_photo">Legújabb fotó</string>
     <string name="local_encryption_title">Helyi titkosítás</string>
-    <string name="local_encryption_desc">Könyvtár, rejtett fotók és beállítások ezen a telefonon</string>
+    <string name="local_encryption_desc">Könyvtár, rejtett fotók, bélyegképek és beállítások ezen a telefonon</string>
     <string name="local_encryption_state_on">Be</string>
     <string name="local_encryption_state_encrypting">Titkosítás…</string>
     <string name="local_encryption_state_locked">Zárolva</string>
@@ -2769,7 +2769,8 @@
     <string name="local_encryption_item_library">Könyvtár-adatbázis</string>
     <string name="local_encryption_item_hidden">Rejtett fotók</string>
     <string name="local_encryption_item_settings">Beállítások és tevékenységnapló</string>
-    <string name="local_encryption_account_note">A kulcs a Proton-fiókodhoz kötődik. Ha a telefon valaha elveszíti, újra bejelentkezve minden megnyílik.</string>
+    <string name="local_encryption_item_cache">Bélyegképek és a Proton Drive-ból megnyitott fotók</string>
+    <string name="local_encryption_account_note">A kulcs a Proton-fiókodhoz kötődik. Ha a telefon valaha elveszíti, ugyanabba a fiókba bejelentkezve újra megnyílnak az adataid.</string>
     <string name="local_encryption_password_note">A rejtett fotók jelszava is megnyitja ezeket az adatokat, ha a telefon valaha elveszíti a kulcsot.</string>
     <string name="local_encryption_guest_title">Állíts be jelszót a rejtett fotókhoz.</string>
     <string name="local_encryption_guest_note">Fiók nélkül a kulcs csak a telefon biztonságos tárolójában van. Ha a telefon valaha elveszíti, a rejtett fotóid nem állíthatók helyre, hacsak nem állítasz be hozzájuk jelszót.</string>

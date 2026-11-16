@@ -2800,7 +2800,7 @@
     <string name="arrange_saved">Ordine salvato</string>
     <string name="albums_sort_newest_photo">Foto più recente</string>
     <string name="local_encryption_title">Crittografia locale</string>
-    <string name="local_encryption_desc">Libreria, foto nascoste e impostazioni su questo telefono</string>
+    <string name="local_encryption_desc">Libreria, foto nascoste, miniature e impostazioni su questo telefono</string>
     <string name="local_encryption_state_on">Attiva</string>
     <string name="local_encryption_state_encrypting">Crittografia in corso…</string>
     <string name="local_encryption_state_locked">Bloccata</string>
@@ -2809,7 +2809,8 @@
     <string name="local_encryption_item_library">Database della libreria</string>
     <string name="local_encryption_item_hidden">Foto nascoste</string>
     <string name="local_encryption_item_settings">Impostazioni e cronologia attività</string>
-    <string name="local_encryption_account_note">La chiave è legata al tuo account Proton. Se il telefono la perde, accedere di nuovo riapre tutto.</string>
+    <string name="local_encryption_item_cache">Miniature e foto aperte da Proton Drive</string>
+    <string name="local_encryption_account_note">La chiave è legata al tuo account Proton. Se il telefono la perde, accedere allo stesso account riapre i tuoi dati.</string>
     <string name="local_encryption_password_note">Anche la tua password delle foto nascoste apre questi dati se il telefono perde la chiave.</string>
     <string name="local_encryption_guest_title">Imposta una password per le foto nascoste.</string>
     <string name="local_encryption_guest_note">Senza account la chiave si trova solo nell\'archivio sicuro di questo telefono. Se il telefono la perde, le foto nascoste non si potranno recuperare a meno che tu non imposti una password per esse.</string>

@@ -2763,7 +2763,7 @@
     <string name="arrange_saved">Ordre enregistré</string>
     <string name="albums_sort_newest_photo">Photo la plus récente</string>
     <string name="local_encryption_title">Chiffrement local</string>
-    <string name="local_encryption_desc">Bibliothèque, photos masquées et réglages sur ce téléphone</string>
+    <string name="local_encryption_desc">Bibliothèque, photos masquées, miniatures et réglages sur ce téléphone</string>
     <string name="local_encryption_state_on">Activé</string>
     <string name="local_encryption_state_encrypting">Chiffrement…</string>
     <string name="local_encryption_state_locked">Verrouillé</string>
@@ -2772,7 +2772,8 @@
     <string name="local_encryption_item_library">Base de données de la bibliothèque</string>
     <string name="local_encryption_item_hidden">Photos masquées</string>
     <string name="local_encryption_item_settings">Réglages et historique d\'activité</string>
-    <string name="local_encryption_account_note">La clé est liée à votre compte Proton. Si le téléphone la perd un jour, une nouvelle connexion rouvre tout.</string>
+    <string name="local_encryption_item_cache">Miniatures et photos ouvertes depuis Proton Drive</string>
+    <string name="local_encryption_account_note">La clé est liée à votre compte Proton. Si le téléphone la perd un jour, vous reconnecter au même compte rouvre vos données.</string>
     <string name="local_encryption_password_note">Votre mot de passe des photos masquées ouvre aussi ces données si le téléphone perd un jour la clé.</string>
     <string name="local_encryption_guest_title">Définissez un mot de passe pour les photos masquées.</string>
     <string name="local_encryption_guest_note">Sans compte, la clé se trouve uniquement dans le stockage sécurisé de ce téléphone. Si le téléphone la perd un jour, vos photos masquées ne pourront pas être récupérées, sauf si vous leur définissez un mot de passe.</string>

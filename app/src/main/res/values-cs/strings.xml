@@ -2898,7 +2898,7 @@
     <string name="arrange_saved">Pořadí uloženo</string>
     <string name="albums_sort_newest_photo">Nejnovější fotka</string>
     <string name="local_encryption_title">Místní šifrování</string>
-    <string name="local_encryption_desc">Knihovna, skryté fotky a nastavení v tomto telefonu</string>
+    <string name="local_encryption_desc">Knihovna, skryté fotky, náhledy a nastavení v tomto telefonu</string>
     <string name="local_encryption_state_on">Zapnuto</string>
     <string name="local_encryption_state_encrypting">Šifrování…</string>
     <string name="local_encryption_state_locked">Zamčeno</string>
@@ -2907,7 +2907,8 @@
     <string name="local_encryption_item_library">Databáze knihovny</string>
     <string name="local_encryption_item_hidden">Skryté fotky</string>
     <string name="local_encryption_item_settings">Nastavení a historie aktivit</string>
-    <string name="local_encryption_account_note">Klíč je vázán na váš účet Proton. Pokud o něj telefon někdy přijde, opětovné přihlášení vše otevře.</string>
+    <string name="local_encryption_item_cache">Náhledy a fotky otevřené z Proton Drive</string>
+    <string name="local_encryption_account_note">Klíč je vázán na váš účet Proton. Pokud o něj telefon někdy přijde, přihlášení ke stejnému účtu vaše data znovu otevře.</string>
     <string name="local_encryption_password_note">Vaše heslo ke skrytým fotkám tato data také otevře, pokud telefon někdy o klíč přijde.</string>
     <string name="local_encryption_guest_title">Nastavte heslo ke skrytým fotkám.</string>
     <string name="local_encryption_guest_note">Bez účtu je klíč jen v zabezpečeném úložišti tohoto telefonu. Pokud o něj telefon někdy přijde, skryté fotky nepůjde obnovit, pokud k nim nenastavíte heslo.</string>

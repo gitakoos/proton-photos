@@ -2678,7 +2678,7 @@
     <string name="arrange_saved">Sıralama kaydedildi</string>
     <string name="albums_sort_newest_photo">En yeni fotoğraf</string>
     <string name="local_encryption_title">Yerel şifreleme</string>
-    <string name="local_encryption_desc">Bu telefondaki kitaplık, gizli fotoğraflar ve ayarlar</string>
+    <string name="local_encryption_desc">Bu telefondaki kitaplık, gizli fotoğraflar, küçük resimler ve ayarlar</string>
     <string name="local_encryption_state_on">Açık</string>
     <string name="local_encryption_state_encrypting">Şifreleniyor…</string>
     <string name="local_encryption_state_locked">Kilitli</string>
@@ -2687,7 +2687,8 @@
     <string name="local_encryption_item_library">Kitaplık veritabanı</string>
     <string name="local_encryption_item_hidden">Gizli fotoğraflar</string>
     <string name="local_encryption_item_settings">Ayarlar ve etkinlik geçmişi</string>
-    <string name="local_encryption_account_note">Anahtar Proton hesabına bağlıdır. Telefon onu bir gün kaybederse yeniden oturum açmak her şeyi açar.</string>
+    <string name="local_encryption_item_cache">Küçük resimler ve Proton Drive\'dan açılan fotoğraflar</string>
+    <string name="local_encryption_account_note">Anahtar Proton hesabına bağlıdır. Telefon onu bir gün kaybederse aynı hesapla oturum açmak verilerini yeniden açar.</string>
     <string name="local_encryption_password_note">Telefon anahtarı bir gün kaybederse gizli fotoğraf parolan da bu verileri açar.</string>
     <string name="local_encryption_guest_title">Gizli fotoğraflar için bir parola belirle.</string>
     <string name="local_encryption_guest_note">Hesap olmadan anahtar yalnızca bu telefonun güvenli deposunda durur. Telefon onu bir gün kaybederse, onlar için bir parola belirlemediğin sürece gizli fotoğrafların kurtarılamaz.</string>

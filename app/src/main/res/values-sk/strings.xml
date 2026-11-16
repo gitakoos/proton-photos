@@ -2899,7 +2899,7 @@
     <string name="arrange_saved">Poradie uložené</string>
     <string name="albums_sort_newest_photo">Najnovšia fotka</string>
     <string name="local_encryption_title">Miestne šifrovanie</string>
-    <string name="local_encryption_desc">Knižnica, skryté fotky a nastavenia v tomto telefóne</string>
+    <string name="local_encryption_desc">Knižnica, skryté fotky, náhľady a nastavenia v tomto telefóne</string>
     <string name="local_encryption_state_on">Zapnuté</string>
     <string name="local_encryption_state_encrypting">Šifruje sa…</string>
     <string name="local_encryption_state_locked">Zamknuté</string>
@@ -2908,7 +2908,8 @@
     <string name="local_encryption_item_library">Databáza knižnice</string>
     <string name="local_encryption_item_hidden">Skryté fotky</string>
     <string name="local_encryption_item_settings">Nastavenia a história aktivít</string>
-    <string name="local_encryption_account_note">Kľúč je viazaný na váš účet Proton. Ak oň telefón niekedy príde, opätovné prihlásenie všetko otvorí.</string>
+    <string name="local_encryption_item_cache">Náhľady a fotky otvorené z Proton Drive</string>
+    <string name="local_encryption_account_note">Kľúč je viazaný na váš účet Proton. Ak oň telefón niekedy príde, prihlásenie do toho istého účtu vaše údaje znova otvorí.</string>
     <string name="local_encryption_password_note">Vaše heslo k skrytým fotkám tieto údaje tiež otvorí, ak telefón niekedy príde o kľúč.</string>
     <string name="local_encryption_guest_title">Nastavte heslo k skrytým fotkám.</string>
     <string name="local_encryption_guest_note">Bez účtu je kľúč len v zabezpečenom úložisku tohto telefónu. Ak oň telefón niekedy príde, skryté fotky nepôjde obnoviť, pokiaľ k nim nenastavíte heslo.</string>
