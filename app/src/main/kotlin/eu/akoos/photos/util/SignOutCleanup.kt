@@ -27,11 +27,13 @@ import androidx.datastore.preferences.core.edit
 import androidx.work.WorkManager
 import coil.imageLoader
 import eu.akoos.photos.data.importer.ImportScanCache
+import eu.akoos.photos.data.localcrypto.VaultFiles
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.worker.AlbumDownloadWorker
+import eu.akoos.photos.worker.CloudCompressWorker
 import eu.akoos.photos.worker.ImportWorker
 import eu.akoos.photos.worker.MetadataEditWorker
 import eu.akoos.photos.worker.SyncWorker
@@ -60,10 +62,12 @@ object SignOutCleanup {
         "motion",
         StageImportUseCase.THUMB_DIR,
         ImportScanCache.DIR_NAME,
+        // The plaintext copies an upload, an import or an editor save works on.
+        VaultFiles.PLAIN_STAGING_DIR,
     )
 
     /** Stop everything scheduled against the account: backup, album downloads, an import, queued
-     *  metadata edits and the service that keeps the process alive. */
+     *  metadata edits, the re-compression of Drive photos and the service that keeps the process alive. */
     fun stopBackgroundWork(context: Context, workManager: WorkManager) {
         runCatching {
             SyncWorker.cancel(workManager)
@@ -72,6 +76,7 @@ object SignOutCleanup {
             workManager.cancelAllWorkByTag(AlbumDownloadWorker.TAG)
             workManager.cancelAllWorkByTag(ImportWorker.TAG)
             workManager.cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)
+            workManager.cancelUniqueWork(CloudCompressWorker.UNIQUE_NAME)
             BackgroundSyncService.stop(context)
         }
     }
@@ -86,7 +91,17 @@ object SignOutCleanup {
         loader.diskCache?.clear()
     }
 
+    /** Empty the diagnostics buffers and their saved copy, which would otherwise carry the account that is
+     *  leaving into the log of whoever uses the app next. Blocking file work, so run off the main thread. */
+    fun clearDiagnostics(context: Context) {
+        SyncDiagnostics.clear()
+        PerfDiagnostics.clear()
+        ImportDiagnostics.clear()
+        File(context.filesDir, "diagnostics").deleteRecursively()
+    }
+
     private val running = ConcurrentHashMap.newKeySet<String>()
+    private val userSignOutsRunning = ConcurrentHashMap.newKeySet<String>()
     private val unfinishedSignIns = ConcurrentHashMap.newKeySet<String>()
 
     /** Claims the cleanup of [userId] for this process; false while another run of it is still going. */
@@ -123,6 +138,52 @@ object SignOutCleanup {
 
     fun runningNow(): Set<String> = running.toSet()
 
+    /** Claims the Settings sign-out of [userId] for this process; false while one is already running. */
+    fun claimUserSignOut(userId: String): Boolean = userSignOutsRunning.add(userId)
+
+    fun releaseUserSignOut(userId: String) {
+        userSignOutsRunning.remove(userId)
+    }
+
+    fun userSignOutsRunningNow(): Set<String> = userSignOutsRunning.toSet()
+
+    suspend fun markUserSignOutPending(context: Context, userId: String) {
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.USER_SIGN_OUT_PENDING] = p[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty() + userId
+        }
+    }
+
+    suspend fun clearUserSignOutPending(context: Context, userId: String) {
+        context.settingsDataStore.edit { p ->
+            val left = p[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty() - userId
+            if (left.isEmpty()) p.remove(SettingsKeys.USER_SIGN_OUT_PENDING)
+            else p[SettingsKeys.USER_SIGN_OUT_PENDING] = left
+        }
+    }
+
+    suspend fun userSignOutsPending(context: Context): Set<String> =
+        context.settingsDataStore.data.first()[SettingsKeys.USER_SIGN_OUT_PENDING].orEmpty()
+
+    /**
+     * What a launch does with each Settings sign-out an earlier process started and never finished. The user
+     * asked to leave, and part of the leaving (the vault, the caches) may already have happened, so an account
+     * still enabled ([enabledUserIds]) is signed out now, leaving the rest of the vault as it is. An account that
+     * is already disabled or gone only loses the marker: the cleanup every sign-out reaches has its own. One
+     * still running in this process is left to it.
+     */
+    fun userSignOutReplayPlan(
+        pending: Set<String>,
+        enabledUserIds: Set<String>,
+        running: Set<String>,
+    ): Map<String, UserSignOutReplay> =
+        pending.associateWith { userId ->
+            when {
+                userId in running -> UserSignOutReplay.SKIP
+                userId in enabledUserIds -> UserSignOutReplay.FINISH
+                else -> UserSignOutReplay.DROP
+            }
+        }
+
     /**
      * What a launch does with each cleanup an earlier process started and never finished. It runs again
      * only while nobody is signed in ([presentUserId] null), since most of it is not scoped to the
@@ -140,3 +201,5 @@ object SignOutCleanup {
 }
 
 enum class SignOutReplay { RUN, DROP, SKIP }
+
+enum class UserSignOutReplay { FINISH, DROP, SKIP }

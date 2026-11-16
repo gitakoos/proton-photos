@@ -166,4 +166,7 @@ object UserSignOut {
     /** Whether [userId] signed out by choice; true once, so a later session ended by the server for
      *  the same account is not taken for it. */
     fun consume(userId: String): Boolean = userIds.remove(userId)
+
+    /** Whether [userId] is signing out by choice, without taking the answer. */
+    fun isMarked(userId: String): Boolean = userId in userIds
 }

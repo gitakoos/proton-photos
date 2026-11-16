@@ -125,6 +125,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val importHistoryDao: eu.akoos.photos.data.db.dao.ImportHistoryDao,
     private val importUploadedDao: eu.akoos.photos.data.db.dao.ImportUploadedDao,
     private val importAlbumMemberDao: eu.akoos.photos.data.db.dao.ImportAlbumMemberDao,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -615,6 +616,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { listingSweepSnapshotDao.clearForUser(userId.id) }
         runCatching { syncStateDao.deleteAll(userId.id) }
         runCatching { dayMetaDao.deleteAll(userId.id) }
+        // Where the account's photos were taken, Drive copies and device files alike, keyed by this account.
+        // A guest's fixes are stored under their own partition and stay.
+        runCatching { photoLocationDao.deleteForUser(userId.id) }
         // Drop the cached cloud album list so the next signed-in user doesn't see the previous
         // account's albums. Awaited now (the method is suspend) so the wipe completes before the
         // account is disabled.

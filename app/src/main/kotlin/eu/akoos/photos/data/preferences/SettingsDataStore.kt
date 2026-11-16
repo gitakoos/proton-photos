@@ -418,6 +418,13 @@ object SettingsKeys {
     val HIDDEN_DELETE_REQUESTS = stringSetPreferencesKey("hidden_delete_requests")
 
     /**
+     * Accounts whose sign-out from Settings started and has not reached the end, where the account is
+     * disabled. Written before the first step, so a process that dies part way leaves the next launch the
+     * work of finishing it (see [eu.akoos.photos.util.SignOutCleanup.userSignOutReplayPlan]).
+     */
+    val USER_SIGN_OUT_PENDING = stringSetPreferencesKey("user_sign_out_pending")
+
+    /**
      * Vault uris whose file was changed in place (an edit, an EXIF write) after it was hidden. A Drive
      * copy recorded for one of them holds only the version before the change, so a sign-out treats the
      * file as the only copy of what it now holds.

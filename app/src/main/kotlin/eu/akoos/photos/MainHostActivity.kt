@@ -220,6 +220,12 @@ class MainHostActivity : AppCompatActivity() {
         try {
             if (persist) signOutStep { cleanup.markPending(app, userId.id) }
             cleanup.stopBackgroundWork(app, workManager)
+            // A session the server ended leaves behind the same diagnostics a sign-out from Settings empties. That
+            // one has emptied them already and opened the next log with its own line, which stays. Emptied before
+            // the vault step below, whose line about what it did opens the next log.
+            if (persist && !eu.akoos.photos.data.hidden.UserSignOut.isMarked(userId.id)) signOutStep {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cleanup.clearDiagnostics(app) }
+            }
             val vault = try {
                 policy.afterSignOut(userId.id, busy)
             } catch (e: Exception) {
@@ -261,6 +267,48 @@ class MainHostActivity : AppCompatActivity() {
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             android.util.Log.w("MainHostActivity", "sign-out cleanup step failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * Finishes a sign-out from Settings an earlier process started and did not end. The user asked to leave and
+     * part of the leaving (the vault, the caches) may already have happened, so an account still enabled is
+     * disabled now, which runs the cleanup every sign-out reaches; the vault is left as the interrupted run left
+     * it. An account already disabled or gone only loses the marker.
+     */
+    private suspend fun finishUnfinishedUserSignOuts(app: android.content.Context) {
+        val cleanup = eu.akoos.photos.util.SignOutCleanup
+        val pending = try {
+            cleanup.userSignOutsPending(app)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            return
+        }
+        if (pending.isEmpty()) return
+        val enabled = accountManager.getAccounts().first()
+            .filter {
+                it.state != me.proton.core.account.domain.entity.AccountState.Disabled &&
+                    it.state != me.proton.core.account.domain.entity.AccountState.Removed
+            }
+            .mapTo(HashSet()) { it.userId.id }
+        for ((userId, step) in cleanup.userSignOutReplayPlan(pending, enabled, cleanup.userSignOutsRunningNow())) {
+            when (step) {
+                eu.akoos.photos.util.UserSignOutReplay.FINISH -> {
+                    if (!cleanup.claimUserSignOut(userId)) continue
+                    try {
+                        signOutStep {
+                            eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, finished after a restart, vault left as it was")
+                            eu.akoos.photos.data.hidden.UserSignOut.mark(userId)
+                            accountManager.disableAccount(UserId(userId))
+                            cleanup.clearUserSignOutPending(app, userId)
+                        }
+                    } finally {
+                        cleanup.releaseUserSignOut(userId)
+                    }
+                }
+                eu.akoos.photos.util.UserSignOutReplay.DROP -> signOutStep { cleanup.clearUserSignOutPending(app, userId) }
+                eu.akoos.photos.util.UserSignOutReplay.SKIP -> Unit
+            }
         }
     }
 
@@ -361,7 +409,11 @@ class MainHostActivity : AppCompatActivity() {
             .onUserKeyCheckFailed { /* corrupt user key - best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
 
-        appScope.launch { replayUnfinishedSignOutCleanups(app, policy) }
+        appScope.launch {
+            // A sign-out from Settings first, since finishing it disables the account and starts its cleanup.
+            finishUnfinishedUserSignOuts(app)
+            replayUnfinishedSignOutCleanups(app, policy)
+        }
 
         lifecycleScope.launch {
             // Login gate: don't arm the BG "Watching for new photos" notification before sign-in,

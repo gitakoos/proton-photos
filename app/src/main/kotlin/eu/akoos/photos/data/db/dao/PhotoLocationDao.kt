@@ -66,6 +66,11 @@ interface PhotoLocationDao {
     @Query("DELETE FROM photo_location WHERE userId = :userId AND id IN (:ids)")
     suspend fun deleteByIds(userId: String, ids: List<String>)
 
+    /** Drops every fix stored under [userId], for its sign-out. The guest partition
+     *  ([PhotoLocationEntity.LOCAL_USER]) and every other account keep theirs. */
+    @Query("DELETE FROM photo_location WHERE userId = :userId")
+    suspend fun deleteForUser(userId: String)
+
     /** Drops every stored fix at exactly 0, 0, the position written for a photo with no GPS, so no map,
      *  place or search shows one. Cheap and idempotent: the backfills run it before each walk. */
     @Query("DELETE FROM photo_location WHERE latitude = 0 AND longitude = 0")
