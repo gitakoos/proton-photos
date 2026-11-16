@@ -2965,6 +2965,8 @@
     <string name="whats_new_260_notsaved_body">Jeśli bezpieczny magazyn telefonu nie odpowiada, zmiana ustawień nie zostaje zapisana, a krótki komunikat prosi, by spróbować ponownie za chwilę.</string>
     <string name="whats_new_260_triggerkeep_title">Kopie działają dalej</string>
     <string name="whats_new_260_triggerkeep_body">Kopia, która rusza, gdy na telefonie pojawi się nowe zdjęcie, działa dalej, gdy otworzysz aplikację lub zmienisz ustawienie.</string>
+    <string name="whats_new_260_savekeep_title">Zapisywanie na urządzeniu trwa dalej</string>
+    <string name="whats_new_260_savekeep_body">Zapisz na urządzeniu działa dalej, gdy opuścisz ekran, z którego je uruchomiono, a także po zamknięciu aplikacji. Jeśli Android zatrzyma aplikację w trakcie, zapisywanie wznowi się tam, gdzie się przerwało, i żadne zdjęcie nie zostanie zapisane dwa razy. Zdjęcie zapisane podczas oglądania pojawia się też w Aktywności i Historii.</string>
     <string name="whats_new_260_freeupbackup_title">Zmienione zdjęcia zostają</string>
     <string name="whats_new_260_freeupbackup_body">Zwalnianie miejsca i usuwanie po kopii porównują każde zdjęcie z jego kopią tuż przed usunięciem z telefonu. Zdjęcie zmienione od czasu kopii zostaje na telefonie i wraca do kolejki kopii; zdjęcie, którego nie da się sprawdzić, zostaje bez zmian.</string>
     <string name="whats_new_260_compressnote_title">Uwaga o kompresji i zwalnianiu miejsca</string>

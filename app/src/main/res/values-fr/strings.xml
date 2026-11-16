@@ -2836,6 +2836,8 @@
     <string name="whats_new_260_notsaved_body">Si le stockage sécurisé du téléphone ne répond pas, la modification des réglages n\'est pas enregistrée et un court message vous invite à réessayer dans un instant.</string>
     <string name="whats_new_260_triggerkeep_title">Les sauvegardes continuent</string>
     <string name="whats_new_260_triggerkeep_body">Une sauvegarde qui démarre quand une nouvelle photo apparaît sur le téléphone continue quand vous ouvrez l\'app ou modifiez un réglage.</string>
+    <string name="whats_new_260_savekeep_title">L\'enregistrement sur l\'appareil continue</string>
+    <string name="whats_new_260_savekeep_body">Enregistrer sur l\'appareil continue quand vous quittez l\'écran d\'où vous l\'avez lancé, et aussi après la fermeture de l\'app. Si Android arrête l\'app en cours de route, l\'enregistrement reprend là où il s\'est arrêté, et aucune photo n\'est enregistrée deux fois. Une photo enregistrée pendant que vous la regardez apparaît aussi dans Activité et Historique.</string>
     <string name="whats_new_260_freeupbackup_title">Les photos modifiées sont gardées</string>
     <string name="whats_new_260_freeupbackup_body">Libérer de l\'espace et supprimer après la sauvegarde comparent chaque photo à sa sauvegarde juste avant de la retirer du téléphone. Une photo modifiée depuis sa sauvegarde reste sur le téléphone et est remise en file pour être sauvegardée à nouveau ; une photo qui ne peut pas être vérifiée reste telle quelle.</string>
     <string name="whats_new_260_compressnote_title">Note sur la compression et la libération d\'espace</string>

@@ -2873,6 +2873,8 @@
     <string name="whats_new_260_notsaved_body">Se l\'archivio sicuro del telefono non risponde, la modifica alle impostazioni non viene salvata e un breve messaggio ti chiede di riprovare tra poco.</string>
     <string name="whats_new_260_triggerkeep_title">I backup continuano</string>
     <string name="whats_new_260_triggerkeep_body">Un backup che parte quando sul telefono compare una nuova foto continua anche se apri l\'app o cambi un\'impostazione.</string>
+    <string name="whats_new_260_savekeep_title">Il salvataggio sul dispositivo continua</string>
+    <string name="whats_new_260_savekeep_body">Salva sul dispositivo continua quando esci dalla schermata da cui l\'hai avviato, e anche dopo la chiusura dell\'app. Se Android ferma l\'app a metà, il salvataggio riprende da dove si era fermato e nessuna foto viene salvata due volte. Una foto salvata mentre la guardi compare anche in Attività e Cronologia.</string>
     <string name="whats_new_260_freeupbackup_title">Le foto modificate restano</string>
     <string name="whats_new_260_freeupbackup_body">Liberare spazio ed eliminare dopo il backup confrontano ogni foto con il suo backup subito prima di toglierla dal telefono. Una foto modificata dopo il backup resta sul telefono e torna in coda per un nuovo backup; una che non si può verificare resta com\'è.</string>
     <string name="whats_new_260_compressnote_title">Nota su compressione e spazio liberato</string>

@@ -354,6 +354,7 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_calendar_title, R.string.whats_new_260_calendar_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Sync, R.string.whats_new_260_syncnow_title, R.string.whats_new_260_syncnow_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Sync, R.string.whats_new_260_triggerkeep_title, R.string.whats_new_260_triggerkeep_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_savekeep_title, R.string.whats_new_260_savekeep_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.CleaningServices, R.string.whats_new_260_freeupbackup_title, R.string.whats_new_260_freeupbackup_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_260_compressnote_title, R.string.whats_new_260_compressnote_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_260_mirrorcheck_title, R.string.whats_new_260_mirrorcheck_body, WhatsNewCategory.Improved),

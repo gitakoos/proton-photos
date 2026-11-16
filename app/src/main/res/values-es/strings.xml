@@ -2871,6 +2871,8 @@
     <string name="whats_new_260_notsaved_body">Si el almacenamiento seguro del teléfono no responde, el cambio de ajustes no se guarda y un breve aviso te pide que lo vuelvas a intentar en un momento.</string>
     <string name="whats_new_260_triggerkeep_title">Las copias siguen en marcha</string>
     <string name="whats_new_260_triggerkeep_body">Una copia que empieza cuando aparece una foto nueva en el teléfono sigue en marcha aunque abras la app o cambies un ajuste.</string>
+    <string name="whats_new_260_savekeep_title">Guardar en el dispositivo sigue en marcha</string>
+    <string name="whats_new_260_savekeep_body">Guardar en el dispositivo sigue en marcha cuando sales de la pantalla desde la que lo iniciaste y también cuando se cierra la app. Si Android detiene la app a medias, el guardado sigue donde se quedó y ninguna foto se guarda dos veces. Una foto que guardas mientras la ves también aparece en Actividad e Historial.</string>
     <string name="whats_new_260_freeupbackup_title">Las fotos cambiadas se quedan</string>
     <string name="whats_new_260_freeupbackup_body">Liberar espacio y eliminar tras la copia comparan cada foto con su copia justo antes de quitarla del teléfono. Una foto cambiada desde su copia se queda en el teléfono y vuelve a la cola de copia; una que no se puede comprobar se queda tal cual.</string>
     <string name="whats_new_260_compressnote_title">Nota sobre compresión y liberar espacio</string>

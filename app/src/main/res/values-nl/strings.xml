@@ -2858,6 +2858,8 @@
     <string name="whats_new_260_notsaved_body">Als de beveiligde opslag van de telefoon niet reageert, wordt een wijziging in de instellingen niet opgeslagen en vraagt een korte melding je het zo meteen opnieuw te proberen.</string>
     <string name="whats_new_260_triggerkeep_title">Back-ups lopen door</string>
     <string name="whats_new_260_triggerkeep_body">Een back-up die start als er een nieuwe foto op de telefoon verschijnt, loopt door als je de app opent of een instelling wijzigt.</string>
+    <string name="whats_new_260_savekeep_title">Opslaan op apparaat gaat door</string>
+    <string name="whats_new_260_savekeep_body">Opslaan op apparaat gaat door als je het scherm verlaat waar je het startte, en ook nadat de app is gesloten. Stopt Android de app halverwege, dan gaat het opslaan verder waar het gebleven was, en geen foto wordt twee keer opgeslagen. Een foto die je opslaat terwijl je hem bekijkt, staat ook in Activiteit en Geschiedenis.</string>
     <string name="whats_new_260_freeupbackup_title">Gewijzigde foto\'s blijven</string>
     <string name="whats_new_260_freeupbackup_body">Ruimte vrijmaken en verwijderen na de back-up vergelijken elke foto met zijn back-up vlak voordat hij van de telefoon gaat. Een foto die sinds de back-up is gewijzigd, blijft op de telefoon en komt opnieuw in de wachtrij voor een back-up; een foto die niet te controleren is, blijft zoals hij is.</string>
     <string name="whats_new_260_compressnote_title">Opmerking over comprimeren en ruimte vrijmaken</string>

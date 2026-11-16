@@ -2972,6 +2972,8 @@
     <string name="whats_new_260_notsaved_body">Keď zabezpečené úložisko telefónu neodpovedá, zmena nastavení sa neuloží a krátka správa vás požiada, aby ste to o chvíľu skúsili znova.</string>
     <string name="whats_new_260_triggerkeep_title">Zálohy bežia ďalej</string>
     <string name="whats_new_260_triggerkeep_body">Záloha, ktorá sa spustí, keď sa v telefóne objaví nová fotka, beží ďalej, aj keď otvoríte aplikáciu alebo zmeníte nastavenie.</string>
+    <string name="whats_new_260_savekeep_title">Ukladanie do zariadenia pokračuje</string>
+    <string name="whats_new_260_savekeep_body">Uložiť do zariadenia pokračuje aj potom, ako opustíte obrazovku, kde ste ukladanie spustili, aj po zatvorení aplikácie. Keď Android aplikáciu uprostred zastaví, ukladanie nadviaže tam, kde skončilo, a žiadna fotka sa neuloží dvakrát. Fotka uložená pri prezeraní sa zobrazí aj v Aktivite a Histórii.</string>
     <string name="whats_new_260_freeupbackup_title">Zmenené fotky zostávajú</string>
     <string name="whats_new_260_freeupbackup_body">Uvoľnenie miesta aj odstránenie po zálohovaní porovnajú každú fotku s jej zálohou tesne predtým, ako z telefónu zmizne. Fotka zmenená od zálohy zostane v telefóne a zaradí sa na nové zálohovanie; fotka, ktorú sa nedá overiť, zostane bez zmeny.</string>
     <string name="whats_new_260_compressnote_title">Poznámka ku kompresii a uvoľneniu miesta</string>

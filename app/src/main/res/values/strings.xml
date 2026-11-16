@@ -2871,6 +2871,8 @@
     <string name="whats_new_260_notsaved_body">If the phone\'s secure storage does not answer, a settings change is not saved and a short message asks you to try again in a moment.</string>
     <string name="whats_new_260_triggerkeep_title">Backups keep running</string>
     <string name="whats_new_260_triggerkeep_body">A backup that starts when a new photo appears on the phone keeps running when you open the app or change a setting.</string>
+    <string name="whats_new_260_savekeep_title">Saving to the device keeps going</string>
+    <string name="whats_new_260_savekeep_body">Save to device keeps going after you leave the screen you started it from, and after the app is closed. If Android stops the app part way, the save picks up where it stopped, and no photo is saved twice. A photo saved while you view it also shows in Activity and History.</string>
     <string name="whats_new_260_freeupbackup_title">Changed photos are kept</string>
     <string name="whats_new_260_freeupbackup_body">Freeing up space and deleting after backup check each photo against its backup right before it leaves the phone. A photo changed since its backup stays on the phone and is queued to be backed up again; one that cannot be checked stays as it is.</string>
     <string name="whats_new_260_compressnote_title">Compression and free-up note</string>
