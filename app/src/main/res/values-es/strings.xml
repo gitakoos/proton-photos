@@ -1193,7 +1193,7 @@
     <string name="update_channel_name">Actualizaciones de la app</string>
     <string name="update_channel_desc">Avisa cuando hay una versión más reciente de la app.</string>
     <string name="vault_rescue_channel_name">Avisos de cierre de sesión</string>
-    <string name="vault_rescue_channel_desc">Te avisa cuando un cierre de sesión que no pediste devolvió tus fotos ocultas a la galería.</string>
+    <string name="vault_rescue_channel_desc">Te avisa de qué ha pasado con tus fotos ocultas tras un cierre de sesión.</string>
     <string name="vault_rescue_title">Se cerró tu sesión</string>
     <string name="vault_rescue_text">Tus fotos ocultas sin copia en Drive se devolvieron a la galería, a la carpeta %1$s, para que no se pierda ninguna.</string>
     <string name="vault_rescue_kept_text">No se pudo leer tu contraseña de fotos ocultas, así que tus fotos ocultas sin copia en Drive se quedaron en la app en lugar de ir sin protección a la galería. Abre Fotos ocultas e introduce la contraseña para verlas.</string>

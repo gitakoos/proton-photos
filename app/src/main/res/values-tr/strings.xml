@@ -1849,7 +1849,7 @@
     <string name="update_channel_name">Uygulama güncellemeleri</string>
     <string name="update_channel_desc">Uygulamanın daha yeni bir sürümü çıktığında seni bilgilendirir.</string>
     <string name="vault_rescue_channel_name">Oturum kapatma bildirimleri</string>
-    <string name="vault_rescue_channel_desc">İstemediğin bir oturum kapatma gizli fotoğraflarını galeriye geri taşıdığında seni bilgilendirir.</string>
+    <string name="vault_rescue_channel_desc">Oturum kapatıldıktan sonra gizli fotoğraflarına ne olduğunu sana bildirir.</string>
     <string name="vault_rescue_title">Oturumun kapatıldı</string>
     <string name="vault_rescue_text">Drive\'da kopyası olmayan gizli fotoğrafların hiçbiri kaybolmasın diye galeriye, %1$s klasörüne geri taşındı.</string>
     <string name="vault_rescue_kept_text">Gizli fotoğraflar parolan okunamadı, bu yüzden Drive\'da kopyası olmayan gizli fotoğrafların korumasız olarak galeriye gitmek yerine uygulamada kaldı. Onları görmek için Gizli Fotoğraflar bölümünü aç ve parolayı gir.</string>

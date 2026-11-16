@@ -1417,7 +1417,7 @@
     <string name="update_channel_name">Posodobitve aplikacije</string>
     <string name="update_channel_desc">Sporoči, ko je na voljo novejša različica aplikacije.</string>
     <string name="vault_rescue_channel_name">Obvestila o odjavi</string>
-    <string name="vault_rescue_channel_desc">Obvesti, ko so se skrite fotografije po odjavi, ki je niste sprožili, vrnile v galerijo.</string>
+    <string name="vault_rescue_channel_desc">Obvesti, kaj se je po odjavi zgodilo s skritimi fotografijami.</string>
     <string name="vault_rescue_title">Vaša seja se je končala</string>
     <string name="vault_rescue_text">Vaše skrite fotografije brez kopije v Drive so bile premaknjene nazaj v galerijo, v mapo %1$s, da nobena ne izgine.</string>
     <string name="vault_rescue_kept_text">Gesla za skrite fotografije ni bilo mogoče prebrati, zato so skrite fotografije brez kopije v Drive ostale v aplikaciji, namesto da bi nezaščitene šle v galerijo. Odprite Skrite fotografije in vnesite geslo, da jih vidite.</string>

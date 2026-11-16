@@ -1193,7 +1193,7 @@
     <string name="update_channel_name">Aggiornamenti dell\'app</string>
     <string name="update_channel_desc">Segnala quando è disponibile una versione più recente dell\'app.</string>
     <string name="vault_rescue_channel_name">Avvisi di disconnessione</string>
-    <string name="vault_rescue_channel_desc">Ti avvisa quando una disconnessione che non hai richiesto ha riportato le foto nascoste nella galleria.</string>
+    <string name="vault_rescue_channel_desc">Ti avvisa di cosa è successo alle foto nascoste dopo una disconnessione.</string>
     <string name="vault_rescue_title">La tua sessione è terminata</string>
     <string name="vault_rescue_text">Le tue foto nascoste senza copia su Drive sono state riportate nella galleria, nella cartella %1$s, così nessuna va persa.</string>
     <string name="vault_rescue_kept_text">Non è stato possibile leggere la password delle foto nascoste, quindi le foto nascoste senza copia su Drive sono rimaste nell\'app invece di finire non protette nella galleria. Apri Foto nascoste e inserisci la password per vederle.</string>

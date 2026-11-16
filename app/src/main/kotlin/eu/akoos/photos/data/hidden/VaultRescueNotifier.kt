@@ -35,7 +35,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Tells the user why hidden photos turned up in the gallery after a sign-out they did not ask for.
+ * Tells the user what happened to hidden photos after a sign-out, forced or chosen.
  *
  * The photos come back into a folder of their own, and without a word the folder would read as
  * photos that appeared from nowhere. Its own channel, so the notice can be silenced on its own.

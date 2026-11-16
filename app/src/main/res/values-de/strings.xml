@@ -1178,7 +1178,7 @@
     <string name="update_channel_name">App-Updates</string>
     <string name="update_channel_desc">Meldet, wenn eine neuere Version der App verfügbar ist.</string>
     <string name="vault_rescue_channel_name">Hinweise zur Abmeldung</string>
-    <string name="vault_rescue_channel_desc">Meldet, wenn eine Abmeldung, die du nicht ausgelöst hast, deine versteckten Fotos zurück in die Galerie verschoben hat.</string>
+    <string name="vault_rescue_channel_desc">Meldet, was nach einer Abmeldung mit deinen versteckten Fotos passiert ist.</string>
     <string name="vault_rescue_title">Du wurdest abgemeldet</string>
     <string name="vault_rescue_text">Deine versteckten Fotos ohne Kopie in Drive wurden zurück in die Galerie verschoben, in den Ordner %1$s, damit keines verloren geht.</string>
     <string name="vault_rescue_kept_text">Dein Passwort für versteckte Fotos konnte nicht gelesen werden, deshalb sind deine versteckten Fotos ohne Kopie in Drive in der App geblieben, statt ungeschützt in die Galerie zu gehen. Öffne Versteckte Fotos und gib das Passwort ein, um sie zu sehen.</string>

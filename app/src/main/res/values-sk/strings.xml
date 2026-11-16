@@ -1416,7 +1416,7 @@
     <string name="update_channel_name">Aktualizácie aplikácie</string>
     <string name="update_channel_desc">Oznámi, keď je dostupná novšia verzia aplikácie.</string>
     <string name="vault_rescue_channel_name">Oznámenia o odhlásení</string>
-    <string name="vault_rescue_channel_desc">Upozorní vás na návrat skrytých fotiek do galérie po odhlásení, ktoré ste nevyvolali.</string>
+    <string name="vault_rescue_channel_desc">Upozorní vás, čo sa po odhlásení stalo s vašimi skrytými fotkami.</string>
     <string name="vault_rescue_title">Vaše prihlásenie skončilo</string>
     <string name="vault_rescue_text">Vaše skryté fotky bez kópie na Drive sa vrátili do galérie, do priečinka %1$s, aby sa žiadna nestratila.</string>
     <string name="vault_rescue_kept_text">Heslo k skrytým fotkám sa nepodarilo prečítať, a tak skryté fotky bez kópie na Drive zostali v aplikácii, namiesto toho, aby išli nechránené do galérie. Otvorte Skryté fotky a zadajte heslo, aby ste ich videli.</string>

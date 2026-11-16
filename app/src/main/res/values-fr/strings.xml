@@ -1180,7 +1180,7 @@
     <string name="update_channel_name">Mises à jour de l\'application</string>
     <string name="update_channel_desc">Vous avertit quand une version plus récente de l\'application est disponible.</string>
     <string name="vault_rescue_channel_name">Avis de déconnexion</string>
-    <string name="vault_rescue_channel_desc">Vous prévient lorsqu\'une déconnexion que vous n\'avez pas demandée a remis vos photos masquées dans la galerie.</string>
+    <string name="vault_rescue_channel_desc">Vous indique ce que sont devenues vos photos masquées après une déconnexion.</string>
     <string name="vault_rescue_title">Votre session a pris fin</string>
     <string name="vault_rescue_text">Vos photos masquées sans copie dans Drive ont été remises dans la galerie, dans le dossier %1$s, pour qu\'aucune ne soit perdue.</string>
     <string name="vault_rescue_kept_text">Votre mot de passe des photos masquées n\'a pas pu être lu : vos photos masquées sans copie dans Drive sont donc restées dans l\'app au lieu d\'aller sans protection dans la galerie. Ouvrez Photos masquées et saisissez le mot de passe pour les voir.</string>
