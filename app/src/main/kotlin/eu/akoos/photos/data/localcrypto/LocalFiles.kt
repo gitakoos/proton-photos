@@ -112,8 +112,8 @@ object LocalFiles {
 
     /**
      * The plaintext of [file] for a reader that can do without it: null when the file is missing, empty, cannot
-     * be read now or does not open. A regenerable cache file that does not open any more is deleted, so it is
-     * fetched or made again.
+     * be read now or does not open. A regenerable cache file that does not open any more, or whose read reaches a
+     * damaged part, is deleted, so it is fetched or made again.
      */
     fun openForRead(context: Context?, file: File): InputStream? {
         if (!file.isFile || file.length() <= 0L) return null
@@ -123,13 +123,60 @@ object LocalFiles {
             LocalFileForm.ENCRYPTED -> {
                 val ctx = CacheFiles.contextOf(context) ?: return null
                 try {
-                    openPlain(ctx, file)
+                    val stream = openPlain(ctx, file)
+                    if (areaOf(ctx, file)?.regenerable == true) CacheFiles.droppingOnDamage(file, stream) else stream
                 } catch (e: Exception) {
                     if (areaOf(ctx, file)?.regenerable == true) CacheFiles.dropIfUnreadable(file, e)
                     null
                 }
             }
         }
+    }
+
+    /**
+     * A decode of [file] for an indexer that has to tell a file it cannot read now from one it can make no image of.
+     * [undecodable] is set only when the whole read went through and the decoder still made nothing (a format it
+     * does not know, corrupt image bytes): that miss is for good. A file missing, locked or damaged part way is a
+     * miss for now (a damaged cache file is deleted by [openForRead], so it is fetched again), and the decoder's
+     * picture of a read cut short is never handed back.
+     */
+    class CheckedDecode(val bitmap: Bitmap?, val undecodable: Boolean)
+
+    fun decodeChecked(
+        context: Context?,
+        file: File,
+        options: BitmapFactory.Options,
+        decode: (InputStream, BitmapFactory.Options) -> Bitmap? = { input, opts -> BitmapFactory.decodeStream(input, null, opts) },
+    ): CheckedDecode {
+        val stream = openForRead(context, file) ?: return CheckedDecode(null, undecodable = false)
+        val watched = ReadWatch(stream)
+        val bitmap = watched.use { decode(BufferedInputStream(it, DECODE_BUFFER), options) }
+        if (watched.failed) {
+            bitmap?.recycle()
+            return CheckedDecode(null, undecodable = false)
+        }
+        val made = if (options.inJustDecodeBounds) options.outWidth > 0 && options.outHeight > 0 else bitmap != null
+        return CheckedDecode(bitmap, undecodable = !made && file.exists())
+    }
+
+    /** Remembers whether a read of [source] threw (a decoder may swallow the error and take it as the end). */
+    internal class ReadWatch(source: InputStream) : java.io.FilterInputStream(source) {
+        @Volatile
+        var failed = false
+            private set
+
+        private inline fun <T> watched(read: () -> T): T = try {
+            read()
+        } catch (e: IOException) {
+            failed = true
+            throw e
+        }
+
+        override fun read(): Int = watched { super.read() }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = watched { super.read(b, off, len) }
+
+        override fun skip(n: Long): Long = watched { super.skip(n) }
     }
 
     /** [BitmapFactory.decodeFile] for a file that may be encrypted: null where [openForRead] has no stream. */
@@ -255,17 +302,44 @@ object CacheFiles {
         }
     }
 
-    /** Opens the cache file [file] decrypted, or null as for [readBytesOrNull]. */
+    /** Opens the cache file [file] decrypted, or null as for [readBytesOrNull]. A read that reaches a damaged
+     *  part deletes it too. */
     fun openOrNull(file: File, context: Context? = null): InputStream? {
         if (!file.isFile || file.length() <= 0L) return null
         if (!LocalCryptoFormat.isEncrypted(file)) return runCatching { FileInputStream(file) }.getOrNull()
         val ctx = contextOf(context) ?: return null
         return try {
-            LocalFiles.openPlain(ctx, file)
+            droppingOnDamage(file, LocalFiles.openPlain(ctx, file))
         } catch (e: Exception) {
             dropIfUnreadable(file, e)
             null
         }
+    }
+
+    /** [stream] of the cache file [file], which deletes the file when a read reaches a damaged segment (the header
+     *  opened, a later part does not), so the next look finds it missing and makes it again. */
+    fun droppingOnDamage(file: File, stream: InputStream): InputStream = object : java.io.FilterInputStream(stream) {
+        private var failure: IOException? = null
+
+        private inline fun <T> dropping(read: () -> T): T = try {
+            read()
+        } catch (e: IOException) {
+            failure = e
+            dropIfUnreadable(file, e)
+            throw e
+        }
+
+        // Deleted again once closed: a file still open may refuse to go until then.
+        override fun close() {
+            super.close()
+            failure?.let { dropIfUnreadable(file, it) }
+        }
+
+        override fun read(): Int = dropping { super.read() }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = dropping { super.read(b, off, len) }
+
+        override fun skip(n: Long): Long = dropping { super.skip(n) }
     }
 
     /** Deletes a cache file whose key is gone or whose bytes are damaged. A Keystore that is only slow to answer

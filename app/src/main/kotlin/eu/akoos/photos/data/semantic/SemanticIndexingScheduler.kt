@@ -943,20 +943,20 @@ class SemanticIndexingScheduler @Inject constructor(
         if (!file.exists() || file.length() <= 0L) return@runCatching null
         // The cache files are encrypted: read through LocalFiles. A file that does not open now is not
         // unreadable (a cache file whose key is gone is deleted there, so it is fetched again).
+        // A read that fails part way (a damaged segment) is a miss for now, never "unreadable".
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        LocalFiles.openForRead(context, file)?.use { BitmapFactory.decodeStream(BufferedInputStream(it), null, bounds) }
-            ?: return@runCatching null
+        val sized = LocalFiles.decodeChecked(context, file, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            if (file.exists()) unreadable?.set(true)
+            if (sized.undecodable) unreadable?.set(true)
             return@runCatching null
         }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val stream = LocalFiles.openForRead(context, file) ?: return@runCatching null
-        val bmp = stream.use { BitmapFactory.decodeStream(BufferedInputStream(it), null, opts) } ?: run {
-            if (file.exists()) unreadable?.set(true)
+        val decoded = LocalFiles.decodeChecked(context, file, opts)
+        val bmp = decoded.bitmap ?: run {
+            if (decoded.undecodable) unreadable?.set(true)
             return@runCatching null
         }
         orientedBitmap(bmp, LocalFiles.exifOrientation(context, file))

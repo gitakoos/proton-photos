@@ -29,6 +29,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -115,6 +116,91 @@ class CacheFilesTest {
 
         assertNull(CacheFiles.readBytesOrNull(file))
         assertFalse(file.exists())
+    }
+
+    @Test
+    fun `a cache file damaged part way is deleted when the read reaches the damage, so it is fetched again`() {
+        val file = File(thumbs, "thumb_mid.jpg")
+        CacheFiles.write(file, Random(8).nextBytes(200_000), context = context)
+        val damaged = file.readBytes().also { it[100_000] = (it[100_000] + 1).toByte() }
+        file.writeBytes(damaged)
+
+        val stream = LocalFiles.openForRead(context, file)
+        assertNotNull("the first segment still opens", stream)
+        val failure = runCatching { stream!!.use { it.readBytes() } }.exceptionOrNull()
+
+        assertTrue(failure is java.io.IOException)
+        assertFalse("a reader that checks for the file sees it gone, not unreadable", file.exists())
+    }
+
+    @Test
+    fun `a vault file damaged part way is kept when a read reaches the damage`() {
+        val vault = VaultFiles.vaultDir(context).apply { mkdirs() }
+        val file = File(vault, "kept_mid.jpg")
+        FileOutputStream(file).use { out ->
+            LocalCryptoFormat.encryptingStream(out, sealing()).use { it.write(Random(9).nextBytes(200_000)) }
+        }
+        val damaged = file.readBytes().also { it[100_000] = (it[100_000] + 1).toByte() }
+        file.writeBytes(damaged)
+
+        runCatching { LocalFiles.openForRead(context, file)!!.use { it.readBytes() } }
+
+        assertTrue(file.exists())
+        file.delete()
+    }
+
+    /** Reads the whole stream like an image decoder that swallows a failed read and takes it as the end, then
+     *  hands back a picture of what it got (a cut-short JPEG comes out grey at the bottom), or [result]. */
+    private fun swallowingDecoder(result: () -> android.graphics.Bitmap?) =
+        { input: java.io.InputStream, _: android.graphics.BitmapFactory.Options ->
+            val cutShort = runCatching { input.readBytes() }.isFailure
+            if (cutShort) android.graphics.Bitmap.createBitmap(4, 4, android.graphics.Bitmap.Config.ARGB_8888) else result()
+        }
+
+    @Test
+    fun `an index decode that hits a damaged segment is a miss for now, never undecodable`() {
+        val file = File(thumbs, "thumb_index.jpg")
+        CacheFiles.write(file, Random(10).nextBytes(200_000), context = context)
+        file.writeBytes(file.readBytes().also { it[100_000] = (it[100_000] + 1).toByte() })
+
+        val decoded = LocalFiles.decodeChecked(
+            context, file, android.graphics.BitmapFactory.Options(), swallowingDecoder { null },
+        )
+
+        assertNull("a picture of a read cut short is never handed back", decoded.bitmap)
+        assertFalse(decoded.undecodable)
+        assertFalse("deleted, so it is fetched again", file.exists())
+    }
+
+    @Test
+    fun `an index decode that read the whole file and made nothing is undecodable`() {
+        val file = File(thumbs, "thumb_bad.jpg")
+        CacheFiles.write(file, Random(11).nextBytes(200_000), context = context)
+
+        val decoded = LocalFiles.decodeChecked(
+            context, file, android.graphics.BitmapFactory.Options(), swallowingDecoder { null },
+        )
+
+        assertTrue(decoded.undecodable)
+        assertTrue(file.exists())
+    }
+
+    @Test
+    fun `an index decode of a damaged vault file keeps the file and does not call it undecodable`() {
+        val vault = VaultFiles.vaultDir(context).apply { mkdirs() }
+        val file = File(vault, "index_mid.jpg")
+        FileOutputStream(file).use { out ->
+            LocalCryptoFormat.encryptingStream(out, sealing()).use { it.write(Random(12).nextBytes(200_000)) }
+        }
+        file.writeBytes(file.readBytes().also { it[100_000] = (it[100_000] + 1).toByte() })
+
+        val decoded = LocalFiles.decodeChecked(
+            context, file, android.graphics.BitmapFactory.Options(), swallowingDecoder { null },
+        )
+
+        assertFalse(decoded.undecodable)
+        assertTrue(file.exists())
+        file.delete()
     }
 
     @Test
