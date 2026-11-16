@@ -45,6 +45,13 @@ object LocalFiles {
     const val FULLRES_DIR = "fullres"
     const val THUMBNAILS_DIR = "thumbnails"
     const val OFFLINE_DIR = "offline"
+
+    /** Where an offline copy is encrypted before it replaces its plaintext; a folder of its own, so a lookup in
+     *  the offline folder never meets a staging copy. */
+    const val OFFLINE_STAGING_DIR = ".offline_staging"
+
+    /** Held while an offline copy is written, removed or encrypted in place, so none of them meets another. */
+    val offlineLock = java.util.concurrent.locks.ReentrantLock()
     const val MOTION_DIR = "motion"
 
     /** A folder of encrypted files. [code] names it in a [VaultReadProvider] uri; [regenerable] files may be

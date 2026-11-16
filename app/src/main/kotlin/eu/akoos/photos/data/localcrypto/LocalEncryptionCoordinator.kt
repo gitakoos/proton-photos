@@ -55,6 +55,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -133,6 +134,7 @@ class LocalEncryptionCoordinator @Inject constructor(
             // after a recovery.
             runCatching { restoreLockedStores() }.onFailure { logFailure("locked settings", it) }
             runCatching { encryptVault() }.onFailure { logFailure("vault encryption", it) }
+            runCatching { encryptOffline() }.onFailure { logFailure("offline encryption", it) }
             runCatching { writeMissingPasswordCopies() }.onFailure { logFailure("password copies", it) }
             refresh()
         }
@@ -342,6 +344,17 @@ class LocalEncryptionCoordinator @Inject constructor(
         if (outcome.complete) LocalCrypto.markMigrated(context)
     }
 
+    /**
+     * Encrypts, in place and with the vault's verify-then-swap, the offline copies an earlier version pinned in
+     * plain. Nothing is downloaded again; a copy that does not encrypt stays readable as it is.
+     */
+    private fun encryptOffline() {
+        val keyring = LocalCrypto.keyringOrNull(context) ?: return
+        val dir = LocalFiles.dir(context, LocalFiles.Area.OFFLINE)
+        if (!dir.isDirectory) return
+        offlineMigration(context, keyring).run()
+    }
+
     private fun logFailure(what: String, e: Throwable) {
         if (e is CancellationException) throw e
         LocalCrypto.log("local encryption: $what failed (${e.javaClass.simpleName})")
@@ -354,6 +367,21 @@ class LocalEncryptionCoordinator @Inject constructor(
         private const val TEMP_SWEEP_MARGIN_MS = 2_000L
     }
 }
+
+/** The migration that encrypts the plaintext offline copies in place, sharing the offline store's lock. */
+internal fun offlineMigration(context: Context, keyring: LocalKeyring, log: (String) -> Unit = LocalCrypto::log) = VaultMigration(
+    vaultDir = LocalFiles.dir(context, LocalFiles.Area.OFFLINE),
+    stagingDir = File(context.applicationContext.filesDir, LocalFiles.OFFLINE_STAGING_DIR),
+    stateDir = LocalCrypto.root(context),
+    keyring = keyring,
+    lock = LocalFiles.offlineLock,
+    metaFor = { LocalFileMeta(mimeType = mimeFromPath(it.name)) },
+    log = log,
+    kind = LocalFileKind.CACHE,
+    accept = { !it.name.startsWith(".") && !it.name.endsWith(".tmp") },
+    attemptsName = "offline_attempts",
+    label = "offline",
+)
 
 /** Seals recovery copies to an account's Proton address key with the envelope the ML data uses. */
 internal class EnvelopeAccountSealer(

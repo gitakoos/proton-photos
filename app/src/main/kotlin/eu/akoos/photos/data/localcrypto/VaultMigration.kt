@@ -33,7 +33,9 @@ import kotlin.concurrent.withLock
 
 /**
  * Encrypts the plaintext files of the hidden vault one at a time, in place of each other, so a hidden photo is
- * never anywhere but in the vault.
+ * never anywhere but in the vault. The same steps encrypt the offline copies pinned by an earlier version: a
+ * folder, the [kind] its files are sealed as, which of its files are taken ([accept]) and the name of its
+ * attempts record.
  *
  * For each file: the encrypted copy is written beside the vault and synced, decrypted again and compared with the
  * plaintext, and only then moved over the plaintext in one atomic rename, so at every moment the vault holds one
@@ -53,6 +55,10 @@ class VaultMigration(
     /** Called between steps, for tests that stop the run at a given point. */
     private val checkpoint: (Step, File) -> Unit = { _, _ -> },
     private val formOf: (File) -> LocalFileForm = { LocalCryptoFormat.formOf(it) },
+    private val kind: LocalFileKind = LocalFileKind.VAULT,
+    private val accept: (File) -> Boolean = { !it.name.startsWith(".") },
+    private val attemptsName: String = ATTEMPTS_FILE,
+    private val label: String = "vault",
 ) {
     enum class Step { STAGED, VERIFIED, MOVED }
 
@@ -77,7 +83,7 @@ class VaultMigration(
             if ((attempts[file.name] ?: 0) >= MAX_ATTEMPTS) continue
             val needed = file.length() + LocalCryptoFormat.overheadFor(file.length()) + SPACE_MARGIN_BYTES
             if (freeBytes(vaultDir) < needed) {
-                log("vault encryption: paused, not enough free space")
+                log("$label encryption: paused, not enough free space")
                 stoppedForSpace = true
                 break
             }
@@ -87,25 +93,25 @@ class VaultMigration(
                 failed++
                 attempts[file.name] = (attempts[file.name] ?: 0) + 1
                 writeAttempts(attempts)
-                log("vault encryption: a file did not encrypt (${e.javaClass.simpleName})")
+                log("$label encryption: a file did not encrypt (${e.javaClass.simpleName})")
             }
         }
         // A file that could not be read is not done either: the run stays unfinished and looks again next time.
         val remaining = pendingFiles().size
-        if (encrypted > 0 || failed > 0) log("vault encryption: $encrypted encrypted, $failed failed, $remaining left")
+        if (encrypted > 0 || failed > 0) log("$label encryption: $encrypted encrypted, $failed failed, $remaining left")
         return Outcome(encrypted, remaining, stoppedForSpace, failed)
     }
 
     /** The vault's files not known to be encrypted: plaintext ones and ones that could not be read. */
     fun pendingFiles(): List<File> =
         vaultDir.listFiles()
-            ?.filter { it.isFile && !it.name.startsWith(".") && formOf(it) != LocalFileForm.ENCRYPTED }
+            ?.filter { it.isFile && accept(it) && formOf(it) != LocalFileForm.ENCRYPTED }
             ?: emptyList()
 
     /** The vault's files that are plaintext, the ones to encrypt. */
     fun plaintextFiles(): List<File> =
         vaultDir.listFiles()
-            ?.filter { it.isFile && !it.name.startsWith(".") && formOf(it) == LocalFileForm.PLAIN }
+            ?.filter { it.isFile && accept(it) && formOf(it) == LocalFileForm.PLAIN }
             ?.sortedBy { it.name }
             ?: emptyList()
 
@@ -121,7 +127,7 @@ class VaultMigration(
                     LocalCryptoFormat.encrypt(
                         input,
                         out,
-                        LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.VAULT, metaFor(file)),
+                        LocalCryptoFormat.Sealing(current.keyId, current.key, kind, metaFor(file)),
                     )
                 }
                 out.flush()
@@ -146,7 +152,7 @@ class VaultMigration(
         }
     }
 
-    private val attemptsFile get() = File(stateDir, ATTEMPTS_FILE)
+    private val attemptsFile get() = File(stateDir, attemptsName)
 
     private fun readAttempts(): MutableMap<String, Int> {
         val text = runCatching { attemptsFile.readText() }.getOrNull() ?: return mutableMapOf()
