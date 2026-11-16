@@ -222,6 +222,7 @@ class HiddenVaultEditor @Inject constructor(
                     folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet(),
                     cloudIds = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet(),
                     carried = prefs[SettingsKeys.HIDDEN_URI_CARRIED_MAP] ?: emptySet(),
+                    edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
                 ),
             )
             prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = updated.index
@@ -229,6 +230,8 @@ class HiddenVaultEditor @Inject constructor(
             prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = updated.folders
             prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = updated.cloudIds
             prefs[SettingsKeys.HIDDEN_URI_CARRIED_MAP] = updated.carried
+            if (updated.edited.isEmpty()) prefs.remove(SettingsKeys.HIDDEN_URI_EDITED)
+            else prefs[SettingsKeys.HIDDEN_URI_EDITED] = updated.edited
             alsoEdit(prefs)
         }
     }

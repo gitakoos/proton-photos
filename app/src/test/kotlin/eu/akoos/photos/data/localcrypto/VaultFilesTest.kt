@@ -23,7 +23,13 @@
 package eu.akoos.photos.data.localcrypto
 
 import android.content.Context
+import android.net.Uri
+import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -48,6 +54,25 @@ class VaultFilesTest {
         VaultFiles.vaultDir(context).deleteRecursively()
         VaultFiles.stagingDir(context).deleteRecursively()
         File(context.cacheDir, "vt").deleteRecursively()
+    }
+
+    @Test
+    fun `an edit that changes a vault photo marks it edited, and one that changes nothing does not`() = runBlocking {
+        context.settingsDataStore.edit { it.remove(SettingsKeys.HIDDEN_URI_EDITED) }
+        val work = File(context.cacheDir, "vt").apply { mkdirs() }
+        val plain = File(work, "p.bin").apply { writeBytes(ByteArray(1_000) { 3 }) }
+        val vault = VaultFiles.sealInto(context, plain, "edit.jpg", LocalFileMeta(cloudLinkId = "L-1"))
+        val uri = Uri.fromFile(vault).toString()
+
+        VaultFiles.editingInPlace(context, uri, changed = { it }, onError = { throw it }) { false }
+        assertTrue(context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_EDITED].orEmpty().isEmpty())
+
+        VaultFiles.editingInPlace(context, uri, changed = { it }, onError = { throw it }) { target ->
+            File(Uri.parse(target).path!!).writeBytes(ByteArray(900) { 4 })
+            true
+        }
+        assertTrue(uri in context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_EDITED].orEmpty())
+        assertTrue(VaultFiles.openPlain(context, vault).use { it.readBytes() }.contentEquals(ByteArray(900) { 4 }))
     }
 
     @Test

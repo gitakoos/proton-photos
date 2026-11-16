@@ -418,6 +418,13 @@ object SettingsKeys {
     val HIDDEN_DELETE_REQUESTS = stringSetPreferencesKey("hidden_delete_requests")
 
     /**
+     * Vault uris whose file was changed in place (an edit, an EXIF write) after it was hidden. A Drive
+     * copy recorded for one of them holds only the version before the change, so a sign-out treats the
+     * file as the only copy of what it now holds.
+     */
+    val HIDDEN_URI_EDITED = stringSetPreferencesKey("hidden_uri_edited")
+
+    /**
      * mediaUri → capture-date-ms mapping for files whose MediaStore DATE_TAKEN is missing or
      * wrong, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
      * MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and video

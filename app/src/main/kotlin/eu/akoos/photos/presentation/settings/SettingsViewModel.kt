@@ -500,8 +500,12 @@ class SettingsViewModel @Inject constructor(
             hiddenVaultJournal.reconcile()
             context.settingsDataStore.data
                 .map { prefs ->
+                    // A file changed since its hide is not recoverable from Drive as it is now.
                     (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
-                        HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+                        eu.akoos.photos.data.hidden.HiddenVaultDecisions.driveBackedUris(
+                            HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()),
+                            edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
+                        )
                 }
                 .distinctUntilChanged()
                 // An unreadable preference store leaves the count at zero, but the confirmation is

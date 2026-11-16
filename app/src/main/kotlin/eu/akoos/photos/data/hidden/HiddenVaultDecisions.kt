@@ -141,6 +141,21 @@ object HiddenVaultDecisions {
     fun liveCloudIds(states: Map<String, Int?>): Set<String> =
         states.filterValues { it == LINK_STATE_ACTIVE }.keys
 
+    /**
+     * The recorded Drive link ids ([cloudIdByUri]) a sign-out may count on: every file changed since its hide
+     * ([edited]) is left out, since its Drive copy holds only the version before the change. Such a file is
+     * then handled as the only copy of what it holds.
+     */
+    fun driveBacked(cloudIdByUri: Map<String, String>, edited: Set<String>): Map<String, String> =
+        if (edited.isEmpty()) cloudIdByUri else cloudIdByUri.filterKeys { it !in edited }
+
+    /**
+     * The vault uris whose Drive copy still holds what the vault file holds: [paired] less every file
+     * changed since its hide ([edited]). Only these may be told to the user as recoverable from Drive.
+     */
+    fun driveBackedUris(paired: Set<String>, edited: Set<String>): Set<String> =
+        if (edited.isEmpty()) paired else paired - edited
+
     /** The Drive link id each vault uri was recorded with, from the stored `vaultUri|linkId` pairs. */
     fun cloudIdsByUri(entries: Set<String>): Map<String, String> =
         entries.mapNotNull { entry ->

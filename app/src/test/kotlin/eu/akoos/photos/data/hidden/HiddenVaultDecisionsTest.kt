@@ -756,6 +756,30 @@ class HiddenVaultDecisionsTest {
     }
 
     @Test
+    fun `a vault photo edited after its hide is saved at sign-out as the only copy of what it holds`() {
+        // Drive holds the version from before the edit, so its copy no longer stands in for this file.
+        val cloudIds = mapOf("file:///v/edited" to "L-e", "file:///v/kept" to "L-k")
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = setOf("file:///v/edited", "file:///v/kept"),
+            cloudIdByUri = HiddenVaultDecisions.driveBacked(cloudIds, edited = setOf("file:///v/edited")),
+            liveCloudIds = setOf("L-e", "L-k"),
+            busy = emptySet(),
+        )
+
+        assertEquals(listOf("file:///v/edited"), plan.rescue)
+        assertEquals(setOf("file:///v/kept"), plan.inDrive)
+    }
+
+    @Test
+    fun `an edited vault photo is not counted as recoverable from Drive`() {
+        assertEquals(
+            setOf("file:///v/kept"),
+            HiddenVaultDecisions.driveBackedUris(setOf("file:///v/edited", "file:///v/kept"), setOf("file:///v/edited")),
+        )
+        assertEquals(mapOf("file:///v/a" to "L-a"), HiddenVaultDecisions.driveBacked(mapOf("file:///v/a" to "L-a"), emptySet()))
+    }
+
+    @Test
     fun `a vault of nothing but confirmed Drive photos has nothing to save`() {
         val plan = HiddenVaultDecisions.signOutPlan(
             blobUris = setOf("file:///v/a", "file:///v/b"),

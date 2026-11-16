@@ -193,6 +193,8 @@ object AccountScopedPreferences {
             SettingsKeys.HIDDEN_URI_CARRIED_MAP,
             SettingsKeys.HIDDEN_PENDING_HIDES,
             SettingsKeys.HIDDEN_DELETE_REQUESTS,
+            // Plain uris rather than "uri|value", which the same key match reads whole.
+            SettingsKeys.HIDDEN_URI_EDITED,
         )) {
             val entries = prefs[key] ?: continue
             keepOnly(prefs, key, entries.filterTo(HashSet()) { it.substringBefore('|') in kept })

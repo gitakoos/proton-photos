@@ -24,8 +24,11 @@ package eu.akoos.photos.data.localcrypto
 
 import android.content.Context
 import android.net.Uri
+import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.encryption.DatabaseKeyState
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -212,6 +215,10 @@ object VaultFiles {
      * A vault file is edited as a plaintext scratch copy that is sealed back under the same name only when
      * [changed] says the result is a change, so the vault file is never written half way. A file that does not
      * open, or a sealing that fails, answers [onError] and leaves the vault file as it was.
+     *
+     * A changed vault file is marked edited ([SettingsKeys.HIDDEN_URI_EDITED]) before it is sealed: a Drive copy
+     * recorded for it holds only the version before the change, so a sign-out must no longer count on that copy.
+     * The mark goes first, so an interruption between the two only ever leaves an unchanged file marked.
      */
     fun <T> editingInPlace(context: Context, uri: String, changed: (T) -> Boolean, onError: (Exception) -> T, edit: (String) -> T): T {
         val vault = fileOf(context, uri) ?: return edit(uri)
@@ -220,13 +227,25 @@ object VaultFiles {
             val work = materialize(context, vault)
             try {
                 val result = edit(Uri.fromFile(work).toString())
-                if (changed(result)) sealInto(context, work, vault.name, meta, requireExisting = true)
+                if (changed(result)) {
+                    markEdited(context, setOf(uri, Uri.fromFile(vault).toString()))
+                    sealInto(context, work, vault.name, meta, requireExisting = true)
+                }
                 result
             } finally {
                 work.delete()
             }
         } catch (e: Exception) {
             onError(e)
+        }
+    }
+
+    /** Records [uris] as changed since their photo was hidden. Blocking, as every caller of [editingInPlace] is. */
+    private fun markEdited(context: Context, uris: Set<String>) {
+        kotlinx.coroutines.runBlocking {
+            context.settingsDataStore.edit { p ->
+                p[SettingsKeys.HIDDEN_URI_EDITED] = (p[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet()) + uris
+            }
         }
     }
 

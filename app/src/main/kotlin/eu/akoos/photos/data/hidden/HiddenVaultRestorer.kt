@@ -548,7 +548,10 @@ class HiddenVaultRestorer @Inject constructor(
         busy: Set<String> = emptySet(),
     ): HiddenRescue = runs.detached {
         val prefs = context.settingsDataStore.data.first()
-        val cloudIdByUri = HiddenVaultDecisions.cloudIdsByUri(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+        val cloudIdByUri = HiddenVaultDecisions.driveBacked(
+            HiddenVaultDecisions.cloudIdsByUri(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()),
+            edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
+        )
         val blobs = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
         val recordedLinks = (blobs - busy).mapNotNull { cloudIdByUri[it] }
         val plan = HiddenVaultDecisions.signOutPlan(
@@ -628,7 +631,10 @@ class HiddenVaultRestorer @Inject constructor(
      */
     suspend fun userDeletePlan(confirmed: Set<String>, userId: UserId?, busy: Set<String>): UserDeletePlan {
         val prefs = context.settingsDataStore.data.first()
-        val cloudIdByUri = HiddenVaultDecisions.cloudIdsByUri(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+        val cloudIdByUri = HiddenVaultDecisions.driveBacked(
+            HiddenVaultDecisions.cloudIdsByUri(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()),
+            edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
+        )
         val blobs = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
         val asked = (confirmed.intersect(blobs) - busy).mapNotNull { cloudIdByUri[it] }
         return HiddenVaultDecisions.userDeletePlan(
@@ -692,6 +698,7 @@ class HiddenVaultRestorer @Inject constructor(
                 SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
                 SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
                 SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+                SettingsKeys.HIDDEN_URI_EDITED,
             )) {
                 val existing = p[key] ?: continue
                 p[key] = HiddenVaultRecords.dropped(existing, targets.toSet())
@@ -831,6 +838,7 @@ internal fun dropRevealedRecords(prefs: MutablePreferences, uri: String, shownAt
         SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
         SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
         SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+        SettingsKeys.HIDDEN_URI_EDITED,
     )) {
         val existing = prefs[key] ?: continue
         prefs[key] = HiddenVaultRecords.dropped(existing, setOf(uri))

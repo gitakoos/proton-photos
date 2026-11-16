@@ -958,6 +958,7 @@ class HiddenVaultJournal @Inject constructor(
             SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
             SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
             SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+            SettingsKeys.HIDDEN_URI_EDITED,
         )) {
             val existing = prefs[key] ?: continue
             prefs[key] = HiddenVaultRecords.dropped(existing, keys)
