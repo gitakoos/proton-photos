@@ -27,6 +27,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.upload.MirrorSourceCheck
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadDeviceFiles
 import eu.akoos.photos.data.upload.UploadImageCompressor
@@ -127,7 +128,7 @@ internal class UploadBytePreparer(
                 // trailer), so overwrite the on-device original with the whole motion-preserving
                 // stripped file instead — the local loses its metadata too and byte-matches the
                 // cloud. Silent with all-files; a refused write leaves the original intact.
-                val motionMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, motionTemp)
+                val motionMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, motionTemp, MirrorSourceCheck.Kind.MOTION_PHOTO)
                 if (motionMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
@@ -142,7 +143,7 @@ internal class UploadBytePreparer(
                 // Mirror: same reasoning as the motion photo. An in-place EXIF rewrite would drop the
                 // appended gain map, so the on-device original is replaced with the whole verified
                 // file instead. Silent with all-files; a refused write leaves the original intact.
-                val gainMapMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, gainMapTemp)
+                val gainMapMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, gainMapTemp, MirrorSourceCheck.Kind.IMAGE)
                 if (gainMapMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
@@ -212,7 +213,7 @@ internal class UploadBytePreparer(
                 // Mirror: overwrite the on-device video with the location-stripped remux so the
                 // local loses its GPS too and matches the cloud. Silent with all-files; a refused
                 // write leaves the original intact.
-                val videoMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, tmp)
+                val videoMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, tmp, MirrorSourceCheck.Kind.VIDEO)
                 if (videoMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
@@ -416,7 +417,7 @@ internal class UploadBytePreparer(
                 // temp when strip is mirrored, or from the original when strip-upload is off. A null
                 // (compression failed or not smaller) skips silently.
                 temps.compressedFile?.let { local ->
-                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local)) {
+                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local, MirrorSourceCheck.Kind.IMAGE)) {
                         temps.deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed for ${localItem.displayName}")
                     }
@@ -442,7 +443,7 @@ internal class UploadBytePreparer(
                 val localCompressed = eu.akoos.photos.data.upload.UploadImageCompressor
                     .compressToTemp(context, state.localUri, compression.tier, MetadataStripConfig())
                 if (localCompressed != null) {
-                    if (deviceFiles.overwriteLocalInPlace(state.localUri, localCompressed)) {
+                    if (deviceFiles.overwriteLocalInPlace(state.localUri, localCompressed, MirrorSourceCheck.Kind.IMAGE)) {
                         temps.deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed (strip-free) for ${localItem.displayName}")
                     }
@@ -460,7 +461,7 @@ internal class UploadBytePreparer(
                 Log.d(UPLOAD_TAG, "Mirror compress skipped for ${localItem.displayName}: ${localItem.mimeType} cannot hold an MP4")
             } else if (mirrorStripToLocal || !stripOnUpload) {
                 temps.compressedFile?.let { local ->
-                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local)) {
+                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local, MirrorSourceCheck.Kind.VIDEO)) {
                         temps.deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror compress: on-device video compressed for ${localItem.displayName}")
                     }

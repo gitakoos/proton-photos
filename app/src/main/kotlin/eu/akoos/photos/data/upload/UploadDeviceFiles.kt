@@ -105,8 +105,14 @@ internal class UploadDeviceFiles(private val context: Context) {
      *  truncates and rewrites the file. A copy that throws (I/O error, eject) is rolled back in place
      *  from the staged backup, and a process killed mid-truncate is rolled back from the same backup
      *  on the next launch, so the original is never left partial. A write the OS refuses is logged and
-     *  skipped (the original stays intact); a staging failure returns false without touching the file. */
-    fun overwriteLocalInPlace(uri: String, src: File): Boolean {
+     *  skipped (the original stays intact); a staging failure returns false without touching the file.
+     *  Before any of that, [src] must read back as [kind] (see [MirrorSourceCheck]); a replacement that
+     *  does not is refused and the original is never touched. */
+    fun overwriteLocalInPlace(uri: String, src: File, kind: MirrorSourceCheck.Kind): Boolean {
+        if (!MirrorSourceCheck.accepts(context, kind, src, uri)) {
+            Log.w(UPLOAD_TAG, "Mirror overwrite refused for $uri: the replacement does not read back as $kind")
+            return false
+        }
         val parsed = Uri.parse(uri)
         var backup: File? = null
         val outcome = eu.akoos.photos.data.upload.MirrorOverwriteJournal.guardedOverwrite(

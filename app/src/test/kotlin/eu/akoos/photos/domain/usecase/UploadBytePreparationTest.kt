@@ -33,6 +33,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
 import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.data.upload.MirrorSourceCheck
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.data.upload.compression.VideoUploadCompression
@@ -144,6 +145,10 @@ class UploadBytePreparationTest {
         every { compression.compressesVideo(any(), any()) } answers {
             secondArg<CompressionSettings>().videos && firstArg<String>().startsWith("video/")
         }
+        // The stubbed encoders write placeholder bytes, not real media, so the read-back before a mirror
+        // overwrite is accepted here; the tests that pin a refusal stub it to false.
+        mockkObject(MirrorSourceCheck)
+        every { MirrorSourceCheck.accepts(any(), any(), any(), any()) } returns true
         val networkObserver = mockk<NetworkObserver>(relaxed = true)
         coEvery { networkObserver.currentlyOnWifi() } returns true
 
@@ -280,6 +285,65 @@ class UploadBytePreparationTest {
         assertEquals(remuxed.size.toLong(), row.sizeBytes)
         assertFalse(compressedTemp.exists())
         assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a video remux that does not read back never overwrites the device original`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(60) { 3 }
+        val (file, item) = deviceFile("VID_2.mp4", "video/mp4", original)
+        val remuxed = ByteArray(50) { 4 }
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } answers { thirdArg<File>().writeBytes(remuxed); true }
+        every { MirrorSourceCheck.accepts(any(), MirrorSourceCheck.Kind.VIDEO, any(), item.uri) } returns false
+
+        useCase(userId)
+
+        assertArrayEquals(original, file.readBytes())
+        assertArrayEquals(remuxed, sent.single().bytes)
+    }
+
+    @Test
+    fun `a failed video remux uploads the untouched original and leaves the device file alone`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(60) { 3 }
+        val (file, item) = deviceFile("VID_3.mp4", "video/mp4", original)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertArrayEquals(original, s.bytes)
+        assertEquals(item.uri, s.uri)
+        assertArrayEquals(original, file.readBytes())
+    }
+
+    @Test
+    fun `a compressed image that does not read back is never mirrored onto the device original`() = runTest {
+        prefs {
+            it[SettingsKeys.COMPRESS_ON_UPLOAD] = true
+            it[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] = true
+        }
+        val original = ByteArray(30) { 1 }
+        val (file, item) = deviceFile("IMG_9.jpg", "image/jpeg", original)
+        val compressedTemp = temp("compressed_", ".jpg", ByteArray(10) { 7 })
+        every { compression.photo(item.uri, "image/jpeg", any(), any()) } returns
+            UploadCompressionStep.PhotoResult(compressedTemp, CompressionOutcome.COMPRESSED, null, 30L, false)
+        every { MirrorSourceCheck.accepts(any(), MirrorSourceCheck.Kind.IMAGE, compressedTemp, item.uri) } returns false
+
+        useCase(userId)
+
+        assertArrayEquals(ByteArray(10) { 7 }, sent.single().bytes)
+        assertArrayEquals(original, file.readBytes())
     }
 
     @Test

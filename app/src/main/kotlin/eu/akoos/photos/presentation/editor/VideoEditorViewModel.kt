@@ -2935,8 +2935,10 @@ class VideoEditorViewModel @Inject constructor(
                 val ok = runCatching {
                     VideoMetadataStripper.remuxWithoutLocation(context, Uri.fromFile(file).toString(), tmp)
                 }.getOrDefault(false)
-                if (ok) {
-                    runCatching { tmp.inputStream().use { i -> file.outputStream().use { o -> i.copyTo(o) } } }
+                // A rename in the same directory replaces the file in one step, so a failure part way can
+                // never leave the edited copy truncated; a rename that fails keeps it unstripped.
+                if (ok && !tmp.renameTo(file)) {
+                    Log.w(TAG, "Mirror strip rename failed; edited copy kept unstripped")
                 }
                 tmp.delete()
             }

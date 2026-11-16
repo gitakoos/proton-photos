@@ -46,8 +46,9 @@ object VideoMetadataStripper {
 
     /**
      * Stream-copies every track of [uri] into [outFile] with no location atom; preserves orientation
-     * via the muxer hint. Returns false (and deletes the partial output) on failure so the caller
-     * can fall back to the original bytes.
+     * via the muxer hint. Returns true only when the muxer finished and [Mp4OutputVerifier] reads the
+     * output back with every track and the source's duration; otherwise returns false and deletes the
+     * output so the caller falls back to the original bytes.
      */
     fun remuxWithoutLocation(context: Context, uri: String, outFile: File): Boolean {
         var pfd: ParcelFileDescriptor? = null
@@ -113,18 +114,40 @@ object VideoMetadataStripper {
                 }
                 extractor.unselectTrack(i)
             }
-            success = true
-            return true
+            // stop() writes the moov box: a stop that fails leaves a file no player opens, so the output
+            // counts only when stop succeeds and the closed file reads back like its source.
+            val finished: MediaMuxer = muxer
+            muxer = null
+            success = finishOutput(
+                stop = { finished.stop() },
+                release = { finished.release() },
+                verify = { Mp4OutputVerifier.verify(context, uri, outFile, sameTracks = true) },
+            )
+            if (!success) Log.w(TAG, "remuxWithoutLocation output rejected for $uri")
+            return success
         } catch (e: Exception) {
             Log.w(TAG, "remuxWithoutLocation failed for $uri: ${e.message}", e)
             return false
         } finally {
+            // Only a remux that broke off before finishOutput still holds its muxer here.
             runCatching { muxer?.stop() }
             runCatching { muxer?.release() }
             runCatching { extractor?.release() }
             runCatching { pfd?.close() }
             if (!success) runCatching { outFile.delete() }
         }
+    }
+
+    /**
+     * Finishes a remux: [stop] then [release] the muxer, then [verify] the closed file. True only when
+     * stop returned normally and the verification passed; release always runs.
+     */
+    internal fun finishOutput(stop: () -> Unit, release: () -> Unit, verify: () -> Boolean): Boolean {
+        val stopped = runCatching { stop() }
+            .onFailure { Log.w(TAG, "muxer stop failed: ${it.message}") }
+            .isSuccess
+        runCatching { release() }
+        return stopped && runCatching { verify() }.getOrDefault(false)
     }
 
     internal fun extractorFlagsToBufferFlags(extractorFlags: Int): Int {
