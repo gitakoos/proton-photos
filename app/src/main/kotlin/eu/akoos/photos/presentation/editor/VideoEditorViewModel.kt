@@ -813,7 +813,7 @@ class VideoEditorViewModel @Inject constructor(
             // Pull duration + rotation (for the additive rotate) via MediaMetadataRetriever.
             val retriever = MediaMetadataRetriever()
             val result = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
                 val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
@@ -911,7 +911,7 @@ class VideoEditorViewModel @Inject constructor(
             }
             val retriever = MediaMetadataRetriever()
             val result = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
                 val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
@@ -1025,7 +1025,7 @@ class VideoEditorViewModel @Inject constructor(
             val parsed = Uri.fromFile(file)
             val retriever = MediaMetadataRetriever()
             val meta = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 VideoMeta(
                     duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         ?.toLongOrNull() ?: 0L,
@@ -1257,7 +1257,7 @@ class VideoEditorViewModel @Inject constructor(
                 }
                 val retriever = MediaMetadataRetriever()
                 val m = runCatching {
-                    retriever.setDataSource(context, parsed)
+                    retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                     VideoMeta(
                         duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
                         rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0,
@@ -1461,7 +1461,7 @@ class VideoEditorViewModel @Inject constructor(
             val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return@launch
             val retriever = MediaMetadataRetriever()
             val duration = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             }.getOrDefault(0L)
             runCatching { retriever.release() }
@@ -1649,7 +1649,7 @@ class VideoEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val retriever = MediaMetadataRetriever()
             val result: FrameGrabResult = try {
-                retriever.setDataSource(context, Uri.parse(sourceUriStr))
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(sourceUriStr)))
                 val bitmap = retriever.getFrameAtTime(
                     positionUs.coerceAtLeast(0L),
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
@@ -2662,7 +2662,7 @@ class VideoEditorViewModel @Inject constructor(
         var extractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
         try {
-            pfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+            pfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 ?: error("Could not open source video for reading")
             extractor = MediaExtractor().apply {
                 setDataSource(pfd.fileDescriptor)
@@ -2852,7 +2852,7 @@ class VideoEditorViewModel @Inject constructor(
                 if (uri.scheme == "file") {
                     uri.path?.let { File(it).length() } ?: 0L
                 } else {
-                    context.contentResolver.openFileDescriptor(uri, "r")
+                    context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri), "r")
                         ?.use { it.statSize.coerceAtLeast(0L) } ?: 0L
                 }
             }.getOrDefault(0L)
@@ -2883,7 +2883,7 @@ class VideoEditorViewModel @Inject constructor(
      *  through the descriptor the resolver hands out, because under scoped storage that is the only
      *  route to a MediaStore item's bytes. */
     private fun mvhdCaptureMs(uri: Uri): Long? = runCatching {
-        context.contentResolver.openFileDescriptor(uri, "r")?.use {
+        context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri), "r")?.use {
             eu.akoos.photos.util.Mp4CreationTime.read(it.fileDescriptor)
         }
     }.getOrNull()

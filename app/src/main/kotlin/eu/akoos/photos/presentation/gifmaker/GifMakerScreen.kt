@@ -213,7 +213,7 @@ private fun GifMakerContent(
     // own repeat mode is off.
     val previewPlayer = remember(videoUri) {
         ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.parse(videoUri)))
+            setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(videoUri))))
             prepare()
             playWhenReady = true
             volume = 0f

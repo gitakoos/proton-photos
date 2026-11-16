@@ -80,7 +80,7 @@ object PhotoGpsResolver {
     fun videoGps(context: Context, uri: String): Pair<Double, Double>? {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, Uri.parse(uri))
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
             val loc = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION) ?: return null
             parseIso6709(loc)
         } catch (e: CancellationException) {

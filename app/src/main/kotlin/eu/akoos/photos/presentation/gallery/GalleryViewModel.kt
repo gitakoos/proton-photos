@@ -1896,6 +1896,7 @@ class GalleryViewModel @Inject constructor(
             val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
             val privateUri = hiddenStorage.store(
                 local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+                sourceFolder = sourceFolder, cloudLinkId = target.cloudLinkId,
             )
             if (privateUri != null) {
                 collected += HiddenVaultJournal.Entry(

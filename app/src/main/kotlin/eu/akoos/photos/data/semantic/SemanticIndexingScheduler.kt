@@ -812,7 +812,7 @@ class SemanticIndexingScheduler @Inject constructor(
         val u = Uri.parse(uri)
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(context, u)
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))
             val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && vw > 0 && vh > 0) {
@@ -903,7 +903,7 @@ class SemanticIndexingScheduler @Inject constructor(
     }
 
     private suspend fun isLocalReadable(uri: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { true } ?: false }
+        runCatching { context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use { true } ?: false }
             .getOrDefault(false)
     }
 
@@ -915,16 +915,16 @@ class SemanticIndexingScheduler @Inject constructor(
     private fun decodeLocalBlocking(uri: String, threw: AtomicBoolean? = null): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = context.contentResolver.openInputStream(u)?.use {
+        val bmp = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use {
             BitmapFactory.decodeStream(it, null, opts)
         } ?: return@runCatching null
-        val orientation = context.contentResolver.openInputStream(u)?.use {
+        val orientation = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use {
             ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         } ?: ExifInterface.ORIENTATION_NORMAL
         orientedBitmap(bmp, orientation)

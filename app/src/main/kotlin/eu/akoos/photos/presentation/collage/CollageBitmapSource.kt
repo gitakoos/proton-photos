@@ -101,10 +101,10 @@ class CollageBitmapSource @Inject constructor(
 
     private fun decodeUri(uri: Uri, maxPx: Int): Bitmap? = guarded {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@guarded null
         val opts = decodeOptions(bounds.outWidth, bounds.outHeight, maxPx)
-        val bmp = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        val bmp = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, opts) }
         // Originals carry an EXIF orientation BitmapFactory ignores, so rotate to upright here.
         bmp?.let { applyOrientation(it, ExifHelper.readOrientation(context, uri.toString())) }
     }

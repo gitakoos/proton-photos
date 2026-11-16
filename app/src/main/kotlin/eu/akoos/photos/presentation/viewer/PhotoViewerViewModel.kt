@@ -1159,12 +1159,26 @@ class PhotoViewerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val parsed = Uri.parse(uri)
             val source: File = when (parsed.scheme) {
-                "file" -> parsed.path?.let { File(it) }?.takeIf { it.isFile } ?: return@launch
+                "file" -> {
+                    val file = parsed.path?.let { File(it) }?.takeIf { it.isFile } ?: return@launch
+                    val vault = eu.akoos.photos.data.localcrypto.VaultFiles
+                    if (vault.isInVault(context, file) && vault.isEncrypted(file)) {
+                        // An encrypted vault file is screened from its decrypting stream and, when flagged,
+                        // decrypted to the vault's scratch folder, which is cleared on every start.
+                        val flagged = runCatching {
+                            vault.openPlain(context, file).use { MotionPhotoUtil.hasMotionXmp(it) }
+                        }.getOrNull() ?: false
+                        if (!flagged) return@launch
+                        runCatching { vault.materialize(context, file) }.getOrNull() ?: return@launch
+                    } else {
+                        file
+                    }
+                }
                 else -> {
                     // Screen the content URI for the motion XMP flag from a small prefix before
                     // copying the whole file — an ordinary image reads a few hundred KB and stops.
                     val flagged = runCatching {
-                        context.contentResolver.openInputStream(parsed)?.use {
+                        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))?.use {
                             MotionPhotoUtil.hasMotionXmp(it)
                         }
                     }.getOrNull() ?: false
@@ -1179,7 +1193,7 @@ class PhotoViewerViewModel @Inject constructor(
                 _isMotionPhoto.value = true
             } else {
                 // Not a motion photo (or stale) — reclaim any staged temp.
-                runCatching { if (source.parentFile == motionTempDir()) source.delete() }
+                runCatching { if (isStagedMotionSource(source)) source.delete() }
             }
         }
     }
@@ -1216,7 +1230,7 @@ class PhotoViewerViewModel @Inject constructor(
     /** Resets motion-photo state on page change. A staged content-probe temp is reclaimed; a
      *  cloud full-res probe source is left alone (owned by the download cache). */
     private fun resetMotionState() {
-        val staged = motionSourceFile?.takeIf { it.parentFile == motionTempDir() }
+        val staged = motionSourceFile?.takeIf { isStagedMotionSource(it) }
         motionItemKey = null
         motionSourceFile = null
         _isMotionPhoto.value = false
@@ -1228,11 +1242,16 @@ class PhotoViewerViewModel @Inject constructor(
 
     private fun motionTempDir(): File = File(context.cacheDir, "motion").also { it.mkdirs() }
 
+    /** Whether [file] is a copy this view model staged (a content uri's temp, or a vault file's scratch copy). */
+    private fun isStagedMotionSource(file: File): Boolean =
+        file.parentFile == motionTempDir() ||
+            file.parentFile?.absolutePath == eu.akoos.photos.data.localcrypto.VaultFiles.workDir(context).absolutePath
+
     /** Copies a content URI's bytes into a cache temp so file-based detection can scan it.
      *  Returns null on any read failure. */
     private fun stageContentToTemp(uri: Uri): File? = runCatching {
         val tmp = File.createTempFile("motion_probe_", ".jpg", motionTempDir())
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { input ->
             tmp.outputStream().use { output -> input.copyTo(output) }
         } ?: run { tmp.delete(); return@runCatching null }
         tmp
@@ -1376,7 +1395,10 @@ class PhotoViewerViewModel @Inject constructor(
                 hiddenStorage.sourceFolderFor(sourceUri, bucketName)
             }
             val privateUri = withContext(Dispatchers.IO) {
-                hiddenStorage.store(sourceUri, displayName, mime, captureTimeMs = dateTakenMs)
+                hiddenStorage.store(
+                    sourceUri, displayName, mime, captureTimeMs = dateTakenMs,
+                    sourceFolder = sourceFolder, cloudLinkId = cloudLinkId,
+                )
             }
             HiddenVaultDiagnostics.copied(
                 copiedCount = if (privateUri != null) 1 else 0,
@@ -1955,7 +1977,7 @@ class PhotoViewerViewModel @Inject constructor(
         }
         val target = context.contentResolver.insert(collection, values)
             ?: error("MediaStore insert failed")
-        context.contentResolver.openInputStream(parsed)?.use { input ->
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))?.use { input ->
             context.contentResolver.openOutputStream(target)?.use { output ->
                 input.copyTo(output)
             } ?: error("openOutputStream returned null")

@@ -247,7 +247,7 @@ class PerceptualHashScheduler @Inject constructor(
         val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             context.contentResolver.loadThumbnail(uri, Size(256, 256), null)
         } else {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, BitmapFactory.Options().apply { inSampleSize = 4 })
             }
         }

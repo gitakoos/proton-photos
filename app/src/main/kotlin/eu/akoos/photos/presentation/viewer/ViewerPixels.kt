@@ -102,8 +102,14 @@ sealed class ViewerPixels {
             val scheme = uri.scheme?.lowercase()
             // A remote model in this viewer is always the thumbnail placeholder.
             if (scheme == "http" || scheme == "https") return NoFullResolution
-            val path = if (scheme == null || scheme == "file") uri.path else null
-            if (path == null && scheme != "content") return NotAnImage
+            val rawPath = if (scheme == null || scheme == "file") uri.path else null
+            if (rawPath == null && scheme != "content") return NotAnImage
+            // An encrypted vault file is read through the resolver, which decrypts it.
+            val path = rawPath?.takeUnless {
+                eu.akoos.photos.data.localcrypto.VaultFiles.fileOf(context, uri)?.let(
+                    eu.akoos.photos.data.localcrypto.VaultFiles::isEncrypted,
+                ) == true
+            }
 
             return withContext(Dispatchers.IO) { decodeOriented(context, uri, path, maxDim) }
         }
@@ -162,7 +168,7 @@ sealed class ViewerPixels {
         ): Bitmap? = if (path != null) {
             BitmapFactory.decodeFile(path, options)
         } else {
-            context.contentResolver.openInputStream(uri)?.use {
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use {
                 BitmapFactory.decodeStream(it, null, options)
             }
         }

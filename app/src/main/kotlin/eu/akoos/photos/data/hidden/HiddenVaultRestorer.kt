@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.hidden
 
+import eu.akoos.photos.data.localcrypto.VaultFiles
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
@@ -576,7 +577,13 @@ class HiddenVaultRestorer @Inject constructor(
         if (files.size != targets.size) return@withContext null
         val names = VaultZip.uniqueNames(files.map { it.third }) { "photo_$it" }
         val entries = files.mapIndexed { i, (_, file, _) ->
-            VaultZipEntry(file, names[i], HiddenCaptureTime.parse(file.name))
+            VaultZipEntry(
+                file,
+                names[i],
+                HiddenCaptureTime.parse(file.name),
+                open = { VaultFiles.openPlain(context, file) },
+                plainLength = VaultFiles.plainLength(file),
+            )
         }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val zipName = "${folder}_$stamp.zip"

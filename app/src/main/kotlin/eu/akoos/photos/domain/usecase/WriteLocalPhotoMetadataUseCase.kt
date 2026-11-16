@@ -168,6 +168,14 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * behaviour of a container with no mvhd at all.
      */
     private fun stampVideoCaptureDate(uri: String, newDateTakenMs: Long): MetadataWriteResult =
+        eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
+            context,
+            uri,
+            changed = { it is MetadataWriteResult.Success },
+            onError = { MetadataWriteResult.Failed(it.message ?: "video date write failed") },
+        ) { target -> stampVideoCaptureDateAt(target, newDateTakenMs) }
+
+    private fun stampVideoCaptureDateAt(uri: String, newDateTakenMs: Long): MetadataWriteResult =
         try {
             val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                 ?: return MetadataWriteResult.Failed("could not open $uri")
@@ -272,6 +280,14 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
      * before any other handling so a cancelled write never reports Failed.
      */
     private fun editExifViaFd(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
+        eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
+            context,
+            uri,
+            changed = { it is MetadataWriteResult.Success },
+            onError = { MetadataWriteResult.Failed(it.message ?: "exif write failed") },
+        ) { target -> editExifViaFdAt(target, mutate) }
+
+    private fun editExifViaFdAt(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
         try {
             val parsed = Uri.parse(uri)
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.

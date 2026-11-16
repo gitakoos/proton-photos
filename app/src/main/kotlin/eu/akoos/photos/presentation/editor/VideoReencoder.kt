@@ -103,7 +103,7 @@ internal class VideoReencoder(private val context: Context) {
         var outputSurface: OutputSurface? = null
 
         try {
-            sourcePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+            sourcePfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 ?: error("Could not open source video for reading")
             videoExtractor = MediaExtractor().apply { setDataSource(sourcePfd.fileDescriptor) }
             val videoTrackIdx = selectTrack(videoExtractor, "video/")
@@ -142,7 +142,7 @@ internal class VideoReencoder(private val context: Context) {
                 if (fromFormat > 0) return@run fromFormat
                 runCatching {
                     val mmr = android.media.MediaMetadataRetriever()
-                    mmr.setDataSource(context, sourceUri)
+                    mmr.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri))
                     val totalBr = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
                         ?.toIntOrNull() ?: 0
                     mmr.release()
@@ -271,11 +271,11 @@ internal class VideoReencoder(private val context: Context) {
 
             // Stream-copy extractor (mix path opens its own inside AudioMixer.decodeAudioToPcm).
             if (streamCopyOverlay) {
-                audioPfd = context.contentResolver.openFileDescriptor(audioOverlayUri!!, "r")
+                audioPfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, audioOverlayUri!!), "r")
                     ?: error("Could not open audio overlay for reading")
                 audioExtractor = MediaExtractor().apply { setDataSource(audioPfd.fileDescriptor) }
             } else if (streamCopySource) {
-                val audioPfd2 = context.contentResolver.openFileDescriptor(sourceUri, "r")
+                val audioPfd2 = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 if (audioPfd2 != null) {
                     audioPfd = audioPfd2
                     audioExtractor = MediaExtractor().apply { setDataSource(audioPfd.fileDescriptor) }
@@ -523,7 +523,7 @@ internal class VideoReencoder(private val context: Context) {
         var streamCopyAudioExtractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
         try {
-            sourcePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+            sourcePfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 ?: error("Could not open source for stream-copy")
             videoExtractor = MediaExtractor().apply { setDataSource(sourcePfd.fileDescriptor) }
             val videoTrackIdx = selectTrack(videoExtractor, "video/")
@@ -538,7 +538,7 @@ internal class VideoReencoder(private val context: Context) {
 
             // Audio decision tree — same logic as transcode's audio path.
             val sourceHasAudio = run {
-                val probePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+                val probePfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 val probe = MediaExtractor()
                 try {
                     probe.setDataSource(probePfd!!.fileDescriptor)
@@ -576,7 +576,7 @@ internal class VideoReencoder(private val context: Context) {
             val mixTargetFormat: Pair<Int, Int>?
 
             if (streamCopySrc) {
-                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 streamCopyAudioExtractor = MediaExtractor().apply {
                     setDataSource(streamCopyAudioPfd!!.fileDescriptor)
                 }
@@ -585,7 +585,7 @@ internal class VideoReencoder(private val context: Context) {
                 audioMuxerTrack = muxer.addTrack(streamCopyAudioExtractor.getTrackFormat(idx))
                 mixTargetFormat = null
             } else if (streamCopyOvl) {
-                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(audioOverlayUri!!, "r")
+                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, audioOverlayUri!!), "r")
                 streamCopyAudioExtractor = MediaExtractor().apply {
                     setDataSource(streamCopyAudioPfd!!.fileDescriptor)
                 }
@@ -751,7 +751,7 @@ internal class VideoReencoder(private val context: Context) {
         var pfd: ParcelFileDescriptor? = null
         val extractor = MediaExtractor()
         return try {
-            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+            pfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri), "r") ?: return null
             extractor.setDataSource(pfd.fileDescriptor)
             val idx = selectTrack(extractor, "audio/") ?: return null
             extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME)

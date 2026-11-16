@@ -456,7 +456,7 @@ fun VideoEditorScreen(
                 parameters = buildUponParameters().setMaxVideoSize(1920, 1080).build()
             }
             ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).setTrackSelector(trackSelector).build().apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(sourceUri)))
+                setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(sourceUri))))
                 prepare()
                 // Start with playWhenReady=true so the renderer immediately decodes and
                 // paints frame 0 to the surface — the listener below pauses on first
@@ -530,7 +530,7 @@ fun VideoEditorScreen(
                     val uri = state.sources.firstOrNull()?.uri ?: state.sourceUri
                     if (uri != null) {
                         runCatching {
-                            p.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                            p.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                             p.repeatMode = ExoPlayer.REPEAT_MODE_ONE
                             p.prepare()
                         }
@@ -546,7 +546,7 @@ fun VideoEditorScreen(
             val items = keptNow.mapNotNull { c ->
                 val uri = state.sources.uriOf(c.sourceId) ?: return@mapNotNull null
                 val srcDur = state.sources.durationOf(c.sourceId)
-                val base = MediaItem.fromUri(Uri.parse(uri))
+                val base = MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
                 val start = c.startMs.coerceAtLeast(0L)
                 // Clamp the end to the real source duration (a reported length can run a few ms past the
                 // container, and endPositionMs >= the true duration trips a ClippingMediaSource assertion);
@@ -607,7 +607,7 @@ fun VideoEditorScreen(
         kotlinx.coroutines.delay(150)
         val end = state.audioTrimEndMs.coerceAtLeast(state.audioTrimStartMs + 1L)
         ov.setMediaItem(
-            MediaItem.fromUri(Uri.parse(uri)).buildUpon()
+            MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))).buildUpon()
                 .setClippingConfiguration(
                     MediaItem.ClippingConfiguration.Builder()
                         .setStartPositionMs(state.audioTrimStartMs.coerceAtLeast(0L))
@@ -1283,6 +1283,7 @@ private fun TrimPanel(
     /** Opens the in-app video picker for the "+" menu's "Add video". */
     onAddVideoRequested: () -> Unit,
 ) {
+    val context = LocalContext.current
     val duration = state.durationMs.coerceAtLeast(1L)
     // The clips in play order, and the played (edited) length.
     val clips = resolveClips(state.clips, state.sources)
@@ -1345,7 +1346,7 @@ private fun TrimPanel(
                         val uri = liveSources.uriOf(cur.sourceId)
                         if (uri != null) {
                             runCatching {
-                                p.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                                p.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                                 p.prepare()
                                 p.seekTo(cur.startMs.coerceAtLeast(0L))
                             }
@@ -1433,7 +1434,7 @@ private fun TrimPanel(
             val uri = state.sources.uriOf(srcId)
             if (uri != null) {
                 runCatching {
-                    previewPlayer?.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                    previewPlayer?.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                     previewPlayer?.prepare()
                     previewPlayer?.seekTo(target)
                 }
@@ -1460,7 +1461,7 @@ private fun TrimPanel(
             val uri = state.sources.uriOf(clip.sourceId)
             if (uri != null) {
                 runCatching {
-                    previewPlayer?.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                    previewPlayer?.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                     previewPlayer?.prepare()
                     previewPlayer?.seekTo(target)
                 }
@@ -1484,7 +1485,6 @@ private fun TrimPanel(
         }
     }
 
-    val context = LocalContext.current
     val resources = LocalResources.current
     // "+" can also add music, so a track can be placed straight from the cut track. Same picker the Audio
     // tab uses; the read permission is persisted so a later re-encode still has access.

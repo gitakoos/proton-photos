@@ -56,7 +56,7 @@ object PanoramaDetector {
      */
     fun isPanorama(context: Context, uri: Uri): Boolean {
         return runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { input ->
                 val buffer = ByteArray(SCAN_BYTES)
                 var read = 0
                 // Stream may hand back short reads; keep filling until the buffer is full

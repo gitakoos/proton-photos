@@ -615,6 +615,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
     private fun buildImageLoader(animated: Boolean): ImageLoader = ImageLoader.Builder(this)
         .components {
+            // Encrypted hidden photos decode from a decrypting stream; everything else is untouched.
+            add(eu.akoos.photos.data.localcrypto.VaultImageFetcher.Factory())
             // First in line from the API that can attach a gain map at all, and even there it claims
             // a load only when that load opted in and the bytes actually carry one. Every other load
             // falls straight through to the decoders below and decodes identically.

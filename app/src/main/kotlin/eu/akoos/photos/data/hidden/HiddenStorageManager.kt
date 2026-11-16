@@ -33,6 +33,9 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.localcrypto.LocalFileMeta
+import eu.akoos.photos.data.localcrypto.PlainDigest
+import eu.akoos.photos.data.localcrypto.VaultFiles
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.ExifDateFormat
@@ -48,6 +51,7 @@ import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.concurrent.withLock
 import kotlin.coroutines.resume
 
 /**
@@ -173,6 +177,10 @@ class HiddenStorageManager @Inject constructor(
          *  (which PNGs / WebPs / Screenshots / Videos rarely carry). When null, the grid reads
          *  the file's modified time and restore falls back to EXIF DateTimeOriginal, then "now". */
         captureTimeMs: Long? = null,
+        /** The folder the photo was hidden from and its Drive link id, written into the encrypted file's own
+         *  header so the vault's records can be rebuilt from the files alone. */
+        sourceFolder: String? = null,
+        cloudLinkId: String? = null,
     ): String? =
         withContext(Dispatchers.IO) {
             // Non-reversible per-file token so a failure can be correlated in the diagnostics
@@ -189,39 +197,53 @@ class HiddenStorageManager @Inject constructor(
                 ?.lowercase()
                 ?: originalDisplayName?.substringAfterLast('.', "")
                 ?: "bin"
-            val dest = File(hiddenDir, "${UUID.randomUUID()}${HiddenCaptureTime.suffix(captureTimeMs)}.$ext")
+            val name = "${UUID.randomUUID()}${HiddenCaptureTime.suffix(captureTimeMs)}.$ext"
             val expectedBytes = sourceLengthBytes(src)
-            val copiedBytes = try {
-                context.contentResolver.openInputStream(src)?.use { input ->
-                    dest.outputStream().use { output ->
-                        val copied = input.copyTo(output)
-                        // Flushed and synced before anything is compared, so the check answers for what
-                        // is on the disk rather than for what is still in a buffer.
-                        output.flush()
-                        output.fd.sync()
-                        copied
+            // The bytes go to a plaintext scratch copy first and are sealed into the vault from there: the
+            // sealing proves the encrypted file decrypts to exactly the scratch copy before it is moved in,
+            // and the scratch copy is measured against what the source states it holds.
+            val work = File(VaultFiles.workDir(context).apply { mkdirs() }, "${UUID.randomUUID()}.$ext")
+            try {
+                val copiedBytes = try {
+                    context.contentResolver.openInputStream(src)?.use { input ->
+                        work.outputStream().use { output -> input.copyTo(output) }
+                    } ?: run {
+                        eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: skipped, source stream unavailable")
+                        return@withContext null
                     }
-                } ?: run {
-                    eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: skipped, source stream unavailable")
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "store: failed to copy source: ${e.message}")
+                    eu.akoos.photos.util.SyncDiagnostics.log(
+                        "hide $ref: failed copy (${e.javaClass.simpleName})",
+                    )
                     return@withContext null
                 }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                Log.w(TAG, "store: failed to copy source: ${e.message}")
-                eu.akoos.photos.util.SyncDiagnostics.log(
-                    "hide $ref: failed copy (${e.javaClass.simpleName})",
+                if (!HiddenVaultDecisions.vaultCopyIsWhole(expectedBytes, copiedBytes, work.length())) {
+                    Log.w(TAG, "store: the copy is not the whole source, refusing it")
+                    eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: failed copy (incomplete)")
+                    return@withContext null
+                }
+                val meta = LocalFileMeta(
+                    originalName = originalDisplayName,
+                    mimeType = mimeType,
+                    sourceFolder = sourceFolder,
+                    cloudLinkId = cloudLinkId,
+                    captureTimeMs = captureTimeMs,
                 )
-                dest.delete()
-                return@withContext null
+                val dest = try {
+                    VaultFiles.sealInto(context, work, name, meta)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "store: sealing failed: ${e.javaClass.simpleName}")
+                    eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: failed copy (${e.javaClass.simpleName})")
+                    return@withContext null
+                }
+                trace("store $ref: $copiedBytes bytes in ${SystemClock.elapsedRealtime() - startedAt}ms")
+                Uri.fromFile(dest).toString()
+            } finally {
+                work.delete()
             }
-            if (!HiddenVaultDecisions.vaultCopyIsWhole(expectedBytes, copiedBytes, dest.length())) {
-                Log.w(TAG, "store: the copy is not the whole source, refusing it")
-                eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: failed copy (incomplete)")
-                dest.delete()
-                return@withContext null
-            }
-            trace("store $ref: $copiedBytes bytes in ${SystemClock.elapsedRealtime() - startedAt}ms")
-            Uri.fromFile(dest).toString()
         }
 
     /**
@@ -256,21 +278,29 @@ class HiddenStorageManager @Inject constructor(
     suspend fun create(
         extension: String,
         captureTimeMs: Long?,
+        meta: LocalFileMeta = LocalFileMeta(captureTimeMs = captureTimeMs),
+        /** Runs on the plaintext file once [write] filled it and before it is sealed into the vault, for a step
+         *  that edits a written file in place (an EXIF copy). */
+        finish: (File) -> Unit = {},
         write: (java.io.OutputStream) -> Unit,
     ): String? = withContext(Dispatchers.IO) {
         val ext = extension.trim('.').lowercase().ifBlank { "bin" }
-        val dest = File(hiddenDir, "${UUID.randomUUID()}${HiddenCaptureTime.suffix(captureTimeMs)}.$ext")
-        val uri = Uri.fromFile(dest).toString()
+        val name = "${UUID.randomUUID()}${HiddenCaptureTime.suffix(captureTimeMs)}.$ext"
+        val work = File(VaultFiles.workDir(context).apply { mkdirs() }, name)
         try {
-            dest.outputStream().use(write)
+            work.outputStream().use(write)
+            finish(work)
+            val dest = VaultFiles.sealInto(context, work, name, meta)
+            val uri = Uri.fromFile(dest).toString()
+            trace("create ${logRef(uri)}: ${work.length()} bytes")
+            uri
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(TAG, "create: failed to write ${logRef(uri)}: ${e.message}")
-            dest.delete()
-            return@withContext null
+            Log.w(TAG, "create: failed to write: ${e.message}")
+            null
+        } finally {
+            work.delete()
         }
-        trace("create ${logRef(uri)}: ${dest.length()} bytes")
-        uri
     }
 
     /**
@@ -320,6 +350,18 @@ class HiddenStorageManager @Inject constructor(
             val startedAt = SystemClock.elapsedRealtime()
             val parsed = runCatching { Uri.parse(hiddenUri) }.getOrNull() ?: return@withContext null
             val srcFile = parsed.path?.let { File(it) }?.takeIf { it.exists() } ?: return@withContext null
+            // Everything below reads, stamps and copies out a plaintext scratch copy proved whole against the
+            // vault file, never the vault file itself, which is removed only once the copy that left landed
+            // byte for byte.
+            val work = try {
+                VaultFiles.materialize(context, srcFile)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "restore: vault file does not open for $ref: ${e.javaClass.simpleName}")
+                eu.akoos.photos.util.SyncDiagnostics.log("reveal $ref: vault file does not open (${e.javaClass.simpleName})")
+                return@withContext null
+            }
+            try {
             val ext = srcFile.extension.lowercase()
             val isVideo = ext in setOf("mp4", "m4v", "mov", "3gp", "ts", "mkv", "webm", "avi")
             val resolvedName = originalDisplayName ?: "recovered_${System.currentTimeMillis()}.$ext"
@@ -363,7 +405,7 @@ class HiddenStorageManager @Inject constructor(
             //    via a gallery editor if it matters to them).
             val captureTimeFromName: Long? = HiddenCaptureTime.parse(srcFile.name)
             val captureTimeMs: Long? = captureTimeFromName ?: if (!isVideo) runCatching {
-                androidx.exifinterface.media.ExifInterface(srcFile.absolutePath)
+                androidx.exifinterface.media.ExifInterface(work.absolutePath)
                     .getAttribute(androidx.exifinterface.media.ExifInterface.TAG_DATETIME_ORIGINAL)
                     ?.let { dt ->
                         // EXIF DateTimeOriginal format: "yyyy:MM:dd HH:mm:ss" (local time, no zone).
@@ -381,9 +423,9 @@ class HiddenStorageManager @Inject constructor(
             // the one it was given.
             if (captureTimeMs != null && captureTimeMs > 0L) {
                 if (isVideo) {
-                    Mp4CreationTime.stampIfChanged(srcFile, captureTimeMs)
+                    Mp4CreationTime.stampIfChanged(work, captureTimeMs)
                 } else {
-                    ExifHelper.stampDateTakenIfMissing(srcFile, captureTimeMs)
+                    ExifHelper.stampDateTakenIfMissing(work, captureTimeMs)
                 }
             }
 
@@ -405,10 +447,10 @@ class HiddenStorageManager @Inject constructor(
             //    all-files access; if that is not granted the write fails and we fall through to the
             //    Pictures/Movies root below.
             if (origPath != null && firstSeg != null && firstSeg in standardRoots && firstSeg !in mediaStoreRoots) {
-                val restored = restoreToOriginalPath(srcFile, origPath, resolvedName, captureTimeMs)
+                val restored = restoreToOriginalPath(work, origPath, resolvedName, captureTimeMs)
                 if (restored != null) {
                     val settled = onRestoredUri(restored)
-                    if (settled) srcFile.delete()
+                    if (settled) deleteVaultFile(srcFile)
                     trace("restore $ref: original path in ${SystemClock.elapsedRealtime() - startedAt}ms")
                     return@withContext RestoredFile(restored, viaOriginalPath = true, recordsSettled = settled)
                 }
@@ -452,8 +494,13 @@ class HiddenStorageManager @Inject constructor(
             } ?: return@withContext null
             try {
                 context.contentResolver.openOutputStream(target)?.use { out ->
-                    srcFile.inputStream().use { it.copyTo(out) }
+                    work.inputStream().use { it.copyTo(out) }
                 } ?: return@withContext null
+                // Read back before anything trusts the copy: the vault file goes only once the device holds
+                // exactly the bytes it held.
+                val expected = work.inputStream().use { PlainDigest.of(it) }
+                val landed = context.contentResolver.openInputStream(target)?.use { PlainDigest.of(it) }
+                if (landed == null || !landed.sameAs(expected)) throw java.io.IOException("restored copy differs")
                 // Between the whole bytes landing and the row being published, so what the caller
                 // records for the photo is already true when the change notification goes out and
                 // the sync pass it wakes comes to look.
@@ -465,7 +512,7 @@ class HiddenStorageManager @Inject constructor(
                 recordDateOverrideIfRefused(target, captureTimeMs)
                 // The private copy goes only once the records naming the photo are right. While they
                 // are not, it is the one copy the hidden area can still offer the photo from.
-                if (settled) srcFile.delete()
+                if (settled) deleteVaultFile(srcFile)
                 trace("restore $ref: media store in ${SystemClock.elapsedRealtime() - startedAt}ms")
                 RestoredFile(target.toString(), viaOriginalPath = false, recordsSettled = settled)
             } catch (e: Exception) {
@@ -473,6 +520,9 @@ class HiddenStorageManager @Inject constructor(
                 // Roll back the half-created MediaStore entry.
                 runCatching { context.contentResolver.delete(target, null, null) }
                 null
+            }
+            } finally {
+                work.delete()
             }
         }
 
@@ -541,7 +591,14 @@ class HiddenStorageManager @Inject constructor(
                 destDir,
                 HiddenVaultDecisions.uniqueRestoreName(name) { candidate -> File(destDir, candidate).exists() },
             )
-            srcFile.inputStream().use { input -> written.outputStream().use { input.copyTo(it) } }
+            try {
+                srcFile.inputStream().use { input -> written.outputStream().use { input.copyTo(it) } }
+                val expected = srcFile.inputStream().use { PlainDigest.of(it) }
+                check(written.inputStream().use { PlainDigest.of(it) }.sameAs(expected)) { "restored copy differs" }
+            } catch (e: Exception) {
+                written.delete()
+                throw e
+            }
             if (captureTimeMs != null && captureTimeMs > 0L) written.setLastModified(captureTimeMs)
             written
         }.getOrNull() ?: return null
@@ -574,8 +631,10 @@ class HiddenStorageManager @Inject constructor(
     fun delete(hiddenUri: String): Boolean {
         val parsed = runCatching { Uri.parse(hiddenUri) }.getOrNull() ?: return false
         val file = parsed.path?.let { File(it) } ?: return false
-        return file.exists() && file.delete()
+        return deleteVaultFile(file)
     }
+
+    private fun deleteVaultFile(file: File): Boolean = VaultFiles.lock.withLock { file.exists() && file.delete() }
 
     /**
      * Rename a hidden file on disk. Returns the new file:// URI string on success.
@@ -626,9 +685,13 @@ class HiddenStorageManager @Inject constructor(
      */
     suspend fun duplicate(hiddenUri: String): String? = withContext(Dispatchers.IO) {
         val srcFile = fileOf(hiddenUri) ?: return@withContext null
-        create(srcFile.extension, HiddenCaptureTime.parse(srcFile.name)) { out ->
-            srcFile.inputStream().use { it.copyTo(out) }
-        }
+        val captureTimeMs = HiddenCaptureTime.parse(srcFile.name)
+        create(
+            srcFile.extension,
+            captureTimeMs,
+            write = { out -> VaultFiles.openPlain(context, srcFile).use { it.copyTo(out) } },
+            meta = VaultFiles.meta(context, srcFile) ?: LocalFileMeta(captureTimeMs = captureTimeMs),
+        )
     }
 
     /** The existing vault file [hiddenUri] names, or null when it names none. */
@@ -654,7 +717,7 @@ class HiddenStorageManager @Inject constructor(
             Log.w(TAG, "rename: target already exists, refusing")
             return null
         }
-        if (!srcFile.renameTo(dest)) {
+        if (!VaultFiles.lock.withLock { !dest.exists() && srcFile.renameTo(dest) }) {
             Log.w(TAG, "rename: renameTo() was refused for $ref")
             return null
         }

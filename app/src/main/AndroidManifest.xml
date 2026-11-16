@@ -561,6 +561,13 @@
                 android:resource="@xml/share_paths" />
         </provider>
 
+        <!-- Hidden photos, decrypted on read for the app's own readers and for an app a share grants. -->
+        <provider
+            android:name=".data.localcrypto.VaultReadProvider"
+            android:authorities="${applicationId}.vaultread"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <!--
             WorkManager's SystemForegroundService entry — needs explicit
             foregroundServiceType="dataSync" on Android 14+ for any worker that calls

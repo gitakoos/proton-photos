@@ -226,7 +226,7 @@ object ExifHelper {
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept as fallback for older EXIF files.
     fun readMetadata(context: Context, uri: String): PhotoMetadata {
         return try {
-            val stream = context.contentResolver.openInputStream(Uri.parse(uri))
+            val stream = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
                 ?: return PhotoMetadata()
             val exif = stream.use { ExifInterface(it) }
             // A 0, 0 fix is what a camera writes when it has none, so it reads as no location.
@@ -279,7 +279,7 @@ object ExifHelper {
      *  from a content [uri]. Returns ORIENTATION_NORMAL when the stream can't be opened or
      *  carries no orientation. */
     fun readOrientation(context: Context, uri: String): Int = try {
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use {
             ExifInterface(it).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL,
             )
@@ -357,7 +357,7 @@ object ExifHelper {
     ): File? {
         if (config.isNoOp) return null
         val parsed = Uri.parse(uri)
-        val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
+        val inputStream = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed)) ?: return null
         // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
         // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
         val suffix = tempSuffixFor(context, parsed)
@@ -443,6 +443,17 @@ object ExifHelper {
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
     fun stripFieldsInPlace(context: Context, uri: String, config: MetadataStripConfig): StripResult {
         if (config.isNoOp) return StripResult.Failed
+        // A hidden photo's vault file is encrypted: the strip runs on a plaintext copy that is sealed back.
+        return eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
+            context,
+            uri,
+            changed = { it is StripResult.Stripped },
+            onError = { StripResult.Failed },
+        ) { target -> stripFieldsInPlaceAt(context, target, config) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stripFieldsInPlaceAt(context: Context, uri: String, config: MetadataStripConfig): StripResult {
         return try {
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
             LocalOverwriteGuard(context).run(uri) {
@@ -744,7 +755,7 @@ object ExifHelper {
      * from the snapshot afterwards. Returns null when the stream can't be opened or parsed.
      */
     fun readExifSnapshot(context: Context, uri: String): ExifInterface? = runCatching {
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use { ExifInterface(it) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use { ExifInterface(it) }
     }.getOrNull()
 
     /**

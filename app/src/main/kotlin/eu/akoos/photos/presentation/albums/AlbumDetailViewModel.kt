@@ -1284,6 +1284,7 @@ class AlbumDetailViewModel @Inject constructor(
                 }
                 val privateUri = hiddenStorage.store(
                     local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+                    sourceFolder = sourceFolder, cloudLinkId = target.cloudLinkId,
                 )
                 if (privateUri != null) {
                     collected += HiddenVaultJournal.Entry(

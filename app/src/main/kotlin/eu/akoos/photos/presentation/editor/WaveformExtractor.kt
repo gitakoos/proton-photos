@@ -46,7 +46,7 @@ object WaveformExtractor {
             var extractor: MediaExtractor? = null
             var codec: MediaCodec? = null
             try {
-                extractor = MediaExtractor().apply { setDataSource(context, parsed, null) }
+                extractor = MediaExtractor().apply { setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed), null) }
                 var trackIndex = -1
                 var format: MediaFormat? = null
                 for (i in 0 until extractor.trackCount) {

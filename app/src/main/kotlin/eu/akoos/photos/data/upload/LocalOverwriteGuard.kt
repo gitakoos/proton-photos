@@ -63,6 +63,13 @@ class LocalOverwriteGuard(private val context: Context) {
         val parsed = Uri.parse(uri)
         val originalSize = imageSize(parsed)
         val wanted = expectedSize ?: originalSize
+        // A hidden photo is edited as a scratch copy whose vault file stays untouched until the edited copy is
+        // sealed back, so the vault file is the backup: no second plaintext copy is written for it.
+        if (eu.akoos.photos.data.localcrypto.VaultFiles.isScratch(context, uri)) {
+            val result = mutate()
+            if (wanted != null && imageSize(parsed) != wanted) throw java.io.IOException("rewritten image does not decode")
+            return result
+        }
         val result = MirrorOverwriteJournal.guardedMutation(
             stage = {
                 journal.stage(uri) { backup ->

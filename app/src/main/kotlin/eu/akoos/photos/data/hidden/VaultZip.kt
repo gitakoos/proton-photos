@@ -28,10 +28,19 @@ import net.lingala.zip4j.model.enums.AesKeyStrength
 import net.lingala.zip4j.model.enums.CompressionMethod
 import net.lingala.zip4j.model.enums.EncryptionMethod
 import java.io.File
+import java.io.InputStream
 
 /** One vault file going into the zip: the file on disk, the name it has inside the zip, and the
  *  capture time stamped on the entry (null leaves the file's own modification time). */
-data class VaultZipEntry(val file: File, val name: String, val modifiedMs: Long?)
+data class VaultZipEntry(
+    val file: File,
+    val name: String,
+    val modifiedMs: Long?,
+    /** Opens the photo's own bytes when [file] holds them encrypted; null reads [file] as it is. */
+    val open: (() -> InputStream)? = null,
+    /** The size of the photo's own bytes, which the zip entry must hold. */
+    val plainLength: Long = file.length(),
+)
 
 /**
  * The password-protected zip a forced sign-out leaves instead of plain photos.
@@ -55,7 +64,13 @@ object VaultZip {
                 fileNameInZip = entry.name
                 entry.modifiedMs?.takeIf { it > 0L }?.let { lastModifiedFileTime = it }
             }
-            zip.addFile(entry.file, params)
+            val open = entry.open
+            if (open == null) {
+                zip.addFile(entry.file, params)
+            } else {
+                params.entrySize = entry.plainLength
+                open().use { zip.addStream(it, params) }
+            }
         }
     }
 
@@ -80,7 +95,7 @@ object VaultZip {
                         read += n
                     }
                 }
-                read == entry.file.length()
+                read == entry.plainLength
             }
         } catch (e: Exception) {
             false

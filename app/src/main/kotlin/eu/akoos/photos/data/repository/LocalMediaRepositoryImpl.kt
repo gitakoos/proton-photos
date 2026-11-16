@@ -743,7 +743,8 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 // ends up with.
                 displayName = HiddenCaptureTime.strip(file.name),
                 mimeType    = mime,
-                sizeBytes   = file.length(),
+                // The photo's own size: an encrypted vault file is larger by its header and tags.
+                sizeBytes   = eu.akoos.photos.data.localcrypto.VaultFiles.plainLength(file),
                 bucketName  = "Hidden",
                 width       = 0,
                 height      = 0,

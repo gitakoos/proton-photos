@@ -142,7 +142,7 @@ class GifExporter @Inject constructor(
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(Date())
         val outFile = File(dir, "${base}_gif_$ts.gif")
         try {
-            retriever.setDataSource(context, Uri.parse(sourceUriStr))
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(sourceUriStr)))
             val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val rawH = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             val rot = (((retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)

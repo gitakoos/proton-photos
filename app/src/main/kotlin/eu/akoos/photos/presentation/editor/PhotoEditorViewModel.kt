@@ -784,14 +784,14 @@ class PhotoEditorViewModel @Inject constructor(
      *  plain decode if the bounds pass reports no dimensions. */
     private fun decodeDownsampled(uri: Uri): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            return context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it) }
         }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = editorSampleSize(bounds.outWidth, bounds.outHeight)
         }
-        return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        return context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, opts) }
     }
 
     /** File variant of [decodeDownsampled] for the downloaded cloud full-res. */
@@ -2829,7 +2829,7 @@ class PhotoEditorViewModel @Inject constructor(
         val mime = source.mimeType.trim().lowercase(java.util.Locale.ROOT)
         if (mime != "image/jpeg" && mime != "image/jpg") return false
         return runCatching {
-            context.contentResolver.openInputStream(Uri.parse(source.uri))?.use { MotionPhotoUtil.hasMotionXmp(it) }
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(source.uri)))?.use { MotionPhotoUtil.hasMotionXmp(it) }
         }.getOrNull() == true
     }
 
@@ -2910,21 +2910,26 @@ class PhotoEditorViewModel @Inject constructor(
         editTimestampMs: Long,
         dateTakenMs: Long,
     ): Uri? {
-        val copyUri = hiddenStorage.create("jpg", dateTakenMs) { out ->
-            requireEncoded(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out))
-        } ?: error("Could not write the copy into the hidden area")
         // Re-inject the source's EXIF so the copy is a metadata-complete twin except for the pixels,
-        // matching what a copy of any other device photo keeps.
+        // matching what a copy of any other device photo keeps. It goes onto the plaintext before the copy is
+        // sealed into the vault.
         val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
-        if (originalExif != null) {
-            runCatching {
-                context.contentResolver.openFileDescriptor(Uri.parse(copyUri), "rw")?.use { pfd ->
-                    ExifHelper.copyExifPreservingOrientation(
-                        originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
-                    )
+        val copyUri = hiddenStorage.create(
+            "jpg",
+            dateTakenMs,
+            write = { out -> requireEncoded(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)) },
+            finish = { file ->
+                if (originalExif != null) {
+                    runCatching {
+                        android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_WRITE).use { pfd ->
+                            ExifHelper.copyExifPreservingOrientation(
+                                originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
+                            )
+                        }
+                    }
                 }
-            }
-        }
+            },
+        ) ?: error("Could not write the copy into the hidden area")
         hiddenVaultEditor.adoptCopy(
             sourceUri = source.uri,
             copyUri = copyUri,
@@ -2945,22 +2950,33 @@ class PhotoEditorViewModel @Inject constructor(
         val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
         // The write empties the original before it fills it, so it runs behind a backup that is put
         // back when the write fails or leaves an unreadable image; a kill part way is replayed from the
-        // same backup on the next launch.
-        LocalOverwriteGuard(context).run(source.uri, expectedSize = bitmap.width to bitmap.height) {
-            context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
-                requireEncoded(bitmap.compress(format, quality, out))
-            } ?: error("openOutputStream returned null for $srcUri")
-            // Re-inject the original's EXIF onto the just-written file, forcing NORMAL orientation and the
-            // edited pixel size. Never fails the save (the helper swallows unsupported-format / IO errors).
-            if (originalExif != null) {
-                runCatching {
-                    context.contentResolver.openFileDescriptor(srcUri, "rw")?.use { pfd ->
-                        ExifHelper.copyExifPreservingOrientation(
-                            originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
-                        )
+        // same backup on the next launch. A hidden photo is written as a plaintext copy that is sealed
+        // back over its vault file only once the write completed.
+        eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
+            context,
+            source.uri,
+            changed = { it },
+            onError = { throw it },
+        ) { target ->
+            val targetUri = Uri.parse(target)
+            LocalOverwriteGuard(context).run(target, expectedSize = bitmap.width to bitmap.height) {
+                context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
+                    requireEncoded(bitmap.compress(format, quality, out))
+                } ?: error("openOutputStream returned null for $targetUri")
+                // Re-inject the original's EXIF onto the just-written file, forcing NORMAL orientation and
+                // the edited pixel size. Never fails the save (the helper swallows unsupported-format / IO
+                // errors).
+                if (originalExif != null) {
+                    runCatching {
+                        context.contentResolver.openFileDescriptor(targetUri, "rw")?.use { pfd ->
+                            ExifHelper.copyExifPreservingOrientation(
+                                originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
+                            )
+                        }
                     }
                 }
             }
+            true
         }
         // Keep the MediaStore MIME label in sync with the bytes just written (a PNG source stays PNG,
         // a WebP stays WebP); the pixels changed but the container did not.

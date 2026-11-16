@@ -496,6 +496,14 @@ class HiddenVaultJournal @Inject constructor(
             // its behalf. Runs before the write below, which is what clears the journal entries these
             // read the originals from. An adopted blob has no entry and therefore no pairing to mark.
             settleVaultedSyncRows(confirm)
+            // An adopted file has no journal entry, but an encrypted one carries its own name, folder and
+            // Drive link in its header: those fill the records it is missing (never one it has).
+            val adoptedMeta = withContext(Dispatchers.IO) {
+                adopt.mapNotNull { uri ->
+                    val file = eu.akoos.photos.data.localcrypto.VaultFiles.fileOf(context, uri) ?: return@mapNotNull null
+                    eu.akoos.photos.data.localcrypto.VaultFiles.meta(context, file)?.let { uri to it }
+                }
+            }
             val published = confirm + adopt
             val cleared = (discard + confirm + forget).toSet()
             context.settingsDataStore.edit { p ->
@@ -506,6 +514,19 @@ class HiddenVaultJournal @Inject constructor(
                 if (discard.isNotEmpty()) {
                     p[SettingsKeys.HIDDEN_PHOTO_URIS] =
                         (p[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) - discard.toSet()
+                }
+                if (adoptedMeta.isNotEmpty()) {
+                    fun fill(key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>, value: (eu.akoos.photos.data.localcrypto.LocalFileMeta) -> String?) {
+                        val existing = p[key] ?: emptySet()
+                        val known = existing.mapTo(HashSet()) { it.substringBefore('|') }
+                        val added = adoptedMeta.mapNotNull { (uri, meta) ->
+                            value(meta)?.takeIf { it.isNotBlank() && uri !in known }?.let { "$uri|$it" }
+                        }
+                        if (added.isNotEmpty()) p[key] = existing + added
+                    }
+                    fill(SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP) { it.originalName }
+                    fill(SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP) { it.sourceFolder }
+                    fill(SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP) { it.cloudLinkId }
                 }
                 p[SettingsKeys.HIDDEN_PENDING_HIDES] =
                     (p[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet())

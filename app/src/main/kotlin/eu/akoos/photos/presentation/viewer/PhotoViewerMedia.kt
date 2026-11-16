@@ -175,7 +175,7 @@ internal fun VideoPlayer(
     val loop = onEnded == null
     val exoPlayer = remember(uri, reloadKey) {
         ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri)))
             prepare()
             playWhenReady = autoPlay
             repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ONE else ExoPlayer.REPEAT_MODE_OFF

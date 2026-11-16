@@ -1,0 +1,252 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.data.localcrypto
+
+import android.content.Context
+import android.net.Uri
+import eu.akoos.photos.BuildConfig
+import eu.akoos.photos.data.db.encryption.DatabaseKeyState
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+
+/**
+ * Reading and writing the hidden vault's files, encrypted or not. Every vault file keeps its name and its
+ * `file://` uri (they are its identity in every index); only its bytes are encrypted. Every reader here accepts
+ * both forms, so a vault halfway through its migration reads whole.
+ *
+ * Scratch plaintext (for an editor or a decoder that needs a real file) lives in `no_backup/vault_work`, is
+ * deleted after use and cleared on every start.
+ */
+object VaultFiles {
+    const val VAULT_DIR = "hidden"
+    private const val STAGING_DIR = ".hidden_staging"
+    private const val WORK_DIR = "vault_work"
+
+    /** Held for every change to a vault file's bytes or name, so the migration never races an edit or a reveal. */
+    val lock = ReentrantLock()
+
+    fun vaultDir(context: Context): File = File(context.applicationContext.filesDir, VAULT_DIR)
+
+    fun stagingDir(context: Context): File = File(context.applicationContext.filesDir, STAGING_DIR)
+
+    fun workDir(context: Context): File = File(context.applicationContext.noBackupFilesDir, WORK_DIR)
+
+    /** The vault file [uri] names, or null when it names no file inside the vault. */
+    fun fileOf(context: Context, uri: Uri): File? {
+        if (uri.scheme != "file") return null
+        val path = uri.path ?: return null
+        val file = File(path)
+        return file.takeIf { isInVault(context, it) }
+    }
+
+    fun fileOf(context: Context, uri: String): File? = runCatching { Uri.parse(uri) }.getOrNull()?.let { fileOf(context, it) }
+
+    fun isInVault(context: Context, file: File): Boolean {
+        val parent = file.absoluteFile.parentFile ?: return false
+        return parent.absolutePath == vaultDir(context).absolutePath
+    }
+
+    fun isEncrypted(file: File): Boolean = LocalCryptoFormat.isEncrypted(file)
+
+    /** Whether [uri] names a scratch copy of a vault file. */
+    fun isScratch(context: Context, uri: String): Boolean {
+        val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return false
+        if (parsed.scheme != "file") return false
+        val parent = File(parsed.path ?: return false).absoluteFile.parentFile ?: return false
+        return parent.absolutePath == workDir(context).absolutePath
+    }
+
+    /**
+     * The uri a reader should open for [uri]: a vault file's is served decrypted by [VaultReadProvider]; any
+     * other uri comes back as it is. For readers that open what they are given through the content resolver.
+     */
+    fun readableUri(context: Context, uri: Uri): Uri {
+        val file = runCatching { fileOf(context, uri) }.getOrNull() ?: return uri
+        return VaultReadProvider.uriFor(file.name)
+    }
+
+    fun readableUri(context: Context, uri: String): String = readableUri(context, Uri.parse(uri)).toString()
+
+    /** The plaintext of a vault file. Throws [LocalKeyLockedException], [LocalKeyUnavailableException] or
+     *  [LocalFileDamagedException] for an encrypted file that does not open. */
+    fun openPlain(context: Context, file: File): InputStream {
+        if (!isEncrypted(file)) return FileInputStream(file)
+        val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
+        return LocalCryptoFormat.openFile(file, keyring).inputStream()
+    }
+
+    fun openReader(context: Context, file: File): LocalFileReader {
+        val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
+        return LocalCryptoFormat.openFile(file, keyring)
+    }
+
+    /** The size of a vault file's plaintext, from its header for an encrypted one. */
+    fun plainLength(file: File): Long = if (isEncrypted(file)) LocalCryptoFormat.plainSize(file) ?: 0L else file.length()
+
+    /** What an encrypted vault file says about itself, or null (plaintext, or it does not open). */
+    fun meta(context: Context, file: File): LocalFileMeta? {
+        if (!isEncrypted(file)) return null
+        return runCatching { openReader(context, file).use { it.meta } }.getOrNull()
+    }
+
+    /** Whether [file] is encrypted with a key this phone cannot open now. */
+    fun isLocked(context: Context, file: File): Boolean {
+        if (!isEncrypted(file)) return false
+        val keyring = LocalCrypto.keyringOrNull(context) ?: return true
+        val keyId = LocalCryptoFormat.keyIdOf(file) ?: return true
+        return keyring.state(keyId) !is DatabaseKeyState.Ready
+    }
+
+    /** A plaintext copy of [file] in the scratch folder, proved whole; the caller deletes it. */
+    fun materialize(context: Context, file: File): File {
+        val dir = workDir(context).apply { mkdirs() }
+        val work = File(dir, "${UUID.randomUUID()}.${file.extension.ifBlank { "bin" }}")
+        try {
+            if (isEncrypted(file)) {
+                val keyring = LocalCrypto.keyringOrNull(context) ?: throw LocalKeyUnavailableException(null)
+                val digest = FileOutputStream(work).use { LocalCryptoFormat.decryptFile(file, keyring, it) }
+                if (work.length() != digest.bytes) throw IOException("scratch copy incomplete")
+            } else {
+                file.copyTo(work, overwrite = true)
+                if (work.length() != file.length()) throw IOException("scratch copy incomplete")
+            }
+        } catch (e: Throwable) {
+            work.delete()
+            throw e
+        }
+        return work
+    }
+
+    /** Runs [block] with a plaintext file holding [file]'s bytes: the file itself when it is not encrypted, else a
+     *  scratch copy that is deleted afterwards. [block] must only read. */
+    inline fun <T> withPlainFile(context: Context, file: File, block: (File) -> T): T {
+        if (!isEncrypted(file)) return block(file)
+        val work = materialize(context, file)
+        try {
+            return block(work)
+        } finally {
+            work.delete()
+        }
+    }
+
+    /**
+     * Encrypts [plain] into a new vault file named [name] (or replacing it): written to the staging folder, synced,
+     * decrypted again and compared, then moved into the vault in one step. Without a keyring (no Keystore on this
+     * platform) the plaintext is moved in as it is. With [requireExisting] the file must still be in the vault when
+     * the new one replaces it (an edit of a file renamed meanwhile writes nothing). Throws on any failure; the vault
+     * is unchanged then.
+     */
+    fun sealInto(context: Context, plain: File, name: String, meta: LocalFileMeta, requireExisting: Boolean = false): File {
+        val keyring = LocalCrypto.keyringOrNull(context)
+        val staging = stagingDir(context).apply { mkdirs() }
+        val temp = File(staging, name)
+        try {
+            val written = FileOutputStream(temp).use { out ->
+                val digest = if (keyring == null) {
+                    FileInputStream(plain).use { input -> PlainDigest.of(TeeInput(input, out)) }
+                } else {
+                    val current = keyring.current()
+                    FileInputStream(plain).use { input ->
+                        LocalCryptoFormat.encrypt(
+                            input,
+                            out,
+                            LocalCryptoFormat.Sealing(current.keyId, current.key, LocalFileKind.VAULT, meta),
+                        )
+                    }
+                }
+                out.flush()
+                out.fd.sync()
+                digest
+            }
+            val source = FileInputStream(plain).use { PlainDigest.of(it) }
+            check(written.sameAs(source)) { "plaintext changed while sealing" }
+            val readBack = if (keyring == null) FileInputStream(temp).use { PlainDigest.of(it) }
+            else LocalCryptoFormat.decryptFile(temp, keyring, null)
+            check(readBack.sameAs(source)) { "sealed copy did not verify" }
+            val dest = File(vaultDir(context).apply { mkdirs() }, name)
+            lock.withLock {
+                if (requireExisting && !dest.exists()) throw IOException("vault file went away")
+                Files.move(temp.toPath(), dest.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                syncDirectory(dest.parentFile)
+            }
+            return dest
+        } catch (e: Throwable) {
+            temp.delete()
+            throw e
+        }
+    }
+
+    /**
+     * Runs an in-place editor [edit] (EXIF, a new date) on [uri]. A uri outside the vault is handed to it as it is.
+     * A vault file is edited as a plaintext scratch copy that is sealed back under the same name only when
+     * [changed] says the result is a change, so the vault file is never written half way. A file that does not
+     * open, or a sealing that fails, answers [onError] and leaves the vault file as it was.
+     */
+    fun <T> editingInPlace(context: Context, uri: String, changed: (T) -> Boolean, onError: (Exception) -> T, edit: (String) -> T): T {
+        val vault = fileOf(context, uri) ?: return edit(uri)
+        return try {
+            val meta = meta(context, vault) ?: LocalFileMeta(captureTimeMs = eu.akoos.photos.util.HiddenCaptureTime.parse(vault.name))
+            val work = materialize(context, vault)
+            try {
+                val result = edit(Uri.fromFile(work).toString())
+                if (changed(result)) sealInto(context, work, vault.name, meta, requireExisting = true)
+                result
+            } finally {
+                work.delete()
+            }
+        } catch (e: Exception) {
+            onError(e)
+        }
+    }
+
+    /** Removes scratch and staging leftovers of an earlier process. Nothing in either is ever the only copy. */
+    fun clearScratch(context: Context) {
+        workDir(context).deleteRecursively()
+        stagingDir(context).deleteRecursively()
+        File(context.applicationContext.cacheDir, SHARE_DIR).deleteRecursively()
+    }
+
+    /** Where a decrypted copy handed to another app (share, set as) lives until the next start. */
+    const val SHARE_DIR = "vault_share"
+
+    internal fun debugTrace(message: String) {
+        if (BuildConfig.DEBUG) android.util.Log.d("VaultFiles", message)
+    }
+}
+
+/** Copies what is read from [input] into [out] as it goes. */
+internal class TeeInput(private val input: InputStream, private val out: java.io.OutputStream) : InputStream() {
+    override fun read(): Int = input.read().also { if (it >= 0) out.write(it) }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int = input.read(b, off, len).also { if (it > 0) out.write(b, off, it) }
+
+    override fun close() = input.close()
+}
