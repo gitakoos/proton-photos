@@ -46,6 +46,7 @@ import okio.Path.Companion.toPath
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -188,8 +189,22 @@ object LocalStoreMigration {
      * Encrypts [file] in place when it is plaintext: the bytes must parse as preferences, the encrypted copy is
      * written beside it and synced, read back and decrypted to the same bytes, and only then renamed over it in
      * one step. Any failure leaves the plaintext file as it was. Answers whether the file is encrypted now.
+     *
+     * Runs under a lock on a file beside it, held across processes and threads, so a second process opening
+     * the same settings never deletes the temp copy of a migration still running in the first.
      */
-    fun migrate(file: File, storeName: String, keyring: LocalKeyring?, log: (String) -> Unit): Boolean {
+    fun migrate(file: File, storeName: String, keyring: LocalKeyring?, log: (String) -> Unit): Boolean =
+        withMigrationLock(file) { migrateLocked(file, storeName, keyring, log) }
+
+    /** Runs [block] holding the cross-process lock that [migrate] of [file] holds. */
+    internal fun <T> withMigrationLock(file: File, block: () -> T): T = synchronized(this) {
+        file.parentFile?.mkdirs()
+        RandomAccessFile(File(file.parentFile, file.name + LOCK_SUFFIX), "rw").use { raf ->
+            raf.channel.lock().use { block() }
+        }
+    }
+
+    private fun migrateLocked(file: File, storeName: String, keyring: LocalKeyring?, log: (String) -> Unit): Boolean {
         val temp = File(file.parentFile, file.name + TEMP_SUFFIX)
         if (temp.exists()) temp.delete()
         if (keyring == null || !file.isFile || file.length() == 0L) return false
@@ -219,6 +234,7 @@ object LocalStoreMigration {
     }
 
     private const val TEMP_SUFFIX = ".enc-tmp"
+    private const val LOCK_SUFFIX = ".migrate-lock"
 }
 
 internal fun syncDirectory(dir: File?) {

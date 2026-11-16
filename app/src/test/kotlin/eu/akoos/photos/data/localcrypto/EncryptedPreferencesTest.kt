@@ -298,6 +298,32 @@ class EncryptedPreferencesTest {
     }
 
     @Test
+    fun `a migration waits for one another process is running and never removes its temp file`() {
+        val file = File(tmp.root, "settings.preferences_pb").apply { writeBytes(plainBytes(sample)) }
+        val temp = File(tmp.root, "settings.preferences_pb.enc-tmp")
+        val holding = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val other = Thread {
+            LocalStoreMigration.withMigrationLock(file) {
+                temp.writeBytes(byteArrayOf(9, 9, 9))
+                holding.countDown()
+                release.await()
+            }
+        }.apply { start() }
+        holding.await()
+        var migrated: Boolean? = null
+        val second = Thread { migrated = LocalStoreMigration.migrate(file, "settings", keyring) {} }.apply { start() }
+        second.join(300)
+        assertTrue("the second migration waits for the lock", second.isAlive)
+        assertTrue("the running migration's temp file is still there", temp.exists())
+        release.countDown()
+        other.join()
+        second.join(5_000)
+        assertEquals(true, migrated)
+        assertEquals(sample, read(file.readBytes()))
+    }
+
+    @Test
     fun `a file that is not settings is left exactly as it is`() {
         val junk = byteArrayOf(1, 2, 3, 4, 5)
         val file = File(tmp.root, "settings.preferences_pb").apply { writeBytes(junk) }

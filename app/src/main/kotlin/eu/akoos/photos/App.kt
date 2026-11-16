@@ -67,32 +67,44 @@ import javax.inject.Inject
 @HiltAndroidApp
 class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
+    // Every injected dependency is a dagger.Lazy: super.onCreate() injects the fields in every process, and
+    // the :crypto process returns before using any of them, so none is built there. A plain field would
+    // build its whole graph in that process too (a second settings DataStore on the same file among it).
     @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+    lateinit var workerFactoryLazy: dagger.Lazy<HiltWorkerFactory>
+    private val workerFactory: HiltWorkerFactory get() = workerFactoryLazy.get()
 
     @Inject
-    lateinit var networkObserver: eu.akoos.photos.util.NetworkObserver
+    lateinit var networkObserverLazy: dagger.Lazy<eu.akoos.photos.util.NetworkObserver>
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver get() = networkObserverLazy.get()
 
     @Inject
-    lateinit var cloudCompressQueue: eu.akoos.photos.domain.usecase.CloudCompressQueue
+    lateinit var cloudCompressQueueLazy: dagger.Lazy<eu.akoos.photos.domain.usecase.CloudCompressQueue>
+    private val cloudCompressQueue: eu.akoos.photos.domain.usecase.CloudCompressQueue get() = cloudCompressQueueLazy.get()
 
     @Inject
-    lateinit var photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao
+    lateinit var photoListingDaoLazy: dagger.Lazy<eu.akoos.photos.data.db.dao.PhotoListingDao>
+    private val photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao get() = photoListingDaoLazy.get()
 
     @Inject
-    lateinit var thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+    lateinit var thumbnailUrlStoreLazy: dagger.Lazy<eu.akoos.photos.data.repository.drive.ThumbnailUrlStore>
+    private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore get() = thumbnailUrlStoreLazy.get()
 
     @Inject
-    lateinit var pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter
+    lateinit var pendingAlbumAddsImporterLazy: dagger.Lazy<eu.akoos.photos.data.upload.PendingAlbumAddsImporter>
+    private val pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter get() = pendingAlbumAddsImporterLazy.get()
 
     @Inject
-    lateinit var autoSaveCoordinator: eu.akoos.photos.data.autosave.AutoSaveCoordinator
+    lateinit var autoSaveCoordinatorLazy: dagger.Lazy<eu.akoos.photos.data.autosave.AutoSaveCoordinator>
+    private val autoSaveCoordinator: eu.akoos.photos.data.autosave.AutoSaveCoordinator get() = autoSaveCoordinatorLazy.get()
 
     @Inject
-    lateinit var sharedBackupScheduler: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
+    lateinit var sharedBackupSchedulerLazy: dagger.Lazy<eu.akoos.photos.data.sharedbackup.SharedBackupScheduler>
+    private val sharedBackupScheduler: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler get() = sharedBackupSchedulerLazy.get()
 
     @Inject
-    lateinit var localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator
+    lateinit var localEncryptionLazy: dagger.Lazy<eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator>
+    private val localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator get() = localEncryptionLazy.get()
 
     // Set up in constructor so getWorkManagerConfiguration() works before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
@@ -116,7 +128,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     override fun onCreate() {
         // Taken before anything in this process can start writing ML sync scratch files.
         val processStartMs = System.currentTimeMillis()
-        super.onCreate() // Hilt injects workerFactory here
+        super.onCreate() // Hilt injects the lazy fields here; nothing is built until one is read
         installCrashLogHandler()
         // The :crypto process shares this Application but must skip the main-process init below
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
