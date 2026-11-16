@@ -2881,7 +2881,7 @@
     <string name="whats_new_260_savekeep_title">Il salvataggio sul dispositivo continua</string>
     <string name="whats_new_260_savekeep_body">Salva sul dispositivo continua quando esci dalla schermata da cui l\'hai avviato, e anche dopo la chiusura dell\'app. Se Android ferma l\'app a metà, il salvataggio riprende da dove si era fermato e nessuna foto viene salvata due volte. Una foto salvata mentre la guardi compare anche in Attività e Cronologia.</string>
     <string name="whats_new_260_freeupbackup_title">Le foto modificate restano</string>
-    <string name="whats_new_260_freeupbackup_body">Liberare spazio ed eliminare dopo il backup confrontano ogni foto con il suo backup subito prima di toglierla dal telefono. Una foto modificata dopo il backup resta sul telefono e torna in coda per un nuovo backup; una che non si può verificare resta com\'è.</string>
+    <string name="whats_new_260_freeupbackup_body">Liberare spazio ed eliminare dopo il backup confrontano ogni foto con il suo backup subito prima di toglierla dal telefono. Una foto modificata dopo il backup resta sul telefono e torna in coda per un nuovo backup; una che non si può verificare resta com\'è. Liberare spazio indica poi quante foto ha tenuto perché non si potevano verificare.</string>
     <string name="whats_new_260_compressnote_title">Nota su compressione e spazio liberato</string>
     <string name="whats_new_260_compressnote_body">Con la compressione al caricamento attiva, le Impostazioni indicano che su Drive resta solo la copia compressa quando l\'originale lascia il telefono liberando spazio o eliminandolo dopo il backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originali sostituiti solo dopo un controllo</string>

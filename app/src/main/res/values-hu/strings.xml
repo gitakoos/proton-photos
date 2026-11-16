@@ -2840,7 +2840,7 @@
     <string name="whats_new_260_savekeep_title">Az eszközre mentés tovább fut</string>
     <string name="whats_new_260_savekeep_body">A Mentés eszközre tovább fut, ha elhagyod a képernyőt, ahol elindítottad, és az app bezárása után is. Ha az Android menet közben leállítja az appot, a mentés ott folytatódik, ahol abbamaradt, és egy fotó sem mentődik el kétszer. A megtekintés közben mentett fotó a Tevékenység és az Előzmények között is megjelenik.</string>
     <string name="whats_new_260_freeupbackup_title">A módosított fotók megmaradnak</string>
-    <string name="whats_new_260_freeupbackup_body">A hely felszabadítása és a mentés utáni törlés minden fotót összevet a mentésével közvetlenül azelőtt, hogy lekerülne a telefonról. A mentés óta módosított fotó a telefonon marad, és újra mentésre vár; amelyik nem ellenőrizhető, változatlanul marad.</string>
+    <string name="whats_new_260_freeupbackup_body">A hely felszabadítása és a mentés utáni törlés minden fotót összevet a mentésével közvetlenül azelőtt, hogy lekerülne a telefonról. A mentés óta módosított fotó a telefonon marad, és újra mentésre vár; amelyik nem ellenőrizhető, változatlanul marad. A hely felszabadítása ezután megmondja, hány fotót hagyott meg, mert nem lehetett ellenőrizni őket.</string>
     <string name="whats_new_260_compressnote_title">Megjegyzés a tömörítésről és a helyfelszabadításról</string>
     <string name="whats_new_260_compressnote_body">Bekapcsolt feltöltéskori tömörítésnél a Beállítások jelzi, hogy a Drive-on csak a tömörített másolat marad, amint az eredeti lekerül a telefonról hely felszabadításával vagy mentés utáni törléssel.</string>
     <string name="whats_new_260_mirrorcheck_title">Az eredeti csak ellenőrzés után cserélődik</string>

@@ -2981,7 +2981,7 @@
     <string name="whats_new_260_savekeep_title">Ukladanie do zariadenia pokračuje</string>
     <string name="whats_new_260_savekeep_body">Uložiť do zariadenia pokračuje aj potom, ako opustíte obrazovku, kde ste ukladanie spustili, aj po zatvorení aplikácie. Keď Android aplikáciu uprostred zastaví, ukladanie nadviaže tam, kde skončilo, a žiadna fotka sa neuloží dvakrát. Fotka uložená pri prezeraní sa zobrazí aj v Aktivite a Histórii.</string>
     <string name="whats_new_260_freeupbackup_title">Zmenené fotky zostávajú</string>
-    <string name="whats_new_260_freeupbackup_body">Uvoľnenie miesta aj odstránenie po zálohovaní porovnajú každú fotku s jej zálohou tesne predtým, ako z telefónu zmizne. Fotka zmenená od zálohy zostane v telefóne a zaradí sa na nové zálohovanie; fotka, ktorú sa nedá overiť, zostane bez zmeny.</string>
+    <string name="whats_new_260_freeupbackup_body">Uvoľnenie miesta aj odstránenie po zálohovaní porovnajú každú fotku s jej zálohou tesne predtým, ako z telefónu zmizne. Fotka zmenená od zálohy zostane v telefóne a zaradí sa na nové zálohovanie; fotka, ktorú sa nedá overiť, zostane bez zmeny. Uvoľnenie miesta potom uvedie, koľko fotiek ponechalo, pretože ich nebolo možné overiť.</string>
     <string name="whats_new_260_compressnote_title">Poznámka ku kompresii a uvoľneniu miesta</string>
     <string name="whats_new_260_compressnote_body">So zapnutou kompresiou pri nahrávaní Nastavenia uvádzajú, že keď originál zmizne z telefónu uvoľnením miesta alebo odstránením po zálohovaní, na Drive zostane len skomprimovaná kópia.</string>
     <string name="whats_new_260_mirrorcheck_title">Originály sa nahrádzajú až po kontrole</string>
