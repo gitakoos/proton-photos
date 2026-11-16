@@ -117,6 +117,13 @@ internal fun albumChildrenVolumeId(album: Album, ownVolumeId: String?): String? 
     album.volumeId?.takeIf { it.isNotBlank() } ?: ownVolumeId
 
 /**
+ * The album cache row of an album this user just created, written before any refresh has listed it. Its
+ * last activity is [nowMs], the moment it was made, so the cache lists it first as the Albums tab does.
+ */
+internal fun createdAlbumRow(album: Album, nowMs: Long): CloudAlbumEntity =
+    CloudAlbumEntity.fromDomain(album.copy(lastActivityTimeMs = album.lastActivityTimeMs ?: nowMs), nowMs)
+
+/**
  * Whether an album still owes a membership walk.
  *
  * [reportedPhotoCount] is Drive's own count for the album. The owned listing always carries it; the
@@ -882,13 +889,18 @@ class AlbumService @Inject constructor(
             createDriveAlbumOwnPath(userId, name)
         }
         Log.d(TAG, "createDriveAlbum: created album linkId=$newLinkId name=$name")
-        Album(
+        val album = Album(
             linkId             = newLinkId,
             name               = name,   // plaintext for immediate display
             photoCount         = 0,
             coverLinkId        = null,
             lastActivityTimeMs = null,
         )
+        // Every album picker reads the album cache, so the new album goes in at once rather than at the next
+        // refresh of the Albums tab.
+        runCatching { cloudAlbumDao.upsertAll(listOf(createdAlbumRow(album, System.currentTimeMillis()))) }
+            .onFailure { Log.w(TAG, "createDriveAlbum: cache row not written (${it.message})") }
+        album
     }
 
     /** The app's own album create; returns the new album's link id. */
