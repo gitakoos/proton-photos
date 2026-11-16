@@ -211,6 +211,27 @@ class EncryptedPreferencesTest {
     }
 
     @Test
+    fun `of two locked copies the newer one wins, and the Hidden password comes from the newest alone`() {
+        val password = stringPreferencesKey("vault_password_blob")
+        val dir = File(tmp.root, "keys/locked")
+        // Set aside at 9 and at 10: by time, not by how the names sort as text.
+        LockedStoreFiles(dir, clock = { 9L }).setAside("settings", write(preferencesOf(name to "Ada", flag to true, password to "old blob", hidden to setOf("a"))))
+        LockedStoreFiles(dir, clock = { 10L }).setAside("settings", write(preferencesOf(name to "Bea", hidden to setOf("b"))))
+        val store = InMemoryStore(preferencesOf())
+
+        val merged = runBlocking {
+            LocalStores.restoreLocked("settings", store, keyring, locked, newestOnly = setOf("vault_password_blob")) { log += it }
+        }
+
+        assertEquals(2, merged)
+        assertEquals("the newer copy wins", "Bea", store.value[name])
+        assertEquals("an older copy still fills what the newer one lacks", true, store.value[flag])
+        assertEquals(setOf("a", "b"), store.value[hidden])
+        assertEquals("the newest copy held no password, so none comes back", null, store.value[password])
+        assertTrue(locked.pending("settings").isEmpty())
+    }
+
+    @Test
     fun `a locked copy stays while its key does not open`() {
         val bytes = write(sample)
         wrapper.key = null

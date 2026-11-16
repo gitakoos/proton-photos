@@ -66,9 +66,17 @@ class LockedStoreFiles(private val dir: File, private val clock: () -> Long = Sy
         writeWhole(File(dir, "$storeName-${clock()}$SUFFIX"), bytes)
     }
 
+    /** The copies of [storeName], newest first, by the time each was set aside (in its name). */
     fun pending(storeName: String): List<File> =
-        dir.listFiles()?.filter { it.name.startsWith("$storeName-") && it.name.endsWith(SUFFIX) }
-            ?.sortedBy { it.name } ?: emptyList()
+        dir.listFiles().orEmpty()
+            .mapNotNull { f -> setAsideAt(storeName, f)?.let { f to it } }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+    private fun setAsideAt(storeName: String, file: File): Long? {
+        if (!file.name.startsWith("$storeName-") || !file.name.endsWith(SUFFIX)) return null
+        return file.name.removePrefix("$storeName-").removeSuffix(SUFFIX).toLongOrNull()
+    }
 
     fun all(): List<File> = dir.listFiles()?.filter { it.name.endsWith(SUFFIX) } ?: emptyList()
 
@@ -232,10 +240,12 @@ object LocalStores {
     fun named(name: String): DataStore<Preferences>? = stores[name]
 
     /**
-     * Merges every locked copy of [storeName] whose key opens now into [store], then deletes that copy. A value set
-     * since then wins: the copy only fills the keys the live file does not have, and sets are joined, so a photo
-     * hidden in either stays listed. [keepOut] names, per copy, keys it must not bring back at all (a Hidden
-     * password the user removed after that copy was set aside). Answers how many copies were merged.
+     * Merges every locked copy of [storeName] whose key opens now into [store], newest first, then deletes that
+     * copy. A value set since then wins: a copy only fills the keys the live file (and the newer copies merged before
+     * it) do not have, and sets are joined, so a photo hidden in either stays listed. [keepOut] names, per copy,
+     * keys it must not bring back at all (a Hidden password the user removed after that copy was set aside).
+     * [newestOnly] names keys taken from the newest merged copy alone: an older copy never fills one the newest
+     * copy did not hold. Answers how many copies were merged.
      */
     suspend fun restoreLocked(
         storeName: String,
@@ -243,6 +253,7 @@ object LocalStores {
         keyring: LocalKeyring,
         locked: LockedStoreFiles,
         keepOut: (File) -> Set<String> = { emptySet() },
+        newestOnly: Set<String> = emptySet(),
         log: (String) -> Unit,
     ): Int {
         var merged = 0
@@ -257,7 +268,7 @@ object LocalStores {
                 log("$storeName: locked copy unreadable (${e.javaClass.simpleName}), kept")
                 continue
             }
-            val excluded = keepOut(file)
+            val excluded = keepOut(file) + if (merged > 0) newestOnly else emptySet()
             store.updateData { current -> mergeRecovered(recovered, current, excluded) }
             file.delete()
             merged++

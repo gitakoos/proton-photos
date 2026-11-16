@@ -302,6 +302,7 @@ class LocalEncryptionCoordinator @Inject constructor(
                     keepOut = { copy ->
                         if (LocalCrypto.passwordRemovedAfter(context, copy.lastModified())) setOf(SettingsKeys.VAULT_PASSWORD_BLOB.name) else emptySet()
                     },
+                    newestOnly = setOf(SettingsKeys.VAULT_PASSWORD_BLOB.name),
                     log = LocalCrypto::log,
                 )
             }
