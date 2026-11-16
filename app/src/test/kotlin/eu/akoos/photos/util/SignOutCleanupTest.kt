@@ -75,6 +75,15 @@ class SignOutCleanupTest {
     }
 
     @Test
+    fun `stopping the account's work also stops its saves to the device`() {
+        val workManager = mockk<WorkManager>(relaxed = true)
+
+        SignOutCleanup.stopBackgroundWork(context, workManager)
+
+        verify { workManager.cancelAllWorkByTag(eu.akoos.photos.worker.PhotoSaveWorker.TAG) }
+    }
+
+    @Test
     fun `the diagnostics buffers and their saved copy are emptied`() {
         SyncDiagnostics.log("before sign-out")
         val saved = File(context.filesDir, "diagnostics").apply { mkdirs() }

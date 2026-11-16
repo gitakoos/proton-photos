@@ -53,6 +53,14 @@ class DownloadEntryPointsTest {
     }
 
     @Test
+    fun `the runner's saves run as background work that outlives the process`() {
+        val text = runner.readText()
+        assertTrue("a save must be queued as background work", "PhotoSaveWorker.enqueue(context" in text)
+        val worker = File("src/main/kotlin/eu/akoos/photos/worker/PhotoSaveWorker.kt").readText()
+        assertTrue("the background work must run the kept batch", "downloads.runSaveBatch(" in worker)
+    }
+
+    @Test
     fun `no screen queues an album download on its own`() {
         assertEquals(emptyList<String>(), sourcesCalling(Regex("""AlbumDownloadWorker\.enqueue\(""")))
     }

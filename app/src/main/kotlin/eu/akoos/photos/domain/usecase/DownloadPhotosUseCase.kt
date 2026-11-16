@@ -82,6 +82,20 @@ class DownloadPhotosUseCase @Inject constructor(
      *  user cancelled on their own, which [cancelled] counts. */
     data class Progress(val done: Int, val total: Int, val failed: Int, val skipped: Int = 0, val cancelled: Int = 0)
 
+    /** How one photo of [downloadGalleryItems] ended, reported once it is over. A photo stopped by the
+     *  whole batch going away gets none, so a batch picked up again knows to fetch it. */
+    enum class ItemResult { SAVED, SKIPPED, FAILED, CANCELLED }
+
+    /**
+     * Told about each gallery row a save opens and when it is settled (published as a whole photo, or
+     * removed). A row opened and never settled was cut off part-way, by the app process ending, and is
+     * not a photo: whoever keeps the journal removes it before the batch goes on.
+     */
+    interface RowJournal {
+        fun opened(uri: Uri)
+        fun settled(uri: Uri)
+    }
+
     /** Pre-resolved per-file metadata for a download set, keyed strictly by linkId. A linkId
      *  absent from a map means "not prefetched" — the downloader falls back to its per-file
      *  fetch for that file, so behaviour is identical to a download with no prefetch at all. */
@@ -229,6 +243,10 @@ class DownloadPhotosUseCase @Inject constructor(
         cancels: ItemCancels? = null,
         /** Told when a cloud photo (by linkId) starts downloading (true) and when it is over (false). */
         onItemState: (key: String, running: Boolean) -> Unit = { _, _ -> },
+        /** Told how each cloud photo (by linkId) ended, see [ItemResult]. */
+        onItemResult: (key: String, result: ItemResult) -> Unit = { _, _ -> },
+        /** Keeps the rows a save opens until they are settled, see [RowJournal]. */
+        rowJournal: RowJournal? = null,
         onProgress: suspend (Progress) -> Unit = {},
     ): Progress = coroutineScope {
         val cloudItems = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud }
@@ -252,6 +270,7 @@ class DownloadPhotosUseCase @Inject constructor(
             async {
                 gate.withPermit {
                     var started = false
+                    var result: ItemResult? = null
                     val body: suspend () -> Unit = {
                         started = true
                         onItemState(photo.linkId, true)
@@ -260,6 +279,7 @@ class DownloadPhotosUseCase @Inject constructor(
                             if (existing != null) {
                                 linkSyncState(userId, existing, photo)
                                 skipped.incrementAndGet()
+                                result = ItemResult.SKIPPED
                                 Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
                             } else {
                                 // Per-photo override beats the default folder. Album-bound photos land in
@@ -279,6 +299,7 @@ class DownloadPhotosUseCase @Inject constructor(
                                             plain, photo.displayName, photo.mimeType, folder,
                                             captureTimeSeconds = photo.captureTime,
                                             gps = gps,
+                                            rowJournal = rowJournal,
                                         )
                                     }
                                 } finally {
@@ -299,14 +320,17 @@ class DownloadPhotosUseCase @Inject constructor(
                                     linkSyncState(userId, savedUri, photo)
                                     onSaved(savedUri.toString())
                                     done.incrementAndGet()
+                                    result = ItemResult.SAVED
                                 } else {
                                     failed.incrementAndGet()
+                                    result = ItemResult.FAILED
                                 }
                             }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
                             Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
                             failed.incrementAndGet()
+                            result = ItemResult.FAILED
                         }
                     }
                     val stopped = if (cancels != null) cancels.run(photo.linkId, body) else { body(); false }
@@ -316,6 +340,7 @@ class DownloadPhotosUseCase @Inject constructor(
                         if (started) runCatching { cloudRepo.discardPartialDownload(photo) }
                         Log.d(TAG, "Download of ${photo.linkId} cancelled by the user")
                     }
+                    (if (stopped) ItemResult.CANCELLED else result)?.let { onItemResult(photo.linkId, it) }
                     onItemState(photo.linkId, false)
                     onProgress(snapshot())
                 }
@@ -466,6 +491,7 @@ class DownloadPhotosUseCase @Inject constructor(
         folder: String,
         captureTimeSeconds: Long = 0L,
         gps: Pair<Double, Double>? = null,
+        rowJournal: RowJournal? = null,
     ): Uri? {
         // Never writes a local encrypted file's bytes into the gallery as the photo.
         if (runCatching { eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(file) }.isFailure) return null
@@ -589,6 +615,7 @@ class DownloadPhotosUseCase @Inject constructor(
         // download's commit point: a cancel that came first removes the row instead.
         var published = false
         return try {
+            rowJournal?.opened(uri)
             context.contentResolver.openOutputStream(uri)?.use { out ->
                 file.inputStream().use { it.copyTo(out) }
             } ?: throw IOException("openOutputStream returned null for $uri")
@@ -666,6 +693,9 @@ class DownloadPhotosUseCase @Inject constructor(
             runCatching { context.contentResolver.delete(uri, null, null) }
             Log.w(TAG, "saveFileToMediaStore failed for $displayName: ${e.message}")
             null
+        } finally {
+            // Published or removed, the row is settled either way; only a cut-off process leaves it open.
+            rowJournal?.settled(uri)
         }
     }
 

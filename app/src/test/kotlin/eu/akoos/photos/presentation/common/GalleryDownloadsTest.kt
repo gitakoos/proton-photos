@@ -24,22 +24,27 @@ package eu.akoos.photos.presentation.common
 
 import android.content.Context
 import eu.akoos.photos.data.offline.OfflineStorageManager
+import eu.akoos.photos.data.transfer.SaveBatchStore
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase.ItemResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
+import java.nio.file.Files
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -55,8 +60,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A save to the device runs on the app's scope: the screen that started it may close, and with it
- * every coroutine it owned, while the photos still have to reach the device and the History tab.
+ * A save to the device is kept on disk and run as background work, never on the screen's scope: the
+ * screen that started it may close, and with it every coroutine it owned, while the photos still have
+ * to reach the device and the History tab. The background work is stood in for by a job on the app
+ * scope that runs [GalleryDownloads.runSaveBatch], the same call the real work makes.
  */
 class GalleryDownloadsTest {
 
@@ -69,14 +76,21 @@ class GalleryDownloadsTest {
     }
     private val transferCenter = mockk<TransferCenter>(relaxed = true)
     private val onCancelBatch = mutableListOf<(() -> Unit)?>()
+    private val tempDir: File = Files.createTempDirectory("save-batches").toFile()
     private val context = mockk<Context>(relaxed = true) {
-        every { cacheDir } returns File(System.getProperty("java.io.tmpdir"))
+        every { cacheDir } returns tempDir
+        every { filesDir } returns tempDir
     }
+    private val batchesDir get() = File(tempDir, SaveBatchStore.DIR)
 
     private val scopes = mutableListOf<CoroutineScope>()
+    private var worker: Job? = null
 
     @After
-    fun cancelScopes() = scopes.forEach { it.cancel() }
+    fun cleanUp() {
+        scopes.forEach { it.cancel() }
+        tempDir.deleteRecursively()
+    }
 
     /** Stands in for the injected app scope: the test's clock, its own SupervisorJob, no caller. */
     private fun TestScope.appScope(): CoroutineScope =
@@ -86,10 +100,25 @@ class GalleryDownloadsTest {
     private fun TestScope.screenScope(): CoroutineScope =
         CoroutineScope(StandardTestDispatcher(testScheduler) + Job()).also { scopes += it }
 
-    private fun TestScope.downloads() = GalleryDownloads(
-        appScope(), downloadPhotos, driveRepo, mockk<OfflineStorageManager>(relaxed = true),
-        transferCenter, accountManager, context,
-    )
+    /** The runner, with its background work stood in for: a cancel the app asks for drops the batch,
+     *  as [eu.akoos.photos.worker.PhotoSaveWorker] does. */
+    private fun TestScope.downloads(): GalleryDownloads {
+        val app = appScope()
+        val downloads = GalleryDownloads(
+            app, downloadPhotos, driveRepo, mockk<OfflineStorageManager>(relaxed = true),
+            transferCenter, accountManager, context,
+        )
+        downloads.io = StandardTestDispatcher(testScheduler)
+        downloads.startBatch = { id ->
+            worker = app.launch {
+                downloads.runSaveBatch(id, cancelBatch = {
+                    downloads.discardSaveBatch(id)
+                    worker?.cancel()
+                })
+            }
+        }
+        return downloads
+    }
 
     private fun cloudItem(linkId: String) = GalleryItem.CloudOnly(
         CloudPhoto(
@@ -105,12 +134,12 @@ class GalleryDownloadsTest {
             transferCenter.start(any(), any(), any(), any(), any(), any(), captureNullable(onCancelBatch), any(), any())
         } returns 7L
         coEvery {
-            downloadPhotos.downloadGalleryItems(any(), any(), any(), any(), any(), any(), any(), any())
+            downloadPhotos.downloadGalleryItems(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
         } coAnswers {
             started.complete(Unit)
             release.await()
-            val onSaved = arg<(String) -> Unit>(4)
-            onSaved("content://media/1")
+            arg<(String) -> Unit>(4).invoke("content://media/1")
+            arg<(String, ItemResult) -> Unit>(7).invoke("a", ItemResult.SAVED)
             DownloadPhotosUseCase.Progress(done = 1, total = 1, failed = 0)
         }
     }
@@ -129,6 +158,7 @@ class GalleryDownloadsTest {
         screen.launch { batch.await(); screenSawResult = true }
         advanceUntilIdle()
         assertTrue(started.isCompleted)
+        assertEquals("the batch is kept on disk while it runs", 1, batchesDir.list()?.size)
 
         screen.cancel()
         advanceUntilIdle()
@@ -144,6 +174,7 @@ class GalleryDownloadsTest {
             transferCenter.log(TransferCenter.Kind.DOWNLOAD, 1, any(), listOf("content://media/1"), any())
         }
         coVerify(exactly = 1) { transferCenter.finish(7L) }
+        assertEquals("a finished batch leaves nothing on disk", 0, batchesDir.list()?.size ?: 0)
     }
 
     @Test
@@ -166,10 +197,11 @@ class GalleryDownloadsTest {
         assertNull(awaited)
         coVerify(exactly = 0) { transferCenter.log(any(), any(), any(), any(), any()) }
         coVerify(exactly = 1) { transferCenter.finish(7L) }
+        assertEquals("a cancelled batch is not picked up again", 0, batchesDir.list()?.size ?: 0)
     }
 
     @Test
-    fun `a sign-out stops a running save`() = runTest {
+    fun `a sign-out stops a running save and drops it`() = runTest {
         val started = CompletableDeferred<Unit>()
         parkDownload(started, CompletableDeferred())
         val downloads = downloads()
@@ -182,10 +214,11 @@ class GalleryDownloadsTest {
         advanceUntilIdle()
         assertTrue("the account the batch started under is gone", batch.outcome.isCancelled)
         coVerify(exactly = 1) { transferCenter.finish(7L) }
+        assertEquals(0, batchesDir.list()?.size ?: 0)
     }
 
     @Test
-    fun `a save with nobody signed in fetches nothing`() = runTest {
+    fun `a save with nobody signed in fetches and keeps nothing`() = runTest {
         primaryUser.value = null
         val downloads = downloads()
 
@@ -193,8 +226,9 @@ class GalleryDownloadsTest {
         advanceUntilIdle()
         assertEquals(GalleryDownloads.Outcome.NotSignedIn, batch.outcome.await())
         coVerify(exactly = 0) {
-            downloadPhotos.downloadGalleryItems(any(), any(), any(), any(), any(), any(), any(), any())
+            downloadPhotos.downloadGalleryItems(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
         }
+        assertFalse(batchesDir.exists())
     }
 
     @Test
@@ -203,7 +237,7 @@ class GalleryDownloadsTest {
             transferCenter.start(any(), any(), any(), any(), any(), any(), any(), any(), any())
         } returns 7L
         coEvery {
-            downloadPhotos.downloadGalleryItems(any(), any(), any(), any(), any(), any(), any(), any())
+            downloadPhotos.downloadGalleryItems(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
         } throws IllegalStateException("volume gone")
         val downloads = downloads()
 
@@ -211,5 +245,17 @@ class GalleryDownloadsTest {
         advanceUntilIdle()
         assertEquals(GalleryDownloads.Outcome.Failed("volume gone"), batch.outcome.await())
         coVerify(exactly = 1) { transferCenter.finish(7L) }
+    }
+
+    @Test
+    fun `a closed screen never sees a result that was already there`() {
+        val finished = CompletableDeferred(5)
+        var screenSawResult = false
+        val screen = CoroutineScope(Job()).launch(start = CoroutineStart.UNDISPATCHED) {
+            coroutineContext.job.cancel()
+            screenSawResult = finished.awaitUnlessStopped() != null
+        }
+        assertTrue(screen.isCancelled)
+        assertFalse(screenSawResult)
     }
 }

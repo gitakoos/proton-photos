@@ -34,10 +34,12 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
+import eu.akoos.photos.data.transfer.SaveBatchStore
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.CloudCompressWorker
 import eu.akoos.photos.worker.ImportWorker
 import eu.akoos.photos.worker.MetadataEditWorker
+import eu.akoos.photos.worker.PhotoSaveWorker
 import eu.akoos.photos.worker.SyncWorker
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -70,13 +72,15 @@ object SignOutCleanup {
     )
 
     /** Stop everything scheduled against the account: backup, album downloads, an import, queued
-     *  metadata edits, the re-compression of Drive photos and the service that keeps the process alive. */
+     *  metadata edits, saves to the device, the re-compression of Drive photos and the service that keeps
+     *  the process alive. */
     fun stopBackgroundWork(context: Context, workManager: WorkManager) {
         runCatching {
             SyncWorker.cancel(workManager)
             workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT)
             workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER)
             workManager.cancelAllWorkByTag(AlbumDownloadWorker.TAG)
+            workManager.cancelAllWorkByTag(PhotoSaveWorker.TAG)
             workManager.cancelAllWorkByTag(ImportWorker.TAG)
             workManager.cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)
             workManager.cancelUniqueWork(CloudCompressWorker.UNIQUE_NAME)
@@ -89,6 +93,8 @@ object SignOutCleanup {
     fun clearDecryptedCaches(context: Context) {
         CACHE_DIRS.forEach { File(context.cacheDir, it).deleteRecursively() }
         context.cacheDir.listFiles { f -> f.name.startsWith("album_dl_") }?.forEach { it.delete() }
+        // The kept save-to-device batches list the account's photos by name.
+        File(context.filesDir, SaveBatchStore.DIR).deleteRecursively()
         val loader = context.imageLoader
         loader.memoryCache?.clear()
         loader.diskCache?.clear()
