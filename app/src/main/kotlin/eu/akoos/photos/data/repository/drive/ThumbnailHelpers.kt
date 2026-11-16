@@ -122,17 +122,15 @@ class ThumbnailHelpers @Inject constructor(
 
             val decrypted: ByteArray? = if (sessionKey != null) {
                 // Primary path: session key from ContentKeyPacket (SEIPD-only blocks).
-                // Per-call unique work temps so two concurrent decrypts of the SAME linkId (the
-                // gallery scheduler racing PhotoEntityBuilder / AlbumService / the widget updater)
-                // never share a file; a shared name let one path delete the encrypted input while
-                // the other was still reading it inside the crypto.
+                // A per-call unique temp for the Drive-encrypted input so two concurrent decrypts of the SAME
+                // linkId (the gallery scheduler racing PhotoEntityBuilder / AlbumService / the widget updater)
+                // never share a file. The plaintext comes back in memory and is never written as it is.
                 val encFile = File.createTempFile("thumb_enc_${safeFileId(linkId)}_", ".tmp", cacheDir)
-                val outFile = File.createTempFile("thumb_dec_${safeFileId(linkId)}_", ".tmp", cacheDir)
                 try {
                     encFile.writeBytes(encryptedBytes)
-                    val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, outFile) }
+                    val result = runCatching { cryptoServiceClient.decryptWithSessionKey(sessionKey, encFile) }
                     if (result.isSuccess) {
-                        outFile.readBytes()
+                        result.getOrThrow()
                     } else {
                         Log.w(TAG, "thumbnail sessionKey decrypt failed for $linkId: ${result.exceptionOrNull()?.message}")
                         // Fallback: try binary-PGP (legacy format)
@@ -140,7 +138,6 @@ class ThumbnailHelpers @Inject constructor(
                     }
                 } finally {
                     encFile.delete()
-                    outFile.delete()
                 }
             } else {
                 // No session key — try binary-PGP (legacy full PKESK+SEIPD format)

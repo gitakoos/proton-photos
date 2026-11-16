@@ -359,13 +359,11 @@ class DriveCryptoHelper @Inject constructor(
         }
     }
 
-    fun decryptFileToDestination(sessionKey: SessionKey, encryptedFile: File, destFile: File): File = cryptoLock.withLock {
-        // Empty/missing bytes trigger the same [:-1] Go panic/SIGABRT — validate in Kotlin first.
-        require(encryptedFile.exists() && encryptedFile.length() > 0) {
-            "decryptFileToDestination: encryptedFile is empty or missing"
-        }
-        val result = cryptoContext.pgpCrypto.decryptFile(encryptedFile, destFile, sessionKey)
-        result.file
+    /** Decrypts [data] (a Drive block or thumbnail) with [sessionKey] in memory, writing no file. */
+    fun decryptWithSessionKey(sessionKey: SessionKey, data: ByteArray): ByteArray = cryptoLock.withLock {
+        // Empty bytes trigger the same [:-1] Go panic/SIGABRT, so they are refused in Kotlin first.
+        require(data.isNotEmpty()) { "decryptWithSessionKey: encrypted bytes are empty" }
+        cryptoContext.pgpCrypto.decryptData(data, sessionKey)
     }
 
     /**

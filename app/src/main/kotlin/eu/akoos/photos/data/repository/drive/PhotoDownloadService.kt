@@ -753,33 +753,25 @@ class PhotoDownloadService @Inject constructor(
         // Disambiguate the encrypted scratch file per-block so two coroutines on
         // adjacent blocks of the same linkId don't collide on the same enc_ path.
         val encFile = File(cacheDir, "enc_${safeFileId(linkId)}_${block.index}.bin")
-        val decryptedBytes: ByteArray = if (sessionKey != null) {
-            encFile.writeBytes(encBytes)
-            val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, decFile) }
-            encFile.delete()
-            if (result.isSuccess) {
-                decFile.readBytes()
+        // The plaintext comes back in memory (through a pipe from :crypto) and is written only encrypted. The
+        // Drive-encrypted input goes through a file so a multi-MB block stays under the binder limit.
+        encFile.writeBytes(encBytes)
+        val decryptedBytes: ByteArray = try {
+            if (sessionKey != null) {
+                val result = runCatching { cryptoServiceClient.decryptWithSessionKey(sessionKey, encFile) }
+                // Binary-PGP as the last resort before giving up.
+                result.getOrNull()
+                    ?: cryptoServiceClient.decryptBinaryFile(encFile, nodeKeyBytes)
+                    ?: error("Block ${block.index} decrypt failed: sessionKey path: ${result.exceptionOrNull()?.message}")
             } else {
-                decFile.delete()
-                // Try binary-PGP as last resort before giving up. File-based so a multi-MB
-                // block stays under the binder limit when the decrypt runs in :crypto.
-                encFile.writeBytes(encBytes)
-                val ok = cryptoServiceClient.decryptBinaryToFile(encFile, decFile, nodeKeyBytes)
-                encFile.delete()
-                if (!ok) error("Block ${block.index} decrypt failed: sessionKey path: ${result.exceptionOrNull()?.message}")
-                decFile.readBytes()
+                // No session key: binary-PGP only works if the block has an embedded PKESK.
+                cryptoServiceClient.decryptBinaryFile(encFile, nodeKeyBytes)
+                    ?: error("Block ${block.index} decrypt failed: no session key and binary-PGP returned null")
             }
-        } else {
-            // No session key — try binary-PGP (only works if block has embedded PKESK).
-            // File-based so a multi-MB block stays under the binder limit in :crypto.
-            encFile.writeBytes(encBytes)
-            val ok = cryptoServiceClient.decryptBinaryToFile(encFile, decFile, nodeKeyBytes)
+        } finally {
             encFile.delete()
-            if (!ok) error("Block ${block.index} decrypt failed: no session key and binary-PGP returned null")
-            decFile.readBytes()
         }
 
-        // The crypto process writes the block in plaintext; it is kept encrypted from here on.
         CacheFiles.write(decFile, decryptedBytes, tempPrefix = "dec_seal_", context = context)
         val decHash = cryptoHelper.sha256(decryptedBytes)
 

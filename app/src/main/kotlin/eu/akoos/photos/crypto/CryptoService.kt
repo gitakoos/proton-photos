@@ -25,6 +25,7 @@ package eu.akoos.photos.crypto
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
@@ -100,24 +101,16 @@ class CryptoService : Service() {
             }
         }
 
-        override fun decryptFileWithSessionKey(
+        override fun decryptWithSessionKeyToFd(
             sessionKeyBytes: ByteArray?,
             encPath: String?,
-            destPath: String?,
-        ): Boolean = cryptoLock.withLock {
-            if (sessionKeyBytes == null || encPath == null || destPath == null) return@withLock false
-            try {
-                val encryptedFile = File(encPath)
-                // Empty/missing bytes trigger the same [:-1] Go panic/SIGABRT — validate first.
-                require(encryptedFile.exists() && encryptedFile.length() > 0) {
-                    "decryptFileWithSessionKey: encryptedFile is empty or missing"
-                }
-                cryptoContext.pgpCrypto.decryptFile(encryptedFile, File(destPath), SessionKey(sessionKeyBytes))
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "decryptFileWithSessionKey failed: ${e.message}")
-                false
-            }
+            out: ParcelFileDescriptor?,
+        ): Boolean = writePlain(out) {
+            if (sessionKeyBytes == null || encPath == null) return@writePlain null
+            val data = File(encPath).readBytes()
+            // Empty bytes trigger the same [:-1] Go panic/SIGABRT, so they are refused first.
+            require(data.isNotEmpty()) { "decryptWithSessionKeyToFd: encrypted file is empty or missing" }
+            cryptoContext.pgpCrypto.decryptData(data, SessionKey(sessionKeyBytes))
         }
 
         override fun decryptBinaryPgpWithNodeKey(
@@ -150,24 +143,40 @@ class CryptoService : Service() {
             }
         }
 
-        override fun decryptBinaryToFile(
+        override fun decryptBinaryToFd(
             encPath: String?,
-            destPath: String?,
+            out: ParcelFileDescriptor?,
             nodeKeyBytes: ByteArray?,
-        ): Boolean = cryptoLock.withLock {
-            // File-based variant for large download blocks so a multi-MB block never crosses the
-            // binder as a byte[]. Same size guard + getArmored path as the byte[] sibling.
-            if (encPath == null || destPath == null || nodeKeyBytes == null) return@withLock false
-            try {
-                val data = File(encPath).readBytes()
-                if (data.size < 16) return@withLock false
-                val armored = cryptoContext.pgpCrypto.getArmored(data, PGPHeader.Message)
-                val plain = cryptoContext.pgpCrypto.decryptData(armored, nodeKeyBytes)
-                File(destPath).writeBytes(plain)
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "decryptBinaryToFile failed: ${e.message}")
-                false
+        ): Boolean = writePlain(out) {
+            // For large download blocks, so a multi-MB block never crosses the binder as a byte[]. Same
+            // size guard and getArmored path as the byte[] sibling.
+            if (encPath == null || nodeKeyBytes == null) return@writePlain null
+            val data = File(encPath).readBytes()
+            if (data.size < 16) return@writePlain null
+            val armored = cryptoContext.pgpCrypto.getArmored(data, PGPHeader.Message)
+            cryptoContext.pgpCrypto.decryptData(armored, nodeKeyBytes)
+        }
+
+        /**
+         * Decrypts with [decrypt] under the crypto lock and writes the plaintext into [out], the write end of the
+         * caller's pipe, closing it in every case so the caller's read ends. False when there was nothing to write.
+         */
+        private fun writePlain(out: ParcelFileDescriptor?, decrypt: () -> ByteArray?): Boolean {
+            if (out == null) return false
+            return ParcelFileDescriptor.AutoCloseOutputStream(out).use { stream ->
+                val plain = try {
+                    cryptoLock.withLock { decrypt() }
+                } catch (e: Exception) {
+                    Log.w(TAG, "decrypt to the caller's pipe failed: ${e.message}")
+                    null
+                } ?: return@use false
+                try {
+                    stream.write(plain)
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "writing to the caller's pipe failed: ${e.message}")
+                    false
+                }
             }
         }
     }
