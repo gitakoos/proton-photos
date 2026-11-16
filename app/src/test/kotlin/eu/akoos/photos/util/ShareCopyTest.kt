@@ -127,15 +127,39 @@ class ShareCopyTest {
     @Test
     fun `a copy made to be shared is written encrypted into the scratch folder`() {
         val bytes = Random(2).nextBytes(70_000)
-        val copy = File(strippedShareDir(context), "annotated_1x1.jpg")
 
-        val written = runCatching { shareCopyUri(context, copy.name) { it.write(bytes) } }
+        val copy = makeShareCopy(context, "annotated_1x1.jpg") { it.write(bytes) }
 
-        // The uri needs the provider registered, which a plain test run does not have; the copy is made first.
-        assertTrue(written.isSuccess || written.exceptionOrNull() is IllegalArgumentException)
+        assertEquals(strippedShareDir(context), copy.parentFile)
+        assertTrue(copy.name, copy.name.startsWith("annotated_1x1_") && copy.name.endsWith(".jpg"))
         assertTrue(LocalFiles.isEncrypted(copy))
         assertArrayEquals(bytes, LocalFiles.readBytes(context, copy))
-        assertFalse(File(strippedShareDir(context), "work/annotated_1x1.jpg").exists())
+        assertTrue(File(strippedShareDir(context), "work").listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `two shares of the same size never write over each other`() {
+        val first = Random(3).nextBytes(20_000)
+        val second = Random(4).nextBytes(20_000)
+
+        val a = makeShareCopy(context, "annotated_1x1.jpg") { it.write(first) }
+        val b = makeShareCopy(context, "annotated_1x1.jpg") { it.write(second) }
+
+        assertTrue(a != b)
+        assertArrayEquals(first, LocalFiles.readBytes(context, a))
+        assertArrayEquals(second, LocalFiles.readBytes(context, b))
+    }
+
+    @Test
+    fun `a stripped copy sealed under a name already in the share folder gets a name of its own`() {
+        val dir = strippedShareDir(context)
+        val work = File(dir, "work").apply { mkdirs() }
+        val earlier = File(dir, "stripped_1.jpg").apply { writeBytes(byteArrayOf(9)) }
+
+        val copy = sealShareCopy(context, File(work, "stripped_1.jpg").apply { writeBytes(byteArrayOf(1, 2)) }, dir)
+
+        assertTrue(copy != earlier)
+        assertArrayEquals(byteArrayOf(9), earlier.readBytes())
     }
 
     @Test

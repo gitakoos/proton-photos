@@ -75,7 +75,8 @@ fun sweepLegacyShareCopies(context: Context, before: Long) {
  * [plain]. When no key can be had now the copy stays as it is, in the scratch folder the next start empties.
  */
 internal fun sealShareCopy(context: Context, plain: File, dir: File): File {
-    val target = File(dir, plain.name)
+    // A name of its own, so a copy another app may still be reading is never written over.
+    val target = uniqueIn(dir, plain.name)
     try {
         val sealed = CacheFiles.encryptingStream(java.io.FileOutputStream(target), context)
         sealed.use { out -> plain.inputStream().use { it.copyTo(out) } }
@@ -92,22 +93,37 @@ internal fun sealShareCopy(context: Context, plain: File, dir: File): File {
     }
 }
 
+/** A new, empty file in [dir] named after [name], with a part of its own so no two shares ever share one. */
+private fun uniqueIn(dir: File, name: String): File {
+    val dot = name.lastIndexOf('.')
+    val base = (if (dot > 0) name.substring(0, dot) else name).padEnd(3, '_')
+    val ext = if (dot > 0) name.substring(dot) else ".bin"
+    return File.createTempFile("${base}_", ext, dir)
+}
+
 /**
- * A copy made only to be shared, named [name] and written by [write], kept as [sealShareCopy] keeps a stripped
- * one (encrypted, in the scratch folder emptied at every start), as a share-provider uri.
+ * A copy made only to be shared, written by [write], kept as [sealShareCopy] keeps a stripped one (encrypted, in
+ * the share folder). Its file name is unique; [name] is what the receiving app is told.
  */
-fun shareCopyUri(context: Context, name: String, write: (java.io.OutputStream) -> Unit): Uri {
+internal fun makeShareCopy(context: Context, name: String, write: (java.io.OutputStream) -> Unit): File {
     val dir = strippedShareDir(context).apply { mkdirs() }
     val work = File(dir, SHARE_WORK_DIR).apply { mkdirs() }
-    val plain = File(work, name)
+    val plain = uniqueIn(work, name)
     try {
         java.io.FileOutputStream(plain).use(write)
     } catch (e: Exception) {
         plain.delete()
         throw e
     }
-    val copy = sealShareCopy(context, plain, dir)
-    return FileProvider.getUriForFile(context, "${context.packageName}.share.fileprovider", copy)
+    return sealShareCopy(context, plain, dir)
+}
+
+/** [makeShareCopy] as a share-provider uri that reports [name] as the file name. */
+fun shareCopyUri(context: Context, name: String, write: (java.io.OutputStream) -> Unit): Uri {
+    val copy = makeShareCopy(context, name, write)
+    return FileProvider.getUriForFile(context, "${context.packageName}.share.fileprovider", copy).also {
+        ShareFileProvider.putDisplayName(it, name)
+    }
 }
 
 /**
