@@ -3106,7 +3106,7 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     private suspend fun saveCloud(bitmap: Bitmap, source: EditorSource.Cloud, mode: SaveMode, quality: Int, editTimestampMs: Long, originalCaptureMs: Long): Uri? {
-        val cacheDir = File(context.cacheDir, "editor").also { it.mkdirs() }
+        val cacheDir = eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context)
         val tempFile = File(cacheDir, "edit_${editTimestampMs}.jpg")
         try {
             FileOutputStream(tempFile).use { out ->
@@ -3231,7 +3231,7 @@ class PhotoEditorViewModel @Inject constructor(
          *  copy and mirrored into the xAttr so Proton keeps the map location + camera info. */
         originalSourceUri: String,
     ): CloudUploadResult {
-        val cacheDir = File(context.cacheDir, "editor").also { it.mkdirs() }
+        val cacheDir = eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context)
         val tempFile = File(cacheDir, "synced_${editTimestampMs}.jpg")
         try {
             FileOutputStream(tempFile).use { out ->

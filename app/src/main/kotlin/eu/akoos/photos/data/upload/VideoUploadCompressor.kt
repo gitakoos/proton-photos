@@ -115,7 +115,7 @@ object VideoUploadCompressor {
         source: VideoSourceInfo,
         plan: VideoCompressionPlan.Transcode,
         sourceDateEpochMs: Long = 0L,
-        tempDir: File = context.applicationContext.cacheDir,
+        tempDir: File = eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context),
         onProgress: ((Progress) -> Unit)? = null,
     ): Outcome {
         val appContext = context.applicationContext

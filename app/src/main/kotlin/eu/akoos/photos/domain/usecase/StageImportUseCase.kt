@@ -57,7 +57,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import java.io.File
-import java.io.FileOutputStream
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -161,7 +160,10 @@ class StageImportUseCase @Inject constructor(
                 alreadyStaged = emptySet()
             }
 
-            val thumbDir = File(context.cacheDir, THUMB_DIR).apply { mkdirs() }
+            val thumbDir = eu.akoos.photos.data.localcrypto.LocalFiles.dir(
+                context,
+                eu.akoos.photos.data.localcrypto.LocalFiles.Area.IMPORT_THUMBS,
+            ).apply { mkdirs() }
             val prefs = context.settingsDataStore.data.first()
             val compression = CompressionPreferences.settings(prefs)
             val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
@@ -240,7 +242,7 @@ class StageImportUseCase @Inject constructor(
                     worked = true
                     runBlocking(parentContext) {
                         ensureActive()
-                        val temp = File.createTempFile("stage_", tempSuffix(name), context.cacheDir)
+                        val temp = File.createTempFile("stage_", tempSuffix(name), eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
                         try {
                             temp.outputStream().use { input.copyTo(it) }
 
@@ -450,9 +452,7 @@ class StageImportUseCase @Inject constructor(
             oriented = ExifHelper.applyOrientation(decoded, ExifHelper.readOrientation(source))
             scaled = scaleToLongEdge(oriented, THUMB_EDGE)
 
-            return FileOutputStream(outFile).use { fos ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, THUMB_QUALITY, fos)
-            }
+            return writeThumbJpeg(scaled, outFile)
         } finally {
             if (scaled != null && scaled !== oriented) scaled.recycle()
             if (oriented != null && oriented !== decoded) oriented.recycle()
@@ -487,14 +487,22 @@ class StageImportUseCase @Inject constructor(
             } ?: return false
 
             scaled = scaleToLongEdge(frame, THUMB_EDGE)
-            return FileOutputStream(outFile).use { fos ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, THUMB_QUALITY, fos)
-            }
+            return writeThumbJpeg(scaled, outFile)
         } finally {
             runCatching { retriever.release() }
             if (scaled != null && scaled !== frame) scaled.recycle()
             frame?.recycle()
         }
+    }
+
+    /** Writes [bitmap] as the thumbnail JPEG [outFile], encrypted like the other image caches (the review grid
+     *  reads it through the decrypting image loader). No key now: nothing is written and the row shows a
+     *  placeholder. */
+    private fun writeThumbJpeg(bitmap: Bitmap, outFile: File): Boolean {
+        val jpeg = java.io.ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, THUMB_QUALITY, jpeg)) return false
+        eu.akoos.photos.data.localcrypto.CacheFiles.write(outFile, jpeg.toByteArray(), tempPrefix = ".cache_", context = context)
+        return true
     }
 
     /** Largest power-of-two sample size that keeps the sampled longest edge at or above [cap], so the

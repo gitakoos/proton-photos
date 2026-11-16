@@ -239,6 +239,33 @@ object VaultFiles {
         workDir(context).deleteRecursively()
         stagingDir(context).deleteRecursively()
         File(context.applicationContext.cacheDir, SHARE_DIR).deleteRecursively()
+        File(context.applicationContext.cacheDir, PLAIN_STAGING_DIR).deleteRecursively()
+    }
+
+    /**
+     * The one folder for the plaintext copies a library can only take as a file path (the EXIF writer, the media
+     * muxer and transcoder, the frame grabber, the upload's hash and block reads): upload, import and editor-save
+     * copies of a photo. Each is deleted right after use by its own step, and the folder is emptied at every start.
+     */
+    fun plainStagingDir(context: Context): File = File(context.cacheDir, PLAIN_STAGING_DIR).apply { mkdirs() }
+
+    const val PLAIN_STAGING_DIR = "plain_staging"
+
+    /** Name starts of the plaintext copies an earlier version made straight in the cache folder. */
+    private val LEGACY_PLAIN_PREFIXES = listOf(
+        "compressed_", "stripped_", "videocompress_", "upl_ts_", "motion_src_", "motion_primary_", "motion_out_",
+        "motion_check_", "gainmap_src_", "gainmap_primary_", "gainmap_out_", "import_", "stage_",
+    )
+
+    /**
+     * Removes the plaintext copies an earlier version made in the cache folder itself and in its editor folder,
+     * written before [before] (the start of this process), so never one this process is still using.
+     */
+    fun sweepLegacyPlainCopies(context: Context, before: Long) {
+        val cache = context.applicationContext?.cacheDir ?: context.cacheDir
+        val files = cache.listFiles().orEmpty().filter { f -> LEGACY_PLAIN_PREFIXES.any { f.name.startsWith(it) } } +
+            File(cache, "editor").listFiles().orEmpty()
+        for (f in files) if (f.isFile && f.lastModified() < before) runCatching { f.delete() }
     }
 
     /** Where a decrypted copy handed to another app (share, set as) lives until the next start. */

@@ -42,7 +42,7 @@ import javax.inject.Singleton
  * still around its appended trailer, strips the primary image's EXIF, and re-attaches the trailer
  * byte-for-byte so the motion or the gain map survives a metadata strip. Also answers whether an
  * upload URI is a Motion Photo or advertises a gain map, so the compressor can skip a pass that
- * would drop either. Reads only the application [context]'s contentResolver and cacheDir.
+ * would drop either. Reads only the application [context]'s contentResolver and the plaintext staging folder.
  */
 @Singleton
 class UploadStructuralStripper @Inject constructor(
@@ -66,7 +66,7 @@ class UploadStructuralStripper @Inject constructor(
     fun stripImagePreservingMotion(localUri: String, stripConfig: MetadataStripConfig): File? {
         // Materialize the source so the tail scan and the split read real bytes, not a stream.
         val source = try {
-            val tmp = File.createTempFile("motion_src_", ".bin", context.cacheDir)
+            val tmp = File.createTempFile("motion_src_", ".bin", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             context.contentResolver.openInputStream(Uri.parse(localUri))?.use { input ->
                 tmp.outputStream().use { input.copyTo(it) }
             } ?: run { tmp.delete(); return null }
@@ -88,7 +88,7 @@ class UploadStructuralStripper @Inject constructor(
         // destructive plain strip). On any failure fall back to the byte-exact source copy.
         var primary: File? = null
         try {
-            primary = File.createTempFile("motion_primary_", ".jpg", context.cacheDir)
+            primary = File.createTempFile("motion_primary_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             RandomAccessFile(source, "r").use { raf ->
                 primary!!.outputStream().use { out ->
                     val buffer = ByteArray(64 * 1024)
@@ -112,7 +112,7 @@ class UploadStructuralStripper @Inject constructor(
             // we already split so the concatenation still yields an intact motion photo.
             val primaryForJoin = strippedPrimary ?: primary!!
 
-            val joined = File.createTempFile("motion_out_", ".jpg", context.cacheDir)
+            val joined = File.createTempFile("motion_out_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             joined.outputStream().use { out ->
                 primaryForJoin.inputStream().use { it.copyTo(out) }
                 RandomAccessFile(source, "r").use { raf ->
@@ -156,7 +156,7 @@ class UploadStructuralStripper @Inject constructor(
     fun stripImagePreservingGainMap(localUri: String, stripConfig: MetadataStripConfig): File? {
         // Materialize the source so the marker walk and the split read real bytes, not a stream.
         val source = try {
-            val tmp = File.createTempFile("gainmap_src_", ".bin", context.cacheDir)
+            val tmp = File.createTempFile("gainmap_src_", ".bin", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             context.contentResolver.openInputStream(Uri.parse(localUri))?.use { input ->
                 tmp.outputStream().use { input.copyTo(it) }
             } ?: run { tmp.delete(); return null }
@@ -176,7 +176,7 @@ class UploadStructuralStripper @Inject constructor(
             val splitAt = primaryImageEndOffset(source)
             if (splitAt <= 0L || splitAt >= source.length()) return null
 
-            primary = File.createTempFile("gainmap_primary_", ".jpg", context.cacheDir)
+            primary = File.createTempFile("gainmap_primary_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             RandomAccessFile(source, "r").use { raf ->
                 primary!!.outputStream().use { out ->
                     val buffer = ByteArray(64 * 1024)
@@ -198,7 +198,7 @@ class UploadStructuralStripper @Inject constructor(
                 context, Uri.fromFile(primary).toString(), stripConfig,
             ) ?: return null
 
-            joined = File.createTempFile("gainmap_out_", ".jpg", context.cacheDir)
+            joined = File.createTempFile("gainmap_out_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             joined!!.outputStream().use { out ->
                 strippedPrimary!!.inputStream().use { it.copyTo(out) }
                 RandomAccessFile(source, "r").use { raf ->
@@ -343,7 +343,7 @@ class UploadStructuralStripper @Inject constructor(
         }
         var temp: File? = null
         return try {
-            temp = File.createTempFile("motion_check_", ".bin", context.cacheDir)
+            temp = File.createTempFile("motion_check_", ".bin", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             val copied = context.contentResolver.openInputStream(uri)?.use { input ->
                 temp!!.outputStream().use { input.copyTo(it) }
                 true

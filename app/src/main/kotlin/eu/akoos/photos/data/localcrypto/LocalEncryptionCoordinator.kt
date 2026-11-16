@@ -127,6 +127,8 @@ class LocalEncryptionCoordinator @Inject constructor(
                 .onFailure { logFailure("temp sweep", it) }
             runCatching { sweepLegacyShareCopies(context, before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS) }
                 .onFailure { logFailure("share copy sweep", it) }
+            runCatching { VaultFiles.sweepLegacyPlainCopies(context, before = LocalCrypto.processStartedAt() - TEMP_SWEEP_MARGIN_MS) }
+                .onFailure { logFailure("plain copy sweep", it) }
             runCatching { encryptPlainCaches() }.onFailure { logFailure("plain cache encryption", it) }
         }
         scope.launch {

@@ -53,6 +53,7 @@ object LocalFiles {
     /** Held while an offline copy is written, removed or encrypted in place, so none of them meets another. */
     val offlineLock = java.util.concurrent.locks.ReentrantLock()
     const val MOTION_DIR = "motion"
+    const val IMPORT_THUMBS_DIR = "import_thumbs"
 
     /** A folder of encrypted files. [code] names it in a [VaultReadProvider] uri; [regenerable] files may be
      *  dropped when they no longer open, since they are fetched or made again. */
@@ -62,6 +63,7 @@ object LocalFiles {
         THUMBNAILS("t", true),
         OFFLINE("o", false),
         MOTION("m", true),
+        IMPORT_THUMBS("i", true),
         ;
 
         companion object {
@@ -77,6 +79,7 @@ object LocalFiles {
             Area.THUMBNAILS -> File(app.cacheDir, THUMBNAILS_DIR)
             Area.OFFLINE -> File(app.filesDir, OFFLINE_DIR)
             Area.MOTION -> File(app.cacheDir, MOTION_DIR)
+            Area.IMPORT_THUMBS -> File(app.cacheDir, IMPORT_THUMBS_DIR)
         }
     }
 
@@ -377,7 +380,7 @@ object CacheFiles {
     fun encryptPlainLeftovers(context: Context, before: Long, freeBytes: (File) -> Long = { it.usableSpace }): Boolean {
         val sealing = sealing(context) ?: return true
         var complete = true
-        for (area in listOf(LocalFiles.Area.THUMBNAILS, LocalFiles.Area.FULLRES)) {
+        for (area in listOf(LocalFiles.Area.THUMBNAILS, LocalFiles.Area.FULLRES, LocalFiles.Area.IMPORT_THUMBS)) {
             val dir = LocalFiles.dir(context, area)
             for (file in dir.listFiles().orEmpty()) {
                 val name = file.name

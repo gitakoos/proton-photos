@@ -204,7 +204,7 @@ internal class UploadBytePreparer(
                 }
             }
         } else if (stripOnUpload && stripConfig.stripGps && localItem.mimeType.startsWith("video/")) {
-            val tmp = File.createTempFile("stripped_", ".mp4", context.cacheDir)
+            val tmp = File.createTempFile("stripped_", ".mp4", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             if (eu.akoos.photos.util.VideoMetadataStripper
                     .remuxWithoutLocation(context, state.localUri, tmp)) {
                 temps.strippedFile = tmp
@@ -364,7 +364,7 @@ internal class UploadBytePreparer(
                 Mp4CreationTime.stamp(temps.strippedFile!!, localItem.dateTaken)
             } else {
                 runCatching {
-                    val tmp = File(context.cacheDir, "upl_ts_" + System.nanoTime() + ".mp4")
+                    val tmp = File(eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context), "upl_ts_" + System.nanoTime() + ".mp4")
                     context.contentResolver.openInputStream(Uri.parse(uploadUri))!!.use { input ->
                         tmp.outputStream().use { output -> input.copyTo(output) }
                     }

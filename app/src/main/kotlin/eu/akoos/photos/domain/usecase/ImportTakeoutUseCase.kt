@@ -337,7 +337,7 @@ class ImportTakeoutUseCase @Inject constructor(
                 // order here and offloads only the upload to [uploadScope].
                 runBlocking(parentContext) {
                     ensureActive()
-                    val temp = File.createTempFile("import_", tempSuffix(name), context.cacheDir)
+                    val temp = File.createTempFile("import_", tempSuffix(name), eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
                     val displayName = row.title?.takeIf { it.isNotBlank() } ?: ImportEntries.baseName(name)
                     val raw: String
                     val rowDateMs: Long

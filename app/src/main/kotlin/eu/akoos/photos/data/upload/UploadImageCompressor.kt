@@ -180,7 +180,7 @@ object UploadImageCompressor {
             // the cap. A cap of 0 (or an already-smaller image) keeps the decoded dimensions.
             scaled = if (cap > 0) scaleToLongEdge(oriented, cap) else oriented
 
-            out = File.createTempFile("compressed_", ".jpg", context.cacheDir)
+            out = File.createTempFile("compressed_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             val encoded = FileOutputStream(out).use { fos ->
                 scaled.compress(Bitmap.CompressFormat.JPEG, tier.quality, fos)
             }
@@ -371,7 +371,7 @@ object UploadImageCompressor {
             val orientation = ExifHelper.readOrientation(context, sourceUri)
             oriented = ExifHelper.applyOrientation(decoded, orientation)
 
-            out = File.createTempFile("stripped_", ".jpg", context.cacheDir)
+            out = File.createTempFile("stripped_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             val encoded = FileOutputStream(out).use { fos ->
                 oriented.compress(Bitmap.CompressFormat.JPEG, STRIP_TRANSCODE_JPEG_QUALITY, fos)
             }
