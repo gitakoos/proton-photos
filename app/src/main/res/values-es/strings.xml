@@ -2859,8 +2859,6 @@
     <string name="whats_new_260_snackbars_body">Los demás avisos breves de la parte inferior de la pantalla también quedan por encima de las barras inferiores y los botones flotantes, como el botón de filtro de la búsqueda y el de volver arriba, en vez de taparlos.</string>
     <string name="whats_new_260_emptyshared_title">Actualizar la página Compartidos vacía</string>
     <string name="whats_new_260_emptyshared_body">Deslizar hacia abajo la página Compartidos la actualiza aunque todavía no tenga nada que mostrar.</string>
-    <string name="whats_new_260_arrangehint_title">Ordenar junto al borde inferior</string>
-    <string name="whats_new_260_arrangehint_body">Al ordenar fotos, una foto que sujetas en el borde inferior de la pantalla queda por encima de la barra de ayuda en vez de quedar debajo.</string>
     <string name="whats_new_260_albumrename_title">Álbumes renombrados al instante</string>
     <string name="whats_new_260_albumrename_body">Un álbum renombrado desde dentro muestra su nuevo nombre en la pestaña Álbumes y en los selectores de álbum sin actualizar.</string>
     <string name="viewer_save_to_drive">Guardar en mi Drive</string>

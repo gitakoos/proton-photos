@@ -2859,8 +2859,6 @@
     <string name="whats_new_260_snackbars_body">Other short messages at the bottom of the screen also sit above the bottom bars and floating buttons, such as the search filter button and the jump to top button, instead of covering them.</string>
     <string name="whats_new_260_emptyshared_title">Pull to refresh on an empty Shared page</string>
     <string name="whats_new_260_emptyshared_body">Pulling down the Shared page refreshes it even while it has nothing to show yet.</string>
-    <string name="whats_new_260_arrangehint_title">Arranging at the bottom edge</string>
-    <string name="whats_new_260_arrangehint_body">While you arrange photos, a photo you hold at the bottom of the screen stays above the hint bar instead of slipping under it.</string>
     <string name="whats_new_260_albumrename_title">Renamed albums update at once</string>
     <string name="whats_new_260_albumrename_body">An album renamed from inside it shows its new name on the Albums tab and in the album pickers without a refresh.</string>
     <string name="viewer_save_to_drive">Save to my Drive</string>

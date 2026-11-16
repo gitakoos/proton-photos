@@ -2960,8 +2960,6 @@
     <string name="whats_new_260_snackbars_body">Aj ostatné krátke správy pri spodnom okraji obrazovky sú nad spodnými lištami a plávajúcimi tlačidlami, napríklad nad tlačidlom filtra vo vyhľadávaní a tlačidlom na návrat nahor, a nezakrývajú ich.</string>
     <string name="whats_new_260_emptyshared_title">Obnovenie prázdnej stránky Zdieľané</string>
     <string name="whats_new_260_emptyshared_body">Stiahnutie stránky Zdieľané nadol ju obnoví, aj keď ešte nič neobsahuje.</string>
-    <string name="whats_new_260_arrangehint_title">Usporiadanie pri spodnom okraji</string>
-    <string name="whats_new_260_arrangehint_body">Pri usporiadaní fotiek zostane fotka, ktorú držíte pri spodnom okraji obrazovky, nad lištou s nápovedou a nezájde pod ňu.</string>
     <string name="whats_new_260_albumrename_title">Premenovaný album hneď s novým názvom</string>
     <string name="whats_new_260_albumrename_body">Album premenovaný zvnútra ukáže nový názov na karte Albumy aj vo výbere albumov bez obnovenia.</string>
     <string name="viewer_save_to_drive">Uložiť na môj Drive</string>

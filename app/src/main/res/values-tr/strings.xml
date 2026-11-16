@@ -2739,8 +2739,6 @@
     <string name="whats_new_260_snackbars_body">Ekranın altındaki diğer kısa mesajlar da alt çubukların ve arama filtresi düğmesi ile başa dön düğmesi gibi yüzen düğmelerin üstünde duruyor, onları örtmüyor.</string>
     <string name="whats_new_260_emptyshared_title">Boş Paylaşılanlar sayfasını yenileme</string>
     <string name="whats_new_260_emptyshared_body">Paylaşılanlar sayfasını aşağı çekmek, henüz gösterecek bir şey olmasa da sayfayı yeniler.</string>
-    <string name="whats_new_260_arrangehint_title">Alt kenarda düzenleme</string>
-    <string name="whats_new_260_arrangehint_body">Fotoğrafları düzenlerken ekranın altında tuttuğun fotoğraf ipucu çubuğunun altına kaymıyor, üstünde kalıyor.</string>
     <string name="whats_new_260_albumrename_title">Yeniden adlandırılan albümler hemen güncel</string>
     <string name="whats_new_260_albumrename_body">İçinden yeniden adlandırılan bir albüm, yenilemeye gerek kalmadan Albümler sekmesinde ve albüm seçicilerde yeni adını gösterir.</string>
     <string name="viewer_save_to_drive">Drive\'ıma kaydet</string>

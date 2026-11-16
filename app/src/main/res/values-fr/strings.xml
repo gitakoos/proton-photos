@@ -2824,8 +2824,6 @@
     <string name="whats_new_260_snackbars_body">Les autres messages courts en bas de l\'écran se placent aussi au-dessus des barres du bas et des boutons flottants, comme le bouton de filtre de la recherche et celui pour revenir en haut, au lieu de les couvrir.</string>
     <string name="whats_new_260_emptyshared_title">Actualiser la page Partagés vide</string>
     <string name="whats_new_260_emptyshared_body">Tirer vers le bas la page Partagés l\'actualise même lorsqu\'elle n\'a encore rien à afficher.</string>
-    <string name="whats_new_260_arrangehint_title">Organiser près du bord inférieur</string>
-    <string name="whats_new_260_arrangehint_body">Pendant que vous organisez les photos, une photo tenue en bas de l\'écran reste au-dessus de la barre d\'aide au lieu de passer dessous.</string>
     <string name="whats_new_260_albumrename_title">Albums renommés mis à jour aussitôt</string>
     <string name="whats_new_260_albumrename_body">Un album renommé depuis l\'intérieur affiche son nouveau nom dans l\'onglet Albums et dans les sélecteurs d\'album sans actualisation.</string>
     <string name="viewer_save_to_drive">Enregistrer dans mon Drive</string>

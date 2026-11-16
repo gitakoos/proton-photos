@@ -2861,8 +2861,6 @@
     <string name="whats_new_260_snackbars_body">Anche gli altri brevi messaggi in fondo allo schermo stanno sopra le barre in basso e i pulsanti mobili, come il pulsante filtro della ricerca e quello per tornare su, invece di coprirli.</string>
     <string name="whats_new_260_emptyshared_title">Aggiornare la pagina Condivisi vuota</string>
     <string name="whats_new_260_emptyshared_body">Trascinare in basso la pagina Condivisi la aggiorna anche quando non ha ancora nulla da mostrare.</string>
-    <string name="whats_new_260_arrangehint_title">Disporre vicino al bordo inferiore</string>
-    <string name="whats_new_260_arrangehint_body">Mentre disponi le foto, una foto che tieni in fondo allo schermo resta sopra la barra dei suggerimenti invece di scivolarci sotto.</string>
     <string name="whats_new_260_albumrename_title">Album rinominati subito aggiornati</string>
     <string name="whats_new_260_albumrename_body">Un album rinominato dal suo interno mostra il nuovo nome nella scheda Album e nei selettori di album senza aggiornare.</string>
     <string name="viewer_save_to_drive">Salva nel mio Drive</string>

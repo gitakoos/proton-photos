@@ -2822,8 +2822,6 @@
     <string name="whats_new_260_snackbars_body">Auch andere kurze Meldungen unten auf dem Bildschirm sitzen über den unteren Leisten und schwebenden Knöpfen, etwa dem Filterknopf der Suche und dem Knopf nach oben, statt sie zu verdecken.</string>
     <string name="whats_new_260_emptyshared_title">Leere Seite Geteilt aktualisieren</string>
     <string name="whats_new_260_emptyshared_body">Herunterziehen aktualisiert die Seite Geteilt auch dann, wenn sie noch nichts zeigt.</string>
-    <string name="whats_new_260_arrangehint_title">Anordnen am unteren Rand</string>
-    <string name="whats_new_260_arrangehint_body">Beim Anordnen bleibt ein Foto, das du am unteren Bildschirmrand hältst, über der Hinweisleiste, statt darunter zu rutschen.</string>
     <string name="whats_new_260_albumrename_title">Umbenannte Alben sofort aktuell</string>
     <string name="whats_new_260_albumrename_body">Ein Album, das du darin umbenennst, zeigt seinen neuen Namen auf dem Tab Alben und in der Albumauswahl ohne Aktualisieren.</string>
     <string name="viewer_save_to_drive">In meinem Drive speichern</string>

@@ -2953,8 +2953,6 @@
     <string name="whats_new_260_snackbars_body">Inne krótkie komunikaty na dole ekranu też są nad dolnymi paskami i pływającymi przyciskami, na przykład nad przyciskiem filtru wyszukiwania i przyciskiem powrotu na górę, zamiast je zasłaniać.</string>
     <string name="whats_new_260_emptyshared_title">Odświeżanie pustej strony Udostępnione</string>
     <string name="whats_new_260_emptyshared_body">Przeciągnięcie w dół strony Udostępnione odświeża ją, nawet gdy nie ma jeszcze nic do pokazania.</string>
-    <string name="whats_new_260_arrangehint_title">Porządkowanie przy dolnej krawędzi</string>
-    <string name="whats_new_260_arrangehint_body">Podczas porządkowania zdjęć zdjęcie trzymane przy dolnej krawędzi ekranu zostaje nad paskiem podpowiedzi, zamiast pod niego wjechać.</string>
     <string name="whats_new_260_albumrename_title">Zmieniona nazwa albumu od razu</string>
     <string name="whats_new_260_albumrename_body">Album, którego nazwę zmieniono w jego wnętrzu, pokazuje nową nazwę na karcie Albumy i w wyborze albumów bez odświeżania.</string>
     <string name="viewer_save_to_drive">Zapisz na moim Drive</string>

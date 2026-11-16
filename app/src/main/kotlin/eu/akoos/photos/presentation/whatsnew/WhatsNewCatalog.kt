@@ -352,7 +352,6 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Notifications, R.string.whats_new_260_undobar_title, R.string.whats_new_260_undobar_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Notifications, R.string.whats_new_260_snackbars_title, R.string.whats_new_260_snackbars_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_260_editedcopy_title, R.string.whats_new_260_editedcopy_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.DragHandle, R.string.whats_new_260_arrangehint_title, R.string.whats_new_260_arrangehint_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_albumrefresh_title, R.string.whats_new_260_albumrefresh_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_albumrename_title, R.string.whats_new_260_albumrename_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_260_trash999_title, R.string.whats_new_260_trash999_body, WhatsNewCategory.Improved),

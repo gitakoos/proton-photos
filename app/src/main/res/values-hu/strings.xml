@@ -2821,8 +2821,6 @@
     <string name="whats_new_260_snackbars_body">A képernyő alján megjelenő többi rövid üzenet is az alsó sávok és a lebegő gombok fölé kerül, például a keresés szűrőgombja és a tetejére ugró gomb fölé, és nem takarja ki őket.</string>
     <string name="whats_new_260_emptyshared_title">Üres Megosztott oldal frissítése</string>
     <string name="whats_new_260_emptyshared_body">A Megosztott oldal lehúzása akkor is frissít, ha még nincs rajta semmi.</string>
-    <string name="whats_new_260_arrangehint_title">Elrendezés az alsó szélen</string>
-    <string name="whats_new_260_arrangehint_body">Fotók elrendezése közben a képernyő aljánál tartott fotó a súgósáv fölött marad, és nem csúszik alá.</string>
     <string name="whats_new_260_albumrename_title">Átnevezett albumok azonnal</string>
     <string name="whats_new_260_albumrename_body">Az albumon belül átnevezett album az Albumok fülön és az albumválasztókban is frissítés nélkül az új nevét mutatja.</string>
     <string name="viewer_save_to_drive">Mentés a Drive-omra</string>

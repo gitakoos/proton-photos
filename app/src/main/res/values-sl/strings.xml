@@ -2953,8 +2953,6 @@
     <string name="whats_new_260_snackbars_body">Tudi druga kratka sporočila na dnu zaslona so nad spodnjimi vrsticami in plavajočimi gumbi, na primer nad gumbom za filter iskanja in gumbom za na vrh, namesto da bi jih prekrivala.</string>
     <string name="whats_new_260_emptyshared_title">Osvežitev prazne strani V skupni rabi</string>
     <string name="whats_new_260_emptyshared_body">Poteg navzdol na strani V skupni rabi jo osveži, tudi ko še nima ničesar za prikaz.</string>
-    <string name="whats_new_260_arrangehint_title">Razporejanje ob spodnjem robu</string>
-    <string name="whats_new_260_arrangehint_body">Med razporejanjem fotografij ostane fotografija, ki jo držite ob spodnjem robu zaslona, nad vrstico z namigom, namesto da bi zdrsnila podnjo.</string>
     <string name="whats_new_260_albumrename_title">Preimenovani albumi takoj posodobljeni</string>
     <string name="whats_new_260_albumrename_body">Album, preimenovan od znotraj, pokaže novo ime na zavihku Albumi in v izbirnikih albumov brez osvežitve.</string>
     <string name="viewer_save_to_drive">Shrani v moj Drive</string>
