@@ -316,4 +316,25 @@ class FreeUpSpaceDeviceCheckTest {
             deviceCopyVerdict(mirrored, 1000L, afterBackupSec, "edited", deviceOnDrive = false, driveHash = "d"),
         )
     }
+
+    @Test
+    fun `a file an older version linked by name and size alone is unchecked unless written as it was linked`() {
+        val relinked = row(localHash = "", originalHash = null)
+        val longBefore = backedUpAtMs / 1000L - 30L * 24 * 3600
+        assertEquals(
+            "a different photo of the same name and size is never taken for backed up",
+            DeviceCopyCheck.UNCHECKED,
+            deviceCopyVerdict(relinked, 1000L, longBefore, "other-photo", deviceOnDrive = false, driveHash = "d"),
+        )
+        assertEquals(
+            "the photo's own bytes still read as backed up",
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(relinked, 1000L, longBefore, "drive-bytes", deviceOnDrive = true, driveHash = "d"),
+        )
+        assertEquals(
+            "a copy written as its row was linked is the download itself",
+            DeviceCopyCheck.UNCHANGED,
+            deviceCopyVerdict(relinked, 1000L, beforeBackupSec, "stamped", deviceOnDrive = false, driveHash = "d"),
+        )
+    }
 }

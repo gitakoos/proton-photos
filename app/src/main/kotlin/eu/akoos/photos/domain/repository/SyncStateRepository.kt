@@ -167,6 +167,14 @@ interface SyncStateRepository {
      */
     suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String) {}
 
+    /**
+     * Records [after] as what [localUri]'s device file holds right after this app rewrote it itself, on a
+     * backed-up row that recorded no device bytes, only while its hash is still [localHash] and its backup
+     * stamp still [backedUpAtMs]: the caller has judged the bytes the rewrite started from backed up by
+     * that row as it read it.
+     */
+    suspend fun recordOwnDeviceWriteOverRow(localUri: String, after: String, localHash: String, backedUpAtMs: Long) {}
+
     /** Drops the upload a device photo was given only to join an album, once no album is left for it to join.
      *  Only a still pending LOCAL_ONLY row queued for an album add. */
     suspend fun clearAlbumAddIntent(localUri: String) {}

@@ -430,6 +430,10 @@ class FreeUpSpaceUseCase @Inject constructor(
         /** DATE_MODIFIED is in whole seconds while the backup stamp is in milliseconds. */
         private const val MODIFIED_SLACK_MS = 2_000L
 
+        /** How long before its row was linked a download's copy may have been written: the save and the
+         *  link run back to back, a large video's copy included. */
+        private const val LINKED_WRITE_WINDOW_MS = 10 * 60_000L
+
         /**
          * Whether a device copy still holds what was backed up, from what was measured of it: its size
          * [deviceSizeBytes] and DATE_MODIFIED [deviceModifiedSec] (0 when the device keeps none), its
@@ -451,8 +455,10 @@ class FreeUpSpaceUseCase @Inject constructor(
          *   decide: a file written after the backup is CHANGED. At a size other than the recorded one it is
          *   CHANGED for an uploaded row, which records the device size, and UNCHECKED for a download, whose
          *   row recorded the Drive size before the app stamped a date or place into the saved copy. At the
-         *   recorded size, written before the backup, it is UNCHANGED. No size to compare, or no modified
-         *   time to tell the same size apart by, is UNCHECKED.
+         *   recorded size, written before the backup, it is UNCHANGED, except that a download row with no
+         *   recorded bytes is UNCHANGED only when its file was written just before the row was linked: an
+         *   older version linked a gallery file it found by name and size alone, which can be a different
+         *   photo. No size to compare, or no modified time to tell the same size apart by, is UNCHECKED.
          */
         fun deviceCopyVerdict(
             row: SyncState,
@@ -487,7 +493,11 @@ class FreeUpSpaceUseCase @Inject constructor(
             if (deviceSizeBytes != row.sizeBytes) {
                 return if (row.localHash.isNotEmpty()) DeviceCopyCheck.CHANGED else DeviceCopyCheck.UNCHECKED
             }
-            return if (deviceModifiedSec > 0L) DeviceCopyCheck.UNCHANGED else DeviceCopyCheck.UNCHECKED
+            if (deviceModifiedSec <= 0L) return DeviceCopyCheck.UNCHECKED
+            if (row.localHash.isEmpty() && deviceModifiedSec * 1000L < backedUpAtMs - LINKED_WRITE_WINDOW_MS) {
+                return DeviceCopyCheck.UNCHECKED
+            }
+            return DeviceCopyCheck.UNCHANGED
         }
 
         /**

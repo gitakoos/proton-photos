@@ -57,7 +57,8 @@ class LocalOverwriteGuardTest {
         journalDir().deleteRecursively()
         LocalRewrites.clear()
         announced.clear()
-        OwnDeviceWrites.install { u, before, after -> announced += Triple(u, before, after) }
+        stamps.clear()
+        OwnDeviceWrites.install { announced += Triple(it.uri, it.before, it.after); stamps += it.beforeStamp }
     }
 
     @org.junit.After
@@ -66,6 +67,7 @@ class LocalOverwriteGuardTest {
     }
 
     private val announced = mutableListOf<Triple<String, String, String>>()
+    private val stamps = mutableListOf<eu.akoos.photos.domain.entity.DeviceFileStamp?>()
 
     private fun journalDir() = File(context.filesDir, MirrorOverwriteJournal.DIR_NAME)
 
@@ -168,6 +170,7 @@ class LocalOverwriteGuardTest {
             listOf(Triple(uri, PlainContent.sha1Hex(original.inputStream()), PlainContent.sha1Hex("stamped".toByteArray().inputStream()))),
             announced,
         )
+        assertEquals("with the size the file had before it", original.size.toLong(), stamps.single()?.sizeBytes)
     }
 
     @Test

@@ -172,13 +172,15 @@ class DownloadPhotosUseCase @Inject constructor(
                         // cloud DTO carries size 0. Those can't match the MediaStore name+size
                         // heuristic below, yet they show the green "synced" badge, so skipping them
                         // here avoids a needless re-download.
+                        // Its row is left as it is: it already links this photo, and a fresh backup stamp
+                        // would vouch for whatever the file holds now.
                         val syncedUri = syncStateRepo.getByCloudId(photo.linkId)
                             ?.takeIf { it.status == SyncStatus.SYNCED }
                             ?.localUri?.takeIf { it.isNotBlank() && localUriExists(it) }
-                        val existing = syncedUri?.let(Uri::parse)
-                            ?: alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
-                        if (existing != null) {
-                            linkSyncState(userId, existing, photo)
+                        val driveHash = driveContentHash(photo, prefetch)
+                        val existing = if (syncedUri != null) null else verifiedOnDevice(photo, driveHash, savingSha1 = null)
+                        if (syncedUri != null || existing != null) {
+                            existing?.let { linkSyncState(userId, it.uri, photo, it.sizeBytes, it.sha1) }
                             skipped.incrementAndGet()
                             Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
                         } else {
@@ -195,6 +197,7 @@ class DownloadPhotosUseCase @Inject constructor(
                                     plain, photo.displayName, photo.mimeType, folder,
                                     captureTimeSeconds = photo.captureTime,
                                     gps = gps,
+                                    driveHash = driveHash,
                                 )
                             }
                             file.delete()
@@ -203,7 +206,7 @@ class DownloadPhotosUseCase @Inject constructor(
                             // common case. Counting it as done reported a photo saved that is not on
                             // the device, so a batch that ran out of space still read as complete.
                             if (saved != null) {
-                                linkSyncState(userId, saved.uri, photo, saved.writtenSize)
+                                linkSyncState(userId, saved.uri, photo, saved.sizeBytes, saved.sha1)
                                 onSaved(saved.uri.toString())
                                 done.incrementAndGet()
                             } else {
@@ -275,9 +278,10 @@ class DownloadPhotosUseCase @Inject constructor(
                         started = true
                         onItemState(photo.linkId, true)
                         try {
-                            val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
+                            val driveHash = driveContentHash(photo, prefetch)
+                            val existing = verifiedOnDevice(photo, driveHash, savingSha1 = null)
                             if (existing != null) {
-                                linkSyncState(userId, existing, photo)
+                                linkSyncState(userId, existing.uri, photo, existing.sizeBytes, existing.sha1)
                                 skipped.incrementAndGet()
                                 result = ItemResult.SKIPPED
                                 Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
@@ -300,6 +304,7 @@ class DownloadPhotosUseCase @Inject constructor(
                                             captureTimeSeconds = photo.captureTime,
                                             gps = gps,
                                             rowJournal = rowJournal,
+                                            driveHash = driveHash,
                                         )
                                     }
                                 } finally {
@@ -317,7 +322,7 @@ class DownloadPhotosUseCase @Inject constructor(
                                     if (!ItemCommitPoint.reach()) {
                                         throw kotlinx.coroutines.CancellationException("download cancelled by the user")
                                     }
-                                    linkSyncState(userId, saved.uri, photo, saved.writtenSize)
+                                    linkSyncState(userId, saved.uri, photo, saved.sizeBytes, saved.sha1)
                                     onSaved(saved.uri.toString())
                                     done.incrementAndGet()
                                     result = ItemResult.SAVED
@@ -355,13 +360,13 @@ class DownloadPhotosUseCase @Inject constructor(
      * [GalleryItem.Synced] entry with the green-cloud indicator instead of showing a separate
      * LocalOnly + CloudOnly pair after download.
      *
-     * [writtenSize] is set for a copy this download wrote itself, [SavedCopy.writtenSize]. Its row then
-     * records that length and the copy's SHA-1 as backed up ([SyncState.originalHash]): the save stamps
-     * the capture date and place into the bytes, so they are no longer Drive's, and without the record
-     * free-up could not tell them from an edit made since. A file found already on the device records
-     * neither, since only its name and size were matched.
+     * The row records [sizeBytes] and the file's SHA-1 ([sha1], or read back from the file when null) as
+     * backed up ([SyncState.originalHash]): the save stamps the capture date and place into the bytes, so
+     * they are no longer Drive's, and without the record free-up could not tell them from an edit made
+     * since. Only a copy this download wrote, or a gallery file whose bytes were matched to the photo
+     * ([verifiedOnDevice]), is linked.
      */
-    private suspend fun linkSyncState(userId: UserId, savedUri: Uri, photo: CloudPhoto, writtenSize: Long? = null) {
+    private suspend fun linkSyncState(userId: UserId, savedUri: Uri, photo: CloudPhoto, sizeBytes: Long, sha1: String?) {
         try {
             syncStateRepo.upsert(
                 SyncState(
@@ -377,16 +382,11 @@ class DownloadPhotosUseCase @Inject constructor(
                     // same as an uploaded photo. Without this stamp a downloaded-then-freed green photo
                     // could never be freed, since only content-certain rows carry it.
                     backedUpAtMs      = System.currentTimeMillis(),
-                    sizeBytes         = writtenSize?.takeIf { it > 0L } ?: photo.sizeBytes,
+                    sizeBytes         = sizeBytes.takeIf { it > 0L } ?: photo.sizeBytes,
                 ),
                 userId,
             )
-            if (writtenSize != null) {
-                val sha1 = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, savedUri.toString())
-                }
-                if (sha1 != null) syncStateRepo.setOriginalHash(savedUri.toString(), sha1)
-            }
+            (sha1 ?: sha1Of(savedUri))?.let { syncStateRepo.setOriginalHash(savedUri.toString(), it) }
             Log.d(TAG, "SyncState linked: ${photo.displayName} → ${savedUri}")
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -408,8 +408,8 @@ class DownloadPhotosUseCase @Inject constructor(
      * Returns null on pre-Q devices (legacy storage; no MediaStore RELATIVE_PATH yet) — those
      * fall through to a fresh save under [folder].
      */
-    private fun alreadyExistsInMediaStore(displayName: String, mimeType: String, sizeBytes: Long): Uri? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+    private fun sameNameAndSizeInMediaStore(displayName: String, mimeType: String, sizeBytes: Long): List<Uri> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
         // Size is the ONLY reliable disambiguator here (MediaStore indexes no content hash).
         // Without it we can't tell two same-named-but-different photos apart — e.g. burst frames
         // that "rename on upload" collapsed to the same capture-time filename — so claiming the
@@ -417,7 +417,7 @@ class DownloadPhotosUseCase @Inject constructor(
         // (cloud DTO carried 0) we must NOT pre-skip: fall through to the download, and let the
         // save-time check (which always has the real file size) dedupe precisely. The cost is at
         // most a redundant download when the photo really was already on device.
-        if (sizeBytes <= 0L) return null
+        if (sizeBytes <= 0L) return emptyList()
         val isVideo = mimeType.startsWith("video/")
         // IMPORTANT: use EXTERNAL_CONTENT_URI (the "external" volume alias), NOT the
         // VOLUME_EXTERNAL_PRIMARY-keyed URI. LocalMediaRepository reads through the same
@@ -443,14 +443,49 @@ class DownloadPhotosUseCase @Inject constructor(
             null,
         )
         return cursor?.use {
-            if (it.moveToFirst()) {
+            val found = mutableListOf<Uri>()
+            while (it.moveToNext() && found.size < MAX_SAME_NAME_CANDIDATES) {
                 val id = it.getLong(it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-                val path = it.getString(it.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH))
-                Log.d(TAG, "Found existing $displayName at $path (size=$sizeBytes)")
-                Uri.withAppendedPath(collection, id.toString())
-            } else null
-        }
+                found += Uri.withAppendedPath(collection, id.toString())
+            }
+            found
+        }.orEmpty()
     }
+
+    /**
+     * A gallery file of [photo]'s name and size that holds the photo itself, or null. Name and size alone
+     * are not enough to link a file to a cloud photo: a different photo of the same name and size linked
+     * as its backup would read as backed up, and free-up could delete the only copy. So the file's bytes
+     * must be the photo's: Drive's content hash of them is [driveHash], or they are the very bytes this
+     * download is about to save ([savingSha1], the photo downloaded before). Hashing a candidate costs
+     * one read of a file already matched by name and size.
+     */
+    private suspend fun verifiedOnDevice(
+        photo: CloudPhoto,
+        driveHash: String?,
+        savingSha1: String?,
+    ): SavedCopy? {
+        if (driveHash.isNullOrEmpty() && savingSha1 == null) return null
+        for (candidate in sameNameAndSizeInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)) {
+            val sha1 = sha1Of(candidate) ?: continue
+            val same = (savingSha1 != null && sha1.equals(savingSha1, ignoreCase = true)) ||
+                (!driveHash.isNullOrEmpty() && cloudRepo.cloudContentHash(sha1) == driveHash)
+            if (same) {
+                Log.d(TAG, "Found ${photo.displayName} already on the device (size=${photo.sizeBytes})")
+                return SavedCopy(candidate, photo.sizeBytes, sha1)
+            }
+        }
+        return null
+    }
+
+    private suspend fun sha1Of(uri: Uri): String? = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri.toString()) }.getOrNull()
+    }
+
+    /** Drive's content hash of [photo], from the listing or the prefetched link detail. */
+    private fun driveContentHash(photo: CloudPhoto, prefetch: PrefetchedDownloadMetadata): String? =
+        photo.contentHash?.takeIf { it.isNotEmpty() }
+            ?: prefetch.linkDetailByLinkId[photo.linkId]?.photo?.contentHash?.takeIf { it.isNotEmpty() }
 
     /** True if [uriString] still resolves to a MediaStore row — i.e. the local file behind a
      *  SYNCED SyncState wasn't deleted out from under it. A stale record then falls through to
@@ -504,6 +539,7 @@ class DownloadPhotosUseCase @Inject constructor(
         captureTimeSeconds: Long = 0L,
         gps: Pair<Double, Double>? = null,
         rowJournal: RowJournal? = null,
+        driveHash: String? = null,
     ): SavedCopy? {
         // Never writes a local encrypted file's bytes into the gallery as the photo.
         if (runCatching { eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(file) }.isFailure) return null
@@ -547,13 +583,22 @@ class DownloadPhotosUseCase @Inject constructor(
             eu.akoos.photos.util.ProtonPhotosStorage.DEFAULT_PICTURES
         }
 
-        // Second-chance global dedupe: callers already pre-skipped via alreadyExistsInMediaStore,
-        // but a concurrent write between the check and the save can sneak in. Size = file.length()
-        // is the bytes we're about to write; if a row with the same (displayName, size) sprang up
-        // meanwhile, return its URI instead of creating a duplicate.
-        alreadyExistsInMediaStore(displayName, mimeType, file.length())?.let { existingUri ->
-            Log.d(TAG, "Skipped duplicate: $displayName already in MediaStore")
-            return SavedCopy(existingUri, writtenSize = null)
+        // Second-chance global dedupe: the callers' check needs Drive's size and content hash, which a
+        // listing can lack, and a concurrent write can land in between. A gallery file of the same name
+        // and size is reused only when it holds these very bytes (or Drive's), so a different photo that
+        // happens to match is never linked; this photo is then saved beside it.
+        if (sameNameAndSizeInMediaStore(displayName, mimeType, file.length()).isNotEmpty()) {
+            val savingSha1 = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file) }.getOrNull()
+            }
+            val probe = CloudPhoto(
+                linkId = "", shareId = "", volumeId = "", captureTime = 0L, displayName = displayName,
+                mimeType = mimeType, sizeBytes = file.length(), thumbnailUrl = null, revisionId = "",
+            )
+            verifiedOnDevice(probe, driveHash, savingSha1)?.let { existing ->
+                Log.d(TAG, "Skipped duplicate: $displayName already in MediaStore")
+                return existing
+            }
         }
 
         // DATE_TAKEN is written ONLY when the capture date is known. When it is not, the column is
@@ -686,7 +731,7 @@ class DownloadPhotosUseCase @Inject constructor(
                     }
                 }
             }
-            SavedCopy(uri, file.length())
+            SavedCopy(uri, file.length(), sha1 = null)
         } catch (e: kotlinx.coroutines.CancellationException) {
             // A stopped download removes the row it was still writing. A published one is a whole photo in
             // the gallery by now and stays.
@@ -699,7 +744,7 @@ class DownloadPhotosUseCase @Inject constructor(
                 // The photo is whole and in the gallery; only a step after it (the date write or its
                 // record) failed. It stays and counts as saved, so a retry never makes a second copy.
                 Log.w(TAG, "saveFileToMediaStore: saved, but a step after it failed: ${e.javaClass.simpleName}")
-                return SavedCopy(uri, file.length())
+                return SavedCopy(uri, file.length(), sha1 = null)
             }
             // Clean up the pending MediaStore entry on failure
             runCatching { context.contentResolver.delete(uri, null, null) }
@@ -712,12 +757,16 @@ class DownloadPhotosUseCase @Inject constructor(
     }
 
     /**
-     * Where a download's photo is on the device: [uri], and [writtenSize], the length of the bytes this
-     * download wrote there, or null for a file of the same name and size it found already in the gallery.
+     * Where a download's photo is on the device: [uri], the length of its bytes [sizeBytes], and their
+     * SHA-1 [sha1] when already read (a gallery file matched to the photo), null for a copy this download
+     * wrote, which is read back from the gallery once it is linked.
      */
-    private class SavedCopy(val uri: Uri, val writtenSize: Long?)
+    private class SavedCopy(val uri: Uri, val sizeBytes: Long, val sha1: String?)
 
     companion object {
+        /** How many gallery files of one name and size are hashed to find the photo among them. */
+        private const val MAX_SAME_NAME_CANDIDATES = 8
+
         /**
          * The DATE_TAKEN / DATE_MODIFIED timestamp (ms) a download stamps: the real capture time when
          * known ([captureTimeSeconds] > 0, promoted from seconds), else the file's last-modified time

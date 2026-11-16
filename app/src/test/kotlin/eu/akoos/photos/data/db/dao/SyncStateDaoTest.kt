@@ -790,6 +790,22 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `an own rewrite over a row that recorded no device bytes lands only while the row is as it was read`() = runTest {
+        dao.upsert(backedUp("uri://1", localHash = "uploaded"))
+        dao.upsert(backedUp("uri://2", localHash = "uploaded"))
+        dao.upsert(backedUp("uri://3", localHash = "uploaded"))
+        dao.setOriginalHash("uri://3", "orig")
+
+        dao.recordOwnDeviceWriteOverRow("uri://1", "written", "uploaded", 5L)
+        dao.recordOwnDeviceWriteOverRow("uri://2", "written", "uploaded", 6L)
+        dao.recordOwnDeviceWriteOverRow("uri://3", "written", "uploaded", 5L)
+
+        assertEquals("written", dao.getByUri("uri://1")!!.originalHash)
+        assertNull("backed up again since it was read", dao.getByUri("uri://2")!!.originalHash)
+        assertEquals("a recorded hash decides alone", "orig", dao.getByUri("uri://3")!!.originalHash)
+    }
+
+    @Test
     fun `a second own rewrite chains on the bytes the first one recorded`() = runTest {
         dao.upsert(backedUp("uri://1", localHash = "UP"))
 

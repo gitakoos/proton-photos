@@ -62,7 +62,7 @@ import java.io.File
  *  - [downloadFullResPhoto] returns a throwaway temp file carrying [downloadBytes].
  *  - [callLog] records the order of upload / add / delete calls so ordering invariants can be asserted.
  *  - [loadAlbums] / [createDriveAlbum] are minimal; [retryPendingOrphanDeletes] is a no-op;
- *    [cloudContentHash] returns null.
+ *    [cloudContentHash] returns [contentHashOf], null unless set.
  * Every other member is an unused no-op / empty result.
  */
 internal class FakeDrivePhotoRepository : DrivePhotoRepository {
@@ -285,7 +285,10 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         Album(linkId = "album-$name", name = name, photoCount = 0, coverLinkId = null, lastActivityTimeMs = null)
 
     override suspend fun retryPendingOrphanDeletes(userId: UserId) {}
-    override fun cloudContentHash(localSha1Hex: String): String? = null
+    /** Drive's content hash for a bare SHA-1; null (no root hash key) unless a test sets it. */
+    var contentHashOf: (String) -> String? = { null }
+
+    override fun cloudContentHash(localSha1Hex: String): String? = contentHashOf(localSha1Hex)
 
     // ── Unused members: never reached by the use cases under test ────────────────────
     override suspend fun getVolumeId(userId: UserId): String = "vol1"

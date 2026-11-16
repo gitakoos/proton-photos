@@ -188,6 +188,40 @@ class Mp4CreationTimeTest {
     }
 
     @Test
+    fun `a stamp gives the bytes before and after it from one read`() {
+        val file = fileOf(
+            ftyp(),
+            container("moov", mvhd(version = 0, creationTime = 0L), container("trak", timestampBox("tkhd", 1, 0L))),
+        )
+        val original = file.readBytes()
+
+        val result = Mp4CreationTime.stampHashing(file, captureMs)
+
+        assertTrue(result.stamped)
+        assertEquals(captureMs, Mp4CreationTime.read(file))
+        assertEquals(sha1(original), result.before)
+        assertEquals("the hash laid over in the read is the file as written", sha1(file.readBytes()), result.after)
+        assertFalse(result.before == result.after)
+    }
+
+    @Test
+    fun `patches laid over a read that splits them across chunks hash as the patched bytes`() {
+        val bytes = ByteArray(200_000) { (it % 251).toByte() }
+        val patches = listOf(65_530L to ByteArray(12) { 7 }, 10L to ByteArray(4) { 9 })
+        val patched = bytes.copyOf().also { b ->
+            patches.forEach { (offset, p) -> p.copyInto(b, offset.toInt()) }
+        }
+
+        val (before, after) = Mp4CreationTime.sha1BeforeAndAfter(bytes.inputStream(), patches)
+
+        assertEquals(sha1(bytes), before)
+        assertEquals(sha1(patched), after)
+    }
+
+    private fun sha1(bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    @Test
     fun `a stamp reaches an mvhd nested behind other boxes`() {
         // moov holds trak and udta siblings in a real file, so the mvhd is rarely the first child.
         val file = fileOf(

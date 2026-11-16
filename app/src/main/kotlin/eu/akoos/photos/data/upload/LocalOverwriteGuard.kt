@@ -25,6 +25,7 @@ package eu.akoos.photos.data.upload
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import eu.akoos.photos.data.repository.DeviceFileStamps
 import java.io.File
 import java.io.InputStream
 
@@ -82,6 +83,7 @@ class LocalOverwriteGuard(private val context: Context) {
             return result
         }
         val before = if (announce && OwnDeviceWrites.listening) sha1(uri) else null
+        val beforeStamp = before?.let { runCatching { DeviceFileStamps.read(context, uri) }.getOrNull() }
         val result = MirrorOverwriteJournal.guardedMutation(
             stage = {
                 journal.stage(uri) { backup ->
@@ -102,7 +104,9 @@ class LocalOverwriteGuard(private val context: Context) {
             verify = { wanted == null || imageSize(parsed) == wanted },
         )
         fileLength(parsed)?.let { LocalRewrites.note(uri, it) }
-        if (before != null) sha1(uri)?.let { after -> OwnDeviceWrites.wrote(uri, before, after) }
+        if (before != null) {
+            sha1(uri)?.let { after -> OwnDeviceWrites.wrote(OwnDeviceWrite(uri, before, beforeStamp, after)) }
+        }
         return result
     }
 

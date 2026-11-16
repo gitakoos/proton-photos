@@ -218,6 +218,19 @@ interface SyncStateDao {
     )
     suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String)
 
+    /**
+     * Records [after] as what [localUri]'s device file holds after this app rewrote it itself, on a row
+     * backed up and paired to Drive that recorded no device bytes and is still as it was read: its hash
+     * [localHash] and backup stamp [backedUpAtMs]; see
+     * [eu.akoos.photos.data.upload.OwnDeviceWriteRecorder].
+     */
+    @Query(
+        "UPDATE sync_state SET originalHash = :after WHERE localUri = :localUri AND status = 'SYNCED' " +
+            "AND cloudFileId IS NOT NULL AND backedUpAtMs = :backedUpAtMs AND localHash = :localHash " +
+            "AND (originalHash IS NULL OR originalHash = '')"
+    )
+    suspend fun recordOwnDeviceWriteOverRow(localUri: String, after: String, localHash: String, backedUpAtMs: Long)
+
     @Transaction
     suspend fun upsertAll(entities: List<SyncStateEntity>) {
         for (entity in entities) upsert(entity)

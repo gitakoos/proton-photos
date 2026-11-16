@@ -164,6 +164,13 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String) =
         dao.recordOwnDeviceWrite(localUri, before, after)
 
+    override suspend fun recordOwnDeviceWriteOverRow(
+        localUri: String,
+        after: String,
+        localHash: String,
+        backedUpAtMs: Long,
+    ) = dao.recordOwnDeviceWriteOverRow(localUri, after, localHash, backedUpAtMs)
+
     override suspend fun clearAlbumAddIntent(localUri: String) {
         dao.clearAlbumAddIntent(localUri)
     }
