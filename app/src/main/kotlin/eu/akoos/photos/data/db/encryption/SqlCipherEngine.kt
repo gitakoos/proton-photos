@@ -138,6 +138,7 @@ internal class SqlCipherEngine(
         tables: List<String>,
         accountHash: String?,
         hashOf: (String) -> String,
+        sameAccounts: Boolean,
     ): RestoreResult {
         SqlCipherLibrary.ensureLoaded()
         open(live, liveKeySpec, SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING).use { db ->
@@ -148,6 +149,11 @@ internal class SqlCipherEngine(
                 if (accountHash != null) {
                     val accounts = firstColumn(db, "SELECT userId FROM main.AccountEntity").map(hashOf)
                     if (accountHash !in accounts) return RestoreResult.Skipped("another account")
+                }
+                if (sameAccounts) {
+                    val liveAccounts = firstColumn(db, "SELECT userId FROM main.AccountEntity").toSet()
+                    val oldAccounts = firstColumn(db, "SELECT userId FROM old.AccountEntity").toSet()
+                    if (liveAccounts != oldAccounts) return RestoreResult.Skipped("other accounts")
                 }
                 val oldTables = firstColumn(db, "SELECT name FROM old.sqlite_master WHERE type = 'table'").toSet()
                 val liveTables = firstColumn(db, "SELECT name FROM main.sqlite_master WHERE type = 'table'").toSet()

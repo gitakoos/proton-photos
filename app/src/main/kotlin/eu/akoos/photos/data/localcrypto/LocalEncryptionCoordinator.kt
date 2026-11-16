@@ -123,6 +123,9 @@ class LocalEncryptionCoordinator @Inject constructor(
             // version installed over this one then stops at the settings rather than run with a vault it can
             // not read.
             runCatching { context.settingsDataStore.data.first() }
+            // Settings kept aside while their key did not open come back as soon as it does, every start, not only
+            // after a recovery.
+            runCatching { restoreLockedStores() }.onFailure { logFailure("locked settings", it) }
             runCatching { encryptVault() }.onFailure { logFailure("vault encryption", it) }
             runCatching { writeMissingPasswordCopies() }.onFailure { logFailure("password copies", it) }
             refresh()

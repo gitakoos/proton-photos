@@ -57,7 +57,8 @@ interface CipherEngine {
     /**
      * Copies [tables] from the set-aside database [old] into the live database [live] in one transaction: every
      * row of each table is replaced, columns matched by name. Skips (changing nothing) when the two schema
-     * versions differ, or when [accountHash] is given and the live database does not hold that account.
+     * versions differ, when [accountHash] is given and the live database does not hold that account, or when
+     * [sameAccounts] is set and the two databases do not hold exactly the same accounts.
      */
     fun restoreTables(
         live: File,
@@ -67,6 +68,7 @@ interface CipherEngine {
         tables: List<String>,
         accountHash: String?,
         hashOf: (String) -> String,
+        sameAccounts: Boolean,
     ): RestoreResult
 }
 
@@ -247,25 +249,35 @@ class DatabaseOpenGate(
     }
 
     /**
-     * Copies the app's own tables back from every set-aside database whose key a recovery copy gave back, into
-     * the live database, and removes that set-aside folder once done. Anything that does not fit (another
-     * account, another schema version, an error) leaves both databases as they were.
+     * Copies the app's own tables back, into the live database, from every set-aside database whose key opens now:
+     * one a recovery copy gave back, or one whose own wrapped copies the Keystore key opens again (it did not answer
+     * for a while). Removes that set-aside folder once done. Runs on every start, so a set-aside database comes back
+     * as soon as its key does. Anything that does not fit (another account, another schema version, an error)
+     * leaves both databases as they were, to be tried again.
      */
     private fun restoreRecovered() {
-        val dirs = setAsideDir.listFiles()?.filter { File(it, RECOVERED_DIR).isDirectory } ?: return
+        val dirs = setAsideDir.listFiles()?.filter { File(it, ENCRYPTED_NAME).exists() } ?: return
         if (dirs.isEmpty()) return
         val live = keys.load() as? DatabaseKeyState.Ready ?: return
         for (dir in dirs) {
             val old = File(dir, ENCRYPTED_NAME)
-            val oldKey = if (old.exists()) recoveredKey(File(dir, RECOVERED_DIR)) else null
+            val recovered = File(dir, RECOVERED_DIR).isDirectory
+            val oldKey = if (recovered) recoveredKey(File(dir, RECOVERED_DIR)) else runCatching { keys.keyIn(dir) }.getOrNull()
             if (oldKey == null) {
-                log("db: recovered key or database missing, kept")
+                if (recovered) log("db: recovered key missing, kept")
                 continue
             }
-            val owner = runCatching { File(File(dir, RECOVERED_DIR), RECOVERED_OWNER).readText().trim() }
-                .getOrNull()?.takeIf { it.isNotEmpty() }
+            // A recovery copy names its account; a key the Keystore gave back names none, so the two databases must
+            // hold the same accounts.
+            val owner = if (!recovered) {
+                null
+            } else {
+                runCatching { File(File(dir, RECOVERED_DIR), RECOVERED_OWNER).readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+            }
             try {
-                when (val result = engine.restoreTables(encrypted, rawKeySpec(live.key), old, rawKeySpec(oldKey), appTables, owner, hashOf)) {
+                when (val result = engine.restoreTables(
+                    encrypted, rawKeySpec(live.key), old, rawKeySpec(oldKey), appTables, owner, hashOf, sameAccounts = !recovered,
+                )) {
                     is RestoreResult.Restored -> {
                         dir.deleteRecursively()
                         log("db: restored ${result.tables} tables, ${result.rows} rows from the set-aside copy")
@@ -279,28 +291,59 @@ class DatabaseOpenGate(
     }
 
     /**
-     * Keeps the newest set-aside database for [SET_ASIDE_KEEP_MS], and every one that a recovery copy may still open
-     * (up to [MAX_WAITING_SET_ASIDE]) until it is restored.
+     * Keeps every set-aside database until it is restored (the restore removes it). The only folders removed here
+     * are empty ones and byte-for-byte copies of a newer set-aside database, which is kept.
      */
     private fun pruneSetAside() {
-        val kept = setAsideDir.listFiles()?.sortedByDescending { it.name.toLongOrNull() ?: 0L } ?: return
-        val now = clock()
-        var plain = 0
-        var waiting = 0
-        for (dir in kept) {
-            if (isWaiting(dir)) {
-                waiting++
-                if (waiting > MAX_WAITING_SET_ASIDE) dir.deleteRecursively()
+        val dirs = setAsideDir.listFiles()?.filter { it.isDirectory }?.sortedByDescending { it.name.toLongOrNull() ?: 0L } ?: return
+        val kept = mutableListOf<File>()
+        for (dir in dirs) {
+            val db = File(dir, ENCRYPTED_NAME)
+            if (!db.exists()) {
+                if (dir.listFiles().isNullOrEmpty()) dir.delete()
                 continue
             }
-            val age = now - (dir.name.toLongOrNull() ?: 0L)
-            if (plain++ > 0 || age > SET_ASIDE_KEEP_MS || age < 0) dir.deleteRecursively()
+            if (kept.any { sameDatabase(File(it, ENCRYPTED_NAME), db) }) {
+                dir.deleteRecursively()
+                log("db: set-aside copy identical to a newer one removed")
+                continue
+            }
+            kept += dir
         }
     }
 
-    private fun isWaiting(dir: File): Boolean =
-        File(dir, RECOVERED_DIR).isDirectory ||
-            (File(dir, DatabaseKeyStore.RECOVERY_DIR).listFiles()?.isNotEmpty() ?: false)
+    /** Whether two set-aside databases and their journals hold the same bytes. */
+    private fun sameDatabase(a: File, b: File): Boolean {
+        val pairs = databaseFiles(a).zip(databaseFiles(b))
+        if (pairs.any { (x, y) -> x.exists() != y.exists() || (x.exists() && x.length() != y.length()) }) return false
+        return pairs.all { (x, y) -> !x.exists() || runCatching { sameBytes(x, y) }.getOrDefault(false) }
+    }
+
+    private fun sameBytes(a: File, b: File): Boolean {
+        a.inputStream().buffered().use { x ->
+            b.inputStream().buffered().use { y ->
+                val bx = ByteArray(COMPARE_BUFFER)
+                val by = ByteArray(COMPARE_BUFFER)
+                while (true) {
+                    val n = readFully(x, bx)
+                    val m = readFully(y, by)
+                    if (n != m) return false
+                    if (n == 0) return true
+                    for (i in 0 until n) if (bx[i] != by[i]) return false
+                }
+            }
+        }
+    }
+
+    private fun readFully(input: java.io.InputStream, buffer: ByteArray): Int {
+        var total = 0
+        while (total < buffer.size) {
+            val n = input.read(buffer, total, buffer.size - total)
+            if (n < 0) break
+            total += n
+        }
+        return total
+    }
 
     private fun attemptsLeft(): Boolean {
         val (version, count) = readPair(attemptsFile)
@@ -345,7 +388,7 @@ class DatabaseOpenGate(
         const val REBUILT_MARKER = "rebuilt"
         const val RECOVERED_DIR = "recovered"
         const val RECOVERED_OWNER = "owner"
-        private const val MAX_WAITING_SET_ASIDE = 3
+        private const val COMPARE_BUFFER = 64 * 1024
         private const val CORRUPT_MARKER = "corrupt"
         private const val ATTEMPTS_FILE = "copy_attempts"
         private const val UNAVAILABLE_FILE = "key_unavailable"
@@ -353,7 +396,6 @@ class DatabaseOpenGate(
         const val MAX_ATTEMPTS = 3L
         private const val UNAVAILABLE_LAUNCHES = 3L
         private const val UNAVAILABLE_SPAN_MS = 60L * 60 * 1000
-        private const val SET_ASIDE_KEEP_MS = 14L * 24 * 60 * 60 * 1000
         private const val SPACE_MARGIN_BYTES = 50L * 1024 * 1024
         private val LOCK = Any()
 

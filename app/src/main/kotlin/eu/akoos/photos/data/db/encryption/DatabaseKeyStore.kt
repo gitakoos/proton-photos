@@ -29,6 +29,7 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import java.security.SecureRandom
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -131,6 +132,8 @@ class DatabaseKeyStore(
     private val dir: File,
     private val wrapper: KeyWrapper,
     private val random: SecureRandom = SecureRandom(),
+    /** Null for a store that may never decide a key is lost (one read only to restore from). */
+    private val strikes: KeystoreStrikes? = KeystoreStrikes(File(dir, STRIKES)),
 ) {
     private val primary get() = File(dir, PRIMARY)
     private val backup get() = File(dir, BACKUP)
@@ -147,12 +150,13 @@ class DatabaseKeyStore(
         val copies = listOf(primary, backup).filter { it.exists() }
         if (copies.isEmpty()) return DatabaseKeyState.Absent
         val sealing = wrapperOf(generation()) ?: return DatabaseKeyState.Lost
-        // A Keystore key that throws for good is lost like a missing one, so a recovery copy can open the key; one
-        // that did not answer this time stays unavailable and is tried again. Nothing is deleted either way.
+        // Lost only for good: no such Keystore key, an invalidated one, a tag refused by a key that loads, or the
+        // same suspect error on several starts over a while ([KeystoreStrikes]). Anything else stays unavailable and
+        // is tried again. Nothing is deleted either way.
         val wrappingKey = try {
             sealing.wrappingKey(create = false) ?: return DatabaseKeyState.Lost
         } catch (e: Exception) {
-            return if (KeystoreErrors.isPermanent(e)) DatabaseKeyState.Lost else DatabaseKeyState.Unavailable(e)
+            return if (lostFor(e)) DatabaseKeyState.Lost else DatabaseKeyState.Unavailable(e)
         }
         for (copy in copies) {
             val blob = runCatching { copy.readBytes() }.getOrNull() ?: continue
@@ -160,16 +164,31 @@ class DatabaseKeyStore(
                 val key = DatabaseKeyCodec.unwrap(blob, wrappingKey)
                 if (key.size != KEY_BYTES) continue
                 repairOtherCopy(copy, blob)
+                strikes?.clear()
                 return DatabaseKeyState.Ready(key)
             } catch (_: MalformedKeyFileException) {
                 continue
+            } catch (_: AEADBadTagException) {
+                // The Keystore key loaded and refused this copy: it was sealed by another key.
+                continue
             } catch (e: Exception) {
-                if (KeystoreErrors.isPermanent(e)) continue
+                if (lostFor(e)) continue
                 return DatabaseKeyState.Unavailable(e)
             }
         }
         return DatabaseKeyState.Lost
     }
+
+    /** Whether [e] means the Keystore key is broken for good, counting a suspect error once per start. */
+    private fun lostFor(e: Throwable): Boolean = when (KeystoreErrors.classify(e)) {
+        KeystoreFailure.PERMANENT -> true
+        KeystoreFailure.SUSPECT -> strikes?.note(e) ?: false
+        KeystoreFailure.TRANSIENT -> false
+    }
+
+    /** The key a set-aside folder's own wrapped copies give with the Keystore key now, or null. Decides nothing. */
+    fun keyIn(setAside: File): ByteArray? =
+        (DatabaseKeyStore(setAside, wrapper, random, strikes = null).load() as? DatabaseKeyState.Ready)?.key
 
     /**
      * Makes a new key, writes both wrapped copies and reads them back. Throws when any step fails, in which case
@@ -199,6 +218,9 @@ class DatabaseKeyStore(
      */
     fun moveTo(target: File) {
         target.mkdirs()
+        // Which Keystore key sealed them goes along (copied: the live store keeps sealing with it), so the folder's
+        // own copies open again once that Keystore key answers.
+        if (generationFile.exists()) runCatching { generationFile.copyTo(File(target, GENERATION), overwrite = true) }
         for (copy in listOf(primary, backup)) {
             if (copy.exists()) moveFile(copy, File(target, copy.name))
         }
@@ -225,7 +247,7 @@ class DatabaseKeyStore(
                 }
                 return key
             } catch (e: Exception) {
-                if (!KeystoreErrors.isPermanent(e)) throw e
+                if (!lostFor(e)) throw e
                 lastFailure = e
                 generation++
             }
@@ -249,6 +271,7 @@ class DatabaseKeyStore(
         private const val PRIMARY = "key.bin"
         private const val BACKUP = "key.bak"
         private const val GENERATION = "keystore_generation"
+        private const val STRIKES = "keystore_strikes"
         private const val MAX_GENERATIONS = 5
         private const val KEY_BYTES = 32
 

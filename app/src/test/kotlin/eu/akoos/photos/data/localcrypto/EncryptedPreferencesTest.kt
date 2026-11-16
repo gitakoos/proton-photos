@@ -159,6 +159,42 @@ class EncryptedPreferencesTest {
     }
 
     @Test
+    fun `settings set aside while the Keystore only looked broken merge back on the start its key answers`() {
+        val bytes = write(sample)
+        var start = 0
+        var now = 1_800_000_000_000L
+        eu.akoos.photos.data.db.encryption.KeystoreStrikes.currentStart = { "start-$start" }
+        eu.akoos.photos.data.db.encryption.KeystoreStrikes.clock = { now }
+        try {
+            wrapper.failure = java.security.InvalidKeyException("Keystore operation failed", ProviderException("busy"))
+            // Two starts it is waited for and the read fails; nothing is set aside.
+            repeat(2) {
+                assertTrue(runCatching { read(bytes, LocalKeyring(File(tmp.root, "keys"), wrapper, clock = { 0L })) }.isFailure)
+                assertTrue(locked.pending("settings").isEmpty())
+                start++
+                now += 6 * 60_000
+            }
+            // The third start, over ten minutes on, takes the key as lost: kept aside, settings start empty.
+            assertTrue(read(bytes, LocalKeyring(File(tmp.root, "keys"), wrapper, clock = { 0L })).asMap().isEmpty())
+            assertEquals(1, locked.pending("settings").size)
+
+            // The next start the key answers again, with no account or password involved.
+            start++
+            wrapper.failure = null
+            val store = InMemoryStore(preferencesOf(flag to false))
+            val merged = runBlocking {
+                LocalStores.restoreLocked("settings", store, LocalKeyring(File(tmp.root, "keys"), wrapper), locked) {}
+            }
+            assertEquals(1, merged)
+            assertEquals("Ada", store.value[name])
+            assertTrue(locked.pending("settings").isEmpty())
+        } finally {
+            eu.akoos.photos.data.db.encryption.KeystoreStrikes.currentStart = { "test" }
+            eu.akoos.photos.data.db.encryption.KeystoreStrikes.clock = System::currentTimeMillis
+        }
+    }
+
+    @Test
     fun `a locked copy stays while its key does not open`() {
         val bytes = write(sample)
         wrapper.key = null

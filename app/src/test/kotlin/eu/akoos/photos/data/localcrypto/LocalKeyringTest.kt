@@ -149,7 +149,7 @@ class LocalKeyringTest {
         val broken = FakeWrapper(KeyGenerator.getInstance("AES").apply { init(256) }.generateKey())
         val ring = LocalKeyring(File(tmp.root, "permanent"), broken)
         val old = ring.current()
-        broken.failure = java.security.UnrecoverableKeyException("broken entry")
+        broken.failure = android.security.keystore.KeyPermanentlyInvalidatedException("invalidated")
 
         val reopened = LocalKeyring(File(tmp.root, "permanent"), broken)
         assertEquals(listOf(old.keyId), reopened.lockedKeyIds())

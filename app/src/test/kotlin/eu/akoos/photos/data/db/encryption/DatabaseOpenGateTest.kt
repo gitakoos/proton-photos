@@ -76,6 +76,8 @@ class DatabaseOpenGateTest {
         var restoreResult: RestoreResult = RestoreResult.Restored(tables = 3, rows = 10)
         var restoreFailure: Exception? = null
         val restores = mutableListOf<Triple<File, String?, List<String>>>()
+        val restoreKeys = mutableListOf<String>()
+        val sameAccountChecks = mutableListOf<Boolean>()
 
         override fun restoreTables(
             live: File,
@@ -85,15 +87,28 @@ class DatabaseOpenGateTest {
             tables: List<String>,
             accountHash: String?,
             hashOf: (String) -> String,
+            sameAccounts: Boolean,
         ): RestoreResult {
             restores += Triple(old, accountHash, tables)
+            restoreKeys += oldKeySpec
+            sameAccountChecks += sameAccounts
             restoreFailure?.let { throw it }
             return restoreResult
         }
     }
 
+    private var start = 0
+
+    @org.junit.After
+    fun resetStrikes() {
+        KeystoreStrikes.currentStart = { "test" }
+        KeystoreStrikes.clock = System::currentTimeMillis
+    }
+
     @Before
     fun setUp() {
+        KeystoreStrikes.currentStart = { "start-$start" }
+        KeystoreStrikes.clock = { now }
         databases = tmp.newFolder("databases")
         state = File(tmp.root, "no_backup/database_key")
         aside = File(tmp.root, "no_backup/database_set_aside")
@@ -148,7 +163,10 @@ class DatabaseOpenGateTest {
     }
 
     /** Opens once like a process start: prepare, then Room's successful open. */
-    private fun launch(): OpenTarget = gate().let { g -> g.prepare().also { g.opened(it) } }
+    private fun launch(): OpenTarget {
+        start++
+        return gate().let { g -> g.prepare().also { g.opened(it) } }
+    }
 
     private fun assertVaultUntouched() {
         assertEquals("hidden photo bytes", File(vault, "photo.jpg").readText())
@@ -406,16 +424,62 @@ class DatabaseOpenGateTest {
     }
 
     @Test
-    fun `only the newest set-aside copy is kept, and none past two weeks`() {
+    fun `a set-aside copy not restored is never pruned, only empty folders and identical copies`() {
         aside.mkdirs()
         File(aside, "${now - 1000}").mkdirs()
-        File(aside, "${now - 2000}").mkdirs()
-        launch()
-        assertEquals(listOf("${now - 1000}"), aside.listFiles()!!.map { it.name })
+        val newer = File(aside, "${now - 2000}").apply { mkdirs() }
+        File(newer, DatabaseOpenGate.ENCRYPTED_NAME).writeText("ENC|k1|rows")
+        val older = File(aside, "${now - 3000}").apply { mkdirs() }
+        File(older, DatabaseOpenGate.ENCRYPTED_NAME).writeText("ENC|k0|other rows")
+        val duplicate = File(aside, "${now - 4000}").apply { mkdirs() }
+        File(duplicate, DatabaseOpenGate.ENCRYPTED_NAME).writeText("ENC|k1|rows")
 
-        now += 15L * 24 * 60 * 60 * 1000
+        now += 365L * 24 * 60 * 60 * 1000
         launch()
-        assertTrue(aside.listFiles()!!.isEmpty())
+
+        assertEquals(setOf(newer.name, older.name), aside.listFiles()!!.map { it.name }.toSet())
+    }
+
+    @Test
+    fun `a database set aside while the Keystore only looked broken comes back once its key answers`() {
+        installEncrypted("library")
+        val oldKey = rawKeySpec((keys.load() as DatabaseKeyState.Ready).key)
+        wrapper.failure = java.security.InvalidKeyException("Keystore operation failed", ProviderException("busy"))
+        // Unavailable on the first two starts; the third, over ten minutes after the first, takes it as lost.
+        repeat(2) {
+            assertTrue(runCatching { launch() }.isFailure)
+            now += 6 * 60_000
+        }
+        assertTrue(launch() is OpenTarget.Encrypted)
+        val kept = aside.listFiles()!!.single()
+        assertTrue(File(kept, DatabaseOpenGate.ENCRYPTED_NAME).readText().endsWith("library"))
+        encrypted.writeText("ENC|${rawKeySpec((keys.load() as DatabaseKeyState.Ready).key)}|fresh")
+
+        wrapper.failure = null
+        now += 60_000
+        launch()
+
+        assertEquals(listOf(oldKey), engine.restoreKeys)
+        assertEquals("a key the Keystore gave back names no account", listOf(true), engine.sameAccountChecks)
+        assertFalse("restored, so it goes", kept.exists())
+    }
+
+    @Test
+    fun `a set-aside database whose key does not answer yet is kept and tried again`() {
+        installEncrypted("library")
+        wrapper.failure = java.security.InvalidKeyException("Keystore operation failed", ProviderException("busy"))
+        repeat(2) {
+            runCatching { launch() }
+            now += 6 * 60_000
+        }
+        launch()
+        encrypted.writeText("ENC|${rawKeySpec((keys.load() as DatabaseKeyState.Ready).key)}|fresh")
+        now += 30L * 24 * 60 * 60 * 1000
+        launch()
+        launch()
+
+        assertTrue(engine.restores.isEmpty())
+        assertEquals(1, aside.listFiles()!!.size)
     }
 
     @Test
