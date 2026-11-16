@@ -22,7 +22,15 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.ContentProvider
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
+import android.database.MatrixCursor
+import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.repository.drive.PhotoDownloadService
 import eu.akoos.photos.data.transfer.ItemCancels
@@ -41,6 +49,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
@@ -164,6 +173,136 @@ class SingleTransferCancelTest {
         assertEquals(0, progress.failed)
         assertEquals(1, progress.done)
         assertTrue(cloud.discardedDownloads.isEmpty())
+    }
+
+    /** A gallery that answers the download's MediaStore calls and records what it was asked to delete. */
+    class FakeMedia : ContentProvider() {
+        override fun onCreate() = true
+        override fun query(
+            uri: Uri,
+            projection: Array<out String>?,
+            selection: String?,
+            args: Array<out String>?,
+            sortOrder: String?,
+        ): Cursor {
+            MediaState.onQuery?.invoke(uri)
+            val id = uri.lastPathSegment?.toLongOrNull()
+            val cols = projection ?: arrayOf(MediaStore.MediaColumns._ID)
+            val cursor = MatrixCursor(cols)
+            // A row asked for by id, or the duplicate check's name match (the size is left out here).
+            val matches = if (id != null) MediaState.rows.filterKeys { it == id }
+                else MediaState.rows.filterValues { it == args?.firstOrNull() }
+            for ((rowId, _) in matches) {
+                cursor.addRow(
+                    cols.map<String, Any> { col ->
+                        when (col) {
+                            MediaStore.MediaColumns._ID -> rowId
+                            MediaStore.MediaColumns.RELATIVE_PATH -> "DCIM/Camera/"
+                            else -> 0L
+                        }
+                    }.toTypedArray(),
+                )
+            }
+            return cursor
+        }
+        override fun insert(uri: Uri, values: ContentValues?): Uri {
+            val id = MediaState.nextId++
+            MediaState.rows[id] = values?.getAsString(MediaStore.MediaColumns.DISPLAY_NAME).orEmpty()
+            MediaState.inserted += id
+            return ContentUris.withAppendedId(uri, id)
+        }
+        override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor = ParcelFileDescriptor.open(
+            File(MediaState.dir, "media_${uri.lastPathSegment}"),
+            ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE,
+        )
+        override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = 1
+        override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int {
+            val id = uri.lastPathSegment?.toLongOrNull() ?: return 0
+            MediaState.deleted += id
+            MediaState.rows.remove(id)
+            return 1
+        }
+        override fun getType(uri: Uri): String? = null
+    }
+
+    object MediaState {
+        val rows = mutableMapOf<Long, String>()
+        val inserted = mutableListOf<Long>()
+        val deleted = mutableListOf<Long>()
+        var nextId = 1L
+        var onQuery: ((Uri) -> Unit)? = null
+        lateinit var dir: File
+
+        fun reset(context: Context) {
+            rows.clear(); inserted.clear(); deleted.clear(); nextId = 1L; onQuery = null
+            dir = File(context.cacheDir, "fake-media").also { it.deleteRecursively(); it.mkdirs() }
+        }
+    }
+
+    @Test
+    fun `a cancel while the save finds the photo already in the gallery leaves that file untouched`() = runTest {
+        MediaState.reset(context)
+        Robolectric.setupContentProvider(FakeMedia::class.java, MediaStore.AUTHORITY)
+        // The user's own file with the same name; Drive reported no size, so only the save-time check finds it.
+        MediaState.rows[100L] = "a.jpg"
+        val cancels = ItemCancels()
+        // The cancel lands while the save's duplicate check runs, before the commit point.
+        MediaState.onQuery = { uri -> if (uri.lastPathSegment?.toLongOrNull() == null) cancels.cancel("a") }
+
+        val progress = useCase.downloadGalleryItems(
+            userId, listOf(cloudItem("a", "image/jpeg")), cancels = cancels,
+        )
+
+        assertEquals(1, progress.cancelled)
+        assertTrue("the existing file is never deleted", MediaState.deleted.isEmpty())
+        assertTrue(MediaState.rows.containsKey(100L))
+        assertTrue("nothing new was written", MediaState.inserted.isEmpty())
+    }
+
+    @Test
+    fun `a cancel before the copy is published removes the copy the save itself wrote`() = runTest {
+        MediaState.reset(context)
+        Robolectric.setupContentProvider(FakeMedia::class.java, MediaStore.AUTHORITY)
+        val cancels = ItemCancels()
+        val saved = mutableListOf<String>()
+        // A test photo with no date: no read-back runs, so nothing but the commit point sees the cancel.
+        val photo = GalleryItem.CloudOnly(
+            CloudPhoto(
+                linkId = "a", shareId = "share", volumeId = "vol", captureTime = 0L,
+                displayName = "a.bin", mimeType = "application/octet-stream", sizeBytes = 0L,
+                thumbnailUrl = null, revisionId = "rev",
+            ),
+        )
+        MediaState.onQuery = { uri -> if (uri.lastPathSegment?.toLongOrNull() == null) cancels.cancel("a") }
+
+        val progress = useCase.downloadGalleryItems(
+            userId, listOf(photo), cancels = cancels, onSaved = { saved += it },
+        )
+
+        assertEquals(1, progress.cancelled)
+        assertTrue(saved.isEmpty())
+        assertEquals(MediaState.inserted, MediaState.deleted)
+    }
+
+    @Test
+    fun `a cancel after the copy was published keeps it and lets the item finish`() = runTest {
+        MediaState.reset(context)
+        Robolectric.setupContentProvider(FakeMedia::class.java, MediaStore.AUTHORITY)
+        val cancels = ItemCancels()
+        // The read-back of the published row's dates: the photo is visible in the gallery by then.
+        MediaState.onQuery = { uri -> if (uri.lastPathSegment?.toLongOrNull() != null) cancels.cancel("a") }
+
+        val saved = mutableListOf<String>()
+
+        val progress = useCase.downloadGalleryItems(
+            userId, listOf(cloudItem("a", "image/jpeg")), cancels = cancels, onSaved = { saved += it },
+        )
+
+        assertEquals(0, progress.cancelled)
+        assertEquals(1, progress.done)
+        assertEquals(1, saved.size)
+        assertEquals(1, MediaState.inserted.size)
+        assertTrue("a published photo stays", MediaState.deleted.isEmpty())
     }
 
     @Test

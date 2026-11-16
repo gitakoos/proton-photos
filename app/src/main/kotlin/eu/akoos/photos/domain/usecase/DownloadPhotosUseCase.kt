@@ -289,12 +289,11 @@ class DownloadPhotosUseCase @Inject constructor(
                                 // common case. Counting it as done reported a photo saved that is not on
                                 // the device, so a batch that ran out of space still read as complete.
                                 if (savedUri != null) {
-                                    // Saved: a cancel of this one photo from now on keeps it. One that came
-                                    // first takes the saved copy out of the gallery again.
+                                    // A copy the save wrote reached the commit point as it was published, so
+                                    // this answers true for it. A file the duplicate check found already in
+                                    // the gallery is the user's own: a cancel that came first stops the item
+                                    // here and leaves that file alone.
                                     if (!ItemCommitPoint.reach()) {
-                                        withContext(NonCancellable) {
-                                            runCatching { context.contentResolver.delete(savedUri, null, null) }
-                                        }
                                         throw kotlinx.coroutines.CancellationException("download cancelled by the user")
                                     }
                                     linkSyncState(userId, savedUri, photo)
@@ -585,10 +584,18 @@ class DownloadPhotosUseCase @Inject constructor(
                 return null
             }
 
+        // Set once the row is published (no longer pending, or written in full where rows are never pending):
+        // from then on it is a photo in the gallery and a stop no longer removes it. Publishing is this
+        // download's commit point: a cancel that came first removes the row instead.
+        var published = false
         return try {
             context.contentResolver.openOutputStream(uri)?.use { out ->
                 file.inputStream().use { it.copyTo(out) }
             } ?: throw IOException("openOutputStream returned null for $uri")
+            if (!ItemCommitPoint.reach()) {
+                throw kotlinx.coroutines.CancellationException("download cancelled by the user before it was saved")
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) published = true
 
             // The EXIF block is left untouched on purpose: modifying it changes the file's
             // byte content and would break hash-based cloud/local matching (the cloud's
@@ -604,6 +611,7 @@ class DownloadPhotosUseCase @Inject constructor(
                 // to set during insert, which is why we write EXIF directly above instead.
                 val pending = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
                 context.contentResolver.update(uri, pending, null, null)
+                published = true
                 // SECOND update — explicitly re-write DATE_TAKEN + DATE_MODIFIED AFTER the
                 // pending flip. Some Android 13+ versions drop timestamp updates when
                 // combined with the IS_PENDING flip, so split this into two updates.
@@ -641,8 +649,11 @@ class DownloadPhotosUseCase @Inject constructor(
             }
             uri
         } catch (e: kotlinx.coroutines.CancellationException) {
-            // A stopped download must not leave its row in the gallery, written or half written.
-            withContext(NonCancellable) { runCatching { context.contentResolver.delete(uri, null, null) } }
+            // A stopped download removes the row it was still writing. A published one is a whole photo in
+            // the gallery by now and stays.
+            if (!published) {
+                withContext(NonCancellable) { runCatching { context.contentResolver.delete(uri, null, null) } }
+            }
             throw e
         } catch (e: Exception) {
             // Clean up the pending MediaStore entry on failure

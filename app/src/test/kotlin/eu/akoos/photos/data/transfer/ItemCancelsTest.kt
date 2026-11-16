@@ -137,7 +137,78 @@ class ItemCancelsTest {
     }
 
     @Test
+    fun `a committed item stays committed at a later commit point after a cancel`() = runTest {
+        val cancels = ItemCancels()
+        var second: Boolean? = null
+        val stopped = cancels.run("k") {
+            ItemCommitPoint.reach()
+            cancels.cancel("k")
+            second = ItemCommitPoint.reach()
+        }
+        assertEquals(true, second)
+        assertFalse(stopped)
+    }
+
+    @Test
     fun `outside an item the commit point always lets the work go on`() = runTest {
         assertTrue(ItemCommitPoint.reach())
+    }
+    @Test
+    fun `a cancel during a stoppable step goes to its stop and a step that still completes is kept`() = runTest {
+        val cancels = ItemCancels()
+        var stopAsked = false
+        var afterCommit = false
+        val stopped = cancels.run("k") {
+            ItemCommitPoint.stopVia(onStop = { stopAsked = true }) {
+                cancels.cancel("k")
+                delay(10)
+                "committed anyway"
+            }
+            // The coroutine was never cancelled, so the steps after the commit still run.
+            delay(10)
+            afterCommit = true
+        }
+        assertTrue(stopAsked)
+        assertTrue(afterCommit)
+        assertFalse(stopped)
+    }
+
+    @Test
+    fun `a stoppable step that gives up after its stop ends the item as cancelled`() = runTest {
+        val cancels = ItemCancels()
+        val stopped = cancels.run("k") {
+            ItemCommitPoint.stopVia(onStop = {}) {
+                cancels.cancel("k")
+                throw CancellationException("the step stopped")
+            }
+        }
+        assertTrue(stopped)
+    }
+
+    @Test
+    fun `a cancel before a stoppable step stops the item without running the step`() = runTest {
+        val cancels = ItemCancels()
+        var ran = false
+        val stopped = cancels.run("k") {
+            cancels.cancel("k")
+            ItemCommitPoint.stopVia(onStop = {}) { ran = true }
+        }
+        assertFalse(ran)
+        assertTrue(stopped)
+    }
+
+    @Test
+    fun `a cancel after a completed stoppable step lets the item finish`() = runTest {
+        val cancels = ItemCancels()
+        var reachedEnd = false
+        val stopped = cancels.run("k") {
+            ItemCommitPoint.stopVia(onStop = {}) { delay(1) }
+            // Committed by the step: a cancel now lets the item finish.
+            cancels.cancel("k")
+            delay(10)
+            reachedEnd = true
+        }
+        assertTrue(reachedEnd)
+        assertFalse(stopped)
     }
 }
