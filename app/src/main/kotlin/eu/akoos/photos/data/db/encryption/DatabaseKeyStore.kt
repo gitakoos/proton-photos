@@ -160,9 +160,15 @@ class DatabaseKeyStore(
      * Makes a new key, writes both wrapped copies and reads them back. Throws when any step fails, in which case
      * no database may be encrypted with it.
      */
-    fun create(): ByteArray {
+    fun create(): ByteArray = store(ByteArray(KEY_BYTES).also { random.nextBytes(it) })
+
+    /**
+     * Seals [key] with the Keystore key (making that key when it is missing), writes both copies and reads them
+     * back. Serves a new key and a key a recovery copy gave back. Throws when any step fails.
+     */
+    fun store(key: ByteArray): ByteArray {
+        require(key.size == KEY_BYTES) { "key size" }
         val wrappingKey = wrapper.wrappingKey(create = true) ?: error("no wrapping key")
-        val key = ByteArray(KEY_BYTES).also { random.nextBytes(it) }
         val blob = DatabaseKeyCodec.wrap(key, wrappingKey)
         dir.mkdirs()
         writeWhole(primary, blob)
@@ -172,12 +178,26 @@ class DatabaseKeyStore(
         return key
     }
 
-    /** Moves the wrapped copies into [target], used when the database they opened is set aside with them. */
+    /**
+     * Moves the wrapped copies, and the recovery copies of the same key, into [target]: used when the database
+     * they opened is set aside with them, so a recovery copy can still open that database later. A file that
+     * cannot be renamed is copied, and removed only once the copy is there.
+     */
     fun moveTo(target: File) {
         target.mkdirs()
         for (copy in listOf(primary, backup)) {
-            if (copy.exists() && !copy.renameTo(File(target, copy.name))) copy.delete()
+            if (copy.exists()) moveFile(copy, File(target, copy.name))
         }
+        val recovery = File(dir, RECOVERY_DIR)
+        recovery.listFiles()?.forEach { file ->
+            moveFile(file, File(File(target, RECOVERY_DIR).apply { mkdirs() }, file.name))
+        }
+    }
+
+    private fun moveFile(from: File, to: File) {
+        if (from.renameTo(to)) return
+        val copied = runCatching { from.copyTo(to, overwrite = true).length() == from.length() }.getOrDefault(false)
+        if (copied) from.delete()
     }
 
     private fun repairOtherCopy(good: File, blob: ByteArray) {
@@ -186,10 +206,13 @@ class DatabaseKeyStore(
         if (!intact) runCatching { writeWhole(other, blob) }
     }
 
-    private companion object {
-        const val PRIMARY = "key.bin"
-        const val BACKUP = "key.bak"
-        const val KEY_BYTES = 32
+    companion object {
+        private const val PRIMARY = "key.bin"
+        private const val BACKUP = "key.bak"
+        private const val KEY_BYTES = 32
+
+        /** The folder beside the wrapped copies that holds the recovery copies of the same key. */
+        const val RECOVERY_DIR = "recovery"
     }
 }
 
