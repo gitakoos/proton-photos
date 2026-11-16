@@ -98,7 +98,7 @@ class SdkPhotoUploadOps @Inject constructor(
             )
             try {
                 coroutineScope {
-                    val input = context.contentResolver.openInputStream(Uri.parse(upload.uploadUri))
+                    val input = eu.akoos.photos.data.localcrypto.PlainContent.open(context, upload.uploadUri)
                         ?: throw SdkUploadException("the file cannot be opened")
                     input.use { stream ->
                         val controller = uploader.uploadFromStream(

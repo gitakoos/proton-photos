@@ -707,22 +707,12 @@ class LocalMediaRepositoryImpl @Inject constructor(
         else withContext(Dispatchers.IO) { confirmGone(uris.toList()).toHashSet() }
 
     override suspend fun sha1(uri: String): String? = withContext(Dispatchers.IO) {
-        val digest = java.security.MessageDigest.getInstance("SHA-1")
         try {
-            context.contentResolver.openInputStream(Uri.parse(uri))?.let {
-                eu.akoos.photos.data.localcrypto.LocalCryptoFormat.guardPlain(it)
-            }?.use { stream ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (stream.read(buffer).also { read = it } != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            } ?: return@withContext null
+            eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            return@withContext null
+            null
         }
-        digest.digest().toLowerHex()
     }
 
     override suspend fun queryByUri(uri: String): LocalMediaItem? = withContext(Dispatchers.IO) {

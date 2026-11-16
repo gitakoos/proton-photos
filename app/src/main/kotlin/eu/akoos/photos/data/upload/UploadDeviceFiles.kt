@@ -171,25 +171,17 @@ internal class UploadDeviceFiles(private val context: Context) {
      * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
      */
     fun computeSha1(uri: String): String? {
-        val digest = MessageDigest.getInstance("SHA-1")
-        try {
+        return try {
             // A null stream (or a read error below) means the content is unreadable this pass. Return
             // null rather than the SHA-1 of empty/partial input: a bogus hash persisted as localHash
             // and sent as the content hash never content-pairs on reconcile, so the file uploads as a
             // silent Drive duplicate (and multiple failures would even share one hash). The caller
-            // treats null as a hard per-file failure and retries the row next pass.
-            val stream = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
-            stream.use { s ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (s.read(buffer).also { read = it } != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            }
+            // treats null as a hard per-file failure and retries the row next pass. Local encrypted
+            // bytes are refused the same way.
+            eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            return null
+            null
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

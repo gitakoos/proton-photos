@@ -849,13 +849,7 @@ class ImportTakeoutUseCase @Inject constructor(
     /** Hex SHA-1 of [file], the content digest [DrivePhotoRepository.uploadFile] requires (Drive pins
      *  its ContentHash to SHA-1). Streamed so a large file is never fully buffered. */
     private fun sha1Hex(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
     }
 
     companion object {

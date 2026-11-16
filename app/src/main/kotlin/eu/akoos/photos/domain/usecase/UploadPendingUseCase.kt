@@ -1185,7 +1185,13 @@ class UploadPendingUseCase @Inject constructor(
             // Reset the claim: the upload failed before the SYNCED upsert, so return the row to
             // LOCAL_ONLY for the next pass instead of leaving it stranded at UPLOADING (which the
             // selector and reconcile both skip). NonCancellable so it lands during a batch teardown.
-            withContext(NonCancellable) { releaseUploadClaim(state.localUri, userId) }
+            withContext(NonCancellable) {
+                releaseUploadClaim(state.localUri, userId)
+                // Local encrypted bytes are never retried: the row stays, off the queue.
+                if (generateSequence<Throwable>(e) { it.cause }.take(4).any { it is eu.akoos.photos.data.localcrypto.EncryptedBytesException }) {
+                    runCatching { syncStateRepo.clearQueued(state.localUri) }
+                }
+            }
             _progress.tryEmit(
                 UploadProgress(
                     uri = state.localUri,

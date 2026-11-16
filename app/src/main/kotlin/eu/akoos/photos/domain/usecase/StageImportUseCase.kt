@@ -399,13 +399,7 @@ class StageImportUseCase @Inject constructor(
     /** Hex SHA-1 of [file], streamed so a large entry is never fully buffered. The upload pass takes the
      *  same digest of the same archive bytes, so the badge and the upload look up the same key. */
     private fun sha1Hex(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
     }
 
     /**

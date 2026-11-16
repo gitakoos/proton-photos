@@ -762,16 +762,7 @@ class CloudTrashService @Inject constructor(
         // `Common.Digests.SHA1` of the xAttr blob and the HMAC that produces the
         // wire ContentHash.
         // The hash and the upload read this same scratch copy, checked to hold no encrypted bytes.
-        eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(fullResFile)
-        val hash = run {
-            val digest = MessageDigest.getInstance("SHA-1")
-            fullResFile.inputStream().use { stream ->
-                val buf = ByteArray(8192)
-                var read: Int
-                while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-            }
-            digest.digest().joinToString("") { "%02x".format(it) }
-        }
+        val hash = eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(fullResFile)
 
         val fileUri = android.net.Uri.fromFile(fullResFile).toString()
         // The copy carries the source's capture time, so it lands in the same timeline slot.

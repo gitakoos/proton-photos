@@ -206,7 +206,9 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
  * malformed content) return false so the finally block wipes the cache. Mirrors
  * [retryUploadCall]'s `shouldRetry` so the two decisions stay aligned.
  */
-private fun isRetryableUploadFailure(e: Throwable): Boolean {
+internal fun isRetryableUploadFailure(e: Throwable): Boolean {
+    // Local encrypted bytes never become a photo, however often they are tried.
+    if (generateSequence(e) { it.cause }.take(4).any { it is eu.akoos.photos.data.localcrypto.EncryptedBytesException }) return false
     // Ask the shared predicate first: it reads the HTTP status off the error itself, which is the
     // only place it appears. The substring pass below never saw a 429 or a 503 raised through the
     // API layer, so a rate-limited upload took the permanent-failure branch and threw away every
@@ -307,6 +309,17 @@ class PhotoUploadService @Inject constructor(
                 context.cacheDir,
                 UploadResumeManifest.stableTempDirName(item.uri, item.sizeBytes),
             ).also { it.mkdirs() }
+
+            // Both upload routes read the source checked here first, before any draft exists on Drive: local
+            // encrypted bytes are refused for good, with the source kept and any resume record dropped.
+            try {
+                eu.akoos.photos.data.localcrypto.PlainContent.requirePlain(context, uploadUri)
+            } catch (e: eu.akoos.photos.data.localcrypto.EncryptedBytesException) {
+                Log.w(TAG, "uploadFile: $logRef refused, its bytes are a local encrypted file")
+                eu.akoos.photos.util.SyncDiagnostics.log("upload $logRef refused: local encrypted bytes")
+                runCatching { tempDir.deleteRecursively() }
+                throw e
+            }
 
             // Proton photo category tags (Motion Photo, Panorama, Video, Raw, Screenshot) sent
             // on the commit; without them the web can't file the photo or play a Live Photo. The

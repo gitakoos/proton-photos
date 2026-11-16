@@ -300,14 +300,7 @@ class CloudPhotoReplacement(
     }
 
     private fun sha1(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        eu.akoos.photos.data.localcrypto.LocalCryptoFormat.requirePlain(file)
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
     }
 
     companion object {

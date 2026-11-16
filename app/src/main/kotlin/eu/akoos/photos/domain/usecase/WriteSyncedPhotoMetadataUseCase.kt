@@ -388,21 +388,12 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
      * per-file failure so an unreadable file never uploads as a silent Drive duplicate.
      */
     private fun computeSha1(uri: String): String? {
-        val digest = MessageDigest.getInstance("SHA-1")
-        try {
-            val stream = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
-            stream.use { s ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (s.read(buffer).also { read = it } != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            }
+        return try {
+            eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return null
+            null
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     /** Byte length behind [uri] via the resolver, or 0 when it cannot be determined. */
