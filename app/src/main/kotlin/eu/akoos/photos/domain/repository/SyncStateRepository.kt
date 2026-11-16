@@ -110,6 +110,11 @@ interface SyncStateRepository {
     suspend fun getLocalOnly(userId: UserId): List<SyncState> =
         observeAll(userId).first().filter { it.status == SyncStatus.LOCAL_ONLY }
 
+    /** [userId]'s rows that are queued or whose uri is in [extraUris], in the order [observeAll] lists them:
+     *  the only rows an upload pass selects from, without reading every row of a large library. */
+    suspend fun getQueuedOrIn(userId: UserId, extraUris: Set<String>): List<SyncState> =
+        observeAll(userId).first().filter { it.queued || it.localUri in extraUris }
+
     /** The rows for [localUris] (a uri with no row is absent), in as few reads as the SQL limit allows. */
     suspend fun getByUris(localUris: List<String>): List<SyncState> = localUris.mapNotNull { getByUri(it) }
 

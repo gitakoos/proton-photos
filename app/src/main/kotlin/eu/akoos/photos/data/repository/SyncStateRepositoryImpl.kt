@@ -44,6 +44,14 @@ class SyncStateRepositoryImpl @Inject constructor(
     override fun observeAll(userId: UserId): Flow<List<SyncState>> =
         dao.observeAll(userId.id).map { list -> list.map { it.toDomain() } }
 
+    override suspend fun getQueuedOrIn(userId: UserId, extraUris: Set<String>): List<SyncState> =
+        // More uris than one statement can bind: the full read filtered here gives the same rows in the same order.
+        if (extraUris.size > SQL_CHUNK) {
+            super.getQueuedOrIn(userId, extraUris)
+        } else {
+            dao.getQueuedOrIn(userId.id, extraUris.toList()).map { it.toDomain() }
+        }
+
     override fun countPendingUploads(userId: UserId): Flow<Int> =
         dao.countPendingUploads(userId.id)
 

@@ -41,6 +41,7 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -103,6 +104,11 @@ class UploadPendingUseCaseTest {
         // skips on a 0 (another pass got it first); the relaxed mock would otherwise return 0 and
         // skip every item. A test modelling a lost claim can override this per URI.
         coEvery { syncStateRepo.claimForUpload(any()) } returns 1
+        // The pass reads only its candidate rows; answered from each test's observeAll fixture with the
+        // repository contract (queued, or owed to an album), so every fixture keeps meaning the whole table.
+        coEvery { syncStateRepo.getQueuedOrIn(any(), any()) } coAnswers {
+            syncStateRepo.observeAll(firstArg()).first().filter { it.queued || it.localUri in secondArg<Set<String>>() }
+        }
         localRepo = mockk()
         cloudRepo = mockk(relaxed = true)
         networkObserver = mockk(relaxed = true)

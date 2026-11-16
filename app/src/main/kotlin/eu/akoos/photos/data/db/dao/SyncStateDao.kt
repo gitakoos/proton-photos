@@ -76,6 +76,12 @@ interface SyncStateDao {
     @Query("SELECT localUri, cloudFileId, localHash, status, queued FROM sync_state WHERE userId = :userId")
     suspend fun getAllLite(userId: String): List<SyncStateLite>
 
+    /** [userId]'s queued rows plus the rows of [localUris], every column, through the same userId index as
+     *  [observeAll] so they come in the same order. [localUris] must fit the SQL host-variable limit. */
+    @Transaction
+    @Query("SELECT * FROM sync_state WHERE userId = :userId AND (queued = 1 OR localUri IN (:localUris))")
+    suspend fun getQueuedOrIn(userId: String, localUris: List<String>): List<SyncStateEntity>
+
     /** Lean stream of local content hashes for the duplicate finder: two columns, blank hashes
      *  filtered out in SQL, so a 50k library does not materialise the full SyncState list just to build
      *  a uri -> hash lookup. */

@@ -429,9 +429,14 @@ class UploadPendingUseCase @Inject constructor(
             albumJoiner.joinQueuedAlbum(userId, target.localUri, target.albumLinkId, cloudId)
         }
 
-        // One snapshot of every SyncState row, read once up front so the explicit-action bypass
-        // below and the pending selection further down share it (no second Flow.first()).
-        val allStates = syncStateRepo.observeAll(userId).first()
+        // Uris owed to an album (see the stranded album-add recovery below), read once for the whole pass.
+        val albumTargetUris: Set<String> = uploadAlbumTargetDao.getAll().map { it.localUri }.toSet()
+
+        // One snapshot of the only rows this pass selects from, read once up front so the explicit-action
+        // bypass below and the pending selection further down share it: the queued rows (the bypass and the
+        // pending set both require queued) and the rows owed to an album (the stranded recovery). Every other
+        // row of a large library is never read.
+        val allStates = syncStateRepo.getQueuedOrIn(userId, albumTargetUris)
 
         // Explicit user-action bypass. A row queued as MANUAL ("back up now") or ALBUM_ADD (added to
         // a cloud album) is something the user asked for regardless of network or folder selection, so
@@ -494,6 +499,13 @@ class UploadPendingUseCase @Inject constructor(
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
+        // A device file queued for a cloud metadata edit is owned end to end by MetadataEditWorker (via
+        // the synced replace path): it seeds its own UPLOADING row and uploads the corrected copy itself.
+        // Exclude those URIs here so this backup selector never races the worker on the same file. The
+        // race is real on a process kill: the pending_metadata_edit row survives, but resetStaleUploadingClaims
+        // would reset the sync row to LOCAL_ONLY and this selector would upload it as a SECOND copy.
+        val metadataEditUris: Set<String> = pendingMetadataEditDao.allPendingDeviceUris().toSet()
+
         // Recovery for force-queued album-adds. A photo the user added to an album has a row in the
         // upload_album_target table. An interrupted prior pass can leave its sync_state row stranded in
         // a non-LOCAL_ONLY status while it still has no cloud copy: that row is invisible to BOTH the
@@ -505,15 +517,6 @@ class UploadPendingUseCase @Inject constructor(
         // a live upload (an editor or metadata save runs outside this lock, and an album-add can target a
         // photo mid-upload), and resetting it would upload the photo a second time. Manual rows are
         // covered by the stranded-intent recovery, so no separate manual set is needed here.
-        val albumTargetUris: Set<String> = uploadAlbumTargetDao.getAll().map { it.localUri }.toSet()
-
-        // A device file queued for a cloud metadata edit is owned end to end by MetadataEditWorker (via
-        // the synced replace path): it seeds its own UPLOADING row and uploads the corrected copy itself.
-        // Exclude those URIs here so this backup selector never races the worker on the same file. The
-        // race is real on a process kill: the pending_metadata_edit row survives, but resetStaleUploadingClaims
-        // would reset the sync row to LOCAL_ONLY and this selector would upload it as a SECOND copy.
-        val metadataEditUris: Set<String> = pendingMetadataEditDao.allPendingDeviceUris().toSet()
-
         val strandedForced = allStates.filter {
             it.localUri in albumTargetUris &&
                 it.localUri !in metadataEditUris &&

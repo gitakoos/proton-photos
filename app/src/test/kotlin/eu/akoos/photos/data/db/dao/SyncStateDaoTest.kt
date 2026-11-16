@@ -616,4 +616,52 @@ class SyncStateDaoTest {
         val auto = dao.getByUri("uri://auto")!!
         assertTrue("an automatic backup keeps its queued intent", auto.queued)
     }
+
+    // ─── getQueuedOrIn (the upload pass's candidate read) ─────────────────────
+
+    private suspend fun seedCandidates() {
+        for (n in 1..8) dao.upsert(entity("uri://$n"))
+        dao.upsert(entity("uri://other", userId = "user2"))
+        dao.markQueued("uri://2", "AUTO_FOLDER", 1L)
+        dao.markQueued("uri://5", "MANUAL", 1L)
+        dao.markQueued("uri://other", "MANUAL", 1L)
+    }
+
+    @Test
+    fun `getQueuedOrIn returns the queued rows and the listed rows of the user in table order`() = runTest {
+        seedCandidates()
+
+        val rows = dao.getQueuedOrIn("user1", listOf("uri://7", "uri://3", "uri://missing"))
+
+        assertEquals(listOf("uri://2", "uri://3", "uri://5", "uri://7"), rows.map { it.localUri })
+        val expected = dao.observeAll("user1").first()
+            .filter { it.queued || it.localUri in setOf("uri://7", "uri://3") }
+        assertEquals(expected, rows)
+    }
+
+    @Test
+    fun `getQueuedOrIn with no listed uris returns only the queued rows`() = runTest {
+        seedCandidates()
+        assertEquals(listOf("uri://2", "uri://5"), dao.getQueuedOrIn("user1", emptyList()).map { it.localUri })
+    }
+
+    @Test
+    fun `the repository candidate read matches the full read on both sides of the bind limit`() = runTest {
+        seedCandidates()
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+        val user = me.proton.core.domain.entity.UserId("user1")
+        val full = dao.observeAll("user1").first()
+
+        val few = setOf("uri://4")
+        assertEquals(
+            full.filter { it.queued || it.localUri in few }.map { it.localUri },
+            repo.getQueuedOrIn(user, few).map { it.localUri },
+        )
+        // Past one statement's bind limit the repository falls back to the full read, filtered.
+        val many = (1..1200).map { "uri://none$it" }.toSet() + "uri://6"
+        assertEquals(
+            full.filter { it.queued || it.localUri in many }.map { it.localUri },
+            repo.getQueuedOrIn(user, many).map { it.localUri },
+        )
+    }
 }
