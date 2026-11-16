@@ -236,12 +236,6 @@ class ReconcileSyncStateUseCase @Inject constructor(
         scanComplete: Boolean,
         scanStartMs: Long,
     ): Recorded {
-        // Unpacked, so the cloud rows can go after their last use below (the demotion scan) instead of
-        // living through every write.
-        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudByLinkId) =
-            matchLocals(userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload)
-        PerfDiagnostics.mark("reconcile:end", localItems.size)
-
         // Previously SYNCED entries whose cloud counterpart was deleted → LOCAL_ONLY (still on device,
         // no longer in Drive). The first loop already covers items in selected folders; this catches
         // items in non-selected folders or edge cases where the file wasn't in localItems.
@@ -260,37 +254,25 @@ class ReconcileSyncStateUseCase @Inject constructor(
         //
         // The same set of every device uri serves the gone-file checks of the queue clean-up.
         val allLocalUris: Set<String> = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
+
+        // Unpacked, so each part can go after its last use below instead of living through every write.
+        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudAbsent, goneCandidates) =
+            matchLocals(
+                userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload,
+                allLocalUris, scanComplete, scanStartMs,
+            )
+        PerfDiagnostics.mark("reconcile:end", localItems.size)
+
         val nowMs = System.currentTimeMillis()
-        // The SYNCED rows as the pairing above saw them: it wrote nothing, and the new states aren't
-        // persisted until the upsertAll below, so this pass only demotes rows that were SYNCED before it
-        // wrote. Read a page at a time, keeping only the rows to act on; the writes follow the scan, so
-        // the whole scan sees the table the pairing saw. Keyed by uri, so a row read twice is acted on once.
-        val cloudGone = LinkedHashMap<String, SyncState>()
-        val goneCandidates = LinkedHashMap<String, SyncState>()
-        forEachRowAt(userId, SyncStatus.SYNCED) { state ->
-            val cloudId = state.cloudFileId ?: return@forEachRowAt
-            when {
-                // Cloud counterpart absent from the local cloud listing. A photo just uploaded is
-                // SYNCED before the listing catches up, so demoting it now would re-queue it for a
-                // duplicate upload and drop its green badge. Only demote once it has been missing
-                // past the grace window; by then a true cloud-side delete is real.
-                cloudId !in cloudByLinkId ->
-                    if (nowMs - (state.lastSyncSuccessMs ?: 0L) > CLOUD_ABSENCE_GRACE_MS) {
-                        cloudGone.putIfAbsent(state.localUri, state)
-                    }
-                // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
-                // user the photo is "on this device" when it actually isn't. Only on a scan that saw
-                // the whole device, and only for a row that predates it: a download saved while this
-                // pass ran is recorded SYNCED, yet the scan, begun before it, could not list its file.
-                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) ->
-                    goneCandidates.putIfAbsent(state.localUri, state)
-            }
-        }
         // Rows this pass marked removed from Drive. The match above already counted them as unmatched
         // in-scope locals up for the folder backup; the stamp below must leave them out, or it would
         // overwrite the mark and upload the photo straight back.
         val removedFromDrive = HashSet<String>()
-        for (state in cloudGone.values) {
+        for (state in cloudAbsent) {
+            // A photo just uploaded is SYNCED before the listing catches up, so demoting it now would
+            // re-queue it for a duplicate upload and drop its green badge. Only demote once it has been
+            // missing past the grace window; by then a true cloud-side delete is real.
+            if (nowMs - (state.lastSyncSuccessMs ?: 0L) <= CLOUD_ABSENCE_GRACE_MS) continue
             // Demote only while the row still carries the cloud id the scan saw: a twin genuinely gone
             // still matches and is demoted, but one an upload re-promoted mid-pass now carries a
             // different id and is left alone (its pairing survives).
@@ -350,8 +332,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
     }
 
     /**
-     * What the pairing loop hands on: the rows it computed, in device order, and the cloud lookup the
-     * demotion scan after it still reads. The other lookups it builds are dropped when it returns.
+     * What the pairing loop hands on: the rows it computed, in device order, and the SYNCED rows whose
+     * cloud or device copy it found gone. The lookups it builds are dropped when it returns.
      *
      * The computed rows come in two batches. [guardedDemotions] holds each computed-LOCAL_ONLY row that
      * already existed when the pairing read it, the only kind an upload could have promoted to
@@ -364,7 +346,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val guardedDemotions: List<SyncState>,
         val freshAutoFolderUris: List<String>,
         val pairedSyncedUris: List<String>,
-        val cloudByLinkId: Map<String, PhotoPairingRow>,
+        /** SYNCED rows whose cloud copy the listing lacks, in table order; the grace window still applies. */
+        val cloudAbsent: List<SyncState>,
+        /** SYNCED rows whose device file the scan did not find, by uri, in table order; not yet confirmed. */
+        val goneCandidates: Map<String, SyncState>,
     )
 
     /** Matches each in-scope device file to its cloud copy and computes the row it gets. */
@@ -375,6 +360,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
         compressVideosOnUpload: Boolean,
+        allLocalUris: Set<String>,
+        scanComplete: Boolean,
+        scanStartMs: Long,
     ): Matched {
         // Cloud DB was already refreshed by the caller (GalleryViewModel.refresh / doSync).
         // Avoid calling refreshCloudPhotosIncremental here: it can replay old "add" events
@@ -411,6 +399,27 @@ class ReconcileSyncStateUseCase @Inject constructor(
         }
         Log.d(TAG, "reconcile: ${localItems.size} local, ${cloudItems.size} cloud " +
             "(${cloudByHash.size} with hash, ${cloudByNameAndDate.size} with captureTime)")
+
+        // The SYNCED rows as they stand before the pairing, the only ones this pass demotes: it writes
+        // nothing until the pairing is done, and a row another writer makes SYNCED while it runs waits for
+        // the next pass. Read a page at a time, keeping only the rows to act on. Keyed by uri, so a row
+        // read twice is acted on once.
+        val cloudAbsent = LinkedHashMap<String, SyncState>()
+        val goneCandidates = LinkedHashMap<String, SyncState>()
+        forEachRowAt(userId, SyncStatus.SYNCED) { state ->
+            val cloudId = state.cloudFileId ?: return@forEachRowAt
+            when {
+                // Cloud counterpart absent from the local cloud listing: demoted after the pairing, once
+                // past the grace window.
+                cloudId !in cloudByLinkId -> cloudAbsent.putIfAbsent(state.localUri, state)
+                // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
+                // user the photo is "on this device" when it actually isn't. Only on a scan that saw
+                // the whole device, and only for a row that predates it: a download saved while this
+                // pass ran is recorded SYNCED, yet the scan, begun before it, could not list its file.
+                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) ->
+                    goneCandidates.putIfAbsent(state.localUri, state)
+            }
+        }
 
         val plainWrites = ArrayList<SyncState>(localItems.size)
         val guardedDemotions = ArrayList<SyncState>()
@@ -586,7 +595,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
             if (status == SyncStatus.SYNCED) pairedSyncedUris += local.uri
         }
 
-        return Matched(total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudByLinkId)
+        return Matched(
+            total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris,
+            cloudAbsent.values.toList(), goneCandidates,
+        )
     }
 
     /** Hands each of [userId]'s rows at [status] to [action], in table order, one page held at a time. */
