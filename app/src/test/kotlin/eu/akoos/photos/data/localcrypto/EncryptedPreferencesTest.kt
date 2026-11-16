@@ -241,6 +241,26 @@ class EncryptedPreferencesTest {
     }
 
     @Test
+    fun `while the newest copy cannot be read, an older one never brings the Hidden password back`() {
+        val password = stringPreferencesKey("vault_password_blob")
+        val dir = File(tmp.root, "keys/locked")
+        LockedStoreFiles(dir, clock = { 9L }).setAside("settings", write(preferencesOf(name to "Ada", password to "old blob")))
+        // The newest copy was sealed with a key this start cannot open.
+        val other = LocalKeyring(File(tmp.root, "other_keys"), FakeWrapper(KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()))
+        LockedStoreFiles(dir, clock = { 10L }).setAside("settings", write(preferencesOf(password to "new blob"), other))
+        val store = InMemoryStore(preferencesOf())
+
+        val merged = runBlocking {
+            LocalStores.restoreLocked("settings", store, keyring, locked, newestOnly = setOf("vault_password_blob")) { log += it }
+        }
+
+        assertEquals(1, merged)
+        assertEquals("Ada", store.value[name])
+        assertEquals("the older copy's password stays out", null, store.value[password])
+        assertEquals("the newest copy waits for its key", 1, locked.pending("settings").size)
+    }
+
+    @Test
     fun `a locked copy stays while its key does not open`() {
         val bytes = write(sample)
         wrapper.key = null

@@ -244,8 +244,8 @@ object LocalStores {
      * copy. A value set since then wins: a copy only fills the keys the live file (and the newer copies merged before
      * it) do not have, and sets are joined, so a photo hidden in either stays listed. [keepOut] names, per copy,
      * keys it must not bring back at all (a Hidden password the user removed after that copy was set aside).
-     * [newestOnly] names keys taken from the newest merged copy alone: an older copy never fills one the newest
-     * copy did not hold. [noJoin] names sets that are never joined: the live set, when there is one, stays as it is,
+     * [newestOnly] names keys taken from the newest copy alone (by the time it was set aside), merged or not yet
+     * readable: an older copy never fills one while a newer copy exists. [noJoin] names sets that are never joined: the live set, when there is one, stays as it is,
      * so an entry removed since the copy was set aside does not come back. Answers how many copies were merged.
      */
     suspend fun restoreLocked(
@@ -259,7 +259,8 @@ object LocalStores {
         log: (String) -> Unit,
     ): Int {
         var merged = 0
-        for (file in locked.pending(storeName)) {
+        val pending = locked.pending(storeName)
+        for (file in pending) {
             val recovered = try {
                 PreferencesSerializer.readFrom(Buffer().write(LocalCryptoFormat.decryptBytes(file.readBytes(), keyring)))
             } catch (_: LocalKeyLockedException) {
@@ -270,7 +271,8 @@ object LocalStores {
                 log("$storeName: locked copy unreadable (${e.javaClass.simpleName}), kept")
                 continue
             }
-            val excluded = keepOut(file) + if (merged > 0) newestOnly else emptySet()
+            // Only the newest copy there is may bring these back, even on a start its key does not open.
+            val excluded = keepOut(file) + if (file != pending.first()) newestOnly else emptySet()
             store.updateData { current -> mergeRecovered(recovered, current, excluded, noJoin) }
             file.delete()
             merged++
