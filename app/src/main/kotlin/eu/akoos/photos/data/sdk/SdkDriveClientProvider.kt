@@ -35,6 +35,7 @@ import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -143,7 +144,10 @@ class SdkDriveClientProvider @Inject constructor(
     suspend fun launchHoldingClient(block: suspend () -> Unit): Job? {
         val held = currentCoroutineContext()[HeldCall]?.held ?: return null
         if (!mutex.withLock { held.lease.extend() }) return null
-        return held.scope.launch {
+        // Started only once it is held in [waitingCallers], like a caller, so its pending requests stay
+        // reachable to the end. Its scope cannot be cancelled before it starts: that happens only once
+        // the client's last call is out, and this one is counted in.
+        val job = held.scope.launch(start = CoroutineStart.LAZY) {
             try {
                 block()
             } catch (e: CancellationException) {
@@ -151,9 +155,13 @@ class SdkDriveClientProvider @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "background client work failed: ${e.javaClass.simpleName}")
             } finally {
+                currentCoroutineContext()[Job]?.let { waitingCallers.remove(it) }
                 withContext(NonCancellable) { release(held) }
             }
         }
+        waitingCallers.add(job)
+        job.start()
+        return job
     }
 
     /**

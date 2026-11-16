@@ -215,7 +215,11 @@ class SingleTransferCancelTest {
             File(MediaState.dir, "media_${uri.lastPathSegment}"),
             ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE,
         )
-        override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = 1
+        override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int {
+            MediaState.updates++
+            if (MediaState.updates == MediaState.failUpdate) throw IllegalStateException("update refused")
+            return 1
+        }
         override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int {
             val id = uri.lastPathSegment?.toLongOrNull() ?: return 0
             MediaState.deleted += id
@@ -231,10 +235,13 @@ class SingleTransferCancelTest {
         val deleted = mutableListOf<Long>()
         var nextId = 1L
         var onQuery: ((Uri) -> Unit)? = null
+        var updates = 0
+        var failUpdate = 0
         lateinit var dir: File
 
         fun reset(context: Context) {
             rows.clear(); inserted.clear(); deleted.clear(); nextId = 1L; onQuery = null
+            updates = 0; failUpdate = 0
             dir = File(context.cacheDir, "fake-media").also { it.deleteRecursively(); it.mkdirs() }
         }
     }
@@ -303,6 +310,24 @@ class SingleTransferCancelTest {
         assertEquals(1, saved.size)
         assertEquals(1, MediaState.inserted.size)
         assertTrue("a published photo stays", MediaState.deleted.isEmpty())
+    }
+
+    @Test
+    fun `a save whose date write fails after it was published keeps the photo and counts it saved`() = runTest {
+        MediaState.reset(context)
+        Robolectric.setupContentProvider(FakeMedia::class.java, MediaStore.AUTHORITY)
+        // The first update publishes the row; the second, the date write, fails.
+        MediaState.failUpdate = 2
+        val saved = mutableListOf<String>()
+
+        val progress = useCase.downloadGalleryItems(
+            userId, listOf(cloudItem("a", "image/jpeg")), cancels = ItemCancels(), onSaved = { saved += it },
+        )
+
+        assertEquals(1, progress.done)
+        assertEquals(0, progress.failed)
+        assertEquals(1, saved.size)
+        assertTrue("a published photo is never removed", MediaState.deleted.isEmpty())
     }
 
     @Test

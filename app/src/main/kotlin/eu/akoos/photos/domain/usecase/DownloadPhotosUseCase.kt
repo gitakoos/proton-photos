@@ -656,8 +656,14 @@ class DownloadPhotosUseCase @Inject constructor(
             }
             throw e
         } catch (e: Exception) {
+            if (published) {
+                // The photo is whole and in the gallery; only a step after it (the date write or its
+                // record) failed. It stays and counts as saved, so a retry never makes a second copy.
+                Log.w(TAG, "saveFileToMediaStore: saved, but a step after it failed: ${e.javaClass.simpleName}")
+                return uri
+            }
             // Clean up the pending MediaStore entry on failure
-            context.contentResolver.delete(uri, null, null)
+            runCatching { context.contentResolver.delete(uri, null, null) }
             Log.w(TAG, "saveFileToMediaStore failed for $displayName: ${e.message}")
             null
         }
