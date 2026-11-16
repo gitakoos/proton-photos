@@ -136,6 +136,9 @@ class LocalEncryptionCoordinator @Inject constructor(
             // version installed over this one then stops at the settings rather than run with a vault it can
             // not read.
             runCatching { context.settingsDataStore.data.first() }
+            // Every other encrypted settings file (the transfer history) is opened now too, so one an earlier
+            // version left in plaintext is encrypted at this start, not only at its next write.
+            runCatching { openStores(encryptedStores(context)) }.onFailure { logFailure("settings files", it) }
             // Settings kept aside while their key did not open come back as soon as it does, every start, not only
             // after a recovery.
             runCatching { restoreLockedStores() }.onFailure { logFailure("locked settings", it) }
@@ -406,6 +409,16 @@ internal fun encryptedStores(context: Context): Map<String, DataStore<Preference
     "settings" to context.settingsDataStore,
     "transfer_history" to context.transferHistoryDataStore,
 )
+
+/**
+ * Reads each of [stores] once. Opening a settings file is what encrypts one still in plaintext, inside the store's
+ * own handling of the file, so no write of the store can race it.
+ */
+internal suspend fun openStores(stores: Map<String, DataStore<Preferences>>) {
+    for ((name, store) in stores) {
+        runCatching { store.data.first() }.onFailure { LocalCrypto.log("$name: not opened at start (${it.javaClass.simpleName})") }
+    }
+}
 
 /** The migration that encrypts the plaintext offline copies in place, sharing the offline store's lock. */
 internal fun offlineMigration(context: Context, keyring: LocalKeyring, log: (String) -> Unit = LocalCrypto::log) = VaultMigration(

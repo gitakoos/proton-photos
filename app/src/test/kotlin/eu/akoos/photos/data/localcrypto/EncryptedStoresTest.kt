@@ -23,7 +23,11 @@
 package eu.akoos.photos.data.localcrypto
 
 import android.content.Context
+import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.test.core.app.ApplicationProvider
+import eu.akoos.photos.data.db.encryption.DatabaseKeyStoreTest.FakeWrapper
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -32,6 +36,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
+import javax.crypto.KeyGenerator
+
+private val Context.startOpenTestStore by encryptedPreferencesDataStore("start_open_test")
 
 /** The start-up restore reaches every encrypted settings file, opened or not by the rest of the app. */
 @RunWith(RobolectricTestRunner::class)
@@ -46,6 +54,31 @@ class EncryptedStoresTest {
 
         assertEquals(LocalEncryptionCoordinator.STORE_NAMES.toSet(), stores.keys)
         for ((name, store) in stores) assertSame(name, store, LocalStores.named(name))
+    }
+
+    @Test
+    fun `a settings file an earlier version left in plaintext is encrypted when the start opens it`() {
+        val keys = File(context.noBackupFilesDir, "stores_test_keys")
+        LocalCrypto.useKeyringForTest(LocalKeyring(keys, FakeWrapper(KeyGenerator.getInstance("AES").apply { init(256) }.generateKey())))
+        try {
+            val name = "start_open_test"
+            val file = context.preferencesDataStoreFile(name)
+            val plain = androidx.datastore.preferences.core.stringPreferencesKey("entry")
+            val bytes = okio.Buffer().also {
+                runBlocking { androidx.datastore.preferences.core.PreferencesSerializer.writeTo(androidx.datastore.preferences.core.preferencesOf(plain to "kept"), it) }
+            }.readByteArray()
+            file.parentFile!!.mkdirs()
+            file.writeBytes(bytes)
+            val store = context.startOpenTestStore
+
+            runBlocking { openStores(mapOf(name to store)) }
+
+            assertTrue("encrypted on disk", LocalCryptoFormat.looksEncrypted(file.readBytes()))
+            assertEquals("kept", runBlocking { store.data.first()[plain] })
+        } finally {
+            LocalCrypto.useKeyringForTest(null)
+            keys.deleteRecursively()
+        }
     }
 
     @Test
