@@ -274,31 +274,34 @@ class DatabaseOpenGate(
     }
 
     /**
-     * Copies the app's own tables back, into the live database, from every set-aside database whose key opens now:
-     * one a recovery copy gave back, or one whose own wrapped copies the Keystore key opens again (it did not answer
-     * for a while). Removes that set-aside folder once done. Runs on every start, so a set-aside database comes back
-     * as soon as its key does. Anything that does not fit (another account, another schema version, an error)
-     * leaves both databases as they were, to be tried again.
+     * Copies the app's own tables back, into the live database, from the newest set-aside database whose key opens
+     * now: one a recovery copy gave back, or one whose own wrapped copies the Keystore key opens again (it did not
+     * answer for a while). Removes that one set-aside folder once done, and no other. At most one is restored per
+     * start: the restored rows are the user's work from then on, so an older set-aside database is never copied
+     * over them and stays where it is, kept. Runs on every start, so a set-aside database comes back as soon as its
+     * key does. Anything that does not fit (another account, another schema version, an error) leaves both
+     * databases as they were, to be tried again.
      *
      * The copy replaces whole tables, so it runs only into a live database that holds none of the user's own work
-     * yet ([userWork]: edits waiting, uploads queued or done, imports, face and label decisions, album order). Once
-     * it does, the set-aside database is never copied over it and stays where it is, kept.
+     * yet ([userWork]: edits waiting, uploads queued or done, imports, face and label decisions, album order),
+     * checked again before every attempt. Once it does, no set-aside database is copied over it.
      */
     private fun restoreRecovered() {
-        val dirs = setAsideDir.listFiles()?.filter { File(it, ENCRYPTED_NAME).exists() } ?: return
+        val dirs = setAsideDir.listFiles()?.filter { File(it, ENCRYPTED_NAME).exists() }
+            ?.sortedByDescending { it.name.toLongOrNull() ?: 0L } ?: return
         if (dirs.isEmpty()) return
         val live = keys.load() as? DatabaseKeyState.Ready ?: return
-        val work = try {
-            engine.liveWorkRows(encrypted, rawKeySpec(live.key), userWork)
-        } catch (e: Exception) {
-            log("db: live database not checked (${e.javaClass.simpleName}), set-aside copies kept")
-            return
-        }
-        if (work > 0) {
-            log("db: live database holds newer work, ${dirs.size} set-aside copies kept, not restored")
-            return
-        }
         for (dir in dirs) {
+            val work = try {
+                engine.liveWorkRows(encrypted, rawKeySpec(live.key), userWork)
+            } catch (e: Exception) {
+                log("db: live database not checked (${e.javaClass.simpleName}), set-aside copies kept")
+                return
+            }
+            if (work > 0) {
+                log("db: live database holds newer work, ${dirs.size} set-aside copies kept, not restored")
+                return
+            }
             val old = File(dir, ENCRYPTED_NAME)
             val recovered = File(dir, RECOVERED_DIR).isDirectory
             val oldKey = if (recovered) recoveredKey(File(dir, RECOVERED_DIR)) else runCatching { keys.keyIn(dir) }.getOrNull()
@@ -320,6 +323,7 @@ class DatabaseOpenGate(
                     is RestoreResult.Restored -> {
                         dir.deleteRecursively()
                         log("db: restored ${result.tables} tables, ${result.rows} rows from the set-aside copy")
+                        return
                     }
                     is RestoreResult.Skipped -> log("db: set-aside copy not restored (${result.reason}), kept")
                 }

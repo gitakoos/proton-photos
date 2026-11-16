@@ -97,6 +97,8 @@ class DatabaseOpenGateTest {
             restoreKeys += oldKeySpec
             sameAccountChecks += sameAccounts
             restoreFailure?.let { throw it }
+            // Restored rows are the user's work from then on.
+            if (restoreResult is RestoreResult.Restored) liveWork += 10
             return restoreResult
         }
     }
@@ -577,6 +579,34 @@ class DatabaseOpenGateTest {
         assertEquals("abc", owner)
         assertEquals(listOf("labels", "face"), tables)
         assertFalse("restored, so it goes", dir.exists())
+    }
+
+    @Test
+    fun `of two restorable set-aside copies only the newest comes back, the older one is kept`() {
+        installEncrypted()
+        val older = recoveredSetAside("${now - 9000}")
+        val newer = recoveredSetAside("${now - 5000}")
+
+        launch()
+        launch()
+
+        assertEquals("one restore, never a second over it", listOf(File(newer, DatabaseOpenGate.ENCRYPTED_NAME)), engine.restores.map { it.first })
+        assertFalse(newer.exists())
+        assertTrue("the older copy is never deleted", File(older, DatabaseOpenGate.ENCRYPTED_NAME).exists())
+    }
+
+    @Test
+    fun `a newest copy that does not restore leaves the next one to try, and only the restored folder goes`() {
+        installEncrypted()
+        val older = recoveredSetAside("${now - 9000}")
+        val newer = recoveredSetAside("${now - 5000}")
+        recoveredKeys.remove(File(newer, DatabaseOpenGate.RECOVERED_DIR))
+
+        launch()
+
+        assertEquals(listOf(File(older, DatabaseOpenGate.ENCRYPTED_NAME)), engine.restores.map { it.first })
+        assertFalse(older.exists())
+        assertTrue(File(newer, DatabaseOpenGate.ENCRYPTED_NAME).exists())
     }
 
     @Test
