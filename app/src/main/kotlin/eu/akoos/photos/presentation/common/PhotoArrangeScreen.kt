@@ -477,6 +477,7 @@ private fun ArrangeBottomBar(
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp)
+            .snackbarObstacle()
             .clip(RoundedCornerShape(20.dp))
             .background(PillBgOpaque)
             .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))

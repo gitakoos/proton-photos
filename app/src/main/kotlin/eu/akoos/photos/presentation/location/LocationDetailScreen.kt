@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.location
 
+import eu.akoos.photos.presentation.common.snackbarObstacle
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.app.Activity
 import android.net.Uri
 import android.os.Build
@@ -738,6 +740,7 @@ fun LocationPhotosContent(
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
+                modifier = Modifier.snackbarObstacle(),
                 diameter = 44.dp,
                 iconSize = 24.dp,
                 background = PillBg,
@@ -748,7 +751,7 @@ fun LocationPhotosContent(
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
         )
 
         // A full-screen host gets the back button over the hero, then the floating header with the

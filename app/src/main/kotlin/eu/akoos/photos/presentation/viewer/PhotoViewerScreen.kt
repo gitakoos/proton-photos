@@ -145,6 +145,8 @@ import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.snackbarAboveBars
+import eu.akoos.photos.presentation.common.snackbarObstacle
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import androidx.compose.ui.Alignment
@@ -2830,6 +2832,9 @@ fun PhotoViewerScreen(
         Column(
             modifier = Modifier
                 .onGloballyPositioned { bottomBarBounds = it.boundsInRoot() }
+                // Snackbars (the undo bar of a delete among them) sit above these controls while they
+                // show, and drop to the bottom edge once immersive browsing hides them.
+                .snackbarObstacle()
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(bottom = if (chromeLandscape) 4.dp else 16.dp),
@@ -3070,20 +3075,21 @@ fun PhotoViewerScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = ViewerTextPillPadding),
+                    .padding(horizontal = 24.dp, vertical = ViewerTextPillPadding)
+                    .snackbarObstacle(),
             )
         }
 
         // Bottom-anchored themed snackbar — keeps add-to-album / set-as-cover
         // confirmations + delete-failure errors inside the app's visual language
         // instead of the OS Toast popup that ignored our theme + sat below the
-        // navigation bar.
+        // navigation bar. Placed like the app-wide undo bar: above the bottom controls
+        // while they show, at the bottom edge while they are hidden.
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(24.dp),
         )
     }
 

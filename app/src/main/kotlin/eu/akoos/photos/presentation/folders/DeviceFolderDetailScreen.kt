@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.folders
 
+import eu.akoos.photos.presentation.common.snackbarObstacle
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.app.Activity
 import android.net.Uri
 import android.os.Build
@@ -466,7 +468,7 @@ fun DeviceFolderDetailScreen(
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
         )
     }
     val orderSavedMsg = stringResource(R.string.arrange_saved)
@@ -1571,6 +1573,7 @@ private fun BoxScope.DeviceFolderScrollTopPill(
             icon = Icons.Default.KeyboardArrowUp,
             contentDescription = stringResource(R.string.cd_scroll_to_top),
             onClick = onClick,
+            modifier = Modifier.snackbarObstacle(),
             diameter = 40.dp,
             iconSize = 24.dp,
             background = PillBg,

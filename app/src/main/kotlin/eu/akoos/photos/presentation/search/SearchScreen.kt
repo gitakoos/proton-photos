@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
+import eu.akoos.photos.presentation.common.snackbarObstacle
 import android.app.Activity
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -636,7 +638,8 @@ fun SearchScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(end = 24.dp, bottom = 36.dp),
+                    .padding(end = 24.dp, bottom = 36.dp)
+                    .snackbarObstacle(),
                 diameter = 52.dp,
                 iconSize = 22.dp,
                 // Opaque while lit: the tinted fill alone would let the photos show through.
@@ -1614,7 +1617,7 @@ private fun BoxScope.SearchSelectionLayer(
 
     eu.akoos.photos.presentation.common.ThemedSnackbarHost(
         snackbarHostState,
-        modifier = Modifier.align(Alignment.BottomCenter),
+        modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
     )
 }
 

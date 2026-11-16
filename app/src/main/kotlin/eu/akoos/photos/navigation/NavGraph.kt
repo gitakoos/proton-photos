@@ -169,8 +169,6 @@ import eu.akoos.photos.presentation.news.NewsScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewHistoryScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewScreen
 import javax.inject.Inject
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -179,6 +177,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ThemedSnackbarHost
+import eu.akoos.photos.presentation.common.LocalSnackbarClearance
+import eu.akoos.photos.presentation.common.SnackbarClearance
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.presentation.common.UndoBarViewModel
 import kotlinx.coroutines.withTimeoutOrNull
@@ -704,11 +705,15 @@ fun NavGraph(
         }
     }
 
+    // The bottom bars of whichever screen is up report here, so no snackbar (the undo bar included)
+    // lands on a control the next tap was meant for.
+    val snackbarClearance = remember { SnackbarClearance() }
     Box(modifier = Modifier.fillMaxSize()) {
     CompositionLocalProvider(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalCoverThumbnailRequester provides coverThumbnailRequester,
         LocalViewerReturnKey provides viewerReturnKey,
+        LocalSnackbarClearance provides snackbarClearance,
     ) {
     // Routes that open with their own full-width slide from the side (Search, the third tab of the dock), so
     // the screen behind them holds still and is covered or uncovered by it, instead of moving too.
@@ -2350,13 +2355,16 @@ fun NavGraph(
 
         // One app-wide undo bar: any screen's reversible action shows here, over whatever route is
         // on top, and a route change consumes it so it never lingers or re-appears elsewhere.
-        UndoSnackbarHost(
-            navController = navController,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 24.dp),
-        )
+        // Above the screen's own bottom bar when it shows one (the viewer's controls, the dock, the
+        // selection drawer), so deleting one photo after another never taps Undo by mistake.
+        CompositionLocalProvider(LocalSnackbarClearance provides snackbarClearance) {
+            UndoSnackbarHost(
+                navController = navController,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .snackbarAboveBars(24.dp),
+            )
+        }
     }
 }
 

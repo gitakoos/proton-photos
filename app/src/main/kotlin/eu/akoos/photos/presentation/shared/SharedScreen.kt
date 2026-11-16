@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.shared
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -169,7 +170,6 @@ fun SharedScreen(
     // No background of its own: the page under the floating header paints it, so the header and
     // the content read as one surface.
     Box(modifier = Modifier.fillMaxSize()) {
-        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
         PullToRefreshBox(
             isRefreshing = state.isLoading,
             onRefresh = { viewModel.pullRefresh() },
@@ -310,6 +310,12 @@ fun SharedScreen(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
+
+        // Last in the box so it draws over the grid, and clear of the navigation bar.
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+            snackbarHost,
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
+        )
     }
 
     BackHandler(enabled = state.isSelectionMode) { viewModel.clearSelection() }

@@ -652,6 +652,8 @@ private fun SelectionDrawerBody(
 
     Column(
         modifier = Modifier
+            // Every snackbar keeps above the drawer, at rest and opened, so none lands on its buttons.
+            .snackbarObstacle()
             .fillMaxWidth()
             // A shadow lifts the sheet off the grid instead of a hairline border, matching the borderless
             // elevated sheets the rest of the app uses (the modal bottom sheets and the import bars).

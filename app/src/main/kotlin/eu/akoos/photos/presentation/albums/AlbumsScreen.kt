@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -996,8 +997,7 @@ fun AlbumsScreen(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(96.dp),
         )
     }
 

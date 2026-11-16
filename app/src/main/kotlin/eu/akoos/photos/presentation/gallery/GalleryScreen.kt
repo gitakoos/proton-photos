@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -1537,8 +1538,7 @@ fun GalleryScreen(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(96.dp),
         )
 
         // ── DEBUG heap readout ────────────────────────────────────────────────

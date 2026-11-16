@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.presentation.common.snackbarObstacle
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.app.Activity
 import android.content.Intent
 import androidx.annotation.StringRes
@@ -491,7 +493,10 @@ fun AlbumDetailScreen(
 
         arrangeSession?.let { AlbumArrangeMode(state = state, session = it, viewModel = viewModel) }
 
-        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+            snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
+        )
     }
 
     AlbumSelectionSheets(
@@ -1292,6 +1297,7 @@ private fun BoxScope.AlbumChrome(
             icon = Icons.Default.KeyboardArrowUp,
             contentDescription = stringResource(R.string.cd_scroll_to_top),
             onClick = { scope.launch { gridState.animateScrollToItem(0) } },
+            modifier = Modifier.snackbarObstacle(),
             diameter = 40.dp,
             iconSize = 24.dp,
             background = PillBg,

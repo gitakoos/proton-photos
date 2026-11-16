@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.presentation.common.snackbarObstacle
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.datastore.preferences.core.edit
@@ -1418,7 +1419,12 @@ internal fun BottomDock(
     val frac = (position - lower).coerceIn(0f, 1f)
     val hlX = lerp(tabX[lower], tabX[upper], frac)
     val hlW = lerp(tabW[lower], tabW[upper], frac)
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Row(
+        // A snackbar sits above the dock rather than on its tabs.
+        modifier = Modifier.snackbarObstacle(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Box(
             modifier = Modifier
                 .pillSurface(PillBgOpaque, pillShape, border = PillBorder)
