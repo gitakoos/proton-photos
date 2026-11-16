@@ -67,6 +67,9 @@ enum class SyncStatus {
  *   Drive copy was then removed (from this app or anywhere else) while the device file stayed. The
  *   folder backup leaves such a photo alone, so a deliberate removal is not undone by the next pass;
  *   an explicit back-up or album add replaces the mark and uploads it again.
+ * - [CANCELLED]: not a reason to upload either: the user cancelled this photo's "back up now" from the
+ *   Activity screen. Kept with the row, so neither a restart's claim recovery nor reconcile's stranded
+ *   intent recovery nor the folder backup uploads it again; asking for it again replaces the mark.
  */
 object QueueSource {
     const val MANUAL = "MANUAL"
@@ -74,6 +77,7 @@ object QueueSource {
     const val ALBUM_ADD = "ALBUM_ADD"
     const val EDITOR = "EDITOR"
     const val REMOVED_FROM_DRIVE = "REMOVED_FROM_DRIVE"
+    const val CANCELLED = "CANCELLED"
 
     /**
      * True when the row is up for upload because the automatic folder backup put it there, rather

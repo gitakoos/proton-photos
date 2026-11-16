@@ -145,8 +145,11 @@ interface SyncStateRepository {
      *  row. Returns the rows changed. Called from the user-cancel path only. */
     suspend fun clearManualQueue(): Int
 
-    /** [clearManualQueue] for the one photo [localUri]: a single cancelled "back up now" upload. A row
-     *  claimed UPLOADING right now only loses its queued flag (source kept), so a restart after a process
-     *  death never uploads it again, while the claim release still re-queues it under its own source. */
+    /** A single cancelled "back up now" upload of [localUri]: de-queued and marked `QueueSource.CANCELLED`,
+     *  claimed or not, so no claim release, restart recovery or reconcile queues it again until the user
+     *  asks. Never touches a SYNCED row. Returns the rows changed. */
     suspend fun clearManualQueueFor(localUri: String): Int = 0
+
+    /** Puts the `QueueSource.CANCELLED` mark back on [localUri] after a write that cleared the queue columns. */
+    suspend fun keepCancelled(localUri: String) {}
 }

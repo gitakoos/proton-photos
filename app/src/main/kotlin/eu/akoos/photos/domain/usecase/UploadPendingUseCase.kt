@@ -212,9 +212,10 @@ class UploadPendingUseCase @Inject constructor(
      *
      * What happens next follows [requestStop]: a manual "back up now" photo is de-queued and waits
      * until the user asks again, while an automatic folder backup or an album add keeps its queued
-     * intent and is taken up by the next backup run. The de-queue is guarded so it never touches an
-     * UPLOADING claim or a SYNCED row; the running item's own row is de-queued once its claim is
-     * released (see [settleCancelledItem]).
+     * intent and is taken up by the next backup run. The manual photo is marked
+     * [QueueSource.CANCELLED] at once, claimed or not, so neither the claim release nor a restart's
+     * claim recovery nor reconcile queues it again; a SYNCED row is never touched (see
+     * [settleCancelledItem]).
      */
     fun cancelItem(localUri: String) {
         itemCancels.cancel(localUri)
@@ -1333,9 +1334,14 @@ class UploadPendingUseCase @Inject constructor(
                 val source = syncStateRepo.getQueueSource(localUri)
                     ?: eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER
                 syncStateRepo.upsert(current.copy(status = SyncStatus.LOCAL_ONLY), userId)
-                // markQueued is a per-row UPDATE, so it re-stamps the queue columns the upsert just
-                // cleared; running it after the upsert lands the flag on the now-LOCAL_ONLY row.
-                syncStateRepo.markQueued(localUri, source, System.currentTimeMillis())
+                if (source == eu.akoos.photos.domain.entity.QueueSource.CANCELLED) {
+                    // The user cancelled this photo: it stays off the queue, with its mark kept.
+                    syncStateRepo.keepCancelled(localUri)
+                } else {
+                    // markQueued is a per-row UPDATE, so it re-stamps the queue columns the upsert just
+                    // cleared; running it after the upsert lands the flag on the now-LOCAL_ONLY row.
+                    syncStateRepo.markQueued(localUri, source, System.currentTimeMillis())
+                }
             }
         }.onFailure { e -> Log.w(UPLOAD_TAG, "Failed to release upload claim for $localUri: ${e.message}") }
     }

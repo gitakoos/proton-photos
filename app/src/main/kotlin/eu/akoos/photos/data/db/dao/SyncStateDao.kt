@@ -395,23 +395,20 @@ interface SyncStateDao {
     )
     suspend fun clearManualQueue(): Int
 
-    /** [clearManualQueue] for the one photo [localUri], for a single upload the user cancelled. */
-    @Query(
-        "UPDATE sync_state SET queued = 0, queueSource = NULL " +
-            "WHERE localUri = :localUri AND queueSource = 'MANUAL' AND status NOT IN ('UPLOADING','SYNCED')"
-    )
-    suspend fun clearManualQueueFor(localUri: String): Int
-
     /**
-     * Takes a cancelled "back up now" photo off the queue while its upload is claimed (UPLOADING), keeping
-     * its source, so a claim a process death strands is not uploaded again once the restart recovers it.
-     * The claim release re-queues it under that source, and [clearManualQueueFor] then clears it.
+     * Takes the one "back up now" photo [localUri] the user cancelled off the queue and marks it
+     * `QueueSource.CANCELLED`, claimed (UPLOADING) or not, so nothing queues it again until the user asks:
+     * not the claim release, not a restart's claim recovery, not reconcile. A SYNCED row is left alone.
      */
     @Query(
-        "UPDATE sync_state SET queued = 0 " +
-            "WHERE localUri = :localUri AND queueSource = 'MANUAL' AND status = 'UPLOADING'"
+        "UPDATE sync_state SET queued = 0, queueSource = 'CANCELLED' " +
+            "WHERE localUri = :localUri AND queueSource = 'MANUAL' AND status != 'SYNCED'"
     )
-    suspend fun unqueueClaimedManual(localUri: String): Int
+    suspend fun cancelManualFor(localUri: String): Int
+
+    /** Puts the `QueueSource.CANCELLED` mark back on [localUri] after a write that cleared the queue columns. */
+    @Query("UPDATE sync_state SET queued = 0, queueSource = 'CANCELLED' WHERE localUri = :localUri AND status != 'SYNCED'")
+    suspend fun keepCancelled(localUri: String): Int
 
     /** The reason a row was queued (a QueueSource constant), or null when it carries none. Read so a
      *  failure demotion can re-queue the row under its ORIGINAL source instead of guessing one. */

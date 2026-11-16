@@ -603,17 +603,16 @@ class SyncStateDaoTest {
         dao.upsert(entity("uri://auto", status = SyncStatus.UPLOADING))
         dao.markQueued("uri://auto", source = "AUTO_FOLDER", at = 5L)
 
-        // The user cancels while both are claimed; the guarded de-queue leaves a claimed row alone.
-        assertEquals(0, dao.clearManualQueueFor("uri://cancelled"))
-        assertEquals(1, dao.unqueueClaimedManual("uri://cancelled"))
-        assertEquals(0, dao.unqueueClaimedManual("uri://auto"))
+        // The user cancels while both are claimed; only the manual one is marked.
+        assertEquals(1, dao.cancelManualFor("uri://cancelled"))
+        assertEquals(0, dao.cancelManualFor("uri://auto"))
         // The process dies here; the next start recovers the stranded claims.
         dao.resetStaleUploadingClaims(SyncStatus.UPLOADING.name, SyncStatus.LOCAL_ONLY.name)
 
         val cancelled = dao.getByUri("uri://cancelled")!!
         assertEquals(SyncStatus.LOCAL_ONLY, cancelled.status)
         assertEquals(false, cancelled.queued)
-        assertEquals("MANUAL", cancelled.queueSource)
+        assertEquals("CANCELLED", cancelled.queueSource)
         val auto = dao.getByUri("uri://auto")!!
         assertTrue("an automatic backup keeps its queued intent", auto.queued)
     }

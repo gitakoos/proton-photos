@@ -845,7 +845,7 @@ class UploadPipelineIntegrationTest {
             assertEquals(SyncStatus.LOCAL_ONLY, it.status)
             assertNull(it.cloudFileId)
             assertEquals(false, it.queued)
-            assertNull(it.queueSource)
+            assertEquals(QueueSource.CANCELLED, it.queueSource)
         }
         // Not counted as attempted, so the run never reads as failed and is never retried for it.
         assertEquals(2, result.attempted)
@@ -908,6 +908,43 @@ class UploadPipelineIntegrationTest {
             assertEquals(SyncStatus.LOCAL_ONLY, it.status)
             assertEquals(false, it.queued)
         }
+    }
+
+    @Test
+    fun `a cancelled manual upload a process death stranded stays off the queue through reconcile`() = runTest {
+        seedBulkUploadGates(folder = "Camera")
+        // One out of the backup folders (only the stranded-intent recovery could queue it) and one inside.
+        val outside = "content://media/cancel-out"
+        val inside = "content://media/cancel-in"
+        local.add(localItem(outside, bucket = "Downloads"))
+        local.add(localItem(inside, bucket = "Camera"))
+        for (uri in listOf(outside, inside)) {
+            syncRepo.upsert(localOnlyRow(uri), userId)
+            syncRepo.markQueued(uri, QueueSource.MANUAL, System.currentTimeMillis() - 60_000L)
+            assertEquals(1, syncRepo.claimForUpload(uri))
+            // The user taps the row's X while it is claimed, and the process dies before the release.
+            syncRepo.clearManualQueueFor(uri)
+        }
+
+        // The next start recovers the stranded claims, then reconcile runs, twice.
+        syncRepo.resetStaleUploadingClaims()
+        reconcileUseCase(userId).collectToEnd()
+        reconcileUseCase(userId).collectToEnd()
+        uploadUseCase(userId)
+
+        for (uri in listOf(outside, inside)) {
+            row(uri)!!.let {
+                assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+                assertEquals("a cancelled photo is not queued again: $uri", false, it.queued)
+                assertEquals(QueueSource.CANCELLED, it.queueSource)
+            }
+        }
+        assertTrue(cloud.uploadedItems.isEmpty())
+
+        // Asking again replaces the mark and backs it up.
+        forceUploadUseCase.forceUpload(userId, listOf(outside))
+        uploadUseCase(userId)
+        assertEquals(SyncStatus.SYNCED, row(outside)!!.status)
     }
 
     @Test
