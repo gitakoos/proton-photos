@@ -208,7 +208,38 @@ class SdkRoutingTest {
             fail("expected the unknown outcome to pass through")
         } catch (e: SdkOutcomeUnknownException) {
             assertEquals(0, fallbackCalls)
-            assertEquals(1, SdkDiagnostics.fallbackCount("upload"))
+            assertEquals(0, SdkDiagnostics.fallbackCount("upload"))
+            assertEquals(1, SdkDiagnostics.unconfirmedCount("upload"))
+            assertTrue(SdkDiagnostics.snapshot(), SdkDiagnostics.snapshot().startsWith("upload: sdk=0 fallback=0 unconfirmed=1"))
         }
+    }
+
+    @Test
+    fun `every kind of SDK failure is tallied by classes and codes, without its message`() = runTest {
+        val storage = me.proton.drive.sdk.SdkHttpClientException.Http(400, null, null, "block of IMG_1234.jpg refused")
+        repeat(3) { runRouted<String>("upload", on = true, viaSdk = { throw storage }, fallback = { "own" }) }
+        runRouted<String>("upload", on = true, viaSdk = { throw java.io.IOException("reset") }, fallback = { "own" })
+        runRouted("upload", on = true, viaSdk = { "sdk" }, fallback = { "own" })
+
+        val snapshot = SdkDiagnostics.snapshot()
+
+        assertEquals(1, SdkDiagnostics.sdkCount("upload"))
+        assertEquals(4, SdkDiagnostics.fallbackCount("upload"))
+        assertTrue(snapshot, snapshot.contains("upload: sdk=1 fallback=4\n  3 x Http http=400\n  1 x IOException\n"))
+        assertTrue(snapshot, snapshot.endsWith("lastFallback=upload IOException: reset"))
+        assertFalse(snapshot, snapshot.substringBefore("lastFallback=").contains("IMG_1234"))
+    }
+
+    @Test
+    fun `the tally of one route keeps its first kinds and puts the rest under other`() = runTest {
+        for (code in 1..8) {
+            val http = me.proton.drive.sdk.SdkHttpClientException.Http(400 + code, null, null, null)
+            runRouted<String>("download", on = true, viaSdk = { throw http }, fallback = { "own" })
+        }
+
+        val lines = SdkDiagnostics.snapshot().lines()
+
+        assertEquals("download: sdk=0 fallback=8", lines[0])
+        assertEquals((1..6).map { "  1 x Http http=${400 + it}" } + "  2 x other", lines.subList(1, 8))
     }
 }

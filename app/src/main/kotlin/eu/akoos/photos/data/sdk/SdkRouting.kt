@@ -145,13 +145,15 @@ internal suspend fun <T> runRouted(
     } catch (e: VirtualMachineError) {
         throw e
     } catch (e: SdkOutcomeUnknownException) {
-        SdkDiagnostics.recordFallback(label, describeSdkFailure(e))
+        // Not a fallback: nothing runs in its place, so it is counted apart from the own-path runs.
+        SdkDiagnostics.recordUnconfirmed(label, describeSdkFailure(e), describeSdkFailure(e, withMessages = false))
         throw e
     } catch (e: Throwable) {
-        SdkDiagnostics.recordFallback(label, describeSdkFailure(e))
-        // The log carries codes only: no message text, which can hold what a user named.
+        // The tally and the log carry codes only: no message text, which can hold what a user named.
+        val codes = describeSdkFailure(e, withMessages = false)
+        SdkDiagnostics.recordFallback(label, describeSdkFailure(e), codes)
         runCatching {
-            Log.w("SdkRouting", "$label through the SDK failed, using the app's own path: ${describeSdkFailure(e, withMessages = false)}")
+            Log.w("SdkRouting", "$label through the SDK failed, using the app's own path: $codes")
         }
         return fallback()
     }
