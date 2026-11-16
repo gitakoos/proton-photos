@@ -110,13 +110,26 @@ object LocalFiles {
 
     fun isEncrypted(file: File): Boolean = LocalCryptoFormat.isEncrypted(file)
 
-    /** The plaintext of [file], decrypting it when it is encrypted. Throws when it cannot be read. */
+    /**
+     * The plaintext of [file], decrypting it when it is encrypted. Throws when it cannot be read. The file is opened
+     * once and its form read from that open file, so an encryption in place racing with this read cannot mix them.
+     */
     fun openPlain(context: Context?, file: File): InputStream {
-        if (VaultFiles.plainForm(file)) return FileInputStream(file)
-        val ctx = CacheFiles.contextOf(context) ?: throw LocalKeyUnavailableException(null)
-        val keyring = LocalCrypto.keyringOrNull(ctx) ?: throw LocalKeyUnavailableException(null)
-        return LocalCryptoFormat.openFile(file, keyring).inputStream()
+        if (!file.isFile) throw java.io.FileNotFoundException(file.name)
+        val opened = LocalCryptoFormat.openOnce(file) ?: throw LocalFileUnreadableException(file)
+        if (opened.form == LocalFileForm.PLAIN) return opened.rawStream()
+        try {
+            val ctx = CacheFiles.contextOf(context) ?: throw LocalKeyUnavailableException(null)
+            val keyring = LocalCrypto.keyringOrNull(ctx) ?: throw LocalKeyUnavailableException(null)
+            return opened.reader(keyring).inputStream()
+        } catch (e: Throwable) {
+            runCatching { opened.close() }
+            throw e
+        }
     }
+
+    @androidx.annotation.VisibleForTesting
+    internal var afterOpenForTest: (() -> Unit)? = null
 
     fun readBytes(context: Context?, file: File): ByteArray = openPlain(context, file).use { it.readBytes() }
 
@@ -127,19 +140,22 @@ object LocalFiles {
      */
     fun openForRead(context: Context?, file: File): InputStream? {
         if (!file.isFile || file.length() <= 0L) return null
-        return when (LocalCryptoFormat.formOf(file)) {
-            LocalFileForm.PLAIN -> runCatching { FileInputStream(file) }.getOrNull()
-            LocalFileForm.UNKNOWN -> null
-            LocalFileForm.ENCRYPTED -> {
-                val ctx = CacheFiles.contextOf(context) ?: return null
-                try {
-                    val stream = openPlain(ctx, file)
-                    if (areaOf(ctx, file)?.regenerable == true) CacheFiles.droppingOnDamage(file, stream) else stream
-                } catch (e: Exception) {
-                    if (areaOf(ctx, file)?.regenerable == true) CacheFiles.dropIfUnreadable(file, e)
-                    null
-                }
-            }
+        // Opened once and judged from that open file, so an encryption in place cannot slip in between.
+        val opened = LocalCryptoFormat.openOnce(file) ?: return null
+        afterOpenForTest?.invoke()
+        if (opened.form == LocalFileForm.PLAIN) return opened.rawStream()
+        val ctx = CacheFiles.contextOf(context) ?: run {
+            opened.close()
+            return null
+        }
+        return try {
+            val keyring = LocalCrypto.keyringOrNull(ctx) ?: throw LocalKeyUnavailableException(null)
+            val stream = opened.reader(keyring).inputStream()
+            if (areaOf(ctx, file)?.regenerable == true) CacheFiles.droppingOnDamage(file, stream) else stream
+        } catch (e: Exception) {
+            runCatching { opened.close() }
+            if (areaOf(ctx, file)?.regenerable == true) CacheFiles.dropIfUnreadable(file, e)
+            null
         }
     }
 

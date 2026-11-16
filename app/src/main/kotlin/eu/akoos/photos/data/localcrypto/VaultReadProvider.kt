@@ -148,12 +148,22 @@ class VaultReadProvider : ContentProvider() {
          * deleted, so it is fetched again.
          */
         fun openDecrypted(context: Context, file: File): ParcelFileDescriptor {
-            val plain = try {
-                VaultFiles.plainForm(file)
-            } catch (e: LocalFileUnreadableException) {
+            // The descriptor is opened first and the form read from it, so a plaintext file encrypted in place right
+            // then is handed out as the plaintext it opened, never as its encrypted bytes. Files only ever go from
+            // plaintext to encrypted, so one seen encrypted is opened again by its name.
+            val descriptor = try {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            } catch (e: Exception) {
                 throw FileNotFoundException("file cannot be read now")
             }
-            if (plain) return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val plain = try {
+                plainAt(descriptor, file.length())
+            } catch (e: Exception) {
+                descriptor.close()
+                throw FileNotFoundException("file cannot be read now")
+            }
+            if (plain) return descriptor
+            descriptor.close()
             val reader = try {
                 VaultFiles.openReader(context, file)
             } catch (e: Exception) {
@@ -162,6 +172,16 @@ class VaultReadProvider : ContentProvider() {
             }
             val storage = context.getSystemService(StorageManager::class.java)
             return storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, ReaderCallback(reader), handler)
+        }
+
+        /** Whether the open [descriptor] holds a plaintext file, read from its first bytes without moving it. */
+        private fun plainAt(descriptor: ParcelFileDescriptor, length: Long): Boolean {
+            if (length < LocalCryptoFormat.META_OFFSET) return true
+            // Not closed: the stream does not own the descriptor, which stays open for the reader.
+            val channel = java.io.FileInputStream(descriptor.fileDescriptor).channel
+            val head = java.nio.ByteBuffer.allocate(5)
+            while (head.hasRemaining()) if (channel.read(head, head.position().toLong()) < 0) throw java.io.EOFException()
+            return !LocalCryptoFormat.looksEncrypted(head.array())
         }
 
         fun setDisplayName(fileName: String, name: String) {

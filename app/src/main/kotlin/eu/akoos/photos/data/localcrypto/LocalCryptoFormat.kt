@@ -187,7 +187,7 @@ object LocalCryptoFormat {
     private const val FIXED_HEADER = 4 + 4 + KEY_ID_BYTES + PREFIX_BYTES
     private const val WRAPPED_KEY_BYTES = IV_BYTES + KEY_BYTES + TAG_BYTES
     private const val META_LENGTH_OFFSET = FIXED_HEADER + WRAPPED_KEY_BYTES
-    private const val META_OFFSET = META_LENGTH_OFFSET + 4
+    internal const val META_OFFSET = META_LENGTH_OFFSET + 4
     private const val MAX_META_BYTES = 64 * 1024
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val META_INDEX = -1
@@ -218,6 +218,30 @@ object LocalCryptoFormat {
                 if (looksEncrypted(head)) LocalFileForm.ENCRYPTED else LocalFileForm.PLAIN
             }
         }.getOrDefault(LocalFileForm.UNKNOWN)
+    }
+
+    /**
+     * [file] opened once, with its form read from that same open file: a file encrypted in place by a rename over it
+     * right after can never be read as the plaintext it was, or the other way round. Null when it cannot be opened
+     * or its start cannot be read. The caller closes it.
+     */
+    fun openOnce(file: File): OpenedFile? {
+        val channel = runCatching { java.nio.channels.FileChannel.open(file.toPath(), java.nio.file.StandardOpenOption.READ) }
+            .getOrNull() ?: return null
+        return try {
+            val size = channel.size()
+            val form = if (size < META_OFFSET) {
+                LocalFileForm.PLAIN
+            } else {
+                val head = ByteBuffer.allocate(5)
+                while (head.hasRemaining()) if (channel.read(head, head.position().toLong()) < 0) throw EOFException()
+                if (looksEncrypted(head.array())) LocalFileForm.ENCRYPTED else LocalFileForm.PLAIN
+            }
+            OpenedFile(form, channel)
+        } catch (e: Exception) {
+            runCatching { channel.close() }
+            null
+        }
     }
 
     fun keyIdHex(id: ByteArray): String = id.joinToString("") { "%02x".format(it) }
@@ -494,6 +518,31 @@ interface RandomSource : Closeable {
     val size: Long
 
     fun readFully(position: Long, into: ByteArray, offset: Int, length: Int)
+}
+
+/** A file opened once by [LocalCryptoFormat.openOnce]: its [form], and its bytes read from the same open file. */
+class OpenedFile internal constructor(val form: LocalFileForm, private val channel: java.nio.channels.FileChannel) : Closeable {
+
+    /** The bytes as they are, from the start (for a plaintext file). Closing the stream closes the file. */
+    fun rawStream(): InputStream = java.nio.channels.Channels.newInputStream(channel.position(0))
+
+    /** A reader of the plaintext of an encrypted file; closing it closes the file. */
+    fun reader(keys: MasterKeys): LocalFileReader = LocalFileReader(ChannelSource(channel), keys)
+
+    override fun close() = channel.close()
+}
+
+internal class ChannelSource(private val channel: java.nio.channels.FileChannel) : RandomSource {
+    override val size: Long = channel.size()
+
+    override fun readFully(position: Long, into: ByteArray, offset: Int, length: Int) {
+        val buffer = ByteBuffer.wrap(into, offset, length)
+        while (buffer.hasRemaining()) {
+            if (channel.read(buffer, position + (buffer.position() - offset)) < 0) throw EOFException()
+        }
+    }
+
+    override fun close() = channel.close()
 }
 
 internal class FileSource(file: File) : RandomSource {

@@ -269,6 +269,28 @@ class CacheFilesTest {
     }
 
     @Test
+    fun `a plain cache file encrypted in place while a reader opens it still reads as the plaintext it opened`() {
+        val file = File(thumbs, "thumb_race.jpg")
+        val plain = Random(30).nextBytes(100_000)
+        file.writeBytes(plain)
+        LocalFiles.afterOpenForTest = {
+            // The start-up encryption in place renames its encrypted copy over the file right after the open.
+            val temp = File(thumbs, ".cache_race.tmp")
+            FileOutputStream(temp).use { out -> LocalCryptoFormat.encryptingStream(out, sealing()).use { it.write(plain) } }
+            java.nio.file.Files.move(temp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        try {
+            val read = LocalFiles.openForRead(context, file)!!.use { it.readBytes() }
+
+            assertArrayEquals(plain, read)
+            assertTrue(LocalFiles.isEncrypted(file))
+        } finally {
+            LocalFiles.afterOpenForTest = null
+            file.delete()
+        }
+    }
+
+    @Test
     fun `a vault file that does not open is never deleted by a reader`() {
         val vault = VaultFiles.vaultDir(context).apply { mkdirs() }
         val file = File(vault, "kept.jpg")
