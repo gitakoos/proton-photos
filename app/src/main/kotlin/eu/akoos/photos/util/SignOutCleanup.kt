@@ -30,6 +30,7 @@ import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.data.localcrypto.VaultFiles
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.worker.AlbumDownloadWorker
@@ -120,13 +121,13 @@ object SignOutCleanup {
     fun consumeUnfinishedSignIn(userId: String): Boolean = unfinishedSignIns.remove(userId)
 
     suspend fun markPending(context: Context, userId: String) {
-        context.settingsDataStore.edit { p ->
+        context.settingsDataStoreStrict.edit { p ->
             p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() + userId
         }
     }
 
     suspend fun clearPending(context: Context, userId: String) {
-        context.settingsDataStore.edit { p ->
+        context.settingsDataStoreStrict.edit { p ->
             val left = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() - userId
             if (left.isEmpty()) p.remove(SettingsKeys.SIGN_OUT_CLEANUP_PENDING)
             else p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = left

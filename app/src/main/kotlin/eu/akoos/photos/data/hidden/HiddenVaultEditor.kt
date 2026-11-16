@@ -32,7 +32,8 @@ import eu.akoos.photos.data.db.dao.LocalTagDao
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.localcrypto.SettingsWriteRefusedException
+import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,6 +74,11 @@ class HiddenVaultEditor @Inject constructor(
 
     private val _moves = MutableStateFlow<Map<String, VaultMove>>(emptyMap())
 
+    /** Where the records are written; a test stands in a store that refuses writes. */
+    @androidx.annotation.VisibleForTesting
+    internal var recordStoreOverride: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>? = null
+    private val recordStore get() = recordStoreOverride ?: context.settingsDataStoreStrict
+
     /**
      * Where every vault photo moved here has ended up, for the screens still holding it under the uri
      * it had. See [HiddenVaultMoves].
@@ -95,8 +101,7 @@ class HiddenVaultEditor @Inject constructor(
         val extension = extensionOf(uri)
         val newUri = hiddenStorage.rename(uri, newName) ?: return null
         val displayName = HiddenVaultRecords.recordedName(newName, extension)
-        applyMove(uri, newUri, displayName)
-        return newUri
+        return if (applyMove(uri, newUri, displayName)) newUri else null
     }
 
     /**
@@ -110,7 +115,13 @@ class HiddenVaultEditor @Inject constructor(
         val extension = extensionOf(uri)
         val copyUri = hiddenStorage.duplicate(uri) ?: return null
         val displayName = HiddenVaultRecords.recordedName(newName, extension)
-        applyRecords(change = { records -> HiddenVaultRecords.copied(records, uri, copyUri, displayName) })
+        try {
+            applyRecords(change = { records -> HiddenVaultRecords.copied(records, uri, copyUri, displayName) })
+        } catch (e: SettingsWriteRefusedException) {
+            // A copy no record names would sit in the vault unseen: it goes, and the copy is reported as failed.
+            hiddenStorage.delete(copyUri)
+            return null
+        }
         return copyUri
     }
 
@@ -120,11 +131,19 @@ class HiddenVaultEditor @Inject constructor(
      *
      * The half of [copy] that turns bytes in the vault directory into a photo the vault knows about,
      * for a caller that produced those bytes itself rather than by duplicating a file.
+     *
+     * Throws [SettingsWriteRefusedException] when the record could not be saved, after removing the copy no
+     * record would name; the photo at [sourceUri] is untouched.
      */
     suspend fun adoptCopy(sourceUri: String, copyUri: String, displayName: String) {
-        applyRecords(
-            change = { records -> HiddenVaultRecords.copied(records, sourceUri, copyUri, displayName) },
-        )
+        try {
+            applyRecords(
+                change = { records -> HiddenVaultRecords.copied(records, sourceUri, copyUri, displayName) },
+            )
+        } catch (e: SettingsWriteRefusedException) {
+            hiddenStorage.delete(copyUri)
+            throw e
+        }
     }
 
     /**
@@ -139,8 +158,7 @@ class HiddenVaultEditor @Inject constructor(
     suspend fun restampCaptureTime(uri: String, captureTimeMs: Long): String? {
         val newUri = hiddenStorage.restampCaptureTime(uri, captureTimeMs) ?: return null
         if (newUri == uri) return uri
-        applyMove(uri, newUri, displayName = null)
-        return newUri
+        return if (applyMove(uri, newUri, displayName = null)) newUri else null
     }
 
     /**
@@ -156,14 +174,27 @@ class HiddenVaultEditor @Inject constructor(
      * keyed by the uri already answers under the one the photo keeps, and walking them anyway would take
      * each answer off the photo and put it back on the same photo — which for the categories, whose move
      * ends by dropping the row the old uri named, would be the choice deleted.
+     *
+     * False when the records could not be saved: the file is then moved back to [oldUri], which the records
+     * still name, so the photo keeps its original name and its Drive pairing.
      */
-    private suspend fun applyMove(oldUri: String, newUri: String, displayName: String?) =
+    private suspend fun applyMove(oldUri: String, newUri: String, displayName: String?): Boolean =
         // The file has already moved by the time this runs, so the records naming it are the only
         // thing that can still find it. Both callers live on a screen scope, and returning from the
         // move is a cancellation point, so a back press between the two left the photo under a name
         // nothing referred to: its original filename and its Drive pairing were both unrecoverable.
         // Shielding the catch-up is what makes leaving the screen safe, exactly as the EXIF walk does.
-        withContext(NonCancellable) { applyMoveRecords(oldUri, newUri, displayName) }
+        withContext(NonCancellable) {
+            try {
+                applyMoveRecords(oldUri, newUri, displayName)
+                true
+            } catch (e: SettingsWriteRefusedException) {
+                if (oldUri != newUri && !hiddenStorage.moveBack(newUri, oldUri)) {
+                    Log.w(TAG, "move: records not saved and the file could not be moved back")
+                }
+                false
+            }
+        }
 
     private suspend fun applyMoveRecords(oldUri: String, newUri: String, displayName: String?) {
         val moved = oldUri != newUri
@@ -214,7 +245,9 @@ class HiddenVaultEditor @Inject constructor(
         change: (VaultRecords) -> VaultRecords,
         alsoEdit: (MutablePreferences) -> Unit = {},
     ) {
-        context.settingsDataStore.edit { prefs ->
+        // Strict: these records are the only thing that finds a vault file, so a write that is not saved
+        // must reach the callers above, which undo the file half.
+        recordStore.edit { prefs ->
             val updated = change(
                 VaultRecords(
                     index = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),

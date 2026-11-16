@@ -27,11 +27,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.dao.LocalTagDao
+import eu.akoos.photos.data.localcrypto.SettingsWriteRefusedException
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.FolderCoverMap
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.verify
 import io.mockk.mockk
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -39,6 +42,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -308,5 +312,75 @@ class HiddenVaultEditorTest {
 
         assertEquals(setOf(oldUri), index())
         assertEquals(setOf("$oldUri|IMG_0042.jpg"), names())
+    }
+    // ── a record write that is not saved ────────────────────────────────────────────────────────
+
+    /** The records store answering reads as it is, while every write is refused, as with a silent Keystore. */
+    private fun recordWritesRefused() {
+        val real = context.settingsDataStore
+        editor.recordStoreOverride = object : androidx.datastore.core.DataStore<Preferences> {
+            override val data = real.data
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
+                throw SettingsWriteRefusedException("settings: key not available, change not written", null)
+        }
+    }
+
+    @Test
+    fun `a rename whose records are not saved moves the file back under its old name`() = runBlocking {
+        seedRecordsFor(oldUri)
+        storageRenamesTo(newUri)
+        coEvery { storage.moveBack(newUri, oldUri) } returns true
+        recordWritesRefused()
+
+        assertNull("the rename is reported as failed", editor.rename(oldUri, "Beach trip"))
+
+        coVerify(exactly = 1) { storage.moveBack(newUri, oldUri) }
+        assertEquals("the records still name the file, now back where they say", setOf(oldUri), index())
+        assertEquals(setOf("$oldUri|IMG_0042.jpg"), names())
+        assertTrue(editor.moves.value.isEmpty())
+    }
+
+    @Test
+    fun `a date edit whose records are not saved moves the file back`() = runBlocking {
+        seedRecordsFor(oldUri)
+        storageRestampsTo(newUri)
+        coEvery { storage.moveBack(newUri, oldUri) } returns true
+        recordWritesRefused()
+
+        assertNull(editor.restampCaptureTime(oldUri, 1_783_507_135_000L))
+
+        coVerify(exactly = 1) { storage.moveBack(newUri, oldUri) }
+        assertEquals(setOf(oldUri), index())
+    }
+
+    @Test
+    fun `a copy whose records are not saved is removed, and the source stays`() = runBlocking {
+        seedRecordsFor(oldUri)
+        coEvery { storage.duplicate(oldUri) } returns copyUri
+        every { storage.delete(copyUri) } returns true
+        recordWritesRefused()
+
+        assertNull(editor.copy(oldUri, "Beach trip"))
+
+        verify(exactly = 1) { storage.delete(copyUri) }
+        verify(exactly = 0) { storage.delete(oldUri) }
+        assertEquals(setOf(oldUri), index())
+    }
+
+    @Test
+    fun `an adopted copy whose records are not saved is removed and the caller is told`() = runBlocking {
+        seedRecordsFor(oldUri)
+        every { storage.delete(copyUri) } returns true
+        recordWritesRefused()
+
+        try {
+            editor.adoptCopy(oldUri, copyUri, "Beach trip.jpg")
+            fail("the refusal has to reach the caller")
+        } catch (_: SettingsWriteRefusedException) {
+        }
+
+        verify(exactly = 1) { storage.delete(copyUri) }
+        verify(exactly = 0) { storage.delete(oldUri) }
+        assertEquals(setOf(oldUri), index())
     }
 }

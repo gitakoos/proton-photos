@@ -145,7 +145,7 @@ class EncryptedPreferencesTest {
         val fresh = LocalKeyring(File(tmp.root, "keys"), wrapper)
         val sink = Buffer()
         val failure = runCatching { runBlocking { serializer(fresh).writeTo(sample, sink) } }.exceptionOrNull()
-        assertTrue(failure is IOException)
+        assertTrue(failure is SettingsWriteRefusedException)
         assertEquals("nothing reaches the file", 0L, sink.size)
     }
 

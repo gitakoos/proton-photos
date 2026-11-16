@@ -3065,4 +3065,5 @@
     <string name="settings_held_back_confirm_title">Želite nadaljevati brez nastavitev?</string>
     <string name="settings_held_back_confirm_body">Aplikacija se zažene s privzetimi nastavitvami. Fotografije, ki ste jih skrili v oblaku, so lahko spet vidne, dokler se shranjene nastavitve ne odprejo, kar se lahko zgodi tudi pozneje. Zaklep aplikacije ostane vklopljen.</string>
     <string name="settings_held_back_confirm_action">Nadaljuj</string>
+    <string name="settings_change_not_saved">Spremembe nastavitev ni bilo mogoče shraniti. Poskusite znova čez trenutek.</string>
 </resources>

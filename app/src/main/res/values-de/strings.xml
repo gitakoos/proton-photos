@@ -2934,4 +2934,5 @@
     <string name="settings_held_back_confirm_title">Ohne deine Einstellungen fortfahren?</string>
     <string name="settings_held_back_confirm_body">Die App startet mit den Standardeinstellungen. In der Cloud versteckte Fotos können wieder erscheinen, bis sich die aufbewahrten Einstellungen öffnen lassen, was auch später noch geschehen kann. Die App-Sperre bleibt eingeschaltet.</string>
     <string name="settings_held_back_confirm_action">Fortfahren</string>
+    <string name="settings_change_not_saved">Eine Änderung der Einstellungen konnte nicht gespeichert werden. Versuche es gleich noch einmal.</string>
 </resources>

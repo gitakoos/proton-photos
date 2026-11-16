@@ -2933,4 +2933,5 @@
     <string name="settings_held_back_confirm_title">Folytatod a beállításaid nélkül?</string>
     <string name="settings_held_back_confirm_body">Az alkalmazás alapbeállításokkal indul. A felhőben elrejtett fotók újra látszhatnak, amíg a megőrzött beállítások meg nem nyílnak, ami később is megtörténhet. Az alkalmazászár bekapcsolva marad.</string>
     <string name="settings_held_back_confirm_action">Folytatás</string>
+    <string name="settings_change_not_saved">Egy beállításmódosítást nem sikerült menteni. Próbáld újra egy kicsit később.</string>
 </resources>

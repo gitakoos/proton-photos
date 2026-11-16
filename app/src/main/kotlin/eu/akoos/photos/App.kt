@@ -135,6 +135,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         if (!isMainProcess()) return
         // Before any screen reads the settings: whether they are held back, so the lock and the cover fail closed.
         eu.akoos.photos.data.localcrypto.SettingsLock.attach(this)
+        // A settings change that could not be saved encrypted is not saved at all; the user is told so.
+        eu.akoos.photos.data.localcrypto.SettingsWriteRefusals.show = {
+            android.os.Handler(mainLooper).post {
+                android.widget.Toast.makeText(this, R.string.settings_change_not_saved, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
         // First: clears scratch plaintext of an earlier process, then encrypts what an earlier version left plain.
         localEncryption.start()
         delegatingFactory.addFactory(workerFactory)

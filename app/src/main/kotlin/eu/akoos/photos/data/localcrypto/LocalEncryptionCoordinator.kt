@@ -38,6 +38,7 @@ import eu.akoos.photos.data.mlsync.EnvelopeSealKeys
 import eu.akoos.photos.data.mlsync.MlSnapshotEnvelope
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import eu.akoos.photos.data.transfer.transferHistoryDataStore
 import eu.akoos.photos.util.HiddenCaptureTime
 import eu.akoos.photos.util.mimeFromPath
@@ -106,6 +107,7 @@ class LocalEncryptionCoordinator @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val keysLock = Mutex()
+    private val heldBackRetry = Mutex()
     private val _state = MutableStateFlow(LocalEncryptionState())
     val state: StateFlow<LocalEncryptionState> = _state.asStateFlow()
 
@@ -214,22 +216,33 @@ class LocalEncryptionCoordinator @Inject constructor(
         refresh()
     }
 
-    /** The settings held back ([SettingsLock]): read the file again and merge back every copy whose key opens now. */
-    suspend fun retryHeldBackSettings() = withContext(Dispatchers.IO) {
-        runCatching { context.settingsDataStore.data.first() }
-        runCatching { restoreLockedStores() }.onFailure { logFailure("locked settings", it) }
-        SettingsLock.refresh()
+    /**
+     * The settings held back ([SettingsLock]): read the file again and merge back every copy whose key opens now.
+     * One try at a time: the cover asks every few seconds, and a merge waits for a busy Keystore longer than that.
+     */
+    suspend fun retryHeldBackSettings() {
+        if (!heldBackRetry.tryLock()) return
+        try {
+            withContext(Dispatchers.IO) {
+                runCatching { context.settingsDataStore.data.first() }
+                runCatching { restoreLockedStores() }.onFailure { logFailure("locked settings", it) }
+                SettingsLock.refresh()
+            }
+        } finally {
+            heldBackRetry.unlock()
+        }
     }
 
     /**
      * The user chose to go on without the settings set aside. Whether the app lock was on is among what was set
-     * aside, so it is kept on; the copies stay and still merge back once their key opens.
+     * aside, so it is kept on; the copies stay and still merge back once their key opens. When that cannot be
+     * saved the cover stays, so the lock never reads off on an empty file.
      */
     suspend fun continueWithoutHeldBackSettings() = withContext(Dispatchers.IO) {
-        runCatching {
-            context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_ENABLED] = true }
-        }.onFailure { logFailure("app lock", it) }
-        SettingsLock.continueWithout()
+        val saved = runCatching {
+            context.settingsDataStoreStrict.edit { it[SettingsKeys.APP_LOCK_ENABLED] = true }
+        }.onFailure { logFailure("app lock", it) }.isSuccess
+        if (saved) SettingsLock.continueWithout() else SettingsWriteRefusals.report(SettingsLock.STORE_NAME)
     }
 
     /** The user set the Hidden password to [password], or removed it (null): the password copies follow it. */

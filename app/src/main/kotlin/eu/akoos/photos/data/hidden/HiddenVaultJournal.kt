@@ -41,6 +41,7 @@ import eu.akoos.photos.data.face.FacePhotoRemoval
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.settingsDataStoreStrict
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -143,7 +144,7 @@ class HiddenVaultJournal @Inject constructor(
         return try {
             val albumsBySource = albumTargetsFor(entries)
             val userTagsBySource = userTagsFor(entries)
-            context.settingsDataStore.edit { prefs ->
+            context.settingsDataStoreStrict.edit { prefs ->
                 // A vault copy an earlier run left pending can be journalled again by the run that takes it
                 // over, so its old records give way to the new ones rather than standing beside them.
                 val keys = entries.mapTo(HashSet(entries.size)) { it.privateUri }
@@ -256,7 +257,7 @@ class HiddenVaultJournal @Inject constructor(
             val publish = split.publish
             val settled = if (publish.isEmpty()) SettledRows() else settleVaultedSyncRows(publish)
             if (publish.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
+                context.settingsDataStoreStrict.edit { prefs ->
                     recordVaultHides(prefs, publish.toSet())
                     prefs[SettingsKeys.HIDDEN_PHOTO_URIS] =
                         (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) + publish
@@ -659,7 +660,7 @@ class HiddenVaultJournal @Inject constructor(
             }
             val published = confirm + adopt
             val cleared = (discard + confirm + forget).toSet()
-            context.settingsDataStore.edit { p ->
+            context.settingsDataStoreStrict.edit { p ->
                 if (published.isNotEmpty()) {
                     p[SettingsKeys.HIDDEN_PHOTO_URIS] =
                         (p[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) + published
@@ -917,7 +918,7 @@ class HiddenVaultJournal @Inject constructor(
     suspend fun forget(privateUris: List<String>, shownAt: Long? = null) {
         val keys = privateUris.toSet()
         try {
-            context.settingsDataStore.edit { prefs ->
+            context.settingsDataStoreStrict.edit { prefs ->
                 prefs[SettingsKeys.HIDDEN_PENDING_HIDES] =
                     (prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet())
                         .filterNot { it.substringBefore('|') in keys }

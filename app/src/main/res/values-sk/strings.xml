@@ -3072,4 +3072,5 @@
     <string name="settings_held_back_confirm_title">Pokračovať bez nastavení?</string>
     <string name="settings_held_back_confirm_body">Aplikácia sa spustí s predvolenými nastaveniami. Fotky skryté v cloude sa môžu znova zobraziť, kým sa uložené nastavenia neotvoria, čo sa môže stať aj neskôr. Zámok aplikácie zostane zapnutý.</string>
     <string name="settings_held_back_confirm_action">Pokračovať</string>
+    <string name="settings_change_not_saved">Zmenu nastavení sa nepodarilo uložiť. Skúste to o chvíľu znova.</string>
 </resources>

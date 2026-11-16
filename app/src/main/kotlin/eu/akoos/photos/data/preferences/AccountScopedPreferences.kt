@@ -66,7 +66,7 @@ object AccountScopedPreferences {
         val vaultPrefix by lazy {
             runCatching { android.net.Uri.fromFile(java.io.File(context.filesDir, "hidden")).toString() + "/" }.getOrNull()
         }
-        context.settingsDataStore.edit { prefs ->
+        context.settingsDataStoreStrict.edit { prefs ->
             clearIn(prefs, userId, keptVaultUris, keepFavorites) { uri -> vaultPrefix?.let { uri.startsWith(it) } == true }
         }
     }

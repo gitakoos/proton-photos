@@ -2958,4 +2958,5 @@
     <string name="settings_held_back_confirm_title">Doorgaan zonder je instellingen?</string>
     <string name="settings_held_back_confirm_body">De app start met de standaardinstellingen. Foto\'s die je in de cloud hebt verborgen, kunnen weer zichtbaar worden tot de bewaarde instellingen opengaan, wat later nog kan gebeuren. De app-vergrendeling blijft aan.</string>
     <string name="settings_held_back_confirm_action">Doorgaan</string>
+    <string name="settings_change_not_saved">Een wijziging in de instellingen kon niet worden opgeslagen. Probeer het zo meteen opnieuw.</string>
 </resources>

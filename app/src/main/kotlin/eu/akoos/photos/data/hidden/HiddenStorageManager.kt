@@ -728,6 +728,17 @@ class HiddenStorageManager @Inject constructor(
         )
     }
 
+    /**
+     * Moves the vault file [hiddenUri] back to the name [previousUri] gave it, for a rename or restamp whose
+     * records could not be saved: the records still name [previousUri]. True when the file is there again.
+     */
+    suspend fun moveBack(hiddenUri: String, previousUri: String): Boolean = withContext(Dispatchers.IO) {
+        val srcFile = fileOf(hiddenUri) ?: return@withContext false
+        val previousName = runCatching { Uri.parse(previousUri).path?.let { File(it).name } }.getOrNull()
+            ?: return@withContext false
+        moveTo(srcFile, previousName) == Uri.fromFile(File(srcFile.parentFile, previousName)).toString()
+    }
+
     /** The existing vault file [hiddenUri] names, or null when it names none. */
     private fun fileOf(hiddenUri: String): File? {
         val parsed = runCatching { Uri.parse(hiddenUri) }.getOrNull() ?: return null

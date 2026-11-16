@@ -37,6 +37,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okio.Buffer
 import okio.BufferedSink
@@ -159,22 +160,26 @@ class EncryptedPreferencesSerializer(
         sink.write(if (keyring == null) plain else encryptVerified(keyring, plain))
     }
 
-    /** [plain] sealed with the current key; throws rather than hand back bytes that are not encrypted. */
+    /**
+     * [plain] sealed with the current key; throws [SettingsWriteRefusedException] rather than hand back bytes that
+     * are not encrypted. A Keystore that does not answer is waited for with a growing pause, [WRITE_BACKOFF_MS] in
+     * all (about 24 seconds), since a busy Keystore usually answers again within that.
+     */
     private suspend fun encryptVerified(keyring: LocalKeyring, plain: ByteArray): ByteArray {
         var attempt = 0
         while (true) {
             try {
                 return sealStoreBytes(keyring, storeName, plain)
             } catch (e: LocalKeyUnavailableException) {
-                if (++attempt < WRITE_ATTEMPTS) {
-                    pause(RETRY_MS)
+                if (attempt < WRITE_BACKOFF_MS.size) {
+                    pause(WRITE_BACKOFF_MS[attempt++])
                     continue
                 }
                 log("$storeName: key not available, change not written")
-                throw IOException("$storeName: key not available, change not written", e)
+                throw SettingsWriteRefusedException("$storeName: key not available, change not written", e)
             } catch (e: Exception) {
                 log("$storeName: change not written (${e.javaClass.simpleName})")
-                throw IOException("$storeName: could not encrypt, change not written", e)
+                throw SettingsWriteRefusedException("$storeName: could not encrypt, change not written", e)
             }
         }
     }
@@ -196,9 +201,76 @@ class EncryptedPreferencesSerializer(
 
     companion object {
         private const val READ_ATTEMPTS = 6
-        private const val WRITE_ATTEMPTS = 6
         private const val RETRY_MS = 500L
+
+        /** The pauses between write attempts while the Keystore does not answer. */
+        internal val WRITE_BACKOFF_MS = longArrayOf(250, 500, 1_000, 2_000, 4_000, 4_000, 4_000, 4_000, 4_000)
     }
+}
+
+/** A settings change that could not be written encrypted and so was not written at all; the file is as it was. */
+class SettingsWriteRefusedException(message: String, cause: Throwable?) : IOException(message, cause)
+
+/**
+ * A settings store whose refused writes ([SettingsWriteRefusedException]) do not reach the caller: the change is
+ * not saved, [onRefused] is told (the user sees that it was not saved), and the caller gets the settings as they
+ * stand. Most of the app's writes are a switch or a choice, made from a scope with no handler, where the
+ * exception would end the app.
+ *
+ * A caller whose correctness depends on the write landing (the Hidden vault's records, the sign-out markers, a
+ * locked copy merged back) writes through [strict] instead and gets the exception, which it handles.
+ */
+class GuardedPreferencesStore(
+    val strict: DataStore<Preferences>,
+    private val storeName: String,
+    private val onRefused: (String) -> Unit,
+) : DataStore<Preferences> {
+
+    override val data: kotlinx.coroutines.flow.Flow<Preferences> get() = strict.data
+
+    override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences =
+        try {
+            strict.updateData(transform)
+        } catch (e: SettingsWriteRefusedException) {
+            onRefused(storeName)
+            try {
+                strict.data.first()
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (_: Exception) {
+                emptyPreferences()
+            }
+        }
+}
+
+/**
+ * Tells the user that a settings change was not saved, at most once per [QUIET_MS], however many writes are refused
+ * meanwhile. [show] is set by the app; until then a refusal is only logged.
+ */
+object SettingsWriteRefusals {
+    @Volatile var show: (() -> Unit)? = null
+    @Volatile internal var clock: () -> Long = { android.os.SystemClock.elapsedRealtime() }
+    @Volatile internal var log: (String) -> Unit = LocalCrypto::log
+    private var lastShownAt = Long.MIN_VALUE / 2
+
+    fun report(storeName: String) {
+        log("$storeName: a change was not saved")
+        val now = clock()
+        val due = synchronized(this) {
+            (now - lastShownAt >= QUIET_MS).also { if (it) lastShownAt = now }
+        }
+        if (due) runCatching { show?.invoke() }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun resetForTest() {
+        synchronized(this) { lastShownAt = Long.MIN_VALUE / 2 }
+        show = null
+        clock = { android.os.SystemClock.elapsedRealtime() }
+        log = LocalCrypto::log
+    }
+
+    private const val QUIET_MS = 10_000L
 }
 
 /** Encrypts [plain] as a settings file with the current key and proves it decrypts back to the same bytes. */
@@ -304,6 +376,8 @@ object LocalStores {
         noJoin: Set<String> = emptySet(),
         log: (String) -> Unit,
     ): Int {
+        // A merge that is not written must fail here, so the copy it came from is kept rather than deleted.
+        val target = (store as? GuardedPreferencesStore)?.strict ?: store
         var merged = 0
         val pending = locked.pending(storeName)
         for (file in pending) {
@@ -319,7 +393,7 @@ object LocalStores {
             }
             // Only the newest copy there is may bring these back, even on a start its key does not open.
             val excluded = keepOut(file) + if (file != pending.first()) newestOnly else emptySet()
-            store.updateData { current -> mergeRecovered(recovered, current, excluded, noJoin) }
+            target.updateData { current -> mergeRecovered(recovered, current, excluded, noJoin) }
             file.delete()
             merged++
         }
@@ -363,7 +437,7 @@ private class EncryptedStoreDelegate(private val name: String) : ReadOnlyPropert
 
     override fun getValue(thisRef: Context, property: KProperty<*>): DataStore<Preferences> =
         instance ?: synchronized(this) {
-            instance ?: create(thisRef.applicationContext).also {
+            instance ?: GuardedPreferencesStore(create(thisRef.applicationContext), name, SettingsWriteRefusals::report).also {
                 instance = it
                 LocalStores.register(name, it)
             }

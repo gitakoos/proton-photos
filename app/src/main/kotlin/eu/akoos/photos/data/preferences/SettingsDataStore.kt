@@ -37,7 +37,20 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
+/**
+ * The settings. A change that cannot be written encrypted is not saved and does not reach the caller: the user is
+ * told instead ([eu.akoos.photos.data.localcrypto.GuardedPreferencesStore]). A write whose correctness depends on
+ * landing goes through [settingsDataStoreStrict].
+ */
 val Context.settingsDataStore: DataStore<Preferences> by encryptedPreferencesDataStore(name = "settings")
+
+/**
+ * The same settings, with a change that cannot be written encrypted thrown back to the caller as
+ * [eu.akoos.photos.data.localcrypto.SettingsWriteRefusedException]: for a write the code later trusts as stored
+ * (the Hidden vault's records, the sign-out markers), whose caller handles the failure.
+ */
+val Context.settingsDataStoreStrict: DataStore<Preferences>
+    get() = (settingsDataStore as? eu.akoos.photos.data.localcrypto.GuardedPreferencesStore)?.strict ?: settingsDataStore
 
 object SettingsKeys {
     val AUTO_SYNC = booleanPreferencesKey("auto_sync")
