@@ -3008,6 +3008,14 @@
     <string name="whats_new_260_videolocation_body">Video skomprimované pri nahrávaní alebo cez Komprimovať na Drive a video uložené z editora videa si ponechá polohu. Keď vaše nastavenia nahrávania polohu odstraňujú, zostane poloha mimo Drive a súbor, z ktorého sa poloha nedá odstrániť, počká namiesto nahratia. Orezanie začne presne tam, kde ste zvolili.</string>
     <string name="whats_new_260_samephoto_title">Rovnaká fotka, jedna položka</string>
     <string name="whats_new_260_samephoto_body">Galéria a albumy ukážu súbor v telefóne a fotku na Drive ako jednu položku len vtedy, keď ide naozaj o tú istú fotku. Súbor, ktorý má s fotkou na Drive spoločný len názov alebo veľkosť, sa ukáže ako samostatná položka. Po preinštalovaní sa súbory v telefóne znova spárujú so svojimi fotkami na Drive, len čo sa overí ich obsah. Fotka spárovaná počas výberu sa odstráni aj s oboma kópiami a správa o koši počíta každú fotku raz.</string>
+    <string name="whats_new_260_labelsearch_title">Hľadanie a filter podľa štítkov</string>
+    <string name="whats_new_260_labelsearch_body">Napíšte do vyhľadávania štítky a uvidíte svoje štítky. Ťuknite na jeden alebo napíšte štítky:názov a ukážu sa len fotky s týmto štítkom. Filtre vo vyhľadávaní a na časovej osi majú sekciu Štítky, kde Ďalšie otvorí celý zoznam s vlastným vyhľadávaním. Keď vyberiete dva a viac štítkov, Ktorýkoľvek alebo Všetky určí, či fotka potrebuje jeden z nich, alebo všetky.</string>
+    <string name="whats_new_260_quotedsearch_title">Hľadanie presného textu</string>
+    <string name="whats_new_260_quotedsearch_body">Dajte výraz do úvodzoviek, napríklad „staré mesto“, a vyhľadá sa len tento presný text so slovami pokope. Fotky nájdené len podľa toho, čo zobrazujú, sa vynechajú, a dátum alebo kategória v úvodzovkách zostane textom a nezmení sa na filter.</string>
+    <string name="whats_new_260_editformat_title">Upravené kópie si držia formát</string>
+    <string name="whats_new_260_editformat_body">Kópia uložená v editore fotiek zo zálohovanej fotky v telefóne sa zálohuje vo formáte, v akom bola uložená. Kópia v PNG zostane na Drive v PNG a nezmení sa na JPEG.</string>
+    <string name="whats_new_260_samename_title">Rovnaký názov, vlastná záloha</string>
+    <string name="whats_new_260_samename_body">Fotka v telefóne, ktorá má s fotkou na Drive spoločný len názov a veľkosť, sa zálohuje ako samostatná fotka a neberie sa ako už zálohovaná.</string>
     <string name="whats_new_260_compressnote_title">Poznámka ku kompresii a uvoľneniu miesta</string>
     <string name="whats_new_260_compressnote_body">So zapnutou kompresiou pri nahrávaní Nastavenia uvádzajú, že keď originál zmizne z telefónu uvoľnením miesta alebo odstránením po zálohovaní, na Drive zostane len skomprimovaná kópia.</string>
     <string name="whats_new_260_mirrorcheck_title">Originály sa nahrádzajú až po kontrole</string>

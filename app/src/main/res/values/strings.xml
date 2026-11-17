@@ -2901,6 +2901,14 @@
     <string name="whats_new_260_videolocation_body">A video compressed on upload or with Compress on Drive, and a video saved from the video editor, keeps its location. When your upload settings remove the location, it stays off Drive, and a file whose location cannot be removed waits instead of being uploaded. A trim starts exactly where you chose.</string>
     <string name="whats_new_260_samephoto_title">Same photo, one item</string>
     <string name="whats_new_260_samephoto_body">The gallery and albums show a phone file and a Drive photo as one item only when they really are the same photo. A file that only shares a name or a size with a Drive photo shows as its own item. After a reinstall, phone files are paired with their Drive photos again once their contents are checked. A photo paired while it was selected is deleted with both its copies, and the trash message counts each photo once.</string>
+    <string name="whats_new_260_labelsearch_title">Search and filter by label</string>
+    <string name="whats_new_260_labelsearch_body">Type the word labels in Search to see your labels, then tap one, or type labels:name, to show only that label\'s photos. The filters in Search and on the timeline have a Labels section, where More opens the full list with its own search. With two or more labels picked, Any or All chooses whether a photo needs one of them or all of them.</string>
+    <string name="whats_new_260_quotedsearch_title">Search for exact text</string>
+    <string name="whats_new_260_quotedsearch_body">Put a term in quotes, such as “old town”, to search for that exact text only, with its words kept together. Photos found only by what they show are left out, and a date or category word inside quotes stays text instead of turning into a filter.</string>
+    <string name="whats_new_260_editformat_title">Edited copies keep their format</string>
+    <string name="whats_new_260_editformat_body">A copy saved in the photo editor from a backed-up photo on the phone is backed up in the format it was saved in. A PNG copy stays a PNG on Drive instead of becoming a JPEG.</string>
+    <string name="whats_new_260_samename_title">Same name, own backup</string>
+    <string name="whats_new_260_samename_body">A photo on the phone that only shares its name and size with a Drive photo is backed up as a photo of its own instead of being taken as already backed up.</string>
     <string name="whats_new_260_compressnote_title">Compression and free-up note</string>
     <string name="whats_new_260_compressnote_body">With upload compression on, Settings says that only the compressed copy is left in Drive once the original leaves the phone by freeing up space or deleting after backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originals replaced only after a check</string>
