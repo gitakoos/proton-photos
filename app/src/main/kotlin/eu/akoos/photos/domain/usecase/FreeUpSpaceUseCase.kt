@@ -325,10 +325,14 @@ class FreeUpSpaceUseCase @Inject constructor(
             val claimed = claimedSizes?.claimedSize(userId, linkId, fetchIfUncached = false, fresh = link.freshXAttr(volumeId))
             driveShort = if (claimed != null) claimed < stamp.sizeBytes else driveCopyShortOf(link.link.size, stamp.sizeBytes)
         }
+        // The name is read only for a file whose bytes nothing recorded proves on Drive.
+        val editorCopy = !keptForGood && !driveShort && !onDrive && row.originalHash.isNullOrEmpty() &&
+            !sha1.equals(row.localHash, ignoreCase = true) &&
+            isEditorCopyName(localRepo.queryByUri(row.localUri)?.displayName ?: return DeviceCopyCheck.UNREADABLE)
         val verdict = if (keptForGood) {
             DeviceCopyCheck.UNCHECKED
         } else {
-            deviceCopyVerdict(row, stamp.sizeBytes, stamp.modifiedSec, sha1, onDrive, driveHash, driveShort)
+            deviceCopyVerdict(row, stamp.sizeBytes, stamp.modifiedSec, sha1, onDrive, driveHash, driveShort, editorCopy)
         }
         try {
             when (verdict) {
@@ -590,6 +594,9 @@ class FreeUpSpaceUseCase @Inject constructor(
          *   be the only one of what was backed up;
          * - a row that recorded what the device file held ([SyncState.originalHash]: as the backup read
          *   it, or as this app last wrote it itself) is decided by that alone;
+         * - a copy the photo editor saved ([editorCopy]) is UNCHECKED: its backup is the editor's own upload
+         *   of a second encoding of the edit, which may hold other bytes (another format, other metadata),
+         *   so neither size nor time tells that Drive holds these;
          * - otherwise the row's hash may be that of rewritten upload bytes, so size and modified time
          *   decide: a file written after the backup is CHANGED. At a size other than the recorded one it is
          *   CHANGED for an uploaded row, which records the device size, and UNCHECKED for a download, whose
@@ -607,6 +614,7 @@ class FreeUpSpaceUseCase @Inject constructor(
             deviceOnDrive: Boolean,
             driveHash: String?,
             driveShort: Boolean = false,
+            editorCopy: Boolean = false,
         ): DeviceCopyCheck {
             if (deviceSha1 == null) return DeviceCopyCheck.UNREADABLE
             if (driveShort) return DeviceCopyCheck.SHORT_ON_DRIVE
@@ -635,6 +643,7 @@ class FreeUpSpaceUseCase @Inject constructor(
                     DeviceCopyCheck.CHANGED
                 }
             }
+            if (editorCopy) return DeviceCopyCheck.UNCHECKED
             val backedUpAtMs = row.backedUpAtMs ?: return DeviceCopyCheck.UNCHECKED
             if (deviceModifiedSec > 0L && deviceModifiedSec * 1000L > backedUpAtMs + MODIFIED_SLACK_MS) {
                 return DeviceCopyCheck.CHANGED

@@ -38,6 +38,12 @@ internal const val EDITOR_SHORT_COPIES_SINCE_MS = 1_782_929_030_000L
 /** The name the photo editor gives a copy of a backed-up photo: `<name>_edit_<yyyyMMdd_HHmmss>.jpg`. */
 private val EDITOR_COPY_NAME = Regex("""_edit_\d{8}_\d{6}\.jpe?g$""", RegexOption.IGNORE_CASE)
 
+/** The name the photo editor gives any copy it saves, in whatever format: `<name>_edit_<yyyyMMdd_HHmmss>.<ext>`. */
+private val EDITOR_SAVED_COPY_NAME = Regex("""_edit_\d{8}_\d{6}\.[a-z0-9]+$""", RegexOption.IGNORE_CASE)
+
+/** Whether [displayName] is the name of a copy the photo editor saved ([EDITOR_SAVED_COPY_NAME]). Pure. */
+internal fun isEditorCopyName(displayName: String): Boolean = EDITOR_SAVED_COPY_NAME.containsMatchIn(displayName)
+
 /**
  * Whether a Drive copy holding [driveBytes] is too small to be a whole copy of a [deviceBytes] file. Drive's
  * link size is the encrypted size of what it stores, and encrypting a block only adds bytes, so a whole copy

@@ -520,6 +520,8 @@ class PhotoEditorViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     // Tells the user when the upload of a cloud-only edit fails after the editor already closed.
     private val editUploadNotifier: eu.akoos.photos.data.notification.EditUploadFailedNotifier,
+    // Records the upload of a synced edit whose device copy holds other bytes, so free-up keeps that copy.
+    private val shortCopies: eu.akoos.photos.domain.repository.ShortCloudCopyStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(EditorUiState())
@@ -2545,7 +2547,11 @@ class PhotoEditorViewModel @Inject constructor(
                     return@launch
                 }
                 val uri = when (source) {
-                    is EditorSource.Local -> saveLocal(bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs, format)
+                    // The copy of a synced photo is uploaded as a JPEG, so its device copy is one too.
+                    is EditorSource.Local -> saveLocal(
+                        bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs,
+                        if (cloudCounterpart != null) Bitmap.CompressFormat.JPEG else format,
+                    )
                     is EditorSource.Cloud -> null // handled above
                     is EditorSource.External -> {
                         // Always a fresh MediaStore copy (foreign URI, no overwrite; device-only, no upload).
@@ -2632,9 +2638,20 @@ class PhotoEditorViewModel @Inject constructor(
                                     TransferCenter.Kind.UPLOAD, count = 1,
                                     name = context.getString(R.string.activity_hist_edited), uris = listOf(savedUriStr),
                                 )
+                                // The upload is a second encoding of the edit, so the device copy counts as
+                                // backed up only when its bytes, or those bytes put through the upload strip,
+                                // are the ones uploaded.
+                                val deviceSha1 = runCatching {
+                                    eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, savedUriStr)
+                                }.getOrNull()
+                                val proven = editCopyOnDrive(deviceSha1, uploadResult.contentSha1) {
+                                    uploadResult.stripConfig?.let { strippedDeviceSha1(savedUriStr, it) }
+                                }
                                 runCatching {
-                                    syncStateRepo.upsert(
-                                        placeholderState.copy(
+                                    recordSyncedEditCopy(
+                                        syncStateRepo, shortCopies, userId,
+                                        provenDeviceSha1 = deviceSha1.takeIf { proven },
+                                        backedUp = placeholderState.copy(
                                             cloudFileId = newLinkId,
                                             // Store the uploaded plaintext's bare sha1 so reconcile can
                                             // map it to the cloud ContentHash and keep the pair Synced
@@ -2649,7 +2666,6 @@ class PhotoEditorViewModel @Inject constructor(
                                             lastSyncSuccessMs = System.currentTimeMillis(),
                                             backedUpAtMs = System.currentTimeMillis(),
                                         ),
-                                        userId,
                                     )
                                     // RULE 1: the edit is backed up, so clear the queued flag (the upsert
                                     // already reset the queue columns, this keeps the intent explicitly
@@ -3306,15 +3322,41 @@ class PhotoEditorViewModel @Inject constructor(
             if (mode == SaveMode.Overwrite) {
                 runCatching { cloudRepo.deleteFiles(userId, listOf(cloud.linkId)) }
             }
-            return CloudUploadResult(newLinkId, hash)
+            return CloudUploadResult(newLinkId, hash, stripConfig.takeIf { stripOnUpload })
         } finally {
             tempFile.delete()
         }
     }
 
     /** New Drive linkId plus the bare sha1 of the uploaded plaintext, so the device sync_state row
-     *  can store the SAME hash the cloud ContentHash was derived from and reconcile re-pairs them. */
-    private data class CloudUploadResult(val linkId: String, val contentSha1: String)
+     *  can store the SAME hash the cloud ContentHash was derived from and reconcile re-pairs them.
+     *  [stripConfig] is the strip the upload ran, null when it ran none. */
+    private data class CloudUploadResult(
+        val linkId: String,
+        val contentSha1: String,
+        val stripConfig: MetadataStripConfig?,
+    )
+
+    /** The SHA-1 of [deviceUri]'s bytes put through the upload strip [config], read from a scratch copy;
+     *  null when the file could not be read. */
+    private fun strippedDeviceSha1(deviceUri: String, config: MetadataStripConfig): String? {
+        val scratch = File(eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context), "edit_check_${System.nanoTime()}.jpg")
+        return try {
+            val copied = context.contentResolver.openInputStream(Uri.parse(deviceUri))?.use { input ->
+                FileOutputStream(scratch).use { input.copyTo(it) }
+            }
+            if (copied == null) {
+                null
+            } else {
+                ExifHelper.stripFieldsInPlace(context, Uri.fromFile(scratch).toString(), config, announce = false)
+                eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(scratch)
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            scratch.delete()
+        }
+    }
 
     /**
      * Appends a "_edit_<ts>" suffix to the filename. Pass the SAME [atMs] to the device + cloud

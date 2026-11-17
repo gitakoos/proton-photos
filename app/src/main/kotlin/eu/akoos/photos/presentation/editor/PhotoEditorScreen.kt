@@ -969,10 +969,13 @@ private fun SaveSheet(
     val formatPickable = !isCloud && !isSynced
     // Default a copy to the source's own format (a PNG stays a lossless PNG, a WebP stays WebP) instead of
     // silently re-encoding it as JPEG; the user can still switch in the picker. HEIC/RAW/GIF fall to JPEG.
-    val defaultFormat = when (source) {
-        is EditorSource.Local -> copyDefaultFormat(source.mimeType, source.displayName)
-        is EditorSource.External -> copyDefaultFormat(source.mimeType, source.displayName)
-        is EditorSource.Cloud -> Bitmap.CompressFormat.JPEG
+    // A copy with no picker is JPEG: the copy of a synced photo is uploaded as a JPEG, and its device copy
+    // has to be the same file for the backup to stand for it.
+    val defaultFormat = when {
+        !formatPickable -> Bitmap.CompressFormat.JPEG
+        source is EditorSource.Local -> copyDefaultFormat(source.mimeType, source.displayName)
+        source is EditorSource.External -> copyDefaultFormat(source.mimeType, source.displayName)
+        else -> Bitmap.CompressFormat.JPEG
     }
     var format by remember { mutableStateOf(defaultFormat) }
     var quality by remember { mutableIntStateOf(92) }
