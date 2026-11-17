@@ -2573,13 +2573,17 @@ class VideoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Trims via the lossless stream-copy muxer, falling back to a re-encode when the muxer rejects the
-     * stream. Some sources (B-frame HEVC clips are the common case) hand the platform MP4 muxer a
-     * non-monotonic decode-order timeline it refuses to write; on any failure the partial output is
-     * deleted and the same kept [windows] are re-encoded through [VideoReencoder.transcode], which lays
-     * down a clean keyframe-led timeline. The lossless path stays first; only a thrown error re-encodes.
+     * Trims the kept [windows] from their exact in-points. When every in-point sits on a keyframe the
+     * lossless stream-copy muxer writes them. Otherwise a stream copy would start at the keyframe before
+     * the in-point, up to a whole keyframe interval early, so [exportExactTrim] clips at the in-point and
+     * re-encodes only the frames ahead of the next keyframe.
+     *
+     * Any failure re-encodes the same windows through [VideoReencoder.transcode], which renders only the
+     * frames inside them. Some sources (B-frame HEVC clips are the common case) hand the platform MP4
+     * muxer a non-monotonic decode-order timeline it refuses to write, which ends up there too. Every
+     * path writes the source's location into the output.
      */
-    private fun muxTrimmedOrReencode(
+    private suspend fun muxTrimmedOrReencode(
         s: VideoEditorUiState,
         sourceUri: Uri,
         outputFile: File,
@@ -2589,17 +2593,33 @@ class VideoEditorViewModel @Inject constructor(
         onProgress: (Float) -> Unit,
         isActive: () -> Boolean,
     ) {
+        val location = eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUri.toString())
         try {
-            muxTrimmed(
-                sourceUri = sourceUri,
-                outputFile = outputFile,
-                windows = windows,
-                orientationDegrees = finalRotation,
-                stripAudio = stripAudio,
-            )
+            if (windows.isNotEmpty() && !streamCopyStartsOnTime(sourceUri, windows)) {
+                exportExactTrim(
+                    context = context,
+                    sourceUri = eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri),
+                    outputFile = outputFile,
+                    windows = windows,
+                    // The user's turn on top of the source's own rotation, which the export keeps.
+                    rotationDeltaDegrees = normalizedRotation(finalRotation, -sourceRotationDegrees),
+                    removeAudio = stripAudio,
+                    location = location,
+                    onProgress = onProgress,
+                )
+            } else {
+                muxTrimmed(
+                    sourceUri = sourceUri,
+                    outputFile = outputFile,
+                    windows = windows,
+                    orientationDegrees = finalRotation,
+                    stripAudio = stripAudio,
+                    location = location,
+                )
+            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(TAG, "Stream-copy trim rejected by the muxer; re-encoding instead", e)
+            Log.w(TAG, "Trim export failed; re-encoding instead", e)
             outputFile.delete()
             val crop = cropInSourcePixels(s)
             val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
@@ -2623,9 +2643,35 @@ class VideoEditorViewModel @Inject constructor(
                 keptWindowsUs = windows.map { it.startMs * 1000L..it.endMs * 1000L },
                 onProgress = onProgress,
                 isActive = isActive,
+                location = location,
             )
         }
     }
+
+    /**
+     * Whether a stream copy of [windows] starts each one where the user asked, i.e. every in-point lies
+     * within one frame after the keyframe a copy has to begin at ([streamCopyStartsOnTime]). True when
+     * the source cannot be probed, so the lossless copy (and its own fallback) runs as before.
+     */
+    private fun streamCopyStartsOnTime(sourceUri: Uri, windows: List<VideoSegment>): Boolean = runCatching {
+        context.contentResolver.openFileDescriptor(
+            eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r",
+        )?.use { pfd ->
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(pfd.fileDescriptor)
+                val inPointsUs = windows.map { it.startMs * 1000L }
+                val allTracks = IntArray(extractor.trackCount) { it }
+                streamCopyStartsOnTime(
+                    inPointsUs = inPointsUs,
+                    keyframeStartsUs = keyframeStartsUs(extractor, allTracks, inPointsUs),
+                    frameUs = frameDurationUs(videoFrameRate(extractor)),
+                )
+            } finally {
+                extractor.release()
+            }
+        } ?: true
+    }.getOrDefault(true)
 
     /**
      * The core MediaExtractor + MediaMuxer stream-copy pipeline. Writes one or more kept [windows] of
@@ -2651,6 +2697,7 @@ class VideoEditorViewModel @Inject constructor(
         windows: List<VideoSegment>,
         orientationDegrees: Int,
         stripAudio: Boolean = false,
+        location: Pair<Double, Double>? = null,
     ) {
         var pfd: ParcelFileDescriptor? = null
         var extractor: MediaExtractor? = null
@@ -2690,6 +2737,8 @@ class VideoEditorViewModel @Inject constructor(
             if (maxBufferSize <= 0) maxBufferSize = 1 shl 20 // 1 MB fallback
 
             muxer.setOrientationHint(orientationDegrees)
+            // The platform muxer writes no location unless told to, so the source's goes in here.
+            location?.let { (lat, lng) -> runCatching { muxer.setLocation(lat.toFloat(), lng.toFloat()) } }
             muxer.start()
 
             var buffer = ByteBuffer.allocate(maxBufferSize)
@@ -2902,9 +2951,15 @@ class VideoEditorViewModel @Inject constructor(
             val remuxed = stripGps && VideoMetadataStripper.remuxWithoutLocation(
                 context, Uri.fromFile(tempFile).toString(), out,
             )
+            if (stripGps && !remuxed) {
+                // The edited copy carries the source's location, so a failed strip must not upload it.
+                // The callers then keep the edit on the device only, so it reaches Drive through the backup
+                // and that upload's own strip.
+                out.delete()
+                error("Location strip of the edited video failed")
+            }
             if (!remuxed) {
-                // No GPS strip requested, or the remux failed: copy the bytes so we can stamp without
-                // touching the device copy.
+                // No GPS strip requested: copy the bytes so we can stamp without touching the device copy.
                 tempFile.inputStream().use { input -> out.outputStream().use { input.copyTo(it) } }
             }
             // Stamp the mvhd AFTER any remux (MediaMuxer resets the creation time): the ORIGINAL when only

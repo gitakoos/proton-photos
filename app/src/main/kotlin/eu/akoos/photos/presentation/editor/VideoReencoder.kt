@@ -91,6 +91,8 @@ internal class VideoReencoder(private val context: Context) {
         onProgress: (Float) -> Unit,
         /** Cooperative cancellation probe checked per loop iteration; false → release codecs and throw. */
         isActive: () -> Boolean = { true },
+        /** Latitude and longitude written as the output's location; null writes none. */
+        location: Pair<Double, Double>? = null,
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var audioPfd: ParcelFileDescriptor? = null
@@ -212,6 +214,7 @@ internal class VideoReencoder(private val context: Context) {
             // Rotation via container orientation hint (matches muxTrimmed); GL pixel-rotation double-rotated.
             val outputRotation = ((rotationDegrees % 360) + 360) % 360
             muxer.setOrientationHint(outputRotation)
+            location?.let { (lat, lng) -> runCatching { muxer.setLocation(lat.toFloat(), lng.toFloat()) } }
 
             videoExtractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
