@@ -33,8 +33,8 @@ import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.drive.AlbumCryptoChain
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.repository.drive.OwnerAlbumKeyCache
 import eu.akoos.photos.data.repository.drive.PhotosShareService
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -66,9 +66,9 @@ class PhotoLocationResolver @Inject constructor(
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val albumCryptoChain: AlbumCryptoChain,
+    /** Album keys already decrypted, so photos sharing a parent skip the re-decrypt; emptied at sign-out. */
+    private val albumKeys: OwnerAlbumKeyCache,
 ) {
-    /** parentLinkId → decrypted parent key bytes, so photos sharing a parent skip the re-decrypt. */
-    private val parentKeyCache = ConcurrentHashMap<String, ByteArray>()
 
     /**
      * Decrypt one [row]'s XAttr and return its location, or null when it carries no GPS / can't be
@@ -119,7 +119,7 @@ class PhotoLocationResolver @Inject constructor(
      * Decrypted node-key bytes for [parentLinkId]:
      *   • Photos root link → [PhotosShareService.getRootLinkKeyBytes] (itself cached).
      *   • Owner-side album → fetch the album's BatchLinkDto, decrypt its nodeKey with the root key,
-     *     and memoise in [parentKeyCache].
+     *     and memoise in [albumKeys].
      * Returns null when the album link can't be fetched / decrypted (e.g. a shared-with-me album,
      * which the thumbnail path resolves through a context map this resolver is not seeded with).
      */
@@ -127,7 +127,7 @@ class PhotoLocationResolver @Inject constructor(
         if (parentLinkId == shareService.photosRootLinkId()) {
             return shareService.getRootLinkKeyBytes(userId)
         }
-        parentKeyCache[parentLinkId]?.let { return it }
+        albumKeys.get(userId.id, parentLinkId)?.let { return it }
 
         val rootKey = shareService.getRootLinkKeyBytes(userId) ?: return null
         val albumDetail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(parentLinkId))[parentLinkId]
@@ -144,7 +144,7 @@ class PhotoLocationResolver @Inject constructor(
             parentKeyBytes = rootKey,
             contextHint = "photo-location-resolver albumLinkId=$parentLinkId",
         ) ?: return null
-        parentKeyCache[parentLinkId] = bytes
+        albumKeys.put(userId.id, parentLinkId, bytes)
         return bytes
     }
 }

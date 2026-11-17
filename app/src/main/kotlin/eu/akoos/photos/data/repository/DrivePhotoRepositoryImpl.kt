@@ -126,6 +126,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val importUploadedDao: eu.akoos.photos.data.db.dao.ImportUploadedDao,
     private val importAlbumMemberDao: eu.akoos.photos.data.db.dao.ImportAlbumMemberDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
+    private val ownerAlbumKeyCache: eu.akoos.photos.data.repository.drive.OwnerAlbumKeyCache,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -601,6 +602,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // Singleton that nothing else empties, so without this they outlive the session that could
         // read them, in a process that can keep running long after the account is gone.
         sharedAlbumKeyStore.clear()
+        // The account's own album keys the location and declared-size readers decrypted, held the same way.
+        ownerAlbumKeyCache.clear()
         // Cancel any in-flight Save-to-my-library copy and reset its state to Idle so a
         // re-login by a different user doesn't pick up a stale Running banner against the
         // old account's album linkId. The Job is rooted in a Singleton-scoped SupervisorJob

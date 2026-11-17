@@ -29,6 +29,7 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.repository.drive.AlbumCryptoChain
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.repository.drive.OwnerAlbumKeyCache
 import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.domain.repository.DriveCopyXAttr
 import io.mockk.coEvery
@@ -63,6 +64,7 @@ class XAttrClaimedSizeReaderTest {
     private lateinit var links: LinkDetailHelpers
     private lateinit var albums: AlbumCryptoChain
     private lateinit var reader: XAttrClaimedSizeReader
+    private val albumKeys = OwnerAlbumKeyCache()
 
     private fun row(encXAttr: String?, parent: String = "root") = PhotoListingEntity(
         linkId = "L1", shareId = "s1", volumeId = "v1", userId = "u1", captureTime = 0L,
@@ -82,7 +84,7 @@ class XAttrClaimedSizeReaderTest {
         every { share.photosRootLinkId() } returns "root"
         coEvery { share.getRootLinkKeyBytes(userId) } returns rootKey
         coEvery { crypto.decryptNodeKey(any(), any(), any()) } returns nodeKey
-        reader = XAttrClaimedSizeReader(crypto, listing, share, links, albums)
+        reader = XAttrClaimedSizeReader(crypto, listing, share, links, albums, albumKeys)
     }
 
     @Test
@@ -146,5 +148,21 @@ class XAttrClaimedSizeReaderTest {
         assertEquals(1564L, reader.claimedSize(userId, "L1", fetchIfUncached = false))
         coVerify { crypto.decryptNodeKey("nk", "np", albumKey) }
         coVerify(exactly = 1) { links.batchFetchLinkDetails(userId, "v1", listOf("A1")) }
+    }
+
+    @Test
+    fun `an album key decrypted before a sign-out is decrypted again after it`() = runTest {
+        coEvery { listing.getByLinkId("L1") } returns row("cached", parent = "A1")
+        coEvery { links.batchFetchLinkDetails(userId, "v1", listOf("A1")) } returns mapOf(
+            "A1" to BatchLinkDto(link = LinkCoreDto(linkId = "A1", type = 1, state = 1, nodeKey = "ank", nodePassphrase = "anp")),
+        )
+        coEvery { albums.decryptAlbumKey("ank", "anp", rootKey, any()) } answers { byteArrayOf(2) }
+        coEvery { crypto.decryptXAttr("cached", nodeKey) } returns xattr(1564L)
+
+        assertEquals(1564L, reader.claimedSize(userId, "L1", fetchIfUncached = false))
+        albumKeys.clear()
+        assertEquals(1564L, reader.claimedSize(userId, "L1", fetchIfUncached = false))
+
+        coVerify(exactly = 2) { links.batchFetchLinkDetails(userId, "v1", listOf("A1")) }
     }
 }

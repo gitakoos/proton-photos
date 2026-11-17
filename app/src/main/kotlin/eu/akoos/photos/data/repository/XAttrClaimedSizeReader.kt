@@ -30,13 +30,13 @@ import eu.akoos.photos.data.crypto.parseXAttrClaimedSize
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.repository.drive.AlbumCryptoChain
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.repository.drive.OwnerAlbumKeyCache
 import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.domain.repository.DriveCopyClaimedSize
 import eu.akoos.photos.domain.repository.DriveCopyXAttr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -54,8 +54,8 @@ class XAttrClaimedSizeReader @Inject constructor(
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val albumCryptoChain: AlbumCryptoChain,
+    private val albumKeys: OwnerAlbumKeyCache,
 ) : DriveCopyClaimedSize {
-    private val parentKeyCache = ConcurrentHashMap<String, ByteArray>()
 
     override suspend fun claimedSize(
         userId: UserId,
@@ -102,10 +102,10 @@ class XAttrClaimedSizeReader @Inject constructor(
         null
     }
 
-    /** The photos root's key, or an owner-side album's, memoised; null for anything else. */
+    /** The photos root's key, or an owner-side album's, held in [albumKeys]; null for anything else. */
     private suspend fun parentKeyBytes(userId: UserId, parentLinkId: String, volumeId: String): ByteArray? {
         if (parentLinkId == shareService.photosRootLinkId()) return shareService.getRootLinkKeyBytes(userId)
-        parentKeyCache[parentLinkId]?.let { return it }
+        albumKeys.get(userId.id, parentLinkId)?.let { return it }
         val rootKey = shareService.getRootLinkKeyBytes(userId) ?: return null
         val album = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(parentLinkId))[parentLinkId]?.link
             ?: return null
@@ -115,7 +115,7 @@ class XAttrClaimedSizeReader @Inject constructor(
             parentKeyBytes = rootKey,
             contextHint = "claimed-size albumLinkId=$parentLinkId",
         ) ?: return null
-        parentKeyCache[parentLinkId] = bytes
+        albumKeys.put(userId.id, parentLinkId, bytes)
         return bytes
     }
 }
