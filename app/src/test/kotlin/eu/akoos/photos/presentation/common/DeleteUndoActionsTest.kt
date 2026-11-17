@@ -168,6 +168,64 @@ class DeleteUndoActionsTest {
         assertEquals(listOf("link-synced"), undo.cloudLinkIds)
     }
 
+    // The bar's count: each photo once, whichever of its copies went to trash.
+
+    private fun mixOf(paired: Int, deviceOnly: Int, driveOnly: Int): List<GalleryItem> =
+        (1..paired).map { synced("link-p$it", "uri://p$it") } +
+            (1..deviceOnly).map { localOnly("uri://d$it") } +
+            (1..driveOnly).map { cloudOnly("link-c$it") }
+
+    @Test
+    fun `a delete everywhere of paired, device-only and Drive-only photos counts every photo once`() {
+        // 23 paired + 2 device-only + 2 Drive-only: 25 Drive links and 25 device files, 27 photos.
+        val undo = buildDeleteUndoAction(
+            mixOf(paired = 23, deviceOnly = 2, driveOnly = 2),
+            freeUpSpace = true, deleteFromCloud = true, hide = false, localRecoverable = true,
+        )!!
+        assertEquals(25, undo.cloudLinkIds.size)
+        assertEquals(25, undo.localTrashedUris.size)
+        assertEquals(27, undo.count)
+    }
+
+    @Test
+    fun `a delete everywhere of paired photos only counts each pair once`() {
+        val undo = buildDeleteUndoAction(
+            mixOf(paired = 27, deviceOnly = 0, driveOnly = 0),
+            freeUpSpace = true, deleteFromCloud = true, hide = false, localRecoverable = true,
+        )!!
+        assertEquals(27, undo.count)
+    }
+
+    @Test
+    fun `a Drive-only delete counts the photos whose Drive copy went`() {
+        // Device files kept: the paired and Drive-only photos lose their Drive copy, the device-only ones
+        // are untouched.
+        val undo = buildDeleteUndoAction(
+            mixOf(paired = 3, deviceOnly = 2, driveOnly = 4),
+            freeUpSpace = false, deleteFromCloud = true, hide = false, localRecoverable = true,
+        )!!
+        assertEquals(7, undo.count)
+    }
+
+    @Test
+    fun `a delete with no device trash counts the photos whose Drive copy can come back`() {
+        val undo = buildDeleteUndoAction(
+            mixOf(paired = 3, deviceOnly = 2, driveOnly = 4),
+            freeUpSpace = true, deleteFromCloud = true, hide = false, localRecoverable = false,
+        )!!
+        assertEquals(7, undo.count)
+    }
+
+    @Test
+    fun `an undo built from its lists alone counts a paired photo once`() {
+        val undo = UndoAction.Delete(
+            cloudLinkIds = listOf("link-p1", "link-c1"),
+            localTrashedUris = listOf("uri://p1", "uri://d1"),
+            syncedRelinks = listOf(UndoAction.Delete.Relink("uri://p1", "link-p1", 1024L)),
+        )
+        assertEquals(3, undo.count)
+    }
+
     // buildHideUndoAction: the shared rule every hide surface (the timeline, search, the viewer, device
     // folders) uses so they all offer the identical restore. A hide vaults only on-device-only photos and
     // moves the bytes into the app-private vault before removing the MediaStore copy, so any vaulted copy
