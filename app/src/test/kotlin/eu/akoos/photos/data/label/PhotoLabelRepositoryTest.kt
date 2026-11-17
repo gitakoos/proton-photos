@@ -293,6 +293,19 @@ class PhotoLabelRepositoryTest {
         assertFalse(dao.hasAnyForUser(ACCOUNT.id))
     }
 
+    @Test
+    fun `a guest's labels filter the guest's photos by exact name`() = runTest {
+        repo.setLabels(URI, listOf("Beach"))
+        repo.setLabels(URI_2, listOf("beach walk"))
+
+        val usage = repo.observeLabelUsage().first()
+        val index = eu.akoos.photos.presentation.gallery.LabelFilter.index(repo.observeLabelsByPhoto().first())
+        val filter = eu.akoos.photos.presentation.gallery.ContentFilter().withLabels(setOf(usage.first { it.label == "Beach" }.labelKey))
+        val items = listOf(GalleryItem.LocalOnly(local(URI)), GalleryItem.LocalOnly(local(URI_2)))
+
+        assertEquals(listOf(URI), eu.akoos.photos.presentation.gallery.LabelFilter.apply(items, filter, index).map { it.stableId })
+    }
+
     private companion object {
         val ACCOUNT = UserId("account-1")
         const val GUEST = PhotoLocationEntity.LOCAL_USER

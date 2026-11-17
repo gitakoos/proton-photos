@@ -27,6 +27,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.GalleryFilter
+import eu.akoos.photos.presentation.gallery.LabelFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.isItemFavorite
@@ -122,6 +123,7 @@ internal object SearchFilter {
         foldedLabels: Map<String, String> = emptyMap(),
         foldedPlaces: Map<String, String> = emptyMap(),
         scoped: Boolean = false,
+        labelIndex: Map<String, Set<String>> = emptyMap(),
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
         // Commas separate alternatives ("beach, sunset" finds a photo that matches either), and the words
@@ -183,7 +185,7 @@ internal object SearchFilter {
             }
             out = byName + byLabel + byMetadata
         }
-        return applyFacets(out, filter, category, offlinePinIds, favoriteIds, personPhotoKeys)
+        return applyFacets(out, filter, category, offlinePinIds, favoriteIds, personPhotoKeys, labelIndex)
     }
 
     /** True when the page asks for nothing: no query, no filter, no category chip and no person. A
@@ -210,8 +212,11 @@ internal object SearchFilter {
         offlinePinIds: Set<String> = emptySet(),
         favoriteIds: Set<String> = emptySet(),
         personPhotoKeys: Set<String>? = null,
+        labelIndex: Map<String, Set<String>> = emptyMap(),
     ): List<GalleryItem> {
         var out = applyContentFilter(items, filter, offlinePinIds)
+        // The picked labels, by exact name ([LabelFilter]).
+        out = LabelFilter.apply(out, filter, labelIndex)
         if (category != GalleryFilter.All) {
             out = when (category) {
                 // Live Photos (tag 3) and Motion Photos (tag 4) are the same concept on iOS/Android

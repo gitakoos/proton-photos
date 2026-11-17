@@ -311,6 +311,7 @@ class GalleryViewModel @Inject constructor(
     private val moveToFolder: MoveToFolderUseCase,
     private val folderDelete: eu.akoos.photos.presentation.folders.DeviceFolderDeleteController,
     private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
+    private val labelRepo: eu.akoos.photos.data.label.PhotoLabelRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -490,6 +491,7 @@ class GalleryViewModel @Inject constructor(
         observeFolderSettings()
         observeGridPreferences()
         observeFavorites()
+        observeLabels()
         observeOfflinePins()
         observeUndoRestores()
         observeBackgroundUploadProgress()
@@ -676,9 +678,44 @@ class GalleryViewModel @Inject constructor(
                         favIds,
                         state.albumHideCloudIds,
                         state.offlinePinIds,
+                        labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
                     )
                     _uiState.update { it.copy(favoriteIds = favIds, filteredItems = filtered) }
                     recomputeMonthGroups(filtered)
+                }
+        }
+    }
+
+    /** Each labelled photo's label keys, which [applyContentFilter] matches a picked label against. */
+    @Volatile
+    private var labelIndex: Map<String, Set<String>> = emptyMap()
+
+    /**
+     * The account's labels (a guest's own when signed out): their names and counts for the filter sheet and the
+     * pill, and each photo's label keys for the label filter. A picked label the account no longer has leaves the
+     * filter, and the timeline is filtered again whenever the labels change while one is picked.
+     */
+    private fun observeLabels() {
+        viewModelScope.launch {
+            labelRepo.observeLabelUsage()
+                .catch { }
+                .collect { usage ->
+                    val state = _uiState.value
+                    _uiState.update { it.copy(labelUsage = usage) }
+                    val pruned = LabelFilter.prune(state.contentFilter, usage)
+                    if (pruned != state.contentFilter) setContentFilter(pruned)
+                }
+        }
+        viewModelScope.launch {
+            labelRepo.observeLabelsByPhoto()
+                .map { LabelFilter.index(it) }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.Default)
+                .catch { }
+                .collect { index ->
+                    labelIndex = index
+                    val filter = _uiState.value.contentFilter
+                    if (filter.labelKeys.isNotEmpty()) setContentFilter(filter)
                 }
         }
     }
@@ -703,6 +740,7 @@ class GalleryViewModel @Inject constructor(
                             state.favoriteIds,
                             state.albumHideCloudIds,
                             ids,
+                            labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
                         )
                         _uiState.update { it.copy(offlinePinIds = ids, filteredItems = filtered) }
                         recomputeMonthGroups(filtered)
@@ -799,6 +837,7 @@ class GalleryViewModel @Inject constructor(
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
+            labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
         )
         _uiState.update { it.copy(filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -1060,6 +1099,7 @@ class GalleryViewModel @Inject constructor(
                         snapshot.favoriteIds,
                         sources.cloudInAlbum,
                         snapshot.offlinePinIds,
+                        labelFiltered = LabelFilter.bypassesAlbumHide(snapshot.contentFilter),
                     )
                     // Month- and day-bucket the filtered list and compute "On this day" here, off
                     // the Main thread, rather than inside Compose composition on every list
@@ -1312,6 +1352,7 @@ class GalleryViewModel @Inject constructor(
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
+            labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
         )
         _uiState.update { it.copy(selectedFilter = filter, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -1358,6 +1399,7 @@ class GalleryViewModel @Inject constructor(
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
+            labelFiltered = LabelFilter.bypassesAlbumHide(filter),
         )
         _uiState.update { it.copy(contentFilter = filter, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -2897,6 +2939,8 @@ class GalleryViewModel @Inject constructor(
         favoriteIds: Set<String> = emptySet(),
         albumHideCloudIds: Set<String> = emptySet(),
         offlinePinIds: Set<String> = emptySet(),
+        // A picked label shows every photo carrying it, album members included, as a category does.
+        labelFiltered: Boolean,
     ): List<GalleryItem> {
         // Album-membership filter only applies on the [GalleryFilter.All] view. Non-All tabs
         // (Favorites, Screenshots, Videos, …) bypass it — when the user explicitly picks a
@@ -2904,7 +2948,7 @@ class GalleryViewModel @Inject constructor(
         // in an album. The set is empty when the "Hide photos in albums" toggle is off,
         // so this is a no-op for users who don't enable the feature.
         // With nothing to hide the list is handed on as it is, rather than copied photo by photo.
-        val baseItems = if (filter == GalleryFilter.All && albumHideCloudIds.isNotEmpty()) {
+        val baseItems = if (filter == GalleryFilter.All && !labelFiltered && albumHideCloudIds.isNotEmpty()) {
             items.filter { item ->
                 val cloudLinkId = when (item) {
                     is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -3003,7 +3047,7 @@ class GalleryViewModel @Inject constructor(
             }
         }
 
-        return result
+        return LabelFilter.apply(result, filter, labelIndex)
     }
 }
 

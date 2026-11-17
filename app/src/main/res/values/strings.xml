@@ -2166,6 +2166,20 @@
     <string name="label_delete_selected_message">They are removed from every photo they are on.</string>
     <string name="label_leave_selection_title">Leave the Labels page?</string>
     <string name="label_leave_selection_message">Your selection will be cleared.</string>
+    <string name="search_label_keyword">labels|label</string>
+    <string name="filter_labels_more">More</string>
+    <string name="filter_labels_any">Any</string>
+    <string name="filter_labels_all">All</string>
+    <string name="filter_labels_search">Search labels</string>
+    <string name="filter_labels_show_all">Show all photos</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">Show %d label</item>
+        <item quantity="other">Show %d labels</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d label</item>
+        <item quantity="other">%d labels</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Leave</string>
     <string name="label_backup_restore_note">Brings back the labels saved then, including ones you have deleted since. Labels you added since stay.</string>
     <string name="label_backup_show_all">Show all (%1$d)</string>

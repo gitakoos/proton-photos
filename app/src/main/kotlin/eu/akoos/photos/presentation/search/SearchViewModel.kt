@@ -69,6 +69,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.domain.entity.Album
@@ -95,6 +96,7 @@ import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.GalleryFilter
+import eu.akoos.photos.presentation.gallery.LabelFilter
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.categoryLabelRes
 import eu.akoos.photos.presentation.gallery.visibleCategories
@@ -292,16 +294,25 @@ class SearchViewModel @Inject constructor(
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
      *  per-item filter only needs to run once typing settles. Debouncing the query feed into
      *  [results] keeps the field responsive while sparing the library a full re-scan per key. */
-    private val debouncedQuery = _query.debounce(QUERY_SETTLE_MS)
+    private val debouncedQuery = _query.debounce(QUERY_SETTLE_MS).map { LabelQuery.textOf(it, labelKeywords.value) }
+
+    /** Each labelled photo's labels as folded keys, which the label filter matches exactly. */
+    private val labelIndex: Flow<Map<String, Set<String>>> = labelRepo.observeLabelsByPhoto()
+        .map { LabelFilter.index(it) }
+        .distinctUntilChanged()
+        .catch { emit(emptyMap()) }
+        .onStart { emit(emptyMap()) }
+        .flowOn(Dispatchers.Default)
 
     /** The chip-driven inputs folded into one value so the [results] combine stays within the typed
-     *  5-flow arity: the category chip, the Offline pin set, the Favourites device-heart set, and the
-     *  People rail's selected-person keys (null when no person is selected). */
+     *  5-flow arity: the category chip, the Offline pin set, the Favourites device-heart set, the
+     *  People rail's selected-person keys (null when no person is selected) and every photo's label keys. */
     private data class ChipState(
         val category: GalleryFilter,
         val pins: Set<String>,
         val hearts: Set<String>,
         val personKeys: Set<String>?,
+        val labelIndex: Map<String, Set<String>>,
     )
 
     private val chipState: Flow<ChipState> = combine(
@@ -309,8 +320,9 @@ class SearchViewModel @Inject constructor(
         offlinePinIdsFlow,
         favoriteIdsFlow,
         _personSelection.map { if (it.id != null) it.keys else null },
-    ) { category, pins, hearts, personKeys ->
-        ChipState(category, pins, hearts, personKeys)
+        labelIndex,
+    ) { category, pins, hearts, personKeys, labels ->
+        ChipState(category, pins, hearts, personKeys, labels)
     }
 
     /** The app's language, as the screen resolves it with appLocale(), so typed month and category
@@ -366,6 +378,75 @@ class SearchViewModel @Inject constructor(
         .catch { emit(emptyMap()) }
         .flowOn(Dispatchers.Default)
 
+    // ── Labels ────────────────────────────────────────────────────────────────────────────────────
+
+    /** The label keyword's variants in the app's language and in English, folded, longest first. */
+    private val labelKeywords: StateFlow<List<String>> = _locale
+        .map { labelKeywordsFor(it) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, labelKeywordsFor(_locale.value))
+
+    /** The account's labels with their photo counts, most used first; a guest's own when signed out. */
+    private val labelUsageSource: Flow<List<LabelUsage>> = labelRepo.observeLabelUsage()
+        .catch { }
+
+    val labelUsage: StateFlow<List<LabelUsage>> = labelUsageSource
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The label keyword the query ends with while it is being typed, or null. */
+    internal val labelTyping: StateFlow<LabelTyping?> = combine(_query, labelKeywords) { q, keywords -> LabelQuery.parse(q, keywords) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** The labels the chip row under the field offers while the keyword is typed; null while it is not. */
+    val labelChips: StateFlow<List<LabelUsage>?> = combine(labelTyping, labelUsage, _contentFilter) { typing, usage, filter ->
+        typing?.let { LabelQuery.offered(it, usage, filter.labelKeys) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** A label search ([LabelQuery.isLabelSearch]) keeps content search and the name rows out. */
+    private val labelSearch: Flow<Boolean> = combine(_query, _contentFilter, labelKeywords, LabelQuery::isLabelSearch)
+        .distinctUntilChanged()
+
+    /** The settled text the name rows match, blank during a label search. */
+    private val nameQuery: Flow<String> = combine(debouncedQuery, labelSearch) { q, labels -> if (labels) "" else q }
+
+    private fun typingLabel(q: String): Boolean = LabelQuery.parse(q, labelKeywords.value) != null
+
+    /** Picks the label [labelKey]; the keyword that offered it leaves the text. */
+    fun pickLabel(labelKey: String) {
+        val filter = _contentFilter.value
+        if (labelKey !in filter.labelKeys) _contentFilter.value = filter.withLabels(filter.labelKeys + labelKey)
+        dropLabelKeyword()
+    }
+
+    fun removeLabel(labelKey: String) {
+        val filter = _contentFilter.value
+        _contentFilter.value = filter.withLabels(filter.labelKeys - labelKey)
+    }
+
+    private fun dropLabelKeyword() {
+        LabelQuery.parse(_query.value, labelKeywords.value)?.let { _query.value = it.rest }
+    }
+
+    init {
+        // A picked label the account no longer has (deleted, renamed, another account) leaves the filter.
+        viewModelScope.launch {
+            labelUsageSource.collect { usage ->
+                val filter = _contentFilter.value
+                val pruned = LabelFilter.prune(filter, usage)
+                if (pruned != filter) _contentFilter.value = pruned
+            }
+        }
+        // "labels:<name>" naming one of the account's labels becomes its pill once typing settles.
+        viewModelScope.launch {
+            combine(_query.debounce(LABEL_SETTLE_MS), labelUsageSource) { q, usage -> q to usage }
+                .collect { (q, usage) ->
+                    if (q != _query.value) return@collect
+                    val typing = LabelQuery.parse(q, labelKeywords.value) ?: return@collect
+                    LabelQuery.named(typing, usage)?.let { pickLabel(it.labelKey) }
+                }
+        }
+    }
+
     /** Every located photo's city and country, folded, by its location key. Empty until the index has
      *  geocoded the library's spots, so a first search never waits on it and the place matches join in
      *  when it lands. */
@@ -408,6 +489,7 @@ class SearchViewModel @Inject constructor(
                 applyAll(
                     all.dropHidden(hidden), typed.q, typed.text, filter,
                     chip.category, chip.pins, chip.hearts, chip.personKeys, typed.labels, typed.places, scoped,
+                    chip.labelIndex,
                 )
             }
         }
@@ -461,7 +543,7 @@ class SearchViewModel @Inject constructor(
     ) { on, userId, _ -> on to userId }
         .flatMapLatest { (on, userId) ->
             if (!on) flowOf(RankStep(false, emptyList()))
-            else _query.map { it.trim() }.distinctUntilChanged().flatMapLatest { q ->
+            else combine(_query, labelSearch) { q, labels -> if (labels) "" else q.trim() }.distinctUntilChanged().flatMapLatest { q ->
                 // A quoted term asks for that exact text only, so neither content nor theme search runs.
                 if (q.length < SEMANTIC_MIN_CHARS || SearchQuery.hasQuote(q)) flowOf(RankStep(false, emptyList()))
                 else flow {
@@ -494,7 +576,7 @@ class SearchViewModel @Inject constructor(
                 val hits = keys.mapNotNull { byKey[it] }
                 SemanticFeed(
                     loading,
-                    SearchFilter.applyFacets(hits, filter, chip.category, chip.pins, chip.hearts, chip.personKeys),
+                    SearchFilter.applyFacets(hits, filter, chip.category, chip.pins, chip.hearts, chip.personKeys, chip.labelIndex),
                 )
             }
         }
@@ -552,7 +634,7 @@ class SearchViewModel @Inject constructor(
      * off, like [people]. Narrowed from [people] itself, which holds every named person under the same
      * gate, so the people are summed up over the library once, not once for each list.
      */
-    val peopleSuggestions: StateFlow<List<PersonUi>> = combine(people, debouncedQuery) { named, q ->
+    val peopleSuggestions: StateFlow<List<PersonUi>> = combine(people, nameQuery) { named, q ->
         peopleMatching(named, SearchQuery.stripped(q))
     }
         .flowOn(Dispatchers.Default)
@@ -571,7 +653,7 @@ class SearchViewModel @Inject constructor(
     /** The albums and device folders whose name matches the typed query, by [SearchAlbums.matches].
      *  Empty while the query is blank. */
     val albumSuggestions: StateFlow<List<SearchAlbum>> =
-        combine(albumSource, debouncedQuery) { source, q -> SearchAlbums.matches(source, SearchQuery.stripped(q)) }
+        combine(albumSource, nameQuery) { source, q -> SearchAlbums.matches(source, SearchQuery.stripped(q)) }
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -592,7 +674,7 @@ class SearchViewModel @Inject constructor(
      *  by: its order, a tile the user hid stays out, People needs the people surfaces shown, and Shared and Offline
      *  need an account. Empty while the query is blank. */
     val destinations: StateFlow<List<LibraryTile>> =
-        combine(debouncedQuery, localizedText, tileSettings, isSignedIn, peopleVisibility.visible()) { q, text, settings, signedIn, peopleShown ->
+        combine(nameQuery, localizedText, tileSettings, isSignedIn, peopleVisibility.visible()) { q, text, settings, signedIn, peopleShown ->
             val offered = resolveTileOrder(settings.order).filter { tile ->
                 tile.name !in settings.hidden && when (tile) {
                     LibraryTile.People -> peopleShown
@@ -651,7 +733,11 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setQuery(value: String) { _query.value = value }
-    fun setContentFilter(filter: ContentFilter) { _contentFilter.value = filter }
+    fun setContentFilter(filter: ContentFilter) {
+        val newLabel = !_contentFilter.value.labelKeys.containsAll(filter.labelKeys)
+        _contentFilter.value = filter
+        if (newLabel) dropLabelKeyword()
+    }
     fun onCategorySelected(filter: GalleryFilter) { _selectedCategory.value = filter }
     fun clearAll() {
         _query.value = ""
@@ -683,7 +769,8 @@ class SearchViewModel @Inject constructor(
     /** Dates the end of the typed query could mean, to pick as a filter instead of matching as text. */
     val dateSuggestions: StateFlow<List<DateSuggestion>> =
         combine(_query, availableYears, localizedText) { q, years, text ->
-            DateSuggestions.suggest(q, text.months, years, text.monthAbbreviations)
+            if (typingLabel(q)) emptyList()
+            else DateSuggestions.suggest(q, text.months, years, text.monthAbbreviations)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Takes a suggested date: the words that spelled it leave the text and it becomes the date filter. */
@@ -722,7 +809,7 @@ class SearchViewModel @Inject constructor(
                     }
                 }
                 .collect { (q, term) ->
-                    if (term == null || q != _query.value) return@collect
+                    if (term == null || q != _query.value || typingLabel(q)) return@collect
                     val current = _contentFilter.value
                     _query.value = SearchFilter.dropLastWords(q, term.consumedTokens)
                     _contentFilter.value = term.applyTo(current)
@@ -736,7 +823,7 @@ class SearchViewModel @Inject constructor(
                 val names = rail.mapNotNull { filter -> text.filterNames[filter]?.let { filter to it } }.toMap()
                 q to CategorySuggestions.match(q, names, _selectedCategory.value)
             }.collect { (q, match) ->
-                if (match == null || q != _query.value || _selectedCategory.value != GalleryFilter.All) return@collect
+                if (match == null || q != _query.value || typingLabel(q) || _selectedCategory.value != GalleryFilter.All) return@collect
                 _query.value = SearchFilter.dropLastWords(q, match.consumedTokens)
                 onCategorySelected(match.filter)
             }
@@ -845,6 +932,7 @@ class SearchViewModel @Inject constructor(
         foldedLabels: Map<String, String> = emptyMap(),
         foldedPlaces: Map<String, String> = emptyMap(),
         scoped: Boolean = false,
+        labelIndex: Map<String, Set<String>> = emptyMap(),
     ): List<GalleryItem> = SearchFilter.apply(
         items = items,
         q = q,
@@ -858,6 +946,7 @@ class SearchViewModel @Inject constructor(
         foldedLabels = foldedLabels,
         foldedPlaces = foldedPlaces,
         scoped = scoped,
+        labelIndex = labelIndex,
     )
 
     private fun localizedContext(locale: Locale): Context {
@@ -890,6 +979,12 @@ class SearchViewModel @Inject constructor(
             },
         )
     }
+
+    /** The `search_label_keyword` variants in [locale] and in English. */
+    private fun labelKeywordsFor(locale: Locale): List<String> =
+        LabelQuery.keywords(
+            listOf(localizedContext(locale), localizedContext(Locale.ENGLISH)).map { it.getString(R.string.search_label_keyword) },
+        )
 
     private fun countedPhraseRes(unit: RelativeUnit): Int = when (unit) {
         RelativeUnit.Day -> R.string.search_ago_days
@@ -950,5 +1045,8 @@ class SearchViewModel @Inject constructor(
         /** Settle delay before a typed category name selects its chip, long enough that the plural 's'
          *  typed right after "screenshot" lands first. */
         const val CATEGORY_SETTLE_MS = 700L
+
+        /** Settle delay before a typed "labels:<name>" becomes the label pill, the same as the other pills. */
+        const val LABEL_SETTLE_MS = 700L
     }
 }

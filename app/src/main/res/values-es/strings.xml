@@ -2544,6 +2544,22 @@
     <string name="label_delete_selected_message">Se quitan de todas las fotos en las que están.</string>
     <string name="label_leave_selection_title">¿Salir de Etiquetas?</string>
     <string name="label_leave_selection_message">Se borrará tu selección.</string>
+    <string name="search_label_keyword">etiquetas|etiqueta</string>
+    <string name="filter_labels_more">Más</string>
+    <string name="filter_labels_any">Cualquiera</string>
+    <string name="filter_labels_all">Todas</string>
+    <string name="filter_labels_search">Buscar etiquetas</string>
+    <string name="filter_labels_show_all">Mostrar todas las fotos</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">Mostrar %d etiqueta</item>
+        <item quantity="many">Mostrar %d etiquetas</item>
+        <item quantity="other">Mostrar %d etiquetas</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d etiqueta</item>
+        <item quantity="many">%d etiquetas</item>
+        <item quantity="other">%d etiquetas</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Salir</string>
     <string name="label_backup_restore_note">Recupera las etiquetas guardadas entonces, también las que borraste después. Las etiquetas añadidas desde entonces se conservan.</string>
     <string name="label_backup_show_all">Ver todas (%1$d)</string>

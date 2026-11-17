@@ -2633,6 +2633,24 @@
     <string name="label_delete_selected_message">Odstranjene bodo z vseh fotografij, na katerih so.</string>
     <string name="label_leave_selection_title">Želite zapustiti oznake?</string>
     <string name="label_leave_selection_message">Vaša izbira bo razveljavljena.</string>
+    <string name="search_label_keyword">oznake|oznaka</string>
+    <string name="filter_labels_more">Več</string>
+    <string name="filter_labels_any">Katera koli</string>
+    <string name="filter_labels_all">Vse</string>
+    <string name="filter_labels_search">Iskanje oznak</string>
+    <string name="filter_labels_show_all">Prikaži vse fotografije</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">Prikaži %d oznako</item>
+        <item quantity="two">Prikaži %d oznaki</item>
+        <item quantity="few">Prikaži %d oznake</item>
+        <item quantity="other">Prikaži %d oznak</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d oznaka</item>
+        <item quantity="two">%d oznaki</item>
+        <item quantity="few">%d oznake</item>
+        <item quantity="other">%d oznak</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Zapusti</string>
     <string name="label_backup_restore_note">Obnovi oznake, shranjene takrat, tudi tiste, ki ste jih od takrat izbrisali. Oznake, dodane od takrat, ostanejo.</string>
     <string name="label_backup_show_all">Pokaži vse (%1$d)</string>

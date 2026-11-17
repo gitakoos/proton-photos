@@ -587,6 +587,7 @@ internal fun FilterRail(
     onClearContentFilter: () -> Unit,
     onOpenTimelineFilter: () -> Unit,
     modifier: Modifier = Modifier,
+    labelUsage: List<eu.akoos.photos.data.db.dao.LabelUsage> = emptyList(),
 ) {
     // The category chips scroll sideways, so a chosen category can sit out of sight; the pill names it
     // as well, so anything narrowing the timeline is visible here.
@@ -599,8 +600,11 @@ internal fun FilterRail(
     val cloudLabel = stringResource(R.string.filter_sync_cloud)
     val offlineLabel = stringResource(R.string.filter_offline)
     val allLabel = stringResource(R.string.gallery_filter_all)
-    val contentSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel, offlineLabel) {
-        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel, offlineLabel)
+    val labelCount = contentFilter.labelKeys.size
+    val manyLabels = pluralStringResource(R.plurals.filter_labels_count, labelCount, labelCount)
+    val labelText = LabelFilter.summary(contentFilter, labelUsage) { manyLabels }
+    val contentSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel, offlineLabel, labelText) {
+        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel, offlineLabel, labelText)
     }
     val filterSummary = listOfNotNull(categoryName, contentSummary).joinToString(" · ").ifEmpty { null }
 

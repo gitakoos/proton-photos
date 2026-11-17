@@ -2064,6 +2064,20 @@
     <string name="label_delete_selected_message">Bulundukları tüm fotoğraflardan kaldırılırlar.</string>
     <string name="label_leave_selection_title">Etiketler sayfasından çıkılsın mı?</string>
     <string name="label_leave_selection_message">Seçimin temizlenecek.</string>
+    <string name="search_label_keyword">etiketler|etiket</string>
+    <string name="filter_labels_more">Daha fazla</string>
+    <string name="filter_labels_any">Herhangi biri</string>
+    <string name="filter_labels_all">Tümü</string>
+    <string name="filter_labels_search">Etiket ara</string>
+    <string name="filter_labels_show_all">Tüm fotoğrafları göster</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">%d etiketi göster</item>
+        <item quantity="other">%d etiketi göster</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d etiket</item>
+        <item quantity="other">%d etiket</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Çık</string>
     <string name="label_backup_restore_note">O sırada kaydedilen etiketleri geri getirir, sonradan sildiklerin de dahil. Sonradan eklediğin etiketler kalır.</string>
     <string name="label_backup_show_all">Tümünü göster (%1$d)</string>

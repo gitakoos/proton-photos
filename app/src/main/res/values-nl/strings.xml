@@ -2530,6 +2530,20 @@
     <string name="label_delete_selected_message">Ze worden van alle foto\'s verwijderd waarop ze staan.</string>
     <string name="label_leave_selection_title">Labels verlaten?</string>
     <string name="label_leave_selection_message">Je selectie wordt gewist.</string>
+    <string name="search_label_keyword">labels|label</string>
+    <string name="filter_labels_more">Meer</string>
+    <string name="filter_labels_any">Willekeurig</string>
+    <string name="filter_labels_all">Alle</string>
+    <string name="filter_labels_search">Labels zoeken</string>
+    <string name="filter_labels_show_all">Alle foto\'s tonen</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">%d label tonen</item>
+        <item quantity="other">%d labels tonen</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d label</item>
+        <item quantity="other">%d labels</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Verlaten</string>
     <string name="label_backup_restore_note">Herstelt de labels die toen zijn opgeslagen, ook de labels die je sindsdien hebt verwijderd. Labels die je sindsdien hebt toegevoegd blijven staan.</string>
     <string name="label_backup_show_all">Alles tonen (%1$d)</string>

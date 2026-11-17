@@ -444,15 +444,17 @@ private fun CreateRow(name: String, locked: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** One label with its photo count; while [selecting], a check mark in front tells whether it is picked. Shared
+ *  with the label filter's page. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LabelRow(
+internal fun LabelRow(
     usage: LabelUsage,
     locked: Boolean,
     selecting: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val colors = AppColors.current
     Row(

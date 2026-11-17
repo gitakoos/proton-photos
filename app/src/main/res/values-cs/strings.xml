@@ -2639,6 +2639,24 @@
     <string name="label_delete_selected_message">Odeberou se ze všech fotek, na kterých jsou.</string>
     <string name="label_leave_selection_title">Opustit štítky?</string>
     <string name="label_leave_selection_message">Váš výběr bude zrušen.</string>
+    <string name="search_label_keyword">štítky|štítek</string>
+    <string name="filter_labels_more">Další</string>
+    <string name="filter_labels_any">Kterýkoli</string>
+    <string name="filter_labels_all">Všechny</string>
+    <string name="filter_labels_search">Hledat štítky</string>
+    <string name="filter_labels_show_all">Zobrazit všechny fotky</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">Zobrazit %d štítek</item>
+        <item quantity="few">Zobrazit %d štítky</item>
+        <item quantity="many">Zobrazit %d štítku</item>
+        <item quantity="other">Zobrazit %d štítků</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d štítek</item>
+        <item quantity="few">%d štítky</item>
+        <item quantity="many">%d štítku</item>
+        <item quantity="other">%d štítků</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Opustit</string>
     <string name="label_backup_restore_note">Obnoví štítky uložené tehdy, i ty, které jste od té doby smazali. Štítky přidané od té doby zůstanou.</string>
     <string name="label_backup_show_all">Zobrazit vše (%1$d)</string>

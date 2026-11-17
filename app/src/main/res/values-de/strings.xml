@@ -2506,6 +2506,20 @@
     <string name="label_delete_selected_message">Sie werden von allen Fotos entfernt, auf denen sie sind.</string>
     <string name="label_leave_selection_title">Labels-Seite verlassen?</string>
     <string name="label_leave_selection_message">Deine Auswahl wird aufgehoben.</string>
+    <string name="search_label_keyword">labels|label</string>
+    <string name="filter_labels_more">Mehr</string>
+    <string name="filter_labels_any">Beliebig</string>
+    <string name="filter_labels_all">Alle</string>
+    <string name="filter_labels_search">Labels suchen</string>
+    <string name="filter_labels_show_all">Alle Fotos anzeigen</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">%d Label anzeigen</item>
+        <item quantity="other">%d Labels anzeigen</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d Label</item>
+        <item quantity="other">%d Labels</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Verlassen</string>
     <string name="label_backup_restore_note">Stellt die damals gespeicherten Labels wieder her, auch die seitdem gelöschten. Seitdem hinzugefügte Labels bleiben erhalten.</string>
     <string name="label_backup_show_all">Alle anzeigen (%1$d)</string>

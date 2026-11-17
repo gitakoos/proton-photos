@@ -2508,6 +2508,20 @@
     <string name="label_delete_selected_message">Elles sont retirées de toutes les photos où elles se trouvent.</string>
     <string name="label_leave_selection_title">Quitter les étiquettes ?</string>
     <string name="label_leave_selection_message">Votre sélection sera effacée.</string>
+    <string name="search_label_keyword">étiquettes|étiquette</string>
+    <string name="filter_labels_more">Plus</string>
+    <string name="filter_labels_any">Au moins une</string>
+    <string name="filter_labels_all">Toutes</string>
+    <string name="filter_labels_search">Rechercher des étiquettes</string>
+    <string name="filter_labels_show_all">Afficher toutes les photos</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">Afficher %d étiquette</item>
+        <item quantity="other">Afficher %d étiquettes</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d étiquette</item>
+        <item quantity="other">%d étiquettes</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Quitter</string>
     <string name="label_backup_restore_note">Restaure les étiquettes enregistrées à ce moment-là, y compris celles supprimées depuis. Les étiquettes ajoutées depuis sont conservées.</string>
     <string name="label_backup_show_all">Tout afficher (%1$d)</string>

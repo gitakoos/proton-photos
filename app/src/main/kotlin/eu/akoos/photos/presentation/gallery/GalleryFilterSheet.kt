@@ -73,6 +73,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.presentation.search.DateSuggestions
 import eu.akoos.photos.presentation.search.RelativeDate
 import eu.akoos.photos.presentation.search.RelativeUnit
@@ -110,6 +111,12 @@ internal fun ContentFilterSheet(
     // return an empty grid; hide the whole sync-status section for a guest.
     showSyncStatusSection: Boolean = true,
     onOpenTimelineSettings: (() -> Unit)? = null,
+    // The account's labels, most used first; none hides the Labels section.
+    labels: List<LabelUsage> = emptyList(),
+    // Whether the sheet shows its Labels page instead of the filters. The host holds it, so its back step
+    // ([AppModalSheet]'s onBackStep) can read it.
+    labelPage: Boolean = false,
+    onLabelPageChange: (Boolean) -> Unit = {},
 ) {
     var mediaType by remember { mutableStateOf(currentFilter.mediaType) }
     var syncStatus by remember { mutableStateOf(currentFilter.syncStatus) }
@@ -120,6 +127,8 @@ internal fun ContentFilterSheet(
     var dateFrom by remember { mutableStateOf(currentFilter.dateFrom) }
     var dateTo by remember { mutableStateOf(currentFilter.dateTo) }
     var category by remember { mutableStateOf(currentCategory) }
+    var labelKeys by remember { mutableStateOf(currentFilter.labelKeys) }
+    var labelsMatchAll by remember { mutableStateOf(currentFilter.labelsMatchAll) }
     // Where the quick dates are offered the calendar waits behind a button, open from the start only when it
     // already holds a date.
     var calendarOpen by remember { mutableStateOf(!showRelativeDates || (currentFilter.year != null && currentFilter.dateFrom == null)) }
@@ -131,12 +140,26 @@ internal fun ContentFilterSheet(
         m: Int? = month,
         d: Int? = day,
         de: Int? = dayEnd,
-    ) = onApply(
-        ContentFilter(
-            mediaType = mt, syncStatus = ss, year = y, month = m, day = d, dayEnd = de,
-            dateFrom = dateFrom, dateTo = dateTo,
-        ),
-    )
+    ) = onApply(sheetFilter(mt, ss, y, m, d, de, dateFrom, dateTo, labelKeys, labelsMatchAll))
+
+    fun applyLabels(keys: Set<String>, matchAll: Boolean = labelsMatchAll) {
+        labelKeys = keys
+        labelsMatchAll = matchAll && keys.size >= 2
+        applyNow()
+    }
+
+    if (labelPage) {
+        LabelFilterPage(
+            usage = labels,
+            picked = labelKeys,
+            onBack = { onLabelPageChange(false) },
+            onShow = { keys ->
+                applyLabels(keys)
+                onLabelPageChange(false)
+            },
+        )
+        return
+    }
 
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
     val years = remember { (currentYear downTo currentYear - 10).toList() }
@@ -164,7 +187,7 @@ internal fun ContentFilterSheet(
                 modifier = Modifier.weight(1f),
             )
             val hasActiveFilter = mediaType != MediaType.All || syncStatus != SyncStatusFilter.All ||
-                year != null || dateFrom != null || category != GalleryFilter.All
+                year != null || dateFrom != null || category != GalleryFilter.All || labelKeys.isNotEmpty()
             if (hasActiveFilter) {
                 Text(
                     text = "✕  ${stringResource(R.string.filter_reset)}",
@@ -175,6 +198,7 @@ internal fun ContentFilterSheet(
                         mediaType = MediaType.All; syncStatus = SyncStatusFilter.All
                         year = null; month = null; day = null; dayEnd = null; dateFrom = null; dateTo = null
                         category = GalleryFilter.All
+                        labelKeys = emptySet(); labelsMatchAll = false
                         onCategorySelected(GalleryFilter.All)
                         applyNow(mt = MediaType.All, ss = SyncStatusFilter.All, y = null, m = null, d = null, de = null)
                     },
@@ -217,6 +241,19 @@ internal fun ContentFilterSheet(
                     }
                 }
             }
+        }
+
+        // ── Labels ───────────────────────────────────────────────────────────
+        // After the categories on Search; the timeline hides those, so there it leads the sheet.
+        if (labels.isNotEmpty()) {
+            LabelFilterSection(
+                usage = labels,
+                picked = labelKeys,
+                matchAll = labelsMatchAll,
+                onToggle = { key -> applyLabels(if (key in labelKeys) labelKeys - key else labelKeys + key) },
+                onMatchAllChange = { all -> applyLabels(labelKeys, all) },
+                onMore = { onLabelPageChange(true) },
+            )
         }
 
         // ── Media type ───────────────────────────────────────────────────────
@@ -365,6 +402,24 @@ internal fun ContentFilterSheet(
     }
 }
 
+/** The filter the sheet's choices make, built whole each time one changes, the picked labels included. */
+internal fun sheetFilter(
+    mediaType: MediaType,
+    syncStatus: SyncStatusFilter,
+    year: Int?,
+    month: Int?,
+    day: Int?,
+    dayEnd: Int?,
+    dateFrom: java.time.LocalDate?,
+    dateTo: java.time.LocalDate?,
+    labelKeys: Set<String>,
+    labelsMatchAll: Boolean,
+): ContentFilter =
+    ContentFilter(
+        mediaType = mediaType, syncStatus = syncStatus, year = year, month = month, day = day, dayEnd = dayEnd,
+        dateFrom = dateFrom, dateTo = dateTo,
+    ).withLabels(labelKeys, labelsMatchAll)
+
 /**
  * A drawer's way out to its full settings page: a hairline, then a row with a chevron. Emitted into
  * the drawer's own column, so the column's spacing sits between the two. The timeline drawer and the
@@ -428,6 +483,8 @@ internal fun FilterChip(
     leadingIcon: (@Composable (Color) -> Unit)? = null,
     accentWhenSelected: Boolean = true,
     trailingClear: Boolean = false,
+    // A count after the label, dimmer, such as a label's photos.
+    count: Int? = null,
 ) {
     val colors = AppColors.current
     val useAccent = accentWhenSelected && selected
@@ -468,6 +525,9 @@ internal fun FilterChip(
                 fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             )
+            if (count != null) {
+                Text(text = formatCount(count), color = contentColor.copy(alpha = 0.7f), fontSize = 11.sp)
+            }
             if (trailingClear && selected) {
                 Icon(
                     Icons.Filled.Close,

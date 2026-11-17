@@ -112,6 +112,8 @@ data class GalleryUiState(
     /** Photo keys ([GalleryItem.stableId]) the selected person appears in. [applyFilter] keeps only
      *  feed items in this set while [selectedPersonId] is non-null, composing like the Offline set. */
     val personPhotoKeys: Set<String> = emptySet(),
+    /** The account's labels with their photo counts, most used first, for the label filter. */
+    val labelUsage: List<eu.akoos.photos.data.db.dao.LabelUsage> = emptyList(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)
@@ -236,7 +238,15 @@ data class ContentFilter(
     // of the year, month and day above, which cannot hold such a run; picking a date there clears it.
     val dateFrom: LocalDate? = null,
     val dateTo: LocalDate? = null,
-)
+    // The labels photos must carry, by their folded key ([eu.akoos.photos.util.LabelNormalizer.fold]): any of
+    // them, or every one when [labelsMatchAll] is set. Set them through [withLabels].
+    val labelKeys: Set<String> = emptySet(),
+    val labelsMatchAll: Boolean = false,
+) {
+    /** This filter narrowed to [keys]; matching every label only means something with two or more. */
+    fun withLabels(keys: Set<String>, matchAll: Boolean = labelsMatchAll): ContentFilter =
+        copy(labelKeys = keys, labelsMatchAll = matchAll && keys.size >= 2)
+}
 
 enum class MediaType { All, PhotosOnly, VideosOnly }
 enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly, Offline }

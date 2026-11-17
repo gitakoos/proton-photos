@@ -278,9 +278,12 @@ internal fun buildContentFilterSummary(
     backedUpLabel: String,
     cloudLabel: String,
     offlineLabel: String,
+    // The picked labels, by name or as a count.
+    labelText: String? = null,
 ): String? {
     if (filter == ContentFilter()) return null
     val parts = buildList {
+        labelText?.let { add(it) }
         when (filter.mediaType) {
             MediaType.PhotosOnly -> add(photosLabel)
             MediaType.VideosOnly -> add(videosLabel)
@@ -852,6 +855,8 @@ fun GalleryScreen(
 
     // ── Filter bottom sheet state ─────────────────────────────────────────────
     var showFilterSheet by remember { mutableStateOf(false) }
+    // The filter sheet's Labels page is open in place of its filters.
+    var labelPage by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Grouping is controlled exclusively by the photo grid's pinch gesture (see
@@ -1566,17 +1571,22 @@ fun GalleryScreen(
     // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showFilterSheet) {
         AppModalSheet(
-            onDismissRequest = { showFilterSheet = false },
+            onDismissRequest = { showFilterSheet = false; labelPage = false },
             sheetState = filterSheetState,
             containerColor = AppColors.current.sheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
+            onBackStep = { labelPage.also { if (it) labelPage = false } },
         ) {
             ContentFilterSheet(
                 currentFilter = state.contentFilter,
                 currentCategory = state.selectedFilter,
                 onApply = { filter -> viewModel.setContentFilter(filter) },
                 onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
-                onDismiss = { showFilterSheet = false },
+                onDismiss = { showFilterSheet = false; labelPage = false },
+                // The labels lead the timeline's sheet, for a guest too.
+                labels = state.labelUsage,
+                labelPage = labelPage,
+                onLabelPageChange = { labelPage = it },
                 // Categories + media type live inline in the timeline rail, so the drawer keeps the
                 // sync-status + date pickers only, matching the Search screen's sheet.
                 showCategorySection = false,

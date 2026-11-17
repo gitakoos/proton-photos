@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -175,6 +176,8 @@ internal fun AppSearchField(
 internal data class SearchFieldTerm(
     val label: String,
     val removeDescription: String? = null,
+    // A mark in front of the label, such as a label pill's tag.
+    val icon: ImageVector? = null,
     val onRemove: () -> Unit,
 )
 
@@ -209,6 +212,7 @@ internal fun SearchTermPill(term: SearchFieldTerm, large: Boolean = false) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (large) 4.dp else 2.dp),
     ) {
+        term.icon?.let { Icon(it, contentDescription = null, tint = colors.accent, modifier = Modifier.size(if (large) 15.dp else 11.dp)) }
         Text(term.label, color = colors.accent, fontSize = if (large) 14.sp else 11.sp, maxLines = 1)
         Icon(
             Icons.Filled.Close, contentDescription = term.removeDescription, tint = colors.accent,

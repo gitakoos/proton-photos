@@ -2505,6 +2505,20 @@
     <string name="label_delete_selected_message">Minden fotóról lekerülnek, amin rajta vannak.</string>
     <string name="label_leave_selection_title">Kilépsz a címkék oldaláról?</string>
     <string name="label_leave_selection_message">A kijelölés törlődik.</string>
+    <string name="search_label_keyword">címkék|címke</string>
+    <string name="filter_labels_more">Több</string>
+    <string name="filter_labels_any">Bármelyik</string>
+    <string name="filter_labels_all">Mindegyik</string>
+    <string name="filter_labels_search">Címkék keresése</string>
+    <string name="filter_labels_show_all">Az összes kép mutatása</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">%d címke mutatása</item>
+        <item quantity="other">%d címke mutatása</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d címke</item>
+        <item quantity="other">%d címke</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Kilépés</string>
     <string name="label_backup_restore_note">Visszahozza az akkor mentett címkéket, az azóta törölteket is. Az azóta hozzáadott címkék megmaradnak.</string>
     <string name="label_backup_show_all">Mind megjelenítése (%1$d)</string>

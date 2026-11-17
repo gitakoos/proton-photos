@@ -2633,6 +2633,24 @@
     <string name="label_delete_selected_message">Zostaną usunięte ze wszystkich zdjęć, na których są.</string>
     <string name="label_leave_selection_title">Opuścić etykiety?</string>
     <string name="label_leave_selection_message">Twoje zaznaczenie zostanie wyczyszczone.</string>
+    <string name="search_label_keyword">etykiety|etykieta</string>
+    <string name="filter_labels_more">Więcej</string>
+    <string name="filter_labels_any">Dowolna</string>
+    <string name="filter_labels_all">Wszystkie</string>
+    <string name="filter_labels_search">Szukaj etykiet</string>
+    <string name="filter_labels_show_all">Pokaż wszystkie zdjęcia</string>
+    <plurals name="filter_labels_show">
+        <item quantity="one">Pokaż %d etykietę</item>
+        <item quantity="few">Pokaż %d etykiety</item>
+        <item quantity="many">Pokaż %d etykiet</item>
+        <item quantity="other">Pokaż %d etykiety</item>
+    </plurals>
+    <plurals name="filter_labels_count">
+        <item quantity="one">%d etykieta</item>
+        <item quantity="few">%d etykiety</item>
+        <item quantity="many">%d etykiet</item>
+        <item quantity="other">%d etykiety</item>
+    </plurals>
     <string name="label_leave_selection_confirm">Opuść</string>
     <string name="label_backup_restore_note">Przywraca etykiety zapisane wtedy, także te usunięte od tamtej pory. Etykiety dodane od tamtej pory zostają.</string>
     <string name="label_backup_show_all">Pokaż wszystkie (%1$d)</string>

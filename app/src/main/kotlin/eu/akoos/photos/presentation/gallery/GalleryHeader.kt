@@ -111,6 +111,7 @@ internal fun GalleryHeader(
                         },
                         onOpenTimelineFilter = onShowAlbumsFilterSheet,
                         modifier = Modifier.weight(1f),
+                        labelUsage = galleryState.labelUsage,
                     )
                 }
                 1 -> {

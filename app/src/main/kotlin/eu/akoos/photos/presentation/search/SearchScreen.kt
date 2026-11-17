@@ -182,6 +182,9 @@ import eu.akoos.photos.presentation.gallery.LocalPeopleRail
 import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
+import eu.akoos.photos.presentation.gallery.LabelSuggestionRow
+import eu.akoos.photos.data.db.dao.LabelUsage
+import androidx.compose.material.icons.automirrored.filled.Label
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
 import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
 import eu.akoos.photos.presentation.gallery.GalleryFilter
@@ -291,6 +294,9 @@ fun SearchScreen(
     val isDeleting by vm.isDeleting.collectAsStateWithLifecycle()
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
     val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
+    val labelUsage by vm.labelUsage.collectAsStateWithLifecycle()
+    val labelChips by vm.labelChips.collectAsStateWithLifecycle()
+    val labelTyping by vm.labelTyping.collectAsStateWithLifecycle()
 
     // Typed month and category names match in the language the page is drawn in.
     val screenLocale = appLocale()
@@ -344,6 +350,8 @@ fun SearchScreen(
     SearchSideEffects(vm, snackbarHostState)
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    // The filter sheet's Labels page is open in place of its filters.
+    var labelPage by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val resultsGridState = rememberLazyGridState()
     // Rows that land ahead of the one at the top (more file-name matches, a name-match row) are pulled
@@ -416,8 +424,10 @@ fun SearchScreen(
     val offlineName = stringResource(R.string.filter_offline)
     // The chosen category takes the rail's own place as a pill; the other filters share the row above it.
     val categoryTerm = categoryName?.let { SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) } }
+    val labelPills = labelTerms(filter, labelUsage, vm::removeLabel)
     val filterTerms = buildList {
         searchScope?.let { add(SearchFieldTerm(it.name) { vm.setScope(null) }) }
+        addAll(labelPills)
         when (filter.mediaType) {
             MediaType.PhotosOnly -> add(SearchFieldTerm(photosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
             MediaType.VideosOnly -> add(SearchFieldTerm(videosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
@@ -503,6 +513,16 @@ fun SearchScreen(
                 }
             }
         }
+        // The label keyword typed into the field offers the user's labels, to pick one as a pill.
+        labelChips?.let { chips ->
+            if (labelUsage.isNotEmpty()) {
+                LabelSuggestionRow(
+                    labels = chips,
+                    onPick = vm::pickLabel,
+                    onMore = { labelPage = true; showFilterSheet = true },
+                )
+            }
+        }
     }
     val density = LocalDensity.current
     // What a picker draws over the bottom: its tab bar, or the keyboard once it is up.
@@ -541,7 +561,7 @@ fun SearchScreen(
 
       Box(modifier = Modifier.fillMaxSize()) {
         val isIdle = SearchFilter.nothingAsked(
-            query, filter, selectedCategory, personSelected = selectedPersonId != null, scoped = searchScope != null,
+            labelTyping?.rest ?: query, filter, selectedCategory, personSelected = selectedPersonId != null, scoped = searchScope != null,
         )
         // The people and albums whose name matches the query are rows of the results, so a name that
         // matched no photo still has something to show.
@@ -573,7 +593,7 @@ fun SearchScreen(
                 onPhotoClick = onPhotoClick,
                 openAlbum = openAlbum,
                 onMonthClick = { year, month ->
-                    vm.setContentFilter(ContentFilter(year = year, month = month))
+                    vm.setContentFilter(filter.copy(year = year, month = month, day = null, dayEnd = null, dateFrom = null, dateTo = null))
                 },
             )
         } else if (phase == 2) {
@@ -636,7 +656,8 @@ fun SearchScreen(
         // The filter button floats at the bottom right, so the field above can run the full width. It takes
         // the accent while a filter the sheet holds is on, and steps aside for the selection drawer.
         val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
-            filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
+            filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All ||
+            filter.labelKeys.isNotEmpty()
         if (pick == null && !isSelectionMode) CompositionLocalProvider(LocalGlassBackdrop provides glass) {
             IconBubble(
                 icon = Icons.Filled.FilterList,
@@ -708,17 +729,21 @@ fun SearchScreen(
 
     if (showFilterSheet) {
         AppModalSheet(
-            onDismissRequest = { showFilterSheet = false },
+            onDismissRequest = { showFilterSheet = false; labelPage = false },
             sheetState = filterSheetState,
             containerColor = colors.sheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
+            onBackStep = { labelPage.also { if (it) labelPage = false } },
         ) {
             ContentFilterSheet(
                 currentFilter = filter,
                 currentCategory = selectedCategory,
                 onApply = { vm.setContentFilter(it) },
                 onCategorySelected = vm::onCategorySelected,
-                onDismiss = { showFilterSheet = false },
+                onDismiss = { showFilterSheet = false; labelPage = false },
+                labels = labelUsage,
+                labelPage = labelPage,
+                onLabelPageChange = { labelPage = it },
                 // The sheet holds the categories too, so every filter can be reached from this one place; the
                 // media type stays a category of its own (Videos).
                 showCategorySection = true,
@@ -733,6 +758,19 @@ fun SearchScreen(
 
 /** How long the header's pill row and category rail take to ease in or out. */
 private const val HEADER_EASE_MS = 220
+
+/** The picked labels as pills in the field, each with its tag; one a tap removes. */
+@Composable
+private fun labelTerms(filter: ContentFilter, usage: List<LabelUsage>, onRemove: (String) -> Unit): List<SearchFieldTerm> =
+    filter.labelKeys.map { key ->
+        val name = usage.firstOrNull { it.labelKey == key }?.label ?: key
+        SearchFieldTerm(
+            label = name,
+            removeDescription = stringResource(R.string.label_remove_cd, name),
+            icon = Icons.AutoMirrored.Filled.Label,
+            onRemove = { onRemove(key) },
+        )
+    }
 
 /**
  * The side effects of the search screen that report back through the snackbar or launch a system
