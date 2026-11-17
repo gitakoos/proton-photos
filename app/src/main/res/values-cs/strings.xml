@@ -2981,6 +2981,14 @@
     <string name="whats_new_260_savekeep_body">Uložit do zařízení pokračuje i poté, co opustíte obrazovku, kde jste ukládání spustili, a i po zavření aplikace. Když Android aplikaci uprostřed zastaví, ukládání naváže tam, kde skončilo, a žádná fotka se neuloží dvakrát. Fotka uložená při prohlížení se také zobrazí v Aktivitě a Historii.</string>
     <string name="whats_new_260_freeupbackup_title">Změněné fotky zůstávají</string>
     <string name="whats_new_260_freeupbackup_body">Uvolnění místa i smazání po záloze porovnají každou fotku s její zálohou těsně předtím, než z telefonu zmizí. Fotka změněná od zálohy zůstane v telefonu a zařadí se k nové záloze; fotka, kterou nejde ověřit, zůstane beze změny. Uvolnění místa pak uvede, kolik fotek ponechalo, protože je nešlo ověřit.</string>
+    <string name="whats_new_260_editwhole_title">Upravené kopie se zálohují celé</string>
+    <string name="whats_new_260_editwhole_body">Kopie uložená z editoru fotek se zálohuje celá. Kopie, které se dříve dostaly na Drive zkrácené, se najdou a zálohují znovu celé: celá kopie se přidá do alb zkrácené kopie a ta pak putuje do koše na Drive. Dokud celá kopie není nahraná, uvolnění místa i smazání po záloze nechají fotku v telefonu.</string>
+    <string name="whats_new_260_sdkblocks_title">Velká nahrávání projdou</string>
+    <string name="whats_new_260_sdkblocks_body">Velké fotky a videa nahrávané přes Proton Drive SDK už neselžou v půlce a už se nemusí nahrávat podruhé.</string>
+    <string name="whats_new_260_videolocation_title">Videa si ponechají polohu</string>
+    <string name="whats_new_260_videolocation_body">Video zkomprimované při nahrávání nebo přes Komprimovat na Drive a video uložené z editoru videa si ponechá polohu. Se zapnutým Odstranit metadata při nahrávání zůstane poloha mimo Drive a soubor, ze kterého polohu nejde odstranit, počká místo nahrání. Oříznutí začne přesně tam, kde jste zvolili.</string>
+    <string name="whats_new_260_samephoto_title">Stejná fotka, jedna položka</string>
+    <string name="whats_new_260_samephoto_body">Galerie a alba ukážou soubor v telefonu a fotku na Drive jako jednu položku jen tehdy, když jde opravdu o stejnou fotku. Soubor, který s fotkou na Drive sdílí jen název nebo velikost, se ukáže jako samostatná položka. Po přeinstalaci se soubory v telefonu znovu spárují se svými fotkami na Drive, jakmile se ověří jejich obsah. Fotka spárovaná během výběru se smaže i s oběma kopiemi a zpráva o koši počítá každou fotku jednou.</string>
     <string name="whats_new_260_compressnote_title">Poznámka ke kompresi a uvolnění místa</string>
     <string name="whats_new_260_compressnote_body">Se zapnutou kompresí při nahrávání Nastavení uvádí, že jakmile originál zmizí z telefonu uvolněním místa nebo smazáním po záloze, zůstane na Drive jen komprimovaná kopie.</string>
     <string name="whats_new_260_mirrorcheck_title">Originály se nahrazují až po kontrole</string>
