@@ -170,6 +170,7 @@ import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
+import eu.akoos.photos.presentation.common.KeepGridAtTopOnChange
 import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.common.ShimmerSquare
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -345,6 +346,12 @@ fun SearchScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val resultsGridState = rememberLazyGridState()
+    // Rows that land ahead of the one at the top (more file-name matches, a name-match row) are pulled
+    // into view instead of being laid out under the header; a new set opens at its first row.
+    KeepGridAtTopOnChange(
+        resultsGridState,
+        firstResultSlotKey(results, showDestinations, showPeopleSuggestions, showAlbumSuggestions),
+    )
     val idleListState = rememberLazyListState()
     // The whole search header (back button, field, filter, categories) hides while the active list is
     // scrolled DOWN, and slides back on a scroll up or once scrolling stops, like the timeline's chrome
@@ -1081,18 +1088,18 @@ private fun SearchResultsGrid(
             // and folders whose name matches: rows of the results, so they scroll with the photos
             // instead of riding the header.
             if (showDestinations) {
-                item(key = "match_destinations", span = { GridItemSpan(maxLineSpan) }) {
+                item(key = KEY_MATCH_DESTINATIONS, span = { GridItemSpan(maxLineSpan) }) {
                     DestinationsRow(tiles = destinations, onOpen = onOpenDestination)
                 }
             }
             if (showPeopleSuggestions) {
-                item(key = "match_people", span = { GridItemSpan(maxLineSpan) }) {
+                item(key = KEY_MATCH_PEOPLE, span = { GridItemSpan(maxLineSpan) }) {
                     PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = openPerson)
                 }
             }
             if (showAlbumSuggestions) {
                 // The same Albums row the idle page shows, with only the albums whose name matches.
-                item(key = "match_albums", span = { GridItemSpan(maxLineSpan) }) {
+                item(key = KEY_MATCH_ALBUMS, span = { GridItemSpan(maxLineSpan) }) {
                     AlbumsRow(entries = albumSuggestions, onOpen = openAlbum)
                 }
             }
@@ -1625,6 +1632,24 @@ private fun keyOf(item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "L:" + item.local.uri
     is GalleryItem.Synced    -> "S:" + item.local.uri
     is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
+}
+
+private const val KEY_MATCH_DESTINATIONS = "match_destinations"
+private const val KEY_MATCH_PEOPLE = "match_people"
+private const val KEY_MATCH_ALBUMS = "match_albums"
+
+/** The key of the results grid's first item, in the order [SearchResultsGrid] emits them, or null
+ *  while it lists nothing. */
+private fun firstResultSlotKey(
+    results: List<GalleryItem>,
+    destinations: Boolean,
+    people: Boolean,
+    albums: Boolean,
+): String? = when {
+    destinations -> KEY_MATCH_DESTINATIONS
+    people -> KEY_MATCH_PEOPLE
+    albums -> KEY_MATCH_ALBUMS
+    else -> results.firstOrNull()?.let(::keyOf)
 }
 
 /**
