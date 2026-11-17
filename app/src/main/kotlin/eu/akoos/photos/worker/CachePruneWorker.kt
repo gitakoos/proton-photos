@@ -35,7 +35,9 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.data.db.dao.ImportStagedDao
+import eu.akoos.photos.domain.usecase.DisplayPairRepair
 import eu.akoos.photos.util.DeviceHealthPolicy
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -60,6 +62,7 @@ class CachePruneWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val deviceHealth: DeviceHealthPolicy,
     private val importStagedDao: ImportStagedDao,
+    private val displayPairRepair: DisplayPairRepair,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -106,6 +109,16 @@ class CachePruneWorker @AssistedInject constructor(
         sweepStaleFiles("video_editor", VIDEO_EDITOR_STALE_MS, "video-editor")
         sweepStaleFiles("motion", MOTION_STALE_MS, "motion-photo")
         sweepStaleFiles("updates", UPDATES_STALE_MS, "staged-update")
+        // Last and bounded: link device files to the Drive photos they hold the bytes of, which a reinstall
+        // left unlinked or linked by name alone. Each run reads a capped number of files and stops at
+        // the time limit; the next run goes on. A failure never fails the worker.
+        try {
+            withTimeoutOrNull(PAIR_REPAIR_TIME_LIMIT_MS) { displayPairRepair.runForPrimaryUser() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "display pair repair failed: ${e.message}")
+        }
         return Result.success()
     }
 
@@ -128,6 +141,9 @@ class CachePruneWorker @AssistedInject constructor(
         const val UNIQUE_NAME = "cache_prune_periodic"
         private const val TAG = "cache_prune_worker"
         private const val INTERVAL_MINUTES = 30L
+
+        /** How long one run spends linking device files to their Drive photos at most. */
+        private val PAIR_REPAIR_TIME_LIMIT_MS: Long = TimeUnit.MINUTES.toMillis(2)
 
         /** Age past which a picked-but-never-confirmed import stage is swept: its import_staged
          *  rows and cached thumbnails. Far longer than any real staging session, so only a

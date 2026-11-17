@@ -392,6 +392,31 @@ class SyncStateDaoTest {
         assertNull(dao.getQueueSource("uri://1"))
     }
 
+    // ── a link reconcile made by name ──
+
+    @Test
+    fun `a name link is marked proven only while its row still links that photo at SYNCED`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "c1").copy(linkBasis = 1))
+        dao.upsert(entity("uri://2", status = SyncStatus.SYNCED, cloudFileId = "c2").copy(linkBasis = 1))
+        dao.upsert(entity("uri://3", status = SyncStatus.LOCAL_ONLY, cloudFileId = "c3").copy(linkBasis = 1))
+        dao.upsert(entity("uri://4", status = SyncStatus.SYNCED, cloudFileId = "c4", backedUpAtMs = 7L).copy(linkBasis = 1))
+
+        assertEquals(1, dao.markLinkProven("user1", "uri://1", "c1", "drive-1", "sha-1", now = 100L))
+        assertEquals("another photo", 0, dao.markLinkProven("user1", "uri://2", "c-other", "d", "s", now = 100L))
+        assertEquals("not SYNCED", 0, dao.markLinkProven("user1", "uri://3", "c3", "d", "s", now = 100L))
+        assertEquals("another account", 0, dao.markLinkProven("user2", "uri://1", "c1", "d", "s", now = 100L))
+        assertEquals(1, dao.markLinkProven("user1", "uri://4", "c4", "drive-4", "sha-4", now = 100L))
+        assertEquals("already proven", 0, dao.markLinkProven("user1", "uri://1", "c1", "d", "s", now = 200L))
+
+        val one = dao.getByUri("uri://1")!!
+        assertEquals(0, one.linkBasis)
+        assertEquals("drive-1", one.cloudHash)
+        assertEquals("sha-1", one.originalHash)
+        assertEquals(100L, one.backedUpAtMs)
+        assertEquals(1, dao.getByUri("uri://2")!!.linkBasis)
+        assertEquals("a backup stamp already there stays", 7L, dao.getByUri("uri://4")!!.backedUpAtMs)
+    }
+
     @Test
     fun `the synced pairs of a cloud id list every device file that holds it`() = runTest {
         dao.upsert(entity("uri://a", status = SyncStatus.SYNCED, cloudFileId = "c1"))

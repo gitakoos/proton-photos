@@ -519,6 +519,24 @@ interface SyncStateDao {
             "WHERE userId = :userId AND status = 'SYNCED' AND cloudFileId IN (:cloudFileIds)"
     )
     suspend fun syncedPairsForCloudIds(userId: String, cloudFileIds: List<String>): List<CloudPairRow>
+
+    /** Marks a link reconcile made by name ([eu.akoos.photos.domain.entity.LinkBasis.NAME]) proven, once the
+     *  device file was found to hold the Drive photo's bytes: records Drive's hash and the file's own SHA-1,
+     *  and stamps the backup when none was. Only while the row still links [cloudFileId] at SYNCED. */
+    @Query(
+        "UPDATE sync_state SET linkBasis = 0, cloudHash = :cloudHash, originalHash = :originalHash, " +
+            "backedUpAtMs = COALESCE(backedUpAtMs, :now) " +
+            "WHERE userId = :userId AND localUri = :localUri AND cloudFileId = :cloudFileId " +
+            "AND status = 'SYNCED' AND linkBasis = 1"
+    )
+    suspend fun markLinkProven(
+        userId: String,
+        localUri: String,
+        cloudFileId: String,
+        cloudHash: String,
+        originalHash: String,
+        now: Long,
+    ): Int
 }
 
 /** A row of a [SyncStateDao.pageByStatus] page and its rowid, the key the next page starts after. */

@@ -60,6 +60,9 @@ class SyncStateRepositoryImpl @Inject constructor(
         dao.upsert(state.toEntity(userId.id))
     }
 
+    override suspend fun insertIfAbsent(state: SyncState, userId: UserId): Boolean =
+        dao.insertIgnore(state.toEntity(userId.id)) != -1L
+
     override suspend fun upsertAll(states: List<SyncState>, userId: UserId) {
         dao.upsertAll(states.map { it.toEntity(userId.id) })
     }
@@ -205,6 +208,15 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun syncedUrisByCloudId(userId: UserId, cloudFileIds: Collection<String>): Map<String, List<String>> =
         cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedPairsForCloudIds(userId.id, chunk) }
             .groupBy({ it.cloudFileId }, { it.localUri })
+
+    override suspend fun markLinkProven(
+        userId: UserId,
+        localUri: String,
+        cloudFileId: String,
+        cloudHash: String,
+        originalHash: String,
+        now: Long,
+    ): Boolean = dao.markLinkProven(userId.id, localUri, cloudFileId, cloudHash, originalHash, now) > 0
 
     override suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
         cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedCloudIdsAmong(userId.id, chunk) }.toHashSet()

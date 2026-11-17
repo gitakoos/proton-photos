@@ -39,11 +39,30 @@ interface SyncStateRepository {
     suspend fun upsert(state: SyncState, userId: UserId)
     suspend fun upsertAll(states: List<SyncState>, userId: UserId)
 
+    /** Writes [state] only when no row holds its uri yet; true when it was written. A row an upload,
+     *  a download or reconcile wrote first is never replaced. */
+    suspend fun insertIfAbsent(state: SyncState, userId: UserId): Boolean {
+        if (getByUri(state.localUri) != null) return false
+        upsert(state, userId)
+        return true
+    }
+
     /** Device uris of [userId]'s SYNCED rows, by the cloud id of [cloudFileIds] each is paired to. */
     suspend fun syncedUrisByCloudId(userId: UserId, cloudFileIds: Collection<String>): Map<String, List<String>> =
         observeAll(userId).first()
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null && it.cloudFileId in cloudFileIds }
             .groupBy({ it.cloudFileId!! }, { it.localUri })
+
+    /** Marks [localUri]'s link to [cloudFileId], made by name, proven by the file's bytes; see
+     *  [eu.akoos.photos.data.db.dao.SyncStateDao.markLinkProven]. True when the row was changed. */
+    suspend fun markLinkProven(
+        userId: UserId,
+        localUri: String,
+        cloudFileId: String,
+        cloudHash: String,
+        originalHash: String,
+        now: Long,
+    ): Boolean = false
 
     /** Guarded domain-column write for reconcile: rewrites [state]'s domain columns UNLESS the row is
      *  already a finished upload (SYNCED with a cloud id), returning the rows changed. Reconcile derives
