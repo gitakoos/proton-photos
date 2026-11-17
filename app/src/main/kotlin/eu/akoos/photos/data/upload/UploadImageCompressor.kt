@@ -272,10 +272,13 @@ object UploadImageCompressor {
         isMotionPhoto: () -> Boolean = { false },
     ): Boolean {
         if (!stripOnUpload || compressWillRun) return false
-        val normalized = mimeType.substringBefore(';').trim().lowercase(Locale.ROOT)
-        if (normalized !in EXIF_UNWRITABLE_IMAGE_MIMES) return false
+        if (!isExifUnwritable(mimeType)) return false
         return !isMotionPhoto()
     }
+
+    /** True for an image container whose EXIF the strip cannot rewrite (the HEIC family and AVIF). */
+    fun isExifUnwritable(mimeType: String): Boolean =
+        mimeType.substringBefore(';').trim().lowercase(Locale.ROOT) in EXIF_UNWRITABLE_IMAGE_MIMES
 
     /**
      * Pure decision: must the image compressor be SKIPPED for this upload because the bytes carry an

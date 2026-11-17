@@ -53,6 +53,8 @@ import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.PhotoGpsResolver
+import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.VideoMetadataStripper
 import io.mockk.coEvery
@@ -376,16 +378,18 @@ class UploadBytePreparationTest {
     }
 
     @Test
-    fun `a failed video remux uploads the untouched original and leaves the device file alone`() = runTest {
+    fun `a failed video remux of a file with no readable location uploads the untouched original`() = runTest {
         prefs {
             it[SettingsKeys.STRIP_ON_UPLOAD] = true
             it[SettingsKeys.STRIP_GPS] = true
             it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
         }
         val original = ByteArray(60) { 3 }
-        val (file, item) = deviceFile("VID_3.mp4", "video/mp4", original)
+        val (file, item) = deviceFile("VID_3.webm", "video/webm", original)
         mockkObject(VideoMetadataStripper)
         every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        mockkObject(PhotoGpsResolver)
+        every { PhotoGpsResolver.videoGps(any(), any()) } returns null
 
         useCase(userId)
 
@@ -393,6 +397,171 @@ class UploadBytePreparationTest {
         assertArrayEquals(original, s.bytes)
         assertEquals(item.uri, s.uri)
         assertArrayEquals(original, file.readBytes())
+    }
+
+    // ── A location strip that falls back to the original ────────────────────────────────────────────
+
+    private fun box(type: String, vararg children: ByteArray): ByteArray {
+        val payload = children.fold(ByteArray(0)) { acc, b -> acc + b }
+        val size = 8 + payload.size
+        return byteArrayOf((size ushr 24).toByte(), (size ushr 16).toByte(), (size ushr 8).toByte(), size.toByte()) +
+            type.toByteArray(Charsets.ISO_8859_1) + payload
+    }
+
+    private fun mp4WithLocation(): ByteArray = box("ftyp", "isom".toByteArray()) +
+        box("moov", box("mvhd", ByteArray(100)), box("udta", box("©xyz", ByteArray(4) + "+47.4979+019.0402/".toByteArray()))) +
+        box("mdat", ByteArray(32) { 5 })
+
+    private suspend fun stripGpsOnly() = prefs {
+        it[SettingsKeys.STRIP_ON_UPLOAD] = true
+        it[SettingsKeys.STRIP_GPS] = true
+    }
+
+    private suspend fun assertHeldBackInQueue(item: LocalMediaItem) {
+        assertEquals(0, sent.size)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertTrue(row.queued)
+        assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a failed video remux uploads a copy with the location erased in place`() = runTest {
+        stripGpsOnly()
+        val original = mp4WithLocation()
+        val (file, _) = deviceFile("VID_10.mp4", "video/mp4", original)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertEquals(original.size, s.bytes.size)
+        assertFalse(String(s.bytes, Charsets.ISO_8859_1).contains("+47.4979"))
+        assertArrayEquals(original, file.readBytes())
+        assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a video whose location cannot be stripped at all is held back in the queue`() = runTest {
+        stripGpsOnly()
+        // An MP4 whose movie box runs past the end of the file: the erase cannot walk it.
+        val broken = box("ftyp", "isom".toByteArray()) + box("moov", box("udta", ByteArray(40) { 1 })).copyOf(30)
+        val (_, item) = deviceFile("VID_11.mp4", "video/mp4", broken)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `a video the platform reads a location from is held back when no strip lands`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("VID_12.webm", "video/webm", ByteArray(60) { 3 })
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        mockkObject(PhotoGpsResolver)
+        every { PhotoGpsResolver.videoGps(any(), item.uri) } returns (47.4979 to 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `a video whose strip failed still uploads once the transcode leaves the location out`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true
+        }
+        val broken = box("ftyp", "isom".toByteArray()) + box("moov", box("udta", ByteArray(40) { 1 })).copyOf(30)
+        deviceFile("VID_13.mp4", "video/mp4", broken)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        val compressed = ByteArray(20) { 9 }
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } returns
+            VideoUploadCompression.Attempt(temp("videocompress_", ".mp4", compressed), CompressionOutcome.COMPRESSED, null, 30L, "video/avc", 20L)
+
+        useCase(userId)
+
+        assertArrayEquals(compressed, sent.single().bytes)
+    }
+
+    @Test
+    fun `a photo whose strip fails while it carries a fix is held back in the queue`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("IMG_20.jpg", "image/jpeg", ByteArray(30) { 1 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `a photo whose strip fails without a fix uploads the original`() = runTest {
+        stripGpsOnly()
+        val original = ByteArray(30) { 1 }
+        val (_, item) = deviceFile("IMG_21.gif", "image/gif", original)
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata()
+
+        useCase(userId)
+
+        assertArrayEquals(original, sent.single().bytes)
+    }
+
+    @Test
+    fun `an HEIC with a fix whose JPEG transcode fails is held back in the queue`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("IMG_22.HEIC", "image/heic", ByteArray(30) { 2 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+        mockkObject(UploadImageCompressor)
+        every { UploadImageCompressor.transcodeStrippedJpeg(any(), item.uri, any()) } returns null
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `an HEIC with a fix that compression leaves as it is is held back in the queue`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.COMPRESS_ON_UPLOAD] = true
+        }
+        val (_, item) = deviceFile("IMG_23.HEIC", "image/heic", ByteArray(30) { 2 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `an HEIC motion photo with a fix still uploads as it is`() = runTest {
+        stripGpsOnly()
+        val original = ByteArray(30) { 2 }
+        val (_, item) = deviceFile("IMG_24.HEIC", "image/heic", original)
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+        every { stripper.isMotionPhotoUpload(item.uri) } returns true
+
+        useCase(userId)
+
+        assertArrayEquals(original, sent.single().bytes)
     }
 
     @Test
