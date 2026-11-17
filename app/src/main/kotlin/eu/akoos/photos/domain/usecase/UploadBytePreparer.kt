@@ -152,11 +152,19 @@ internal class UploadBytePreparer(
             if (motionTemp != null) {
                 temps.strippedFile = motionTemp
                 Log.d(UPLOAD_TAG, "Motion Photo primary stripped, trailer preserved for ${localItem.displayName}")
+                // A JPEG motion photo whose primary strip failed comes back byte-exact, fix included:
+                // it waits like any other photo whose strip left its location. A HEIF one whose layout
+                // the in-place GPS patch refused uploads as it is, which the stripper has logged.
+                val motionKeepsLocation = stripConfig.stripGps &&
+                    !eu.akoos.photos.util.HeifExifGps.isHeif(motionTemp) &&
+                    photoHasLocation(android.net.Uri.fromFile(motionTemp).toString())
+                if (motionKeepsLocation) temps.locationStripOwed = true
                 // Mirror: a motion photo can't be wiped in place (an EXIF rewrite drops its
                 // trailer), so overwrite the on-device original with the whole motion-preserving
                 // stripped file instead — the local loses its metadata too and byte-matches the
                 // cloud. Silent with all-files; a refused write leaves the original intact.
-                val motionMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, motionTemp, MirrorSourceCheck.Kind.MOTION_PHOTO)
+                val motionMirrorLanded = !motionKeepsLocation && mirrorStripToLocal &&
+                    deviceFiles.overwriteLocalInPlace(state.localUri, motionTemp, MirrorSourceCheck.Kind.MOTION_PHOTO)
                 if (motionMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
@@ -290,16 +298,19 @@ internal class UploadBytePreparer(
     private fun photoLocationOwed(uri: String, mimeType: String, stripConfig: MetadataStripConfig): Boolean =
         photoLocationStripOwed(
             stripGps = stripConfig.stripGps,
-            hasLocation = {
-                val meta = runCatching { ExifHelper.readMetadata(context, uri) }.getOrNull()
-                val lat = meta?.gpsLatitude
-                val lng = meta?.gpsLongitude
-                lat != null && lng != null && eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng)
-            },
+            hasLocation = { photoHasLocation(uri) },
             keepsMotionAsIs = {
                 UploadImageCompressor.isExifUnwritable(mimeType) && structuralStripper.isMotionPhotoUpload(uri)
             },
         )
+
+    /** Whether the photo at [uri] carries a usable GPS fix, read as the upload reads it. */
+    private fun photoHasLocation(uri: String): Boolean {
+        val meta = runCatching { ExifHelper.readMetadata(context, uri) }.getOrNull()
+        val lat = meta?.gpsLatitude
+        val lng = meta?.gpsLongitude
+        return lat != null && lng != null && eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng)
+    }
 
     /** The compression and the uncompressed-video mvhd floor, reading [strippedUploadUri]. */
     suspend fun compress(

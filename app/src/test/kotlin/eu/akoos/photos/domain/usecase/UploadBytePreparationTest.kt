@@ -565,6 +565,25 @@ class UploadBytePreparationTest {
     }
 
     @Test
+    fun `a motion photo whose primary strip left its fix is held back and the device file kept`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(40) { 4 }
+        val (file, item) = deviceFile("MVIMG_1.jpg", "image/jpeg", original)
+        every { stripper.stripImagePreservingMotion(item.uri, any()) } returns temp("motion_", ".jpg", original)
+        mockkObject(ExifHelper)
+        every { ExifHelper.readMetadata(any(), any()) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+        assertArrayEquals(original, file.readBytes())
+    }
+
+    @Test
     fun `a compressed image that does not read back is never mirrored onto the device original`() = runTest {
         prefs {
             it[SettingsKeys.COMPRESS_ON_UPLOAD] = true

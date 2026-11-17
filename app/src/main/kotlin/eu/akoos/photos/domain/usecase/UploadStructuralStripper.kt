@@ -29,6 +29,7 @@ import android.os.Build
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.HeifExifGps
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.UltraHdrUtil
@@ -125,6 +126,11 @@ class UploadStructuralStripper @Inject constructor(
                     }
                 }
             }
+            // A HEIC primary cannot be rewritten by the EXIF writer, so the join above is byte-exact.
+            // Its GPS is then emptied in place, leaving the clip and every offset where they were.
+            if (strippedPrimary == null && stripConfig.stripGps && HeifExifGps.isHeif(source)) {
+                eraseHeifMotionGps(source, joined, info.videoOffset)
+            }
             strippedPrimary?.delete()
             primary?.delete()
             source.delete()
@@ -136,6 +142,58 @@ class UploadStructuralStripper @Inject constructor(
             // Byte-exact fallback: the untouched materialized copy keeps the motion intact.
             return source
         }
+    }
+
+    /**
+     * Empties the GPS of [joined], a byte-exact copy of the HEIF motion photo [source] whose clip starts
+     * at [videoOffset], and keeps the patch only once the copy proves it: the same length, every byte
+     * outside the Exif item unchanged (so the image items and the clip are untouched), no GPS entry left,
+     * no location read back and the same image size. True when [joined] now carries no GPS. Otherwise
+     * [joined] is restored to [source], one diagnostics line says why, and the photo uploads as before.
+     */
+    internal fun eraseHeifMotionGps(source: File, joined: File, videoOffset: Long): Boolean {
+        val reason = when (val result = HeifExifGps.erase(joined)) {
+            HeifExifGps.Result.NoGps -> return true
+            is HeifExifGps.Result.Unsupported -> result.reason
+            is HeifExifGps.Result.Erased -> heifPatchProblem(source, joined, result, videoOffset) ?: return true
+        }
+        runCatching { source.copyTo(joined, overwrite = true) }
+        eu.akoos.photos.util.SyncDiagnostics.log("motion photo location patch skipped: $reason")
+        return false
+    }
+
+    /** Why the patched [joined] cannot be kept, or null when every check passes. */
+    private fun heifPatchProblem(source: File, joined: File, erased: HeifExifGps.Result.Erased, videoOffset: Long): String? {
+        if (joined.length() != source.length()) return "length changed"
+        if (erased.exifEnd > videoOffset) return "exif past the clip"
+        if (!sameOutside(source, joined, erased.exifStart, erased.exifEnd)) return "bytes outside the exif changed"
+        if (HeifExifGps.gpsEntryCount(joined) != 0) return "gps left"
+        val readBack = runCatching { androidx.exifinterface.media.ExifInterface(joined.absolutePath).latLong }.getOrNull()
+        if (readBack != null) return "location read back"
+        if (boundsOf(source) != boundsOf(joined)) return "size changed"
+        return null
+    }
+
+    /** True when [a] and [b] hold the same bytes everywhere outside [from, to). */
+    private fun sameOutside(a: File, b: File, from: Long, to: Long): Boolean {
+        a.inputStream().buffered().use { ia ->
+            b.inputStream().buffered().use { ib ->
+                var pos = 0L
+                while (true) {
+                    val x = ia.read()
+                    val y = ib.read()
+                    if (x != y && (pos < from || pos >= to)) return false
+                    if (x < 0 || y < 0) return x == y
+                    pos++
+                }
+            }
+        }
+    }
+
+    private fun boundsOf(file: File): Pair<Int, Int> {
+        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts) }
+        return opts.outWidth to opts.outHeight
     }
 
     /**
