@@ -167,6 +167,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     status = SyncStatus.SYNCED,
                     lastSyncSuccessMs = now,
                     backedUpAtMs = now,
+                    sizeBytes = querySizeBytes(deviceUri).takeIf { it > 0L } ?: resumeExisting.sizeBytes,
                 ),
                 userId,
             )
@@ -347,6 +348,8 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     status = SyncStatus.SYNCED,
                     lastSyncSuccessMs = pairedNow,
                     backedUpAtMs = pairedNow,
+                    // The size of the corrected bytes just uploaded, not the one recorded before the edit.
+                    sizeBytes = item.sizeBytes.takeIf { it > 0L } ?: existing.sizeBytes,
                 ),
                 userId,
             )

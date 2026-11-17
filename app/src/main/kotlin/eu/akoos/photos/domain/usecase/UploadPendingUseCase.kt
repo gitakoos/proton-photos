@@ -1035,14 +1035,16 @@ class UploadPendingUseCase @Inject constructor(
             if (state.localHash != hash) {
                 syncStateRepo.upsert(state.copy(localHash = hash, status = SyncStatus.UPLOADING), userId)
             }
-            // Size the item from whatever temp holds the bytes we actually send: the compressed copy
-            // when compression produced one (strippedFile was cleared to it above), the stripped temp
-            // otherwise, else the original. Keeps sizeBytes / progress / xAttr aligned with the wire.
+            // Size the item from the bytes actually sent, measured now that every write to them is done:
+            // the compressed copy, the stripped temp, the timestamp-floored copy, or the device file
+            // itself, whose MediaStore size predates an in-place mirror strip. Keeps sizeBytes / progress
+            // / xAttr aligned with the wire.
             val uploadTempFile = temps.compressedFile ?: temps.strippedFile
             // Kept for the batch's savings, since compressedFile is deleted below.
             val compressedSize = temps.compressedFile?.length() ?: 0L
-            val sizedItem = if (uploadTempFile != null)
-                localItem.copy(sizeBytes = uploadTempFile.length())
+            val sentBytes = deviceFiles.deviceFileLength(finalUploadUri) ?: uploadTempFile?.length()
+            val sizedItem = if (sentBytes != null && sentBytes > 0L)
+                localItem.copy(sizeBytes = sentBytes)
             else
                 localItem
             // After a re-encode the name and MIME type follow the bytes; the device file keeps its own.

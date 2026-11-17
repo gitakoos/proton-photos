@@ -239,6 +239,32 @@ class UploadBytePreparationTest {
     }
 
     @Test
+    fun `an in-place mirror strip that changes the file's length uploads and records the length it left`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        // The scan measured the file before the rewrite; the rewrite leaves it 484 bytes longer.
+        val (file, item) = deviceFile("IMG_2.jpg", "image/jpeg", ByteArray(10_000) { 5 })
+        val rewritten = ByteArray(10_484) { 6 }
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripFieldsInPlace(any(), any(), any(), any()) } answers { file.writeBytes(rewritten); StripResult.Stripped }
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertEquals(item.uri, s.uri)
+        assertArrayEquals(rewritten, s.bytes)
+        assertEquals(10_484L, s.item.sizeBytes)
+        assertEquals(sha1(rewritten), s.hash)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals(10_484L, row.sizeBytes)
+        assertEquals(sha1(rewritten), row.localHash)
+    }
+
+    @Test
     fun `a motion photo mirror rewrites the device file and records the device bytes`() = runTest {
         prefs {
             it[SettingsKeys.STRIP_ON_UPLOAD] = true

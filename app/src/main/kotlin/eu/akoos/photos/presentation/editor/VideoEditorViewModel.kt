@@ -2347,7 +2347,7 @@ class VideoEditorViewModel @Inject constructor(
      * Hex-encodes the SHA-1 of the file's plaintext bytes. The upload pipeline
      * feeds this into `Common.Digests.SHA1` of the encrypted xAttr blob AND into
      * the `HMAC-SHA256(rootNodeHashKey, ...)` that produces the wire ContentHash.
-     * See `PhotoEditorViewModel.sha1` for the cross-client rationale.
+     * See `finishEditFile` for the cross-client rationale.
      */
     private fun sha1(file: File): String {
         return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)

@@ -2640,6 +2640,11 @@ class PhotoEditorViewModel @Inject constructor(
                                             // map it to the cloud ContentHash and keep the pair Synced
                                             // once this fresh linkId is later demoted to LOCAL_ONLY.
                                             localHash = uploadResult.contentSha1,
+                                            // The device copy's length as it is now, after any mirror
+                                            // strip, rather than the placeholder's 0.
+                                            sizeBytes = runCatching {
+                                                context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+                                            }.getOrNull()?.takeIf { it > 0L } ?: 0L,
                                             status = eu.akoos.photos.domain.entity.SyncStatus.SYNCED,
                                             lastSyncSuccessMs = System.currentTimeMillis(),
                                             backedUpAtMs = System.currentTimeMillis(),
@@ -3134,29 +3139,31 @@ class PhotoEditorViewModel @Inject constructor(
                 stripOnUpload && stripConfig.stripTimestamp -> System.currentTimeMillis()
                 else -> originalCaptureMs
             }
+            // Re-inject the Cloud original's EXIF into the temp, honouring the upload strip settings, and
+            // mirror the surviving GPS/camera into the xAttr so Proton's map + camera UI keep working.
+            // The size and the SHA-1 are taken only after these writes: the upload sends exactly the
+            // recorded length, and Drive's ContentHash is computed from exactly these bytes.
+            val originalExif = cloudOriginalFilePath?.let { ExifHelper.readExifSnapshot(File(it)) }
+            val finished = finishEditFile(tempFile) {
+                if (originalExif != null) {
+                    ExifHelper.copyExifPreservingOrientation(originalExif, tempFile, bitmap.width, bitmap.height)
+                }
+                if (stripOnUpload) {
+                    // Reuse the exact backup strip so the cloud file matches the xAttr gating below.
+                    runCatching { ExifHelper.stripFieldsInPlace(context, tempUri.toString(), stripConfig) }
+                }
+            }
             val item = LocalMediaItem(
                 uri = tempUri.toString(),
                 dateTaken = dateTaken,
                 displayName = displayName,
                 mimeType = "image/jpeg",
-                sizeBytes = tempFile.length(),
+                sizeBytes = finished.sizeBytes,
                 bucketName = null,
                 width = bitmap.width,
                 height = bitmap.height,
                 duration = 0L,
             )
-            // Re-inject the Cloud original's EXIF into the temp, honouring the upload strip settings, and
-            // mirror the surviving GPS/camera into the xAttr so Proton's map + camera UI keep working.
-            // MUST run before sha1() below: the EXIF write changes the bytes, and Drive's ContentHash is
-            // computed from exactly these bytes; hashing before the write would make the upload mismatch.
-            val originalExif = cloudOriginalFilePath?.let { ExifHelper.readExifSnapshot(File(it)) }
-            if (originalExif != null) {
-                ExifHelper.copyExifPreservingOrientation(originalExif, tempFile, bitmap.width, bitmap.height)
-            }
-            if (stripOnUpload) {
-                // Reuse the exact backup strip so the cloud file matches the xAttr gating below.
-                runCatching { ExifHelper.stripFieldsInPlace(context, tempUri.toString(), stripConfig) }
-            }
             val xAttr = buildEditXAttr(
                 originalExif = originalExif,
                 captureTimeMs = dateTaken,
@@ -3165,8 +3172,7 @@ class PhotoEditorViewModel @Inject constructor(
                 stripOnUpload = stripOnUpload,
                 stripConfig = stripConfig,
             )
-            val hash = sha1(tempFile)
-            val newLinkId = cloudRepo.uploadFile(userId, item, hash, tempUri.toString(), xAttr)
+            val newLinkId = cloudRepo.uploadFile(userId, item, finished.sha1, tempUri.toString(), xAttr)
 
             // Re-attach the new linkId to the source album (when there is one) so the edited
             // copy lives in the same album as the source did. Best-effort — never fails the save.
@@ -3256,27 +3262,29 @@ class PhotoEditorViewModel @Inject constructor(
                 stripOnUpload && stripConfig.stripTimestamp -> System.currentTimeMillis()
                 else -> originalCaptureMs
             }
+            // Re-inject the device original's EXIF into the temp, honouring the upload strip settings, and
+            // mirror the surviving GPS/camera into the xAttr so Proton's map + camera UI keep working.
+            // The size and the SHA-1 are taken only after these writes (see saveCloud).
+            val originalExif = ExifHelper.readExifSnapshot(context, originalSourceUri)
+            val finished = finishEditFile(tempFile) {
+                if (originalExif != null) {
+                    ExifHelper.copyExifPreservingOrientation(originalExif, tempFile, bitmap.width, bitmap.height)
+                }
+                if (stripOnUpload) {
+                    runCatching { ExifHelper.stripFieldsInPlace(context, tempUri.toString(), stripConfig) }
+                }
+            }
             val item = LocalMediaItem(
                 uri = tempUri.toString(),
                 dateTaken = dateTaken,
                 displayName = displayName,
                 mimeType = "image/jpeg",
-                sizeBytes = tempFile.length(),
+                sizeBytes = finished.sizeBytes,
                 bucketName = null,
                 width = bitmap.width,
                 height = bitmap.height,
                 duration = 0L,
             )
-            // Re-inject the device original's EXIF into the temp, honouring the upload strip settings, and
-            // mirror the surviving GPS/camera into the xAttr so Proton's map + camera UI keep working.
-            // MUST run before sha1() below: the EXIF write changes the bytes Drive's ContentHash covers.
-            val originalExif = ExifHelper.readExifSnapshot(context, originalSourceUri)
-            if (originalExif != null) {
-                ExifHelper.copyExifPreservingOrientation(originalExif, tempFile, bitmap.width, bitmap.height)
-            }
-            if (stripOnUpload) {
-                runCatching { ExifHelper.stripFieldsInPlace(context, tempUri.toString(), stripConfig) }
-            }
             val xAttr = buildEditXAttr(
                 originalExif = originalExif,
                 captureTimeMs = dateTaken,
@@ -3290,7 +3298,7 @@ class PhotoEditorViewModel @Inject constructor(
             // cloudContentHash() to the cloud copy's HMAC ContentHash to re-pair the two as Synced.
             // The on-device file keeps full EXIF and may hash differently, so the UPLOAD's sha1 is the
             // one that pairs. Drive's wire ContentHash is derived from this same digest, unchanged.
-            val hash = sha1(tempFile)
+            val hash = finished.sha1
             val newLinkId = cloudRepo.uploadFile(userId, item, hash, tempUri.toString(), xAttr)
             sourceAlbumLinkId?.let { albumId ->
                 runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
@@ -3307,14 +3315,6 @@ class PhotoEditorViewModel @Inject constructor(
     /** New Drive linkId plus the bare sha1 of the uploaded plaintext, so the device sync_state row
      *  can store the SAME hash the cloud ContentHash was derived from and reconcile re-pairs them. */
     private data class CloudUploadResult(val linkId: String, val contentSha1: String)
-
-    /**
-     * Hex SHA-1 of the file's plaintext. Must stay SHA-1 (not SHA-256): Drive pins the digest algorithm,
-     * and Drive web rejects a differently-derived ContentHash ("Cannot build photo payload...").
-     */
-    private fun sha1(file: File): String {
-        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
-    }
 
     /**
      * Appends a "_edit_<ts>" suffix to the filename. Pass the SAME [atMs] to the device + cloud
