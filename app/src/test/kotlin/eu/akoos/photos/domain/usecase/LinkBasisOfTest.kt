@@ -79,7 +79,7 @@ class LinkBasisOfTest {
     }
 
     @Test
-    fun `only proven links count as a device copy of a Drive photo`() {
+    fun `every synced link counts as a device copy for display`() {
         fun row(uri: String, cloud: String, basis: Int) =
             SyncStateLite(localUri = uri, cloudFileId = cloud, localHash = "", status = SyncStatus.SYNCED, queued = false, linkBasis = basis)
         val rows = SyncStateSnapshot.Rows(
@@ -90,6 +90,6 @@ class LinkBasisOfTest {
             ),
         )
 
-        assertEquals(setOf("c1"), rows.syncedCloudIds)
+        assertEquals(setOf("c1", "c2", "c3"), rows.syncedCloudIds)
     }
 }

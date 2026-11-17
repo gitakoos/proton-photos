@@ -35,6 +35,7 @@ import eu.akoos.photos.presentation.viewer.syncedLocalUrisByCloudId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -94,7 +95,7 @@ class SyncSnapshotReadersTest {
     }
 
     @Test
-    fun `a link made by name alone does not count as the photo being on the device`() {
+    fun `a link made by name counts as the photo being on the device for display`() {
         val withNameLinks = table + listOf(
             row("uri://by-name", "c-by-name", SyncStatus.SYNCED).copy(linkBasis = LinkBasis.NAME),
             row("uri://rewritten", "c-rewritten", SyncStatus.SYNCED).copy(linkBasis = LinkBasis.NAME_REWRITTEN),
@@ -103,13 +104,12 @@ class SyncSnapshotReadersTest {
         val noBlank = SyncStateSnapshot.Rows(lean(withNameLinks.filterNot { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }))
 
         for (ids in listOf(syncedCloudIdsOnDevice(sync), syncedCloudIdsOnDevice(noBlank))) {
-            assertFalse("c-by-name" in ids)
-            assertFalse("c-rewritten" in ids)
+            assertTrue("c-by-name" in ids)
+            assertTrue("c-rewritten" in ids)
         }
         val albumUris = albumLocalUrisByLinkId(lean(withNameLinks))
-        assertFalse("c-by-name" in albumUris)
-        assertFalse("c-rewritten" in albumUris)
-        assertEquals("uri://synced-1", albumUris["c-1"])
+        assertEquals("uri://by-name", albumUris["c-by-name"])
+        assertEquals("uri://rewritten", albumUris["c-rewritten"])
     }
 
     @Test

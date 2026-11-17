@@ -34,6 +34,7 @@ import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -179,6 +180,24 @@ class DownloadRelinkTest {
         assertEquals(1, progress.skipped)
         assertTrue("no fresh backup stamp for whatever the file holds now", upserts.isEmpty())
         coVerify(exactly = 0) { syncRepo.setOriginalHash(any(), any()) }
+    }
+
+    @Test
+    fun `a device file linked to the photo by name alone never stops the photo being saved`() = runTest {
+        // Same name and capture second, other bytes: shown as one item, but no proof the photo is here.
+        val own = Media.add("IMG_0001.png", usersOwn)
+        cloud.downloadBytes = cloudBytes
+        coEvery { syncRepo.getByCloudId("cloud-1") } returns SyncState(
+            localUri = own.toString(), cloudFileId = "cloud-1", localHash = "", cloudHash = null,
+            status = SyncStatus.SYNCED, lastSyncAttemptMs = 1L, lastSyncSuccessMs = 1L, backedUpAtMs = null,
+            sizeBytes = 64L, linkBasis = LinkBasis.NAME,
+        )
+
+        val progress = useCase.downloadCloudPhotos(userId, listOf(photo(64L, "drive:${sha1(cloudBytes)}")), folderName = "")
+
+        assertEquals(1, progress.done)
+        assertEquals(listOf("cloud-1"), cloud.downloadedLinkIds)
+        assertArrayEquals(usersOwn, Media.bytes(own))
     }
 
     @Test

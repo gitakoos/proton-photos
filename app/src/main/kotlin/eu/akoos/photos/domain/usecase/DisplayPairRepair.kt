@@ -81,9 +81,15 @@ class PrefsPairRepairMisses @Inject constructor(@ApplicationContext context: Con
 
 /**
  * A device file and the Drive photo it may hold, before the bytes are read: the one Drive photo of its
- * name for a file with no sync row, or the photo its row links by name alone ([upgrade]).
+ * name for a file with no sync row, or the photo its row links by name alone ([upgrade]). [nameAndSecond]
+ * marks a file with no row whose exact name and capture second are the photo's.
  */
-internal data class PairRepairCandidate(val file: LocalMediaItem, val linkId: String, val upgrade: Boolean = false) {
+internal data class PairRepairCandidate(
+    val file: LocalMediaItem,
+    val linkId: String,
+    val upgrade: Boolean = false,
+    val nameAndSecond: Boolean = false,
+) {
     /** The file and its Drive photo as weighed: another photo or a rewritten file is weighed again. */
     val fingerprint: String get() = "$linkId|${file.sizeBytes}|${file.dateModified}"
 }
@@ -93,10 +99,13 @@ internal data class PairRepairCandidate(val file: LocalMediaItem, val linkId: St
  * reinstall wipes the sync rows, and reconcile writes rows again only for the folders that are backed
  * up, so a photo in a folder that is not would show twice: once as a device file and once on Drive. In
  * the backed-up folders reconcile links a file with no recorded hash by its name and capture second
- * ([LinkBasis.NAME]), a link the gallery shows only when the sizes agree as well, which Drive's listing
- * does not report. The gallery pairs only through a sync row (see [GetGalleryItemsUseCase]), so this
- * writes the row, or marks the name link proven, and only on proof: the file's SHA-1, turned into
- * Drive's content hash, is the photo's.
+ * ([LinkBasis.NAME]), a link the gallery shows but free-up never counts as backed up. The gallery pairs
+ * only through a sync row (see [GetGalleryItemsUseCase]), so this writes the row, or marks the name link
+ * proven, and only on proof: the file's SHA-1, turned into Drive's content hash, is the photo's. A file
+ * with no row that agrees with its photo on the exact name and capture second is linked by name at once,
+ * before any byte is read, as reconcile links one in a backed-up folder: the gallery shows the two as one
+ * item, a download whose saved bytes this app stamped included, and free-up keeps the file until the
+ * bytes prove the link.
  *
  * Runs in the background ([eu.akoos.photos.worker.CachePruneWorker]), never on the gallery path, and
  * weighs a device file whose SYNCED row links a Drive photo by name alone, or one that has no row yet
@@ -156,8 +165,14 @@ class DisplayPairRepair internal constructor(
     internal suspend fun run(userId: UserId): Int = withContext(Dispatchers.IO) {
         val device = localRepo.lastKnownMedia()?.takeIf { it.isNotEmpty() } ?: return@withContext 0
         misses.keepOnly(device.mapTo(HashSet(device.size * 2)) { it.uri })
-        val candidates = candidates(userId, device, syncStateSnapshot.current(userId))
-        var linked = 0
+        val found = candidates(userId, device, syncStateSnapshot.current(userId))
+        val linked = HashSet<String>()
+        // Name links first: they cost no read, so every one is written in this run.
+        val candidates = found.map { candidate ->
+            if (!candidate.nameAndSecond) return@map candidate
+            if (syncStateRepo.insertIfAbsent(nameLinkRow(candidate), userId)) linked += candidate.file.uri
+            candidate.copy(upgrade = true)
+        }.filter { misses.fingerprintOf(it.file.uri) != it.fingerprint }
         var files = 0
         var bytes = 0L
         budget@ for (window in candidates.chunked(PAIR_REPAIR_NAME_CHUNK)) {
@@ -177,11 +192,28 @@ class DisplayPairRepair internal constructor(
                     misses.record(candidate.file.uri, candidate.fingerprint)
                     continue
                 }
-                if (link(userId, candidate, photo.linkId, driveHash, sha1)) linked++
+                if (link(userId, candidate, photo.linkId, driveHash, sha1)) linked += candidate.file.uri
             }
         }
-        if (linked > 0) Log.d(TAG, "linked $linked device file(s) to their Drive photo")
-        linked
+        if (linked.isNotEmpty()) Log.d(TAG, "linked ${linked.size} device file(s) to their Drive photo")
+        linked.size
+    }
+
+    /** The row of a link by exact name and capture second: shown as one item, never counted as backed up. */
+    private fun nameLinkRow(candidate: PairRepairCandidate): SyncState {
+        val now = System.currentTimeMillis()
+        return SyncState(
+            localUri = candidate.file.uri,
+            cloudFileId = candidate.linkId,
+            localHash = "",
+            cloudHash = null,
+            status = SyncStatus.SYNCED,
+            lastSyncAttemptMs = now,
+            lastSyncSuccessMs = now,
+            backedUpAtMs = null,
+            sizeBytes = candidate.file.sizeBytes,
+            linkBasis = LinkBasis.NAME,
+        )
     }
 
     /** Records that [candidate]'s file holds the bytes of Drive photo [linkId]. True when a row changed. */
@@ -220,8 +252,8 @@ class DisplayPairRepair internal constructor(
 
     /**
      * The files of [device] whose SYNCED row in [rows] links a Drive photo by name alone, and those with no
-     * row and one Drive photo of their name that no row claims, a name no other device file carries; each
-     * not weighed before as it is now, newest first.
+     * row and one Drive photo of their name that no row claims, a name no other device file carries; newest
+     * first. [run] leaves out the ones already weighed as they are now.
      */
     internal suspend fun candidates(
         userId: UserId,
@@ -243,15 +275,15 @@ class DisplayPairRepair internal constructor(
             .flatMap { photoListingDao.ownStreamByLowerNames(userId.id, it) }
         val onlyPhotoOfName = listed.groupBy { it.displayName.lowercase() }
             .filterValues { it.size == 1 }
-            .mapValues { it.value.single().linkId }
+            .mapValues { it.value.single() }
         val named = unrowed.mapNotNull { file ->
             onlyPhotoOfName[file.displayName.lowercase()]
-                ?.takeIf { it !in claimed }
-                ?.let { PairRepairCandidate(file, it) }
+                ?.takeIf { it.linkId !in claimed }
+                ?.let { photo ->
+                    val sameSecond = photo.displayName == file.displayName && file.dateTaken / 1000L == photo.captureTime
+                    PairRepairCandidate(file, photo.linkId, nameAndSecond = sameSecond)
+                }
         }
-        return (nameLinked + named).asSequence()
-            .filter { misses.fingerprintOf(it.file.uri) != it.fingerprint }
-            .sortedByDescending { it.file.dateTaken }
-            .toList()
+        return (nameLinked + named).sortedByDescending { it.file.dateTaken }
     }
 }

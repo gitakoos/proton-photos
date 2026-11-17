@@ -90,7 +90,6 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.ShareExternalInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
-import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.util.friendlyNetworkError
@@ -107,13 +106,12 @@ import javax.inject.Inject
 private const val PHOTO_OBSERVE_MAX_RETRIES = 5L
 
 /**
- * Cloud linkId to device uri for every SYNCED row with a proven link. Only a SYNCED row stands for a file
- * on the device: a CLOUD_ONLY row can keep the stale uri of a freed-up file. A link reconcile made by
- * name alone ([LinkBasis]) is no sign the photo is on the device; such a member pairs only through the
- * merged library's twin. Where two rows share a linkId, the later row's uri stands.
+ * Cloud linkId to device uri for every SYNCED row with a linkId. Only a SYNCED row stands for a file on
+ * the device: a CLOUD_ONLY row can keep the stale uri of a freed-up file. Where two rows share a
+ * linkId, the later row's uri stands.
  */
 internal fun albumLocalUrisByLinkId(rows: List<SyncStateLite>): Map<String, String> =
-    rows.filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null && it.linkBasis == LinkBasis.PROVEN }
+    rows.filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
         .associate { it.cloudFileId!! to it.localUri }
 
 /** Summary of a bulk invite-by-email batch. [failures] is the raw error message per failed email. */

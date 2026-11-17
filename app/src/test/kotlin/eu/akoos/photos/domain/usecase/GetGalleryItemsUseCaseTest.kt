@@ -367,24 +367,50 @@ class GetGalleryItemsUseCaseTest {
     }
 
     // ─── a link reconcile made by name ─────────────────────────────────────────
-    // Such a row pairs for display only while the file still agrees with the Drive photo on the exact name
-    // and capture second, and on the size unless the upload rewrote the bytes.
+    // Such a row pairs for display while the file still agrees with the Drive photo on the exact name and
+    // capture second. Drive's listing reports no size, so the size is never weighed.
 
     private fun nameRow(uri: String, linkId: String, basis: Int) = syncState(uri, linkId).copy(linkBasis = basis)
 
     @Test
-    fun `a name link to a Drive photo reporting no size shows two items`() {
+    fun `a name link to a Drive photo reporting no size shows one item`() {
         val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_000L, size = 4096L))
         val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 0L))
 
         val result = useCase.merge(local, cloud, listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME)))
 
-        assertTrue(result.none { it is GalleryItem.Synced })
-        assertEquals("link-p1", result.filterIsInstance<GalleryItem.CloudOnly>().single().cloud.linkId)
+        assertEquals("link-p1", result.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+        assertEquals(1, result.size)
     }
 
     @Test
-    fun `a name link that agrees on name, capture second and size shows one item`() {
+    fun `after a reinstall a backed-up library reconcile links by name shows each photo once`() {
+        // Reconcile links each file with no recorded hash by its name and capture second; the listing
+        // reports no Drive size, and the files' own sizes differ from what went up.
+        val local = (1..5).map { i -> namedPhoto("uri://p$i", "IMG_000$i.jpg", (1_783_507_100L + i) * 1000L + 250L, size = 4_000L + i) }
+        val cloud = (1..5).map { i -> namedDrivePhoto("link-p$i", "IMG_000$i.jpg", 1_783_507_100L + i, size = 0L) }
+        val rows = (1..5).map { i -> nameRow("uri://p$i", "link-p$i", LinkBasis.NAME) }
+
+        val result = useCase.merge(local, cloud, rows)
+
+        assertEquals(5, result.size)
+        assertTrue(result.all { it is GalleryItem.Synced })
+    }
+
+    @Test
+    fun `a download whose saved bytes were stamped shows once through its name link`() {
+        // Saving wrote the place and the Drive capture time into the file: other bytes, a larger size, the
+        // same name and second.
+        val local = listOf(namedPhoto("uri://dl", "IMG_0009.jpg", 1_783_507_135_000L, size = 9_999L))
+        val cloud = listOf(namedDrivePhoto("link-dl", "IMG_0009.jpg", 1_783_507_135L, size = 0L, contentHash = "as-uploaded"))
+
+        val result = useCase.merge(local, cloud, listOf(nameRow("uri://dl", "link-dl", LinkBasis.NAME)))
+
+        assertEquals("link-dl", result.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+    }
+
+    @Test
+    fun `a name link that agrees on size as well shows one item`() {
         val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_400L, size = 4096L))
         val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 4096L))
 

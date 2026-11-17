@@ -114,7 +114,8 @@ class DisplayPairRepairTest {
             coEvery { snapshot.current(user) } returns SyncStateSnapshot.Rows(rows)
             coEvery { listing.ownStreamByLowerNames("user1", any()) } answers {
                 val names = secondArg<List<String>>().toSet()
-                drivePhotos.filter { it.displayName.lowercase() in names }.map { LinkIdName(it.linkId, it.displayName) }
+                drivePhotos.filter { it.displayName.lowercase() in names }
+                    .map { LinkIdName(it.linkId, it.displayName, it.captureTime) }
             }
             coEvery { syncRepo.insertIfAbsent(any(), user) } answers {
                 written += firstArg<SyncState>()
@@ -142,9 +143,13 @@ class DisplayPairRepairTest {
         )
     }
 
+    /** A capture time a second off every Drive photo's here, so no name link is made. */
+    private val otherSecond = 1_783_507_136_000L
+
     @Test
     fun `after a reinstall a download holding the Drive bytes pairs once the repair ran`() {
-        val file = device("uri://dl", "IMG_0001.jpg")
+        // Another capture second (an edit kept the bytes' date apart), so only the bytes can link it.
+        val file = device("uri://dl", "IMG_0001.jpg", dateTaken = otherSecond)
         val photo = drive("link-1", "IMG_0001.jpg", contentHash = "hmac-sha-same")
         val h = Harness(listOf(file), listOf(photo), mapOf("uri://dl" to "sha-same"))
 
@@ -166,8 +171,8 @@ class DisplayPairRepairTest {
     }
 
     @Test
-    fun `a same-named file with other bytes stays two items and is not read again`() {
-        val file = device("uri://other", "IMG_0001.jpg")
+    fun `a same-named file with other bytes and another capture second stays two items and is not read again`() {
+        val file = device("uri://other", "IMG_0001.jpg", dateTaken = otherSecond)
         val photo = drive("link-1", "IMG_0001.jpg", contentHash = "hmac-sha-drive")
         val h = Harness(listOf(file), listOf(photo), mapOf("uri://other" to "sha-different"))
 
@@ -194,17 +199,51 @@ class DisplayPairRepairTest {
     }
 
     @Test
-    fun `a download whose bytes the app stamped on saving stays two items`() {
-        // Saving a download writes the place and the date into the file, so its SHA-1 is no longer Drive's.
+    fun `after a reinstall a stamped download is linked by name and shows once, never proven`() {
+        // Saving a download writes the place and the Drive capture time into the file, so its SHA-1 is no
+        // longer Drive's, but its name and capture second still are.
         val file = device("uri://stamped", "IMG_0002.jpg")
         val photo = drive("link-2", "IMG_0002.jpg", contentHash = "hmac-sha-as-uploaded")
         val h = Harness(listOf(file), listOf(photo), mapOf("uri://stamped" to "sha-with-gps-stamped"))
+        assertEquals(2, merger().merge(listOf(file), listOf(photo), emptyList<SyncState>()).size)
+
+        assertEquals(1, h.run())
+
+        val row = h.written.single()
+        assertEquals(LinkBasis.NAME, row.linkBasis)
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertNull("free-up keeps it until the bytes prove the link", row.backedUpAtMs)
+        assertTrue(h.proven.isEmpty())
+        assertEquals("the bytes were read once", listOf("uri://stamped"), h.hashed)
+        val merged = merger().merge(listOf(file), listOf(photo), h.written)
+        assertEquals("link-2", merged.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+        assertEquals(1, merged.size)
+
+        h.run()
+        assertEquals("a miss is not read again", listOf("uri://stamped"), h.hashed)
+    }
+
+    @Test
+    fun `a file holding the Drive bytes with the same name and second is linked by name, then proven`() {
+        val file = device("uri://same", "IMG_0003.jpg")
+        val h = Harness(listOf(file), listOf(drive("link-3", "IMG_0003.jpg", "hmac-sha-3")), mapOf("uri://same" to "sha-3"))
+
+        assertEquals(1, h.run())
+
+        assertEquals(LinkBasis.NAME, h.written.single().linkBasis)
+        assertEquals(listOf("uri://same" to "link-3"), h.proven)
+    }
+
+    @Test
+    fun `a same-named file a second off is never linked by name`() {
+        val file = device("uri://impostor", "IMG_0004.jpg", dateTaken = otherSecond)
+        val photo = drive("link-4", "IMG_0004.jpg", contentHash = "hmac-sha-4")
+        val h = Harness(listOf(file), listOf(photo), mapOf("uri://impostor" to "sha-other"))
 
         assertEquals(0, h.run())
 
         assertTrue(h.written.isEmpty())
-        val merged = merger().merge(listOf(file), listOf(photo), h.written)
-        assertTrue(merged.none { it is GalleryItem.Synced })
+        assertEquals(2, merger().merge(listOf(file), listOf(photo), h.written).size)
     }
 
     @Test
@@ -321,7 +360,7 @@ class DisplayPairRepairTest {
 
     @Test
     fun `a row written meanwhile by another path is kept`() {
-        val file = device("uri://dl", "IMG_0001.jpg")
+        val file = device("uri://dl", "IMG_0001.jpg", dateTaken = otherSecond)
         val h = Harness(listOf(file), listOf(drive("link-1", "IMG_0001.jpg", "hmac-sha-same")), mapOf("uri://dl" to "sha-same"))
         coEvery { h.syncRepo.insertIfAbsent(any(), user) } returns false
 
@@ -341,14 +380,14 @@ class DisplayPairRepairTest {
     )
 
     @Test
-    fun `after a reinstall a backed-up photo linked by name pairs once its bytes are found to be Drive's`() {
-        // Reconcile links the file by name and capture second; Drive's listing reports no size, so the
-        // gallery shows the name link as two items until the bytes prove it.
+    fun `after a reinstall a backed-up photo linked by name is marked proven once its bytes are Drive's`() {
+        // Reconcile links the file by name and capture second; the gallery shows it as one item at once,
+        // and free-up waits for the bytes to prove the link.
         val file = device("uri://cam", "IMG_0003.jpg")
         val photo = drive("link-3", "IMG_0003.jpg", contentHash = "hmac-sha-same")
         val row = nameRow("uri://cam", "link-3")
         val h = Harness(listOf(file), listOf(photo), mapOf("uri://cam" to "sha-same"), rows = listOf(row))
-        assertEquals(2, merger().merge(listOf(file), listOf(photo), listOf(row.full())).size)
+        assertEquals(1, merger().merge(listOf(file), listOf(photo), listOf(row.full())).size)
 
         assertEquals(1, h.run())
 

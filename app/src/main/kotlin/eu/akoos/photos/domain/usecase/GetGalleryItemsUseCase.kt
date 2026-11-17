@@ -372,20 +372,17 @@ class GetGalleryItemsUseCase @Inject constructor(
 
     /**
      * Whether a row's link of [local] to [cloud] shows them as one item, by what the link rests on
-     * ([LinkBasis]). A proven link always does. A link reconcile made by name does only when the file
-     * still agrees with the Drive photo on the exact name and capture second, and on the size too unless
-     * the upload rewrote the bytes ([LinkBasis.NAME_REWRITTEN], which also accepts the re-encoded name).
-     * Drive reporting no size for the photo is no agreement. Otherwise the two show apart.
+     * ([LinkBasis]). A proven link always does. A link reconcile made by name does while the file still
+     * agrees with the Drive photo on the exact name and capture second; one whose upload rewrote the
+     * bytes ([LinkBasis.NAME_REWRITTEN]) also takes the re-encoded name. Drive's listing reports no size,
+     * so the size is not weighed. A file with the same name and another capture second shows apart.
      */
     internal fun rowLinkShows(basis: Int, local: LocalMediaItem, cloud: CloudPhoto): Boolean {
         if (basis == LinkBasis.PROVEN) return true
         if (local.dateTaken / 1000L != cloud.captureTime) return false
-        return if (basis == LinkBasis.NAME_REWRITTEN) {
-            cloud.displayName == local.displayName ||
-                cloud.displayName == UploadFormatNaming.reencodedName(local.displayName, local.mimeType)
-        } else {
-            cloud.displayName == local.displayName && cloud.sizeBytes > 0L && cloud.sizeBytes == local.sizeBytes
-        }
+        return cloud.displayName == local.displayName ||
+            (basis == LinkBasis.NAME_REWRITTEN &&
+                cloud.displayName == UploadFormatNaming.reencodedName(local.displayName, local.mimeType))
     }
 
     /** A gallery item belongs to a hidden album when its cloud copy's linkId is a hidden-album
