@@ -33,6 +33,7 @@ import eu.akoos.photos.domain.entity.compression.CompressionOutcome
 import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
 import eu.akoos.photos.domain.entity.compression.VideoCompressionPlan
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
+import eu.akoos.photos.util.MetadataStripConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -64,11 +65,14 @@ class VideoUploadCompression @Inject constructor(
     /**
      * Compress the clip at [sourceUri]. [onPlanned] fires once a transcode is decided, before the first
      * frame, then [onProgress] ticks while encoding. A cancellation deletes the temp and propagates.
+     * [stripConfig] is the strip in effect for these bytes: with its GPS group set, the output carries
+     * no location even when the source still does.
      */
     suspend fun compress(
         sourceUri: String,
         profile: VideoCompressionProfile,
         captureDateMs: Long,
+        stripConfig: MetadataStripConfig,
         onPlanned: (VideoCompressionPlan.Transcode) -> Unit = {},
         onProgress: (VideoUploadCompressor.Progress) -> Unit = {},
     ): Attempt = withContext(Dispatchers.IO) {
@@ -81,6 +85,7 @@ class VideoUploadCompression @Inject constructor(
                 onPlanned(plan)
                 val result = VideoUploadCompressor.transcode(
                     context, uri, source, plan,
+                    stripLocation = stripConfig.stripGps,
                     sourceDateEpochMs = captureDateMs,
                     onProgress = onProgress,
                 )

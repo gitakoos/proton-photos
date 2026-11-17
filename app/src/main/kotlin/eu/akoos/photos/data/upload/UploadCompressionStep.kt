@@ -111,12 +111,14 @@ class UploadCompressionStep @Inject constructor(
 
     /**
      * Transcodes the video at [uri] behind the process-wide gate, stamping [captureMs] into the output.
+     * [stripConfig] is the strip in effect for the upload, so a stripped location stays stripped.
      * [onPlanned] and [onProgress] are [VideoUploadCompression.compress]'s; a cancellation propagates.
      */
     suspend fun video(
         uri: String,
         settings: CompressionSettings,
         captureMs: Long,
+        stripConfig: MetadataStripConfig,
         onPlanned: (VideoCompressionPlan.Transcode) -> Unit = {},
         onProgress: (VideoUploadCompressor.Progress) -> Unit = {},
     ): VideoUploadCompression.Attempt = videoTranscodeGate.withPermit {
@@ -124,6 +126,7 @@ class UploadCompressionStep @Inject constructor(
             sourceUri = uri,
             profile = settings.videoProfile,
             captureDateMs = captureMs,
+            stripConfig = stripConfig,
             onPlanned = onPlanned,
             onProgress = onProgress,
         )

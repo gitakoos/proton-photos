@@ -207,7 +207,7 @@ class ImportCompressionUploadDbTest {
         upload(zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4", "Trip/solo.jpg"))
 
         verify(exactly = 1) { step.photo(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { step.video(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { step.video(any(), any(), any(), any(), any(), any()) }
         val still = sent.single { it.item.displayName == "IMG_1.jpg" }
         val video = sent.single { it.item.displayName == "IMG_1.mp4" }
         assertEquals(sha1(bytesOf("Trip/IMG_1.jpg")), still.sha1)
@@ -218,7 +218,7 @@ class ImportCompressionUploadDbTest {
     @Test
     fun `a compressed video goes up as an mp4`() = runBlocking {
         every { step.compressesVideo(any(), any()) } returns true
-        coEvery { step.video(any(), any(), any(), any(), any()) } answers {
+        coEvery { step.video(any(), any(), any(), any(), any(), any()) } answers {
             val out = File.createTempFile("videocompress_", ".mp4", ctx.cacheDir).apply { writeBytes("small clip".toByteArray()) }
             VideoUploadCompression.Attempt(out, CompressionOutcome.COMPRESSED, null)
         }

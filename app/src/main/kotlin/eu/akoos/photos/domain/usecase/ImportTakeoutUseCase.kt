@@ -652,7 +652,7 @@ class ImportTakeoutUseCase @Inject constructor(
     ): Pair<File, String>? {
         if (isVideo(mimeType)) {
             if (!compressionStep.compressesVideo(mimeType, settings)) return null
-            val attempt = compressionStep.video(uri, settings, captureMs)
+            val attempt = compressionStep.video(uri, settings, captureMs, MetadataStripConfig())
             Log.d(TAG, "video compression ${attempt.outcome} ${attempt.reason ?: ""}")
             return attempt.file?.let { it to UploadFormatNaming.MP4 }
         }

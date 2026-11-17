@@ -782,7 +782,7 @@ class UploadPendingUseCaseTest {
         coEvery { cloudRepo.uploadFile(userId, capture(sent), any(), any(), any(), any()) } returns "cloud-id"
         val temp = java.io.File.createTempFile("videocompress_", ".mp4").apply { writeBytes(ByteArray(10)) }
         coEvery {
-            videoCompression.compress(any(), any(), any(), any(), any())
+            videoCompression.compress(any(), any(), any(), any(), any(), any())
         } returns VideoUploadCompression.Attempt(temp, CompressionOutcome.COMPRESSED, null, 10_000_000L, "video/avc", 10L)
         mockkStatic(Uri::class)
         every { Uri.fromFile(any()) } answers {
@@ -808,7 +808,7 @@ class UploadPendingUseCaseTest {
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
         val profile = slot<VideoCompressionProfile>()
         coEvery {
-            videoCompression.compress(any(), capture(profile), any(), any(), any())
+            videoCompression.compress(any(), capture(profile), any(), any(), any(), any())
         } returns skippedAttempt()
 
         useCase(userId)
@@ -831,7 +831,7 @@ class UploadPendingUseCaseTest {
 
         val transcodeRelease = CompletableDeferred<Unit>()
         coEvery {
-            videoCompression.compress(any(), any(), any(), any(), any())
+            videoCompression.compress(any(), any(), any(), any(), any(), any())
         } coAnswers {
             transcodeRelease.await()
             skippedAttempt()
@@ -865,10 +865,10 @@ class UploadPendingUseCaseTest {
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
         val temp = java.io.File.createTempFile("videocompress_", ".mp4").apply { writeBytes(ByteArray(10)) }
         coEvery {
-            videoCompression.compress(any(), any(), any(), any(), any())
+            videoCompression.compress(any(), any(), any(), any(), any(), any())
         } coAnswers {
-            val onPlanned = arg<(VideoCompressionPlan.Transcode) -> Unit>(3)
-            val onProgress = arg<(VideoUploadCompressor.Progress) -> Unit>(4)
+            val onPlanned = arg<(VideoCompressionPlan.Transcode) -> Unit>(4)
+            val onProgress = arg<(VideoUploadCompressor.Progress) -> Unit>(5)
             onPlanned(transcodePlan())
             onProgress(VideoUploadCompressor.Progress(0.5f, VideoCodec.HEVC, 1.8f))
             VideoUploadCompression.Attempt(temp, CompressionOutcome.COMPRESSED, null, 10_000_000L, "video/hevc", 10L)

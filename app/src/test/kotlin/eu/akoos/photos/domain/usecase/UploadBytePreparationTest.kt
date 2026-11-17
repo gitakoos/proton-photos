@@ -60,6 +60,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import io.mockk.slot
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
@@ -306,7 +307,7 @@ class UploadBytePreparationTest {
         val compressedTemp = temp("videocompress_", ".mp4", compressed)
         mockkObject(VideoMetadataStripper)
         every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } answers { thirdArg<File>().writeBytes(remuxed); true }
-        coEvery { compression.video(any(), any(), any(), any(), any()) } returns
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } returns
             VideoUploadCompression.Attempt(compressedTemp, CompressionOutcome.COMPRESSED, null, 50L, "video/avc", 20L)
 
         useCase(userId)
@@ -320,6 +321,38 @@ class UploadBytePreparationTest {
         assertEquals(remuxed.size.toLong(), row.sizeBytes)
         assertFalse(compressedTemp.exists())
         assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a video whose location strip fails is still transcoded without its location`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true
+        }
+        deviceFile("VID_7.mp4", "video/mp4", ByteArray(60) { 3 })
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        val strip = slot<MetadataStripConfig>()
+        coEvery { compression.video(any(), any(), any(), capture(strip), any(), any()) } returns
+            VideoUploadCompression.Attempt(null, CompressionOutcome.SKIPPED, CompressionSkipReason.ALREADY_EFFICIENT)
+
+        useCase(userId)
+
+        assertTrue("the transcode is told to leave the location out", strip.captured.stripGps)
+    }
+
+    @Test
+    fun `a video uploaded without a strip is transcoded keeping its location`() = runTest {
+        prefs { it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true }
+        deviceFile("VID_8.mp4", "video/mp4", ByteArray(60) { 3 })
+        val strip = slot<MetadataStripConfig>()
+        coEvery { compression.video(any(), any(), any(), capture(strip), any(), any()) } returns
+            VideoUploadCompression.Attempt(null, CompressionOutcome.SKIPPED, CompressionSkipReason.ALREADY_EFFICIENT)
+
+        useCase(userId)
+
+        assertFalse("the transcode keeps the location", strip.captured.stripGps)
     }
 
     @Test
@@ -494,7 +527,7 @@ class UploadBytePreparationTest {
         prefs { it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true }
         val (_, item) = deviceFile("VID_3.mp4", "video/mp4", ByteArray(40) { 2 })
         val transcoding = CompletableDeferred<Unit>()
-        coEvery { compression.video(any(), any(), any(), any(), any()) } coAnswers {
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } coAnswers {
             transcoding.complete(Unit)
             awaitCancellation()
         }
@@ -508,7 +541,7 @@ class UploadBytePreparationTest {
         assertTrue(released.queued)
         assertEquals(0, sent.size)
 
-        coEvery { compression.video(any(), any(), any(), any(), any()) } returns
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } returns
             VideoUploadCompression.Attempt(null, CompressionOutcome.SKIPPED, CompressionSkipReason.ALREADY_EFFICIENT)
         useCase(userId)
 

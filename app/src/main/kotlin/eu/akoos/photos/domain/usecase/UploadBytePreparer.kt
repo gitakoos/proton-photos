@@ -323,6 +323,9 @@ internal class UploadBytePreparer(
                     uri = strippedUploadUri,
                     settings = compression,
                     captureMs = localItem.dateTaken,
+                    // The strip in effect, as for the photo compressor: when the location strip above
+                    // fell back to the original, the transcode still leaves the location out.
+                    stripConfig = compressStripConfig,
                     onPlanned = { plan ->
                         emitPhase(UploadStatus.Compressing, localItem.sizeBytes, VideoUploadCompressor.Progress(0f, plan.codec, null))
                     },
