@@ -46,6 +46,7 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import eu.akoos.photos.util.VideoLocationMetadata
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
@@ -185,6 +186,10 @@ internal suspend fun concatMultiSourceToTemp(
         suspendCancellableCoroutine<Unit> { cont ->
             handler.post { startConcat(appContext, items, musicItem, musicGapUs, outputFile, handler, onProgress, cont) }
         }
+        // Media3 writes the location of the first clip only, as two numbers, and none at all when that
+        // clip's string carries an altitude; the clip's own string goes in instead.
+        val location = locationSourceUri(clipsInPlayOrder, sources)?.let { VideoLocationMetadata.read(appContext, it) }
+        VideoLocationMetadata.carryOver(outputFile, location)
     } catch (ce: kotlin.coroutines.cancellation.CancellationException) {
         runCatching { outputFile.delete() }
         throw ce
@@ -318,6 +323,14 @@ private fun pollProgress(
         }
     }, PROGRESS_POLL_MS)
 }
+
+/**
+ * The source whose location the joined video carries: the first clip in play order. Transformer copies the
+ * output's metadata, the location among it, from the first input of each track and never from a later clip.
+ * Pure.
+ */
+internal fun locationSourceUri(clipsInPlayOrder: List<VideoClip>, sources: List<VideoSource>): String? =
+    clipsInPlayOrder.firstNotNullOfOrNull { sources.uriOf(it.sourceId) }
 
 /**
  * The uri the Transformer reads a joined clip from. A cloud original or a hidden video is kept encrypted, so it is
