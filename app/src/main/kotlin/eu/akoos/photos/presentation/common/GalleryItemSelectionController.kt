@@ -488,7 +488,10 @@ class GalleryItemSelectionController @AssistedInject constructor(
                     is DeletePhotoUseCase.Result.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
-                        buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                        buildDeleteUndoAction(
+                            result.landed(items), result.ranFreeUpSpace ?: freeUpSpace, result.ranDeleteFromCloud ?: deleteFromCloud,
+                            hide = false, localRecoverable = false,
+                        )
                             ?.let { undoController.offer(it) }
                         reportKeptOnDevice(result)
                         selection.clear()

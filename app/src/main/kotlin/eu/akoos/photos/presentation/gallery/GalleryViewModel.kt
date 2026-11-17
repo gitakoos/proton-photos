@@ -1677,7 +1677,10 @@ class GalleryViewModel @Inject constructor(
                     // No system-trash dialog was needed, so any device copies were either untouched or
                     // removed permanently (pre-R). Only a cloud trash is reversible, so the undo carries
                     // no local URIs: localRecoverable = false.
-                    buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                    buildDeleteUndoAction(
+                        result.landed(items), result.ranFreeUpSpace ?: freeUpSpace, result.ranDeleteFromCloud ?: deleteFromCloud,
+                        hide = false, localRecoverable = false,
+                    )
                         ?.let { undoController.offer(it) }
                     _uiState.update { it.copy(
                         selectedItems    = emptySet(),

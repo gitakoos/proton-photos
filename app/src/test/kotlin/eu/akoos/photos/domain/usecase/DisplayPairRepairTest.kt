@@ -276,6 +276,50 @@ class DisplayPairRepairTest {
     }
 
     @Test
+    fun `files whose Drive photo cannot be compared take no place in the budget`() {
+        // The newest files are larger than a whole run may read, but their Drive photos carry no content
+        // hash or are not listed: they are passed over unread, and the older match is still reached.
+        val noHash = device("uri://no-hash", "VID_big.mp4", size = PAIR_REPAIR_MAX_BYTES, dateTaken = 3_000L)
+        val unlisted = device("uri://unlisted", "VID_gone.mp4", size = PAIR_REPAIR_MAX_BYTES, dateTaken = 2_000L)
+        val match = device("uri://match", "IMG_old.jpg", size = 10L, dateTaken = 1_000L)
+        val h = Harness(
+            listOf(noHash, unlisted, match),
+            listOf(drive("l-no-hash", "VID_big.mp4", contentHash = null), drive("l-match", "IMG_old.jpg", "hmac-sha-old")),
+            mapOf("uri://no-hash" to "sha-big", "uri://unlisted" to "sha-gone", "uri://match" to "sha-old"),
+        )
+        every { h.cloudRepo.observePhotosByLinkIds(any()) } answers {
+            val ids = firstArg<List<String>>().toSet()
+            flowOf(h.drivePhotos.filter { it.linkId in ids && it.linkId != "l-gone" })
+        }
+        coEvery { h.listing.ownStreamByLowerNames("user1", any()) } answers {
+            val names = secondArg<List<String>>().toSet()
+            (h.drivePhotos.map { LinkIdName(it.linkId, it.displayName) } + LinkIdName("l-gone", "VID_gone.mp4"))
+                .filter { it.displayName.lowercase() in names }
+        }
+
+        assertEquals(1, h.run())
+
+        assertEquals(listOf("uri://match"), h.hashed)
+        assertEquals("uri://match", h.written.single().localUri)
+    }
+
+    @Test
+    fun `with no key to compare hashes the run stops after the first read`() {
+        val files = listOf(device("uri://a", "IMG_A.jpg", dateTaken = 2L), device("uri://b", "IMG_B.jpg", dateTaken = 1L))
+        val h = Harness(
+            files,
+            listOf(drive("l-a", "IMG_A.jpg", "hmac-sha-a"), drive("l-b", "IMG_B.jpg", "hmac-sha-b")),
+            mapOf("uri://a" to "sha-a", "uri://b" to "sha-b"),
+        )
+        every { h.cloudRepo.cloudContentHash(any()) } returns null
+
+        assertEquals(0, h.run())
+
+        assertEquals(listOf("uri://a"), h.hashed)
+        assertNull("no key is not a miss", h.misses.fingerprintOf("uri://a"))
+    }
+
+    @Test
     fun `a row written meanwhile by another path is kept`() {
         val file = device("uri://dl", "IMG_0001.jpg")
         val h = Harness(listOf(file), listOf(drive("link-1", "IMG_0001.jpg", "hmac-sha-same")), mapOf("uri://dl" to "sha-same"))

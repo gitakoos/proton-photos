@@ -51,7 +51,7 @@ internal const val PAIR_REPAIR_MAX_FILES = 400
 /** Bytes one run reads at most; the first file is read whatever its size. */
 internal const val PAIR_REPAIR_MAX_BYTES = 1024L * 1024 * 1024
 
-/** Names one listing lookup carries, under SQLite's bind-variable limit. */
+/** Names, or Drive photos, one listing lookup carries, under SQLite's bind-variable limit. */
 private const val PAIR_REPAIR_NAME_CHUNK = 500
 
 /** Device files a run found not to hold their same-named Drive photo, so no later run reads them again. */
@@ -148,54 +148,74 @@ class DisplayPairRepair internal constructor(
         return prefs.asMap().any { (k, v) -> k.name.startsWith("photo_listing_ever_complete_${userId.id}_") && v == true }
     }
 
-    /** One run for [userId] over a library listed in full. Returns the files it linked. */
+    /**
+     * One run for [userId] over a library listed in full. Returns the files it linked. A candidate whose
+     * Drive photo is not listed or carries no content hash is passed over before any byte is read, so it
+     * never takes a place in the run's budget; only files actually read count against it.
+     */
     internal suspend fun run(userId: UserId): Int = withContext(Dispatchers.IO) {
         val device = localRepo.lastKnownMedia()?.takeIf { it.isNotEmpty() } ?: return@withContext 0
         misses.keepOnly(device.mapTo(HashSet(device.size * 2)) { it.uri })
         val candidates = candidates(userId, device, syncStateSnapshot.current(userId))
-        if (candidates.isEmpty()) return@withContext 0
-        val budgeted = withinBudget(candidates)
-        val photos = cloudRepo.observePhotosByLinkIds(budgeted.map { it.linkId }).first().associateBy { it.linkId }
         var linked = 0
-        for (candidate in budgeted) {
-            val photo = photos[candidate.linkId] ?: continue
-            val driveHash = photo.contentHash?.takeIf { it.isNotEmpty() } ?: continue
-            val sha1 = localRepo.sha1(candidate.file.uri) ?: continue
-            val keyed = cloudRepo.cloudContentHash(sha1) ?: continue
-            if (keyed != driveHash) {
-                misses.record(candidate.file.uri, candidate.fingerprint)
-                continue
-            }
-            val now = System.currentTimeMillis()
-            if (candidate.upgrade) {
-                if (syncStateRepo.markLinkProven(userId, candidate.file.uri, photo.linkId, driveHash, sha1, now)) linked++
-                continue
-            }
-            // Written like a download's row: the link is proven, the backup stamp lets free-up check the file,
-            // and the recorded bytes are what free-up compares it with. The empty row hash keeps the automatic
-            // sweep off it, as off any copy put on the device from Drive.
-            val written = syncStateRepo.insertIfAbsent(
-                SyncState(
-                    localUri = candidate.file.uri,
-                    cloudFileId = photo.linkId,
-                    localHash = "",
-                    cloudHash = driveHash,
-                    status = SyncStatus.SYNCED,
-                    lastSyncAttemptMs = now,
-                    lastSyncSuccessMs = now,
-                    backedUpAtMs = now,
-                    sizeBytes = candidate.file.sizeBytes,
-                    linkBasis = LinkBasis.PROVEN,
-                ),
-                userId,
-            )
-            if (written) {
-                syncStateRepo.setOriginalHash(candidate.file.uri, sha1)
-                linked++
+        var files = 0
+        var bytes = 0L
+        budget@ for (window in candidates.chunked(PAIR_REPAIR_NAME_CHUNK)) {
+            val photos = cloudRepo.observePhotosByLinkIds(window.map { it.linkId }.distinct()).first()
+                .associateBy { it.linkId }
+            for (candidate in window) {
+                val photo = photos[candidate.linkId] ?: continue
+                val driveHash = photo.contentHash?.takeIf { it.isNotEmpty() } ?: continue
+                val size = candidate.file.sizeBytes.coerceAtLeast(0L)
+                if (files >= PAIR_REPAIR_MAX_FILES || (files > 0 && bytes + size > PAIR_REPAIR_MAX_BYTES)) break@budget
+                files++
+                val sha1 = localRepo.sha1(candidate.file.uri) ?: continue
+                bytes += size
+                // No key to turn the SHA-1 into Drive's hash: nothing in this run can be compared.
+                val keyed = cloudRepo.cloudContentHash(sha1) ?: break@budget
+                if (keyed != driveHash) {
+                    misses.record(candidate.file.uri, candidate.fingerprint)
+                    continue
+                }
+                if (link(userId, candidate, photo.linkId, driveHash, sha1)) linked++
             }
         }
         if (linked > 0) Log.d(TAG, "linked $linked device file(s) to their Drive photo")
         linked
+    }
+
+    /** Records that [candidate]'s file holds the bytes of Drive photo [linkId]. True when a row changed. */
+    private suspend fun link(
+        userId: UserId,
+        candidate: PairRepairCandidate,
+        linkId: String,
+        driveHash: String,
+        sha1: String,
+    ): Boolean {
+        val now = System.currentTimeMillis()
+        if (candidate.upgrade) {
+            return syncStateRepo.markLinkProven(userId, candidate.file.uri, linkId, driveHash, sha1, now)
+        }
+        // Written like a download's row: the link is proven, the backup stamp lets free-up check the file,
+        // and the recorded bytes are what free-up compares it with. The empty row hash keeps the automatic
+        // sweep off it, as off any copy put on the device from Drive.
+        val written = syncStateRepo.insertIfAbsent(
+            SyncState(
+                localUri = candidate.file.uri,
+                cloudFileId = linkId,
+                localHash = "",
+                cloudHash = driveHash,
+                status = SyncStatus.SYNCED,
+                lastSyncAttemptMs = now,
+                lastSyncSuccessMs = now,
+                backedUpAtMs = now,
+                sizeBytes = candidate.file.sizeBytes,
+                linkBasis = LinkBasis.PROVEN,
+            ),
+            userId,
+        )
+        if (written) syncStateRepo.setOriginalHash(candidate.file.uri, sha1)
+        return written
     }
 
     /**
@@ -233,18 +253,5 @@ class DisplayPairRepair internal constructor(
             .filter { misses.fingerprintOf(it.file.uri) != it.fingerprint }
             .sortedByDescending { it.file.dateTaken }
             .toList()
-    }
-
-    private fun withinBudget(candidates: List<PairRepairCandidate>): List<PairRepairCandidate> {
-        val picked = ArrayList<PairRepairCandidate>()
-        var bytes = 0L
-        for (candidate in candidates) {
-            if (picked.size >= PAIR_REPAIR_MAX_FILES) break
-            val size = candidate.file.sizeBytes.coerceAtLeast(0L)
-            if (picked.isNotEmpty() && bytes + size > PAIR_REPAIR_MAX_BYTES) break
-            picked += candidate
-            bytes += size
-        }
-        return picked
     }
 }

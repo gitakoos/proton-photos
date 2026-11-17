@@ -711,10 +711,11 @@ class PhotoViewerViewModel @Inject constructor(
                 is DeletePhotoUseCase.Result.Success           -> {
                     // A cloud-trash delete is reversible; offer Undo through the shared bar so it
                     // shows even after the viewer closes. A local-only free-up carries no undo.
-                    if (deleteFromCloud) {
-                        val linkId = when (item) {
-                            is GalleryItem.Synced    -> item.cloud.linkId
-                            is GalleryItem.CloudOnly -> item.cloud.linkId
+                    // Taken as the delete ran: a device photo backed up since it was opened went as a whole.
+                    if (result.ranDeleteFromCloud ?: deleteFromCloud) {
+                        val linkId = when (val landed = result.landed(listOf(item)).firstOrNull() ?: item) {
+                            is GalleryItem.Synced    -> landed.cloud.linkId
+                            is GalleryItem.CloudOnly -> landed.cloud.linkId
                             is GalleryItem.LocalOnly -> null
                         }
                         if (linkId != null) undoController.offer(UndoAction.Delete(cloudLinkIds = listOf(linkId)))
@@ -1011,6 +1012,7 @@ class PhotoViewerViewModel @Inject constructor(
                     items           = pending.itemsBeingDeleted,
                     freeUpSpace     = pending.freeUpSpace,
                     hide            = pending.hide,
+                    deleteFromCloud = pending.deleteFromCloud,
                 )
             } else DeletePhotoUseCase.Result.Success()
 
