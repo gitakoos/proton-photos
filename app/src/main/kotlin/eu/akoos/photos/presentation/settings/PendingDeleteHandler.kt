@@ -94,7 +94,12 @@ class PendingDeleteVerifier @Inject constructor(
             .filter { it.status == SyncStatus.SYNCED && it.backedUpAtMs != null && it.localUri in uris }
         val checked = freeUpSpace.confirmPendingDeletes(userId, rows)
         val confirmed = checked.deletable.mapTo(HashSet()) { it.localUri }
-        shortCopies.addDeleteAfterWholeBackup(checked.afterWholeBackup.map { it.localUri })
+        // A file reconcile already found short and queued to be backed up again is no longer paired, so it
+        // never reached the check; its delete is held back for its whole backup the same way.
+        val checkedUris = rows.mapTo(HashSet()) { it.localUri }
+        val replacing = shortCopies.replacements().keys
+        val awaitingWhole = uris.filter { it !in checkedUris && it in replacing }
+        shortCopies.addDeleteAfterWholeBackup(checked.afterWholeBackup.map { it.localUri } + awaitingWhole)
         // A file whose Drive copy could not be told whole or short now stays queued for the next check.
         val checkAgain = checked.checkAgain.mapTo(HashSet()) { it.localUri }
         return Outcome(confirmed, uris - confirmed - checkAgain)

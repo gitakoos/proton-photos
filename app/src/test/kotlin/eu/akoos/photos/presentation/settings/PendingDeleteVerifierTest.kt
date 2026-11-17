@@ -150,4 +150,22 @@ class PendingDeleteVerifierTest {
         assertTrue(outcome.failed.isEmpty())
         assertTrue(shortCopies.deleteAfterWhole.isEmpty())
     }
+
+    @Test
+    fun `a URI reconcile already queued for a whole backup keeps its delete for after that backup`() = runTest {
+        val backedUp = row(1)
+        val requeued = row(2, status = SyncStatus.LOCAL_ONLY, backedUpAtMs = null).copy(cloudFileId = null)
+        val dropped = row(3, status = SyncStatus.LOCAL_ONLY, backedUpAtMs = null).copy(cloudFileId = null)
+        shortCopies.addReplacement(requeued.localUri, "short-2")
+        coEvery { repo.cloudPairedLinkIds(userId, any()) } returns mapOf(backedUp.localUri to "cloud-1")
+        coEvery { repo.getByUris(any()) } returns listOf(backedUp)
+        coEvery { freeUp.confirmPendingDeletes(userId, listOf(backedUp)) } returns
+            FreeUpSpaceUseCase.PendingDeleteCheck(listOf(backedUp), emptyList())
+
+        val outcome = verifier.verify(userId, setOf(backedUp.localUri, requeued.localUri, dropped.localUri))
+
+        assertEquals(setOf(backedUp.localUri), outcome.confirmed)
+        assertEquals(setOf(requeued.localUri, dropped.localUri), outcome.failed)
+        assertEquals(setOf(requeued.localUri), shortCopies.deleteAfterWhole)
+    }
 }
