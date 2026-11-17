@@ -35,6 +35,7 @@ import eu.akoos.photos.data.upload.compression.VideoUploadCompression
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
+import eu.akoos.photos.util.MetadataStripConfig
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -145,7 +146,7 @@ class VideoUploadCompressorTest {
             val source = probe(uri) ?: continue
             Log.i(TAG, "SOURCE $uri  $source  ${sourceSize}B  dateTaken=$dateTakenMs")
 
-            val output = compression.compress(uri.toString(), profile, dateTakenMs).file
+            val output = compression.compress(uri.toString(), profile, dateTakenMs, MetadataStripConfig()).file
 
             val longEdge = maxOf(source.width, source.height)
             if (longEdge > MAX_SAFE_LONG_EDGE) {

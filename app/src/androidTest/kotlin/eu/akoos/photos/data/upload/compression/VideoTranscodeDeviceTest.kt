@@ -109,7 +109,7 @@ class VideoTranscodeDeviceTest {
         val (uri, source) = clip(name)
         val planned = planFor(source, profile)
         val plan = forceCodec?.let { planned.copy(codec = it, plannedFallback = null, hardware = false) } ?: planned
-        val outcome = VideoUploadCompressor.transcode(context, uri, source, plan, sourceDateEpochMs = dateMs, tempDir = tempDir)
+        val outcome = VideoUploadCompressor.transcode(context, uri, source, plan, stripLocation = false, sourceDateEpochMs = dateMs, tempDir = tempDir)
         Log.i(TAG, "RESULT $name ${plan.codec} ${source.sizeBytes} -> ${outcome.outputBytes} ${outcome.outcome} ${outcome.reason ?: ""}")
         plan to outcome
     }
@@ -270,7 +270,7 @@ class VideoTranscodeDeviceTest {
         val started = CompletableDeferred<Unit>()
         val job = async {
             VideoUploadCompressor.transcode(
-                context, uri, source, plan, tempDir = tempDir,
+                context, uri, source, plan, stripLocation = false, tempDir = tempDir,
                 onProgress = { if (it.fraction > 0f) started.complete(Unit) },
             )
         }
