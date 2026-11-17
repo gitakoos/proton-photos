@@ -246,6 +246,12 @@ class DeviceHealthPolicy @Inject constructor(
             ),
         )
 
+    /** Whether the user limited the face and photo-search scans to when the phone is charging. */
+    val mlChargingOnly: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.ML_ONLY_WHILE_CHARGING] == true }
+        .catch { emit(false) }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
     init {
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -288,12 +294,6 @@ class DeviceHealthPolicy @Inject constructor(
             }
         }
     }
-
-    /** Whether the user limited the face and photo-search scans to when the phone is charging. */
-    val mlChargingOnly: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.ML_ONLY_WHILE_CHARGING] == true }
-        .catch { emit(false) }
-        .stateIn(scope, SharingStarted.Eagerly, false)
 
     /** Snapshot the current verdict. */
     fun verdict(): HealthVerdict = evaluateDeviceHealth(snapshot.value)

@@ -88,34 +88,6 @@ class MapViewModel @Inject constructor(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    init {
-        // A local photo can sit in the library with no pin: a fresh capture, or one revealed from the
-        // vault, which comes back under a NEW MediaStore id and leaves the old id's location fix
-        // behind. A one-shot walk on first open misses it, so re-read EXIF every time the local photo
-        // set changes and the new id gets its fix on this view instead of only after a restart. The
-        // scheduler's skip-set keeps the walk to the newcomers, and this watches the library (never the
-        // location table it writes) so a fix it stores cannot re-trigger the walk.
-        viewModelScope.launch {
-            accountManager.getPrimaryUserId()
-                .flatMapLatest { userId ->
-                    (if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
-                        .map { items ->
-                            items.mapNotNullTo(HashSet()) { item ->
-                                when (item) {
-                                    is GalleryItem.LocalOnly -> item.local.uri
-                                    is GalleryItem.Synced -> item.local.uri
-                                    is GalleryItem.CloudOnly -> null
-                                }
-                            }
-                        }
-                }
-                .distinctUntilChanged()
-                // A set of every device photo, built and compared on each library change: off the main thread.
-                .flowOn(Dispatchers.Default)
-                .collect { startLocalBackfill() }
-        }
-    }
-
     /**
      * The places the globe reads, taken from ONE emission so "loaded" and the city and country lists always agree.
      * Reading them from separate flows let the globe see "loaded" before the cities arrived and never turn to them.
@@ -143,6 +115,34 @@ class MapViewModel @Inject constructor(
     val countries: StateFlow<List<PlaceCountry>> = places
         .map { it?.countries.orEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    init {
+        // A local photo can sit in the library with no pin: a fresh capture, or one revealed from the
+        // vault, which comes back under a NEW MediaStore id and leaves the old id's location fix
+        // behind. A one-shot walk on first open misses it, so re-read EXIF every time the local photo
+        // set changes and the new id gets its fix on this view instead of only after a restart. The
+        // scheduler's skip-set keeps the walk to the newcomers, and this watches the library (never the
+        // location table it writes) so a fix it stores cannot re-trigger the walk.
+        viewModelScope.launch {
+            accountManager.getPrimaryUserId()
+                .flatMapLatest { userId ->
+                    (if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
+                        .map { items ->
+                            items.mapNotNullTo(HashSet()) { item ->
+                                when (item) {
+                                    is GalleryItem.LocalOnly -> item.local.uri
+                                    is GalleryItem.Synced -> item.local.uri
+                                    is GalleryItem.CloudOnly -> null
+                                }
+                            }
+                        }
+                }
+                .distinctUntilChanged()
+                // A set of every device photo, built and compared on each library change: off the main thread.
+                .flowOn(Dispatchers.Default)
+                .collect { startLocalBackfill() }
+        }
+    }
 
     /**
      * On-device EXIF backfill — reads GPS from local photos, which needs the ACCESS_MEDIA_LOCATION

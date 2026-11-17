@@ -148,17 +148,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
-    init {
-        // Follows the cached album rows, so an album made or refreshed anywhere shows in the picker
-        // without a visit to the Albums tab.
-        scope.launch {
-            driveRepo.observeAlbumsCached()
-                .catch { Log.w(TAG, "album list stream failed: ${it.message}") }
-                .collect { _albums.value = it }
-        }
-    }
-
-    // ── One-shot results the screen consumes ────────────────────────────────────────────────────
     private val _shareIntent = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
     val shareIntent: SharedFlow<Intent> = _shareIntent.asSharedFlow()
 
@@ -187,14 +176,61 @@ class GalleryItemSelectionController @AssistedInject constructor(
         .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
         .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    // ── Favourite ───────────────────────────────────────────────────────────────────────────────
-
     /** The device-side favourite set, which the dock needs to decide which way its button goes. */
     val favoriteIds: StateFlow<Set<String>> =
         favoriteWriter.favoriteIds.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     private val _favoriteState = MutableStateFlow<FavoriteActionState>(FavoriteActionState.Idle)
     val favoriteState: StateFlow<FavoriteActionState> = _favoriteState.asStateFlow()
+
+    private val _shareState = MutableStateFlow<SelectionShareState>(SelectionShareState.Idle)
+    val shareState: StateFlow<SelectionShareState> = _shareState.asStateFlow()
+
+    private val _isDeleting = MutableStateFlow(false)
+    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
+
+    private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
+    val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
+
+    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+
+    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
+     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
+     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** How many device files that hide could not copy into the vault. Carried to whichever commit
+     *  path lands so the count is reported once the hide is actually done. */
+    private var pendingHideFailures = 0
+
+    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
+    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
+
+    private val _pendingStripIntent = MutableStateFlow<PendingIntent?>(null)
+    val pendingStripIntent: StateFlow<PendingIntent?> = _pendingStripIntent.asStateFlow()
+
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
+    private var pendingStripFailed = 0
+
+    init {
+        // Follows the cached album rows, so an album made or refreshed anywhere shows in the picker
+        // without a visit to the Albums tab.
+        scope.launch {
+            driveRepo.observeAlbumsCached()
+                .catch { Log.w(TAG, "album list stream failed: ${it.message}") }
+                .collect { _albums.value = it }
+        }
+    }
+
+    // ── One-shot results the screen consumes ────────────────────────────────────────────────────
+
+    // ── Favourite ───────────────────────────────────────────────────────────────────────────────
 
     /**
      * Puts the whole selection into the state [favoriteTurnsOn] picks for it: on if any selected photo
@@ -244,8 +280,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Share ───────────────────────────────────────────────────────────────────────────────────
-    private val _shareState = MutableStateFlow<SelectionShareState>(SelectionShareState.Idle)
-    val shareState: StateFlow<SelectionShareState> = _shareState.asStateFlow()
 
     fun shareSelected() {
         val items = selection.value.toList()
@@ -445,25 +479,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Delete / hide + system-trash permission handshake ───────────────────────────────────────
-    private val _isDeleting = MutableStateFlow(false)
-    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
-
-    private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
-    val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
-
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
-
-    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
-     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
-    private var pendingHidePrivateUris: List<String> = emptyList()
-
-    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
-     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
-    private var pendingHideCloudLinkIds: List<String> = emptyList()
-
-    /** How many device files that hide could not copy into the vault. Carried to whichever commit
-     *  path lands so the count is reported once the hide is actually done. */
-    private var pendingHideFailures = 0
 
     /**
      * The two halves the current selection's hide would act on, for the confirmation that fronts it.
@@ -754,17 +769,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Batch EXIF strip (+ Android 11+ write-permission handshake) ─────────────────────────────
-    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
-    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
-
-    private val _pendingStripIntent = MutableStateFlow<PendingIntent?>(null)
-    val pendingStripIntent: StateFlow<PendingIntent?> = _pendingStripIntent.asStateFlow()
-
-    private var pendingStripConfig: MetadataStripConfig? = null
-    private var pendingStripUris: List<String> = emptyList()
-    private var pendingStripStripped = 0
-    private var pendingStripSkipped = 0
-    private var pendingStripFailed = 0
 
     /** [config] comes straight from the multi-select picker, so this manual strip is independent of
      *  the upload-strip settings. An empty config never reaches here (the picker's confirm is gated on

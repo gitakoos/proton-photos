@@ -633,6 +633,64 @@ class PhotoEditorViewModel @Inject constructor(
      */
     private val liveFrames = Channel<LiveFrame>(Channel.CONFLATED)
 
+    /** Absolute path of the Cloud source's downloaded full-res original (set by [loadCloud]). The save
+     *  path reads its EXIF to re-inject the original's metadata into the edited cloud copy. Null for a
+     *  Local/External source, or before the cloud download finishes. */
+    private var cloudOriginalFilePath: String? = null
+
+    /** Set for a Synced photo (device + cloud); local saves consult it to also replace the cloud copy. */
+    private var cloudCounterpart: CloudPhoto? = null
+
+    /** Mirrors [cloudCounterpart] presence so the save dialog can show a "device + cloud" subtitle. */
+    private val _hasCloudCounterpart = MutableStateFlow(false)
+
+    val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
+
+    /** Master AI-features gate (Settings, AI and machine learning). Off hides the Hide-faces tool from
+     *  the editor tool row so no face model is ever fetched. Observed, so a change made in Settings is
+     *  reflected the next time the editor is opened. */
+    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
+     *  the Hide-faces tool is offered, so turning faces off drops the tool while the master AI switch
+     *  stays on. Observed, so a change made in Settings is reflected the next time the editor is opened. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Detector holding one open ONNX session, reused across detects and rebuilt only if the resolved
+     *  model path changes. Closed in [onCleared]. */
+    private var faceDetector: FaceDetector? = null
+    private var faceDetectorModelPath: String? = null
+
+    // A detection runs its native session off the main thread and cannot be interrupted, so the
+    // session is only ever closed with no detection inside it: onCleared defers the close to the last
+    // running detection, and no detection starts once the editor is gone.
+    private val faceDetectorLock = Any()
+    private var detectionsInFlight = 0
+    private var faceDetectorRetired = false
+
+    /** Longest edge the detection copy is capped to, so a large source never inflates ARGB_8888 past
+     *  the heap during a detect. Results are scaled back up to full-res image pixels afterwards. */
+    private val faceDetectMaxEdge = 1920
+
+    /** Longest-edge cap on decode: a 50 MP photo as ARGB_8888 (~200 MB) exceeds the ~100 MB a hardware
+     *  Canvas can draw ("too large bitmap"). ~12 MP photos pass through untouched. */
+    private val editorMaxDim = 4096
+
+    private var textIdCounter = 0
+
+    private var textMoveSnapshot: EditorAdjustments? = null
+
+    private var textEditSnapshot: EditorAdjustments? = null
+
+    private var pendingWriteMode: SaveMode? = null
+    private var pendingWriteQuality: Int = 92
+
     init {
         viewModelScope.launch(Dispatchers.Default) {
             for (tick in liveFrames) {
@@ -717,63 +775,16 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    /** Absolute path of the Cloud source's downloaded full-res original (set by [loadCloud]). The save
-     *  path reads its EXIF to re-inject the original's metadata into the edited cloud copy. Null for a
-     *  Local/External source, or before the cloud download finishes. */
-    private var cloudOriginalFilePath: String? = null
-
-    /** Set for a Synced photo (device + cloud); local saves consult it to also replace the cloud copy. */
-    private var cloudCounterpart: CloudPhoto? = null
-
-    /** Mirrors [cloudCounterpart] presence so the save dialog can show a "device + cloud" subtitle. */
-    private val _hasCloudCounterpart = MutableStateFlow(false)
-
     fun setCloudCounterpart(photo: CloudPhoto?) {
         cloudCounterpart = photo
         _hasCloudCounterpart.value = photo != null
     }
 
-    val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
-
     // ── Hide faces ─────────────────────────────────────────────────────────────
-    /** Master AI-features gate (Settings, AI and machine learning). Off hides the Hide-faces tool from
-     *  the editor tool row so no face model is ever fetched. Observed, so a change made in Settings is
-     *  reflected the next time the editor is opened. */
-    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
-     *  the Hide-faces tool is offered, so turning faces off drops the tool while the master AI switch
-     *  stays on. Observed, so a change made in Settings is reflected the next time the editor is opened. */
-    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Resolves the SCRFD model (side-loaded, cached, or downloaded on consent). Built lazily so the
      *  editor pays nothing for it until the user reaches for Hide faces. */
     private val faceModelManager by lazy { FaceModelManager(context) }
-    /** Detector holding one open ONNX session, reused across detects and rebuilt only if the resolved
-     *  model path changes. Closed in [onCleared]. */
-    private var faceDetector: FaceDetector? = null
-    private var faceDetectorModelPath: String? = null
-
-    // A detection runs its native session off the main thread and cannot be interrupted, so the
-    // session is only ever closed with no detection inside it: onCleared defers the close to the last
-    // running detection, and no detection starts once the editor is gone.
-    private val faceDetectorLock = Any()
-    private var detectionsInFlight = 0
-    private var faceDetectorRetired = false
-
-    /** Longest edge the detection copy is capped to, so a large source never inflates ARGB_8888 past
-     *  the heap during a detect. Results are scaled back up to full-res image pixels afterwards. */
-    private val faceDetectMaxEdge = 1920
-
-    /** Longest-edge cap on decode: a 50 MP photo as ARGB_8888 (~200 MB) exceeds the ~100 MB a hardware
-     *  Canvas can draw ("too large bitmap"). ~12 MP photos pass through untouched. */
-    private val editorMaxDim = 4096
 
     private fun editorSampleSize(width: Int, height: Int): Int {
         var sample = 1
@@ -1247,7 +1258,6 @@ class PhotoEditorViewModel @Inject constructor(
     fun clearDrawStrokes() = updateAdjustments { it.copy(drawStrokes = emptyList()) }
 
     // ── Text overlays ─────────────────────────────────────────────────────────
-    private var textIdCounter = 0
 
     /** Add a text overlay at the centre and select it. Blank text is ignored. */
     fun addTextItem(text: String) {
@@ -1311,7 +1321,6 @@ class PhotoEditorViewModel @Inject constructor(
 
     /** Live drag/pinch of a text overlay, WITHOUT a re-render: the overlay draws the text, so only the
      *  state changes. [commitTextMove] pushes one undo entry when the gesture ends. */
-    private var textMoveSnapshot: EditorAdjustments? = null
     fun nudgeTextItemLive(id: Int, dcx: Float, dcy: Float, zoom: Float, dRotation: Float) = _state.update { s ->
         if (textMoveSnapshot == null) textMoveSnapshot = s.adjustments
         s.copy(adjustments = s.adjustments.copy(textItems = s.adjustments.textItems.map { t ->
@@ -1341,7 +1350,6 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     // ── Inline text editing (typed directly on the photo, no dialog) ──────────────
-    private var textEditSnapshot: EditorAdjustments? = null
 
     /** Create an empty text at the centre and open it for inline editing. Returns its id. */
     fun addEmptyTextItem(): Int {
@@ -2414,9 +2422,6 @@ class PhotoEditorViewModel @Inject constructor(
      * copy (the SaveSheet only offers Overwrite for a device-only photo): the Photos backend refuses
      * a second revision on a photo link, so the original is left in place and a fresh file uploads.
      */
-    private var pendingWriteMode: SaveMode? = null
-    private var pendingWriteQuality: Int = 92
-
     fun save(
         mode: SaveMode,
         quality: Int = 92,

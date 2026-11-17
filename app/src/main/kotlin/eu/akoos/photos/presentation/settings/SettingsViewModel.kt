@@ -233,63 +233,6 @@ class SettingsViewModel @Inject constructor(
     private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
     private val semanticModelManager by lazy { SemanticModelManager(context) }
 
-    init {
-        // The codec chips need this device's encoders: a one-off scan, cached for the process.
-        viewModelScope.launch(Dispatchers.Default) {
-            val caps = runCatching { videoEncoderCapabilities.snapshot() }.getOrNull()
-            _uiState.update { it.copy(encoderCapabilities = caps) }
-        }
-        // The per-feature enable toggles mirror their durable prefs, so a download that finished on
-        // ModelDownloadService (which sets the pref) flips the row on live on whichever settings page is
-        // open, and because the pref is the source of truth a stale finished-state can never re-enable a
-        // feature the user has since turned off. OCR keeps its "on when the models are already present"
-        // default when its pref was never written (matching the load path and the viewer's own gate), so
-        // the disk check runs off the main thread.
-        viewModelScope.launch {
-            context.settingsDataStore.data
-                .map {
-                    Triple(
-                        it[SettingsKeys.FACE_ENABLED] == true,
-                        it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
-                        it[SettingsKeys.SEMANTIC_ENABLED] == true,
-                    ) to (it[SettingsKeys.SHARED_BACKUP_ENABLED] == true)
-                }
-                .distinctUntilChanged()
-                .flowOn(Dispatchers.IO)
-                .collect { (switches, backupOn) ->
-                    val (face, ocr, semantic) = switches
-                    _uiState.update {
-                        it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic, sharedBackupOn = backupOn)
-                    }
-                }
-        }
-        // Reflect the shared model-download progress into the per-feature rows, derived fresh from the
-        // whole snapshot on each emit rather than accumulated: a cleared or absent entry reads as
-        // not-downloading (so a stopped or torn-down download can never leave a row wedged at a frozen
-        // bar), and a terminal state lingering in the process-lived map is harmless. The enable itself
-        // rides the prefs above; only the transient spinner, byte count and failure flag come from here.
-        viewModelScope.launch {
-            modelDownloadState.status.collect { s ->
-                val face = s[ModelDownloadKind.FACE]
-                val ocr = s[ModelDownloadKind.OCR]
-                val semantic = s[ModelDownloadKind.SEMANTIC]
-                _uiState.update {
-                    it.copy(
-                        faceModelDownloading = face?.phase == ModelDownloadPhase.DOWNLOADING,
-                        faceModelDownloadFailed = face?.phase == ModelDownloadPhase.FAILED,
-                        faceModelDownloadedBytes = if (face?.phase == ModelDownloadPhase.DOWNLOADING) (face?.downloadedBytes ?: 0L) else 0L,
-                        faceRecognitionAvailable = if (face?.phase == ModelDownloadPhase.DONE) true else it.faceRecognitionAvailable,
-                        ocrModelDownloading = ocr?.phase == ModelDownloadPhase.DOWNLOADING,
-                        ocrModelDownloadFailed = ocr?.phase == ModelDownloadPhase.FAILED,
-                        semanticModelDownloading = semantic?.phase == ModelDownloadPhase.DOWNLOADING,
-                        semanticModelDownloadFailed = semantic?.phase == ModelDownloadPhase.FAILED,
-                        semanticModelDownloadProgress = if (semantic?.phase == ModelDownloadPhase.DOWNLOADING) (semantic?.downloadedBytes ?: 0L) else 0L,
-                    )
-                }
-            }
-        }
-    }
-
     /** Where the background face indexer stands, surfaced verbatim from the scheduler so the AI
      *  settings panel can label its state and offer pause / resume. */
     val faceIndexingProgress: StateFlow<FaceIndexingProgress> = faceIndexingScheduler.progress
@@ -427,6 +370,78 @@ class SettingsViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
+    /** The vault files behind [SettingsUiState.vaultedPhotoCount], the count the sign-out confirmation
+     *  names: a sign-out the user confirms with "delete" destroys these and never a file added after. */
+    @Volatile
+    private var countedVaultUris: Set<String> = emptySet()
+
+    /** Whether the face and photo-search scans are limited to when the phone is charging. */
+    val mlOnlyWhileCharging: StateFlow<Boolean> = deviceHealth.mlChargingOnly
+
+    /** The condition standing the on-device scans down right now, so the photo-search rows can name it
+     *  the way the face card does instead of reading as a plain "scanning". */
+    val mlBlockReason: StateFlow<HealthBlockReason> =
+        combine(deviceHealth.snapshot, deviceHealth.mlChargingOnly) { snap, chargingOnly ->
+            heavyMlBlockReason(snap, chargingOnly = chargingOnly)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), HealthBlockReason.NONE)
+
+    init {
+        // The codec chips need this device's encoders: a one-off scan, cached for the process.
+        viewModelScope.launch(Dispatchers.Default) {
+            val caps = runCatching { videoEncoderCapabilities.snapshot() }.getOrNull()
+            _uiState.update { it.copy(encoderCapabilities = caps) }
+        }
+        // The per-feature enable toggles mirror their durable prefs, so a download that finished on
+        // ModelDownloadService (which sets the pref) flips the row on live on whichever settings page is
+        // open, and because the pref is the source of truth a stale finished-state can never re-enable a
+        // feature the user has since turned off. OCR keeps its "on when the models are already present"
+        // default when its pref was never written (matching the load path and the viewer's own gate), so
+        // the disk check runs off the main thread.
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map {
+                    Triple(
+                        it[SettingsKeys.FACE_ENABLED] == true,
+                        it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
+                        it[SettingsKeys.SEMANTIC_ENABLED] == true,
+                    ) to (it[SettingsKeys.SHARED_BACKUP_ENABLED] == true)
+                }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.IO)
+                .collect { (switches, backupOn) ->
+                    val (face, ocr, semantic) = switches
+                    _uiState.update {
+                        it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic, sharedBackupOn = backupOn)
+                    }
+                }
+        }
+        // Reflect the shared model-download progress into the per-feature rows, derived fresh from the
+        // whole snapshot on each emit rather than accumulated: a cleared or absent entry reads as
+        // not-downloading (so a stopped or torn-down download can never leave a row wedged at a frozen
+        // bar), and a terminal state lingering in the process-lived map is harmless. The enable itself
+        // rides the prefs above; only the transient spinner, byte count and failure flag come from here.
+        viewModelScope.launch {
+            modelDownloadState.status.collect { s ->
+                val face = s[ModelDownloadKind.FACE]
+                val ocr = s[ModelDownloadKind.OCR]
+                val semantic = s[ModelDownloadKind.SEMANTIC]
+                _uiState.update {
+                    it.copy(
+                        faceModelDownloading = face?.phase == ModelDownloadPhase.DOWNLOADING,
+                        faceModelDownloadFailed = face?.phase == ModelDownloadPhase.FAILED,
+                        faceModelDownloadedBytes = if (face?.phase == ModelDownloadPhase.DOWNLOADING) (face?.downloadedBytes ?: 0L) else 0L,
+                        faceRecognitionAvailable = if (face?.phase == ModelDownloadPhase.DONE) true else it.faceRecognitionAvailable,
+                        ocrModelDownloading = ocr?.phase == ModelDownloadPhase.DOWNLOADING,
+                        ocrModelDownloadFailed = ocr?.phase == ModelDownloadPhase.FAILED,
+                        semanticModelDownloading = semantic?.phase == ModelDownloadPhase.DOWNLOADING,
+                        semanticModelDownloadFailed = semantic?.phase == ModelDownloadPhase.FAILED,
+                        semanticModelDownloadProgress = if (semantic?.phase == ModelDownloadPhase.DOWNLOADING) (semantic?.downloadedBytes ?: 0L) else 0L,
+                    )
+                }
+            }
+        }
+    }
+
     /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
      *  dropped, matching how the People rail maps them. */
     private fun PersonSummary.toPersonUi(): PersonUi? {
@@ -492,10 +507,6 @@ class SettingsViewModel @Inject constructor(
      * Both the reconciliation and the directory listing run off the main thread, and the listing is
      * repeated only when the index itself changes.
      */
-    /** The vault files behind [SettingsUiState.vaultedPhotoCount], the count the sign-out confirmation
-     *  names: a sign-out the user confirms with "delete" destroys these and never a file added after. */
-    @Volatile
-    private var countedVaultUris: Set<String> = emptySet()
 
     private fun observeVaultedCount() {
         viewModelScope.launch {
@@ -1370,15 +1381,6 @@ class SettingsViewModel @Inject constructor(
      * editor and viewer observe [SettingsKeys.AI_FEATURES_ENABLED] directly, so flipping it takes
      * effect the next time either surface is opened.
      */
-    /** Whether the face and photo-search scans are limited to when the phone is charging. */
-    val mlOnlyWhileCharging: StateFlow<Boolean> = deviceHealth.mlChargingOnly
-
-    /** The condition standing the on-device scans down right now, so the photo-search rows can name it
-     *  the way the face card does instead of reading as a plain "scanning". */
-    val mlBlockReason: StateFlow<HealthBlockReason> =
-        combine(deviceHealth.snapshot, deviceHealth.mlChargingOnly) { snap, chargingOnly ->
-            heavyMlBlockReason(snap, chargingOnly = chargingOnly)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), HealthBlockReason.NONE)
 
     fun setMlOnlyWhileCharging(enabled: Boolean) {
         viewModelScope.launch {

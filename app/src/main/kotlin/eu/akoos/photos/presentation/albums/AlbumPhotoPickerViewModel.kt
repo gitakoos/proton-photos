@@ -87,10 +87,6 @@ class AlbumPhotoPickerViewModel @Inject constructor(
 
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
 
-    init {
-        viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
-    }
-
     /** The full merged library, shared with the timeline so the picker adds no extra DB work. Null until
      *  the library's first emission, so a load in progress never reads as an empty library. */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -132,19 +128,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
             eu.akoos.photos.presentation.search.SearchAlbums.Source(),
         )
 
-    /** The cloud ids of the photos album [albumLinkId] holds, read from the local membership table. */
-    fun albumMembers(albumLinkId: String): kotlinx.coroutines.flow.Flow<Set<String>> =
-        albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(setOf(albumLinkId))
-            .map { it.toSet() }
-            .catch { emit(emptySet()) }
-
     private val query = MutableStateFlow<PickerQuery?>(null)
-
-    /** What the grid is narrowed and sectioned by. The content waits for the first one, so a screen
-     *  opened in a narrowed mode never shows the unfiltered library first. */
-    fun setQuery(value: PickerQuery) {
-        query.value = value
-    }
 
     /** The prepared grid: null while the library or the first query is still loading, then the
      *  filtered, sectioned photos (possibly empty). Rebuilt on [Dispatchers.Default] whenever the
@@ -164,6 +148,22 @@ class AlbumPhotoPickerViewModel @Inject constructor(
 
     private val _addState = MutableStateFlow<PickerAddState>(PickerAddState.Idle)
     val addState: StateFlow<PickerAddState> = _addState.asStateFlow()
+
+    init {
+        viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
+    }
+
+    /** The cloud ids of the photos album [albumLinkId] holds, read from the local membership table. */
+    fun albumMembers(albumLinkId: String): kotlinx.coroutines.flow.Flow<Set<String>> =
+        albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(setOf(albumLinkId))
+            .map { it.toSet() }
+            .catch { emit(emptySet()) }
+
+    /** What the grid is narrowed and sectioned by. The content waits for the first one, so a screen
+     *  opened in a narrowed mode never shows the unfiltered library first. */
+    fun setQuery(value: PickerQuery) {
+        query.value = value
+    }
 
     /** Stable key for an item — matches [stableKeyOf] so taps toggle the right cell. */
     fun toggle(key: String) {

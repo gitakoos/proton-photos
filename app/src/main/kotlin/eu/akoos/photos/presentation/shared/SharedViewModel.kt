@@ -158,6 +158,21 @@ class SharedViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SharedUiState())
     val uiState: StateFlow<SharedUiState> = _uiState.asStateFlow()
 
+    /** True once a load has run to its end, whatever it found. */
+    @Volatile private var loadedOnce = false
+
+    private var ownAlbumsRefreshJob: kotlinx.coroutines.Job? = null
+
+    private var sharedPrefetchJob: kotlinx.coroutines.Job? = null
+
+    private var thumbObserveJob: kotlinx.coroutines.Job? = null
+
+    private val _publicLinkState = MutableStateFlow<PublicLinkState>(PublicLinkState.None)
+    val publicLinkState: StateFlow<PublicLinkState> = _publicLinkState.asStateFlow()
+
+    /** The shared photo the manage-link sheet currently acts on; guards async results. */
+    private var activeLinkPhotoId: String? = null
+
     init {
         loadSharedAlbums()
         // Album-detail actions emit on this bus when a share flips — e.g. leaving a
@@ -409,11 +424,6 @@ class SharedViewModel @Inject constructor(
         }
     }
 
-    /** True once a load has run to its end, whatever it found. */
-    @Volatile private var loadedOnce = false
-
-    private var ownAlbumsRefreshJob: kotlinx.coroutines.Job? = null
-
     /**
      * The user's own albums, refreshed alongside the tab rather than ahead of it.
      *
@@ -436,8 +446,6 @@ class SharedViewModel @Inject constructor(
                 }
         }
     }
-
-    private var sharedPrefetchJob: kotlinx.coroutines.Job? = null
 
     /**
      * What a shared album needs to be worth looking at before it is opened: the cover its tile draws,
@@ -491,8 +499,6 @@ class SharedViewModel @Inject constructor(
     // on view, the DAO row updates, and this observation re-emits so the tile fills in without
     // a manual refresh — the same lazy-thumbnail contract the gallery grid uses.
 
-    private var thumbObserveJob: kotlinx.coroutines.Job? = null
-
     private fun observeSharedPhotoThumbnails(linkIds: List<String>) {
         thumbObserveJob?.cancel()
         if (linkIds.isEmpty()) return
@@ -539,12 +545,6 @@ class SharedViewModel @Inject constructor(
         data class Active(val url: String, val hasPassword: Boolean = false) : PublicLinkState()
         data class Error(val message: String) : PublicLinkState()
     }
-
-    private val _publicLinkState = MutableStateFlow<PublicLinkState>(PublicLinkState.None)
-    val publicLinkState: StateFlow<PublicLinkState> = _publicLinkState.asStateFlow()
-
-    /** The shared photo the manage-link sheet currently acts on; guards async results. */
-    private var activeLinkPhotoId: String? = null
 
     /** Open the manage-link sheet for [linkId]: seed it with the existing public link. */
     fun openLinkManager(linkId: String) {

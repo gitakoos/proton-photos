@@ -200,6 +200,10 @@ class DuplicateFinderViewModel @Inject constructor(
     private val _albumNames = MutableStateFlow<Map<String, String>>(emptyMap())
     val albumNames: StateFlow<Map<String, String>> = _albumNames.asStateFlow()
 
+    private val _cloudFullRes = MutableStateFlow<Map<String, CloudFullRes>>(emptyMap())
+    val cloudFullRes: StateFlow<Map<String, CloudFullRes>> = _cloudFullRes.asStateFlow()
+    private val fullResInFlight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     init {
         // Resolve each photo's cloud album once per account so a duplicate copy can show its album at a
         // glance. getAlbumMemberships shares one cached membership walk with the rest of the app, so
@@ -483,10 +487,6 @@ class DuplicateFinderViewModel @Inject constructor(
      *  dimensions. The photo listing carries none of these for the cloud volume, so the review resolves
      *  them on demand for the copy on screen. */
     data class CloudFullRes(val uri: String, val sizeBytes: Long, val width: Int, val height: Int)
-
-    private val _cloudFullRes = MutableStateFlow<Map<String, CloudFullRes>>(emptyMap())
-    val cloudFullRes: StateFlow<Map<String, CloudFullRes>> = _cloudFullRes.asStateFlow()
-    private val fullResInFlight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     /** Downloads and decrypts one cloud copy's full-resolution file, then publishes its uri, size and
      *  dimensions (bounds decoded without allocating the bitmap). Runs once per link and only for the

@@ -469,6 +469,88 @@ class GalleryViewModel @Inject constructor(
     /** Applies the back-up's progress, its end once no new photo has started for [UPLOAD_END_HOLD_MS]. */
     private val uploadEndHold = UploadEndHold(viewModelScope, UPLOAD_END_HOLD_MS, ::applyUploadProgress)
 
+    /** Each labelled photo's label keys, which [applyContentFilter] matches a picked label against. */
+    @Volatile
+    private var labelIndex: Map<String, Set<String>> = emptyMap()
+
+    /**
+     * Cached primary userId for synchronous use by PhotoCell's thumbnail decrypt
+     * lambdas. Compose can't suspend on a Flow inside its body without forcing
+     * recomposition on every emission, so we stash the resolved value here and let
+     * cells read it cheaply during the grid scroll. Null until the first emission
+     * lands. In that window the cells just won't request thumbnails (the next
+     * recomposition triggered by the userId update will queue them).
+     */
+    @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
+
+    // The avatar's UP arrow has two independent sources: the backup pipeline (upload.progress) and
+    // any TransferCenter UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
+    // two are ORed into hasActiveUpload, so a frame from one source never clears what the other set.
+    private var backupUploading = false
+    private var transferUploading = false
+
+    /** The in-flight off-main month + day re-bucket from a filter toggle; cancelled when a newer
+     *  toggle supersedes it so the last filter always wins. */
+    private var monthGroupsJob: kotlinx.coroutines.Job? = null
+
+    /** The write-consent request stashed while the user approves the system dialog, replayed by
+     *  [onMovePermissionGranted] and dropped by [clearPendingMove]. */
+    private var stashedMove: PendingMove? = null
+
+    /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
+     *  system trash dialog. Cleared on commit OR on cancel. */
+    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+
+    /** Private URIs of a hide whose intent is journalled and whose system delete has not confirmed
+     *  yet. Published into HIDDEN_PHOTO_URIS once it does. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
+     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** The device photos the running hide claimed, released once it is published or undone. */
+    private var pendingHideSources: Set<String> = emptySet()
+
+    /** done/total of a device folder moving into the vault, or null when none is. Drives the pill
+     *  this screen already shows background work in: a folder can hold thousands and each file is
+     *  copied on its own, so the user watches the count and stops it from where they pressed. */
+    private val _folderHideProgress = MutableStateFlow<HiddenFolderProgress?>(null)
+    val folderHideProgress: StateFlow<HiddenFolderProgress?> = _folderHideProgress.asStateFlow()
+
+    /** The running folder hide, so a second tap cannot start a parallel one. */
+    private var folderHideJob: kotlinx.coroutines.Job? = null
+
+    /** Raised by [cancelFolderHide] and polled between photos. A flag rather than a job cancel, so a
+     *  stopped hide still records and deletes the originals of everything it already copied. */
+    private val stopFolderHide = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private val _folderHideRequest = MutableStateFlow<FolderHideRequest?>(null)
+    /** The folder hide awaiting confirmation, or null when none is. */
+    val folderHideRequest: StateFlow<FolderHideRequest?> = _folderHideRequest.asStateFlow()
+
+    /** The device folder delete awaiting confirmation, or null when none is. */
+    val folderDeleteRequest: StateFlow<eu.akoos.photos.presentation.folders.DeviceFolderDeleteRequest?> =
+        folderDelete.request
+
+    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
+     *  folder hide is in flight, which is every selection hide. */
+    private var pendingHideFolderName: String? = null
+
+    /** The photos another device hid that the hide now running moves into the vault, by link id. */
+    private var remoteHideBatch: Set<String> = emptySet()
+
+    /** Single-photo public-link state surfaced in the manage-link sheet, owned by [publicLink]. */
+    val publicLinkState: StateFlow<eu.akoos.photos.presentation.viewer.PublicLinkState> = publicLink.state
+
+    /** Strip config + counters carried across an Android 10+ write-permission dialog so the
+     *  granted retry strips the deferred foreign URIs and folds them into the final tally. */
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
+    private var pendingStripFailed = 0
+
     init {
         watchRemoteHides()
         // A change of the range regroups the carousel from the library already on screen.
@@ -527,16 +609,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Cached primary userId for synchronous use by PhotoCell's thumbnail decrypt
-     * lambdas. Compose can't suspend on a Flow inside its body without forcing
-     * recomposition on every emission, so we stash the resolved value here and let
-     * cells read it cheaply during the grid scroll. Null until the first emission
-     * lands — in that window the cells just won't request thumbnails (the next
-     * recomposition triggered by the userId update will queue them).
-     */
-    @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
-
     private fun observePrimaryUserId() {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().collect { userId ->
@@ -588,20 +660,6 @@ class GalleryViewModel @Inject constructor(
         cloudRepo.requestThumbnailDecrypt(userId, linkIds)
     }
 
-    /**
-     * Mirror [UploadPendingUseCase.progress] into [GalleryUiState.isSyncing] so the avatar
-     * spinner reflects ALL upload activity — not just the foreground [doSync] calls. Without
-     * this, a SyncWorker tick that started from the MediaStore ContentObserver (camera fired)
-     * uploads silently and the user has no in-app indicator that anything is happening.
-     *
-     * Idle frames clear the flag; per-file Uploading/Queued frames set it.
-     */
-    // The avatar's UP arrow has two independent sources: the backup pipeline (upload.progress) and
-    // any TransferCenter UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
-    // two are ORed into hasActiveUpload, so a frame from one source never clears what the other set.
-    private var backupUploading = false
-    private var transferUploading = false
-
     /** Drives the avatar's DOWN arrow from the TransferCenter (downloads + offline pins), and folds a
      *  TransferCenter UPLOAD transfer into the UP arrow alongside the backup pipeline. */
     private fun observeActiveTransfers() {
@@ -618,6 +676,14 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Mirror [UploadPendingUseCase.progress] into [GalleryUiState.isSyncing] so the avatar
+     * spinner reflects ALL upload activity, not just the foreground [doSync] calls. Without
+     * this, a SyncWorker tick that started from the MediaStore ContentObserver (camera fired)
+     * uploads silently and the user has no in-app indicator that anything is happening.
+     *
+     * Idle frames clear the flag; per-file Uploading/Queued frames set it.
+     */
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
@@ -685,10 +751,6 @@ class GalleryViewModel @Inject constructor(
                 }
         }
     }
-
-    /** Each labelled photo's label keys, which [applyContentFilter] matches a picked label against. */
-    @Volatile
-    private var labelIndex: Map<String, Set<String>> = emptyMap()
 
     /**
      * The account's labels (a guest's own when signed out): their names and counts for the filter sheet and the
@@ -1324,10 +1386,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** The in-flight off-main month + day re-bucket from a filter toggle; cancelled when a newer
-     *  toggle supersedes it so the last filter always wins. */
-    private var monthGroupsJob: kotlinx.coroutines.Job? = null
-
     /** Re-bucket the date-grouped zoom levels off the main thread after a filter toggle updates
      *  [GalleryUiState.filteredItems]. The streaming combine keeps month + day groups in lockstep
      *  with the list as it loads; the explicit filter handlers update filteredItems synchronously for
@@ -1616,10 +1674,6 @@ class GalleryViewModel @Inject constructor(
     // Physically relocates the selected device photos into DCIM/<name>/ so other gallery apps see
     // them there. Works signed-in and out; cloud-only photos have no device file and are skipped.
 
-    /** The write-consent request stashed while the user approves the system dialog, replayed by
-     *  [onMovePermissionGranted] and dropped by [clearPendingMove]. */
-    private var stashedMove: PendingMove? = null
-
     /** Move the selected device photos (device-only + synced, cloud-only skipped) into [folderName]
      *  under DCIM/. A blank name or a selection with no device file is a no-op. */
     fun moveSelectedToFolder(folderName: String) {
@@ -1702,10 +1756,6 @@ class GalleryViewModel @Inject constructor(
             onResult(queued)
         }
     }
-
-    /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
-     *  system trash dialog. Cleared on commit OR on cancel. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
 
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         runDelete(_uiState.value.selectedItems.toList(), freeUpSpace, deleteFromCloud)
@@ -1853,17 +1903,6 @@ class GalleryViewModel @Inject constructor(
     fun resetMultiDeleteState() {
         _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Idle, hideFailureCount = 0) }
     }
-
-    /** Private URIs of a hide whose intent is journalled and whose system delete has not confirmed
-     *  yet. Published into HIDDEN_PHOTO_URIS once it does. */
-    private var pendingHidePrivateUris: List<String> = emptyList()
-
-    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
-     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
-    private var pendingHideCloudLinkIds: List<String> = emptyList()
-
-    /** The device photos the running hide claimed, released once it is published or undone. */
-    private var pendingHideSources: Set<String> = emptySet()
 
     /**
      * The two halves the current selection's hide would act on, for the confirmation that fronts it.
@@ -2062,19 +2101,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** done/total of a device folder moving into the vault, or null when none is. Drives the pill
-     *  this screen already shows background work in: a folder can hold thousands and each file is
-     *  copied on its own, so the user watches the count and stops it from where they pressed. */
-    private val _folderHideProgress = MutableStateFlow<HiddenFolderProgress?>(null)
-    val folderHideProgress: StateFlow<HiddenFolderProgress?> = _folderHideProgress.asStateFlow()
-
-    /** The running folder hide, so a second tap cannot start a parallel one. */
-    private var folderHideJob: kotlinx.coroutines.Job? = null
-
-    /** Raised by [cancelFolderHide] and polled between photos. A flag rather than a job cancel, so a
-     *  stopped hide still records and deletes the originals of everything it already copied. */
-    private val stopFolderHide = java.util.concurrent.atomic.AtomicBoolean(false)
-
     /**
      * A folder hide the user has been asked about and has not answered yet.
      *
@@ -2086,10 +2112,6 @@ class GalleryViewModel @Inject constructor(
         val bucketName: String,
         val split: HiddenFolderRecords.HideSplit? = null,
     )
-
-    private val _folderHideRequest = MutableStateFlow<FolderHideRequest?>(null)
-    /** The folder hide awaiting confirmation, or null when none is. */
-    val folderHideRequest: StateFlow<FolderHideRequest?> = _folderHideRequest.asStateFlow()
 
     /**
      * Ask about hiding [bucketName], and start reading what that would move.
@@ -2165,10 +2187,6 @@ class GalleryViewModel @Inject constructor(
         stopFolderHide.set(true)
     }
 
-    /** The device folder delete awaiting confirmation, or null when none is. */
-    val folderDeleteRequest: StateFlow<eu.akoos.photos.presentation.folders.DeviceFolderDeleteRequest?> =
-        folderDelete.request
-
     /**
      * Ask about deleting [bucketName] with everything it holds on the device, and start reading what
      * that would take. Nothing is deleted until [confirmDeleteFolder]. Held off while a folder hide
@@ -2231,10 +2249,6 @@ class GalleryViewModel @Inject constructor(
     }
 
     /** Publish the journalled hide now that the delete has confirmed, and clear the pending state. */
-    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
-     *  folder hide is in flight, which is every selection hide. */
-    private var pendingHideFolderName: String? = null
-
     private fun commitPendingHide() {
         val uris = pendingHidePrivateUris
         val sources = pendingHideSources
@@ -2270,9 +2284,6 @@ class GalleryViewModel @Inject constructor(
         hiddenVaultJournal.releaseAllSources(this)
         super.onCleared()
     }
-
-    /** The photos another device hid that the hide now running moves into the vault, by link id. */
-    private var remoteHideBatch: Set<String> = emptySet()
 
     /**
      * Carries out the hides another device asked for of photos this phone holds as a device file
@@ -2556,9 +2567,6 @@ class GalleryViewModel @Inject constructor(
     // lives in the shared [PublicLinkController] so the gallery and the viewer behave identically;
     // the methods below resolve the selected linkId / local uri and delegate.
 
-    /** Single-photo public-link state surfaced in the manage-link sheet, owned by [publicLink]. */
-    val publicLinkState: StateFlow<eu.akoos.photos.presentation.viewer.PublicLinkState> = publicLink.state
-
     /** The single cloud-backed (Synced/CloudOnly) linkId in the current selection, or null when
      *  the selection is empty, larger than one, or contains a local-only item. Drives both the
      *  share drawer's [showPublicLink] gating and which photo the manage-link sheet operates on. */
@@ -2798,14 +2806,6 @@ class GalleryViewModel @Inject constructor(
     // The manual strip's config comes from the multi-select picker, independent of the upload-strip
     // settings. The picker gates its confirm on at least one field, so an empty config never reaches
     // here and counts as a silent no-op.
-
-    /** Strip config + counters carried across an Android 10+ write-permission dialog so the
-     *  granted retry strips the deferred foreign URIs and folds them into the final tally. */
-    private var pendingStripConfig: MetadataStripConfig? = null
-    private var pendingStripUris: List<String> = emptyList()
-    private var pendingStripStripped = 0
-    private var pendingStripSkipped = 0
-    private var pendingStripFailed = 0
 
     fun stripMetadataSelected(config: MetadataStripConfig) {
         val items = _uiState.value.selectedItems.toList()

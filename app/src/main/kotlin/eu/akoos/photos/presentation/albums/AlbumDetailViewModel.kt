@@ -422,6 +422,50 @@ class AlbumDetailViewModel @Inject constructor(
         return resolveCoverGifUseCase.resolve(userId, coverLinkId)
     }
 
+    // Cancelled on each new load() call so stale DB observers don't linger.
+    private var albumJob: Job? = null
+
+    // The DB-observe job from load() and the linkIds it is collecting. Promoted to fields so a
+    // remove can re-bind the observe to the surviving ids: observePhotosByLinkIds keeps returning a
+    // removed photo (only its album membership row is deleted; the photo_listing row remains), which
+    // would otherwise fight the optimistic filter and make the removed tiles flicker.
+    private var observeJob: Job? = null
+    private var observedLinkIds: List<String> = emptyList()
+
+    // True only for the duration of a local remove so the albumListEvents collector skips a racing
+    // full reload while we re-bind the observe to the surviving ids. Cleared in a finally so a later
+    // external change (gallery "Add to album", a cover-set) still refreshes this album.
+    private var suppressSelfRefresh = false
+
+    private val pullRefresh = PullRefreshTracker()
+
+    /** Whether on-device face recognition is on (the AI master and the face switch), which offers Add to
+     *  person on the album selection, the same gate the timeline and Search use. Off until the switches
+     *  resolve, so the action never flashes in. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
+    private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingDeleteLinkIds: List<String> = emptyList()
+    private var pendingDeleteFromCloud: Boolean = false
+
+    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
+     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
+     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** How many device files that hide could not copy into the vault. Carried to whichever commit
+     *  path lands so the count is reported once the hide is actually done. */
+    private var pendingHideFailures = 0
+
+    val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
+
     init {
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         viewModelScope.launch {
@@ -584,21 +628,6 @@ class AlbumDetailViewModel @Inject constructor(
             }
         }
     }
-
-    // Cancelled on each new load() call so stale DB observers don't linger.
-    private var albumJob: Job? = null
-
-    // The DB-observe job from load() and the linkIds it is collecting. Promoted to fields so a
-    // remove can re-bind the observe to the surviving ids — observePhotosByLinkIds keeps returning a
-    // removed photo (only its album membership row is deleted; the photo_listing row remains), which
-    // would otherwise fight the optimistic filter and make the removed tiles flicker.
-    private var observeJob: Job? = null
-    private var observedLinkIds: List<String> = emptyList()
-
-    // True only for the duration of a local remove so the albumListEvents collector skips a racing
-    // full reload while we re-bind the observe to the surviving ids. Cleared in a finally so a later
-    // external change (gallery "Add to album", a cover-set) still refreshes this album.
-    private var suppressSelfRefresh = false
 
     fun load(albumLinkId: String, albumName: String, shareId: String?, sharedByEmail: String? = null, volumeId: String? = null) {
         albumJob?.cancel()
@@ -784,8 +813,6 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    private val pullRefresh = PullRefreshTracker()
-
     /** The user's pull: [refresh], and the shared backup is brought up to date as well, in the background. */
     fun pullRefresh() {
         sharedBackup.refresh()
@@ -926,14 +953,6 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     fun clearSelection() = _uiState.update { it.copy(selectedPhotos = emptySet()) }
-
-    /** Whether on-device face recognition is on (the AI master and the face switch), which offers Add to
-     *  person on the album selection, the same gate the timeline and Search use. Off until the switches
-     *  resolve, so the action never flashes in. */
-    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
     fun setSelectedPhotos(linkIds: Set<String>) = _uiState.update { it.copy(selectedPhotos = linkIds) }
@@ -1095,11 +1114,6 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
-    private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
-    private var pendingDeleteLinkIds: List<String> = emptyList()
-    private var pendingDeleteFromCloud: Boolean = false
-
     /** Resolve selected photos to [GalleryItem]s for delete: [GalleryItem.Synced] if a local twin exists, else CloudOnly. */
     private fun selectedGalleryItems(): List<GalleryItem> {
         val state = _uiState.value
@@ -1193,18 +1207,6 @@ class AlbumDetailViewModel @Inject constructor(
      */
     fun hideSplitForSelection(): HiddenFolderRecords.HideSplit =
         HiddenFolderRecords.hideSplit(selectedGalleryItems())
-
-    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
-     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
-    private var pendingHidePrivateUris: List<String> = emptyList()
-
-    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
-     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
-    private var pendingHideCloudLinkIds: List<String> = emptyList()
-
-    /** How many device files that hide could not copy into the vault. Carried to whichever commit
-     *  path lands so the count is reported once the hide is actually done. */
-    private var pendingHideFailures = 0
 
     /**
      * Hide the selected album members, running the very body the timeline, search and device-folder
@@ -2093,7 +2095,6 @@ class AlbumDetailViewModel @Inject constructor(
     // ── Public link for the single selected photo — delegated to the shared [PublicLinkController]
     // so the album selection behaves identically to the timeline and viewer. Only share metadata is
     // touched, never photo content. ────────────────────────────────────────────────────────────────
-    val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
 
     /** The single selected album photo's linkId, or null when 0 or >1 are selected. */
     fun singleSelectedLinkId(): String? =

@@ -612,12 +612,6 @@ class PhotoViewerViewModel @Inject constructor(
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
-    init {
-        // An album changed outside this screen, as when a device photo joins its album once backed up:
-        // reload, so the album counts and covers in the details sheet and the picker follow.
-        viewModelScope.launch { albumListEvents.changes.collect { loadAlbums() } }
-    }
-
     /** Cloud-album linkIds containing the viewed photo, driving the picker's checkmarks +
      *  remove-on-tap. Refreshed each time the sheet opens so a Drive-web change self-corrects. */
     private val _currentPhotoAlbumIds = MutableStateFlow<Set<String>>(emptySet())
@@ -652,17 +646,10 @@ class PhotoViewerViewModel @Inject constructor(
      *  silently spinning indicator. Caller clears via [clearTransientError]. */
     private val _transientError = MutableStateFlow<String?>(null)
     val transientError: StateFlow<String?> = _transientError.asStateFlow()
-    fun clearTransientError() { _transientError.value = null }
 
     private val _renameState = MutableStateFlow<RenameState>(RenameState.Idle)
     val renameState: StateFlow<RenameState> = _renameState.asStateFlow()
     private var pendingRename: PendingRenameRequest? = null
-    private data class PendingRenameRequest(
-        val item: GalleryItem,
-        val newName: String,
-        val replaceOriginal: Boolean,
-        val sourceAlbumLinkId: String?,
-    )
 
     /** Whether a Proton account is signed in. The null-userId local-only session leaves the per-photo
      *  cloud actions without a destination, so the screen hides them. Defaults to signed-in so nothing
@@ -698,6 +685,159 @@ class PhotoViewerViewModel @Inject constructor(
     /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
      *  system trash dialog. Cleared on commit OR on cancel — never leaks across user actions. */
     private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+
+    /**
+     * The vaulted photos that still have a Drive copy, so the viewer's status badge answers for one
+     * the same way the vault's grid does.
+     *
+     * A vaulted photo reaches every screen as a device-only item — vaulting removes the MediaStore row
+     * that made it a [GalleryItem.Synced] — so nothing about the item itself can say a Drive copy is
+     * there, and the vault's own cloud-id records are the only thing that still can. Keyed by vault
+     * uri, so membership already means the photo is one the vault holds and nothing further has to be
+     * asked. A rename re-keys the record in the same edit that moves the file, so the badge follows the
+     * photo instead of being left on a path nothing is at.
+     */
+    val pairedVaultUris: StateFlow<Set<String>> = context.settingsDataStore.data
+        .map { HiddenVaultRecords.pairedUris(it[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Master AI-features gate (Settings, AI and machine learning). Off suppresses the Copy-text long
+     *  press so no text-detection model is ever fetched from the viewer. Observed, so a change made in
+     *  Settings is reflected the next time the viewer is opened. */
+    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Copy-text gate (Settings, AI and machine learning): the master switch AND the per-feature Copy
+     *  text opt-in, whose absent state falls back to the reader's models already being on disk so a user
+     *  who used Copy text before keeps it. Off keeps the long press to read inert, so no OCR model is
+     *  fetched from the viewer. Observed, so a Settings change is reflected the next time it is opened. */
+    val copyTextEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map {
+            it[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                (it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick())
+        }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Whether a long press on the photo opens the top-right menu instead of selecting its text
+     *  (Settings, Appearance). Observed, so a Settings change is reflected the next time it is opened. */
+    val longPressOpensMenu: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
+     *  the viewer offers the people-in-this-photo action, so turning faces off suppresses it while the
+     *  master AI switch stays on. Observed, so a Settings change is reflected the next time the viewer
+     *  is opened. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Whether the people already known on a photo are shown (name chips, the People row of the details):
+     *  while this phone scans, or when the account holds people from elsewhere ([PeopleVisibility]). Reading
+     *  them needs no face model, unlike detecting faces on demand, which stays behind [faceEnabled]. */
+    val peopleVisible: StateFlow<Boolean> = peopleVisibility.visible()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
+    /** The people found on the settled photo, named first; empty when AI is off or none are grouped. */
+    val peopleInPhoto: StateFlow<List<ViewerPerson>> = _peopleInPhoto.asStateFlow()
+
+    private val _peopleInPhotoKey = MutableStateFlow<String?>(null)
+    /** The stableId of the photo [peopleInPhoto] was read for, published together with the list, so a
+     *  surface can tell a list still describing the photo swiped away from apart from the settled one's
+     *  (see [peopleBelongTo]). Null until the first read lands. */
+    val peopleInPhotoKey: StateFlow<String?> = _peopleInPhotoKey.asStateFlow()
+
+    /** The people read in flight, cancelled by the next [loadPeopleInPhoto] so a slow read for a photo
+     *  swiped past can never land over the read for the photo now on screen. Main thread only. */
+    private var peopleJob: Job? = null
+
+    /** The stableId the latest [loadPeopleInPhoto] was started for, the photo the viewer settled on. A
+     *  scan that finishes after a swipe checks it before touching the list. Main thread only. */
+    private var peopleRequestedFor: String? = null
+
+    private val _manualPeopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
+    /** The named people the settled photo was added to by hand, with no face of theirs on it, for the
+     *  details panel's People row only; read with [peopleInPhoto] and keyed by [peopleInPhotoKey]. */
+    val manualPeopleInPhoto: StateFlow<List<ViewerPerson>> = _manualPeopleInPhoto.asStateFlow()
+
+    /** Holds the private-storage URI of a file currently being hidden, awaiting the user's
+     *  confirmation in the system trash dialog. Its intent is journalled; only a confirmed delete
+     *  publishes it into [SettingsKeys.HIDDEN_PHOTO_URIS], and a cancel drops both copy and record. */
+    private var pendingHidePrivateUri: String? = null
+
+    /** Follows the heart of the photo on screen; see [checkIfFavorite]. */
+    private var favoriteWatch: Job? = null
+
+    /** The photo on screen whose labels the Labels section and the Add labels sheet read, null until set. */
+    private val labelTarget = MutableStateFlow<GalleryItem?>(null)
+
+    /** [labelTarget]'s labels, live, read under both keys a backed-up photo's labels may sit under. */
+    val currentLabels: StateFlow<List<String>> = labelTarget
+        .flatMapLatest { item ->
+            if (item == null) flowOf(emptyList())
+            else labelRepo.observeLabelsByPhoto().map { LabelKeyReconciler.labelsFor(item, it) }
+        }
+        .distinctUntilChanged()
+        .catch { emit(emptyList()) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Every label of the account with its photo count, most used first. */
+    private val labelUsage: StateFlow<List<LabelUsage>> = labelRepo.observeLabelUsage()
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether the Labels section still says where labels are kept: until the first label is ever added. */
+    val showLabelsNote: StateFlow<Boolean> = combine(
+        context.settingsDataStore.data.map { it[SettingsKeys.LABELS_NOTE_SEEN] == true },
+        labelUsage,
+    ) { seen, usage -> !seen && usage.isEmpty() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** True while the labels are saved to or restored from Drive, when they cannot be edited. */
+    val labelsLocked: StateFlow<Boolean> = labelRepo.observeLocked()
+        .catch { emit(false) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Serialises label writes, each of which re-reads the list it replaces. */
+    private val labelWriteLock = Mutex()
+
+    /** Serialises the local-tag writes below. Each one re-reads the row it is about to replace, so
+     *  two quick chip taps have to queue or the second would compose its toggle onto the set the
+     *  first has not stored yet and drop it. */
+    private val userTagWriteLock = Mutex()
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the host's launcher drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    init {
+        // An album changed outside this screen, as when a device photo joins its album once backed up:
+        // reload, so the album counts and covers in the details sheet and the picker follow.
+        viewModelScope.launch { albumListEvents.changes.collect { loadAlbums() } }
+    }
+
+    fun clearTransientError() { _transientError.value = null }
+
+    private data class PendingRenameRequest(
+        val item: GalleryItem,
+        val newName: String,
+        val replaceOriginal: Boolean,
+        val sourceAlbumLinkId: String?,
+    )
 
     fun deleteItem(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         viewModelScope.launch {
@@ -743,67 +883,9 @@ class PhotoViewerViewModel @Inject constructor(
      *  photo it is drawing, rather than being told by whichever surface opened the viewer. */
     fun isVaultUri(uri: String): Boolean = hiddenStorage.isHiddenUri(uri)
 
-    /**
-     * The vaulted photos that still have a Drive copy, so the viewer's status badge answers for one
-     * the same way the vault's grid does.
-     *
-     * A vaulted photo reaches every screen as a device-only item — vaulting removes the MediaStore row
-     * that made it a [GalleryItem.Synced] — so nothing about the item itself can say a Drive copy is
-     * there, and the vault's own cloud-id records are the only thing that still can. Keyed by vault
-     * uri, so membership already means the photo is one the vault holds and nothing further has to be
-     * asked. A rename re-keys the record in the same edit that moves the file, so the badge follows the
-     * photo instead of being left on a path nothing is at.
-     */
-    val pairedVaultUris: StateFlow<Set<String>> = context.settingsDataStore.data
-        .map { HiddenVaultRecords.pairedUris(it[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()) }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
-
-    /** Master AI-features gate (Settings, AI and machine learning). Off suppresses the Copy-text long
-     *  press so no text-detection model is ever fetched from the viewer. Observed, so a change made in
-     *  Settings is reflected the next time the viewer is opened. */
-    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     // Resolves the Copy-text opt-in fallback for a device that never touched the switch: whether the
     // reader's models are already on disk. Non-suspend and cheap enough to answer inline.
     private val ocrModelManager by lazy { OcrModelManager(context) }
-
-    /** Copy-text gate (Settings, AI and machine learning): the master switch AND the per-feature Copy
-     *  text opt-in, whose absent state falls back to the reader's models already being on disk so a user
-     *  who used Copy text before keeps it. Off keeps the long press to read inert, so no OCR model is
-     *  fetched from the viewer. Observed, so a Settings change is reflected the next time it is opened. */
-    val copyTextEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map {
-            it[SettingsKeys.AI_FEATURES_ENABLED] == true &&
-                (it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick())
-        }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    /** Whether a long press on the photo opens the top-right menu instead of selecting its text
-     *  (Settings, Appearance). Observed, so a Settings change is reflected the next time it is opened. */
-    val longPressOpensMenu: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] == true }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
-     *  the viewer offers the people-in-this-photo action, so turning faces off suppresses it while the
-     *  master AI switch stays on. Observed, so a Settings change is reflected the next time the viewer
-     *  is opened. */
-    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    /** Whether the people already known on a photo are shown (name chips, the People row of the details):
-     *  while this phone scans, or when the account holds people from elsewhere ([PeopleVisibility]). Reading
-     *  them needs no face model, unlike detecting faces on demand, which stays behind [faceEnabled]. */
-    val peopleVisible: StateFlow<Boolean> = peopleVisibility.visible()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** One person the face index found on the photo now on screen, for the "people in this photo" bar.
      *  [faceBox] is the 0..1 crop of this photo, so the chip shows the person's face from this frame. */
@@ -825,29 +907,6 @@ class PhotoViewerViewModel @Inject constructor(
             val NO_FACE = eu.akoos.photos.presentation.gallery.FaceBox(0f, 0f, 0f, 0f)
         }
     }
-
-    private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
-    /** The people found on the settled photo, named first; empty when AI is off or none are grouped. */
-    val peopleInPhoto: StateFlow<List<ViewerPerson>> = _peopleInPhoto.asStateFlow()
-
-    private val _peopleInPhotoKey = MutableStateFlow<String?>(null)
-    /** The stableId of the photo [peopleInPhoto] was read for, published together with the list, so a
-     *  surface can tell a list still describing the photo swiped away from apart from the settled one's
-     *  (see [peopleBelongTo]). Null until the first read lands. */
-    val peopleInPhotoKey: StateFlow<String?> = _peopleInPhotoKey.asStateFlow()
-
-    /** The people read in flight, cancelled by the next [loadPeopleInPhoto] so a slow read for a photo
-     *  swiped past can never land over the read for the photo now on screen. Main thread only. */
-    private var peopleJob: Job? = null
-
-    /** The stableId the latest [loadPeopleInPhoto] was started for, the photo the viewer settled on. A
-     *  scan that finishes after a swipe checks it before touching the list. Main thread only. */
-    private var peopleRequestedFor: String? = null
-
-    private val _manualPeopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
-    /** The named people the settled photo was added to by hand, with no face of theirs on it, for the
-     *  details panel's People row only; read with [peopleInPhoto] and keyed by [peopleInPhotoKey]. */
-    val manualPeopleInPhoto: StateFlow<List<ViewerPerson>> = _manualPeopleInPhoto.asStateFlow()
 
     private fun publishPeople(photoKey: String, people: List<ViewerPerson>, manual: List<ViewerPerson>? = null) {
         _peopleInPhoto.value = people
@@ -1338,11 +1397,6 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /** Holds the private-storage URI of a file currently being hidden, awaiting the user's
-     *  confirmation in the system trash dialog. Its intent is journalled; only a confirmed delete
-     *  publishes it into [SettingsKeys.HIDDEN_PHOTO_URIS], and a cancel drops both copy and record. */
-    private var pendingHidePrivateUri: String? = null
-
     /**
      * Hide a single photo. A photo with a device file, backed up or not, moves to the Hidden vault:
      * copy bytes to app-private storage, record the intent, then delete the MediaStore original
@@ -1545,9 +1599,6 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /** Follows the heart of the photo on screen; see [checkIfFavorite]. */
-    private var favoriteWatch: Job? = null
-
     fun checkIfFavorite(item: GalleryItem) {
         watchCloudFavorite(item)
         viewModelScope.launch {
@@ -1731,41 +1782,6 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /** The photo on screen whose labels the Labels section and the Add labels sheet read, null until set. */
-    private val labelTarget = MutableStateFlow<GalleryItem?>(null)
-
-    /** [labelTarget]'s labels, live, read under both keys a backed-up photo's labels may sit under. */
-    val currentLabels: StateFlow<List<String>> = labelTarget
-        .flatMapLatest { item ->
-            if (item == null) flowOf(emptyList())
-            else labelRepo.observeLabelsByPhoto().map { LabelKeyReconciler.labelsFor(item, it) }
-        }
-        .distinctUntilChanged()
-        .catch { emit(emptyList()) }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** Every label of the account with its photo count, most used first. */
-    private val labelUsage: StateFlow<List<LabelUsage>> = labelRepo.observeLabelUsage()
-        .catch { emit(emptyList()) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** Whether the Labels section still says where labels are kept: until the first label is ever added. */
-    val showLabelsNote: StateFlow<Boolean> = combine(
-        context.settingsDataStore.data.map { it[SettingsKeys.LABELS_NOTE_SEEN] == true },
-        labelUsage,
-    ) { seen, usage -> !seen && usage.isEmpty() }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    /** True while the labels are saved to or restored from Drive, when they cannot be edited. */
-    val labelsLocked: StateFlow<Boolean> = labelRepo.observeLocked()
-        .catch { emit(false) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    /** Serialises label writes, each of which re-reads the list it replaces. */
-    private val labelWriteLock = Mutex()
-
     /** Points [currentLabels] at [item], moving any labels still under its device uri onto its linkId. */
     fun loadLabels(item: GalleryItem) {
         labelTarget.value = item
@@ -1796,11 +1812,6 @@ class PhotoViewerViewModel @Inject constructor(
             }
         }
     }
-
-    /** Serialises the local-tag writes below. Each one re-reads the row it is about to replace, so
-     *  two quick chip taps have to queue or the second would compose its toggle onto the set the
-     *  first has not stored yet and drop it. */
-    private val userTagWriteLock = Mutex()
 
     /**
      * Records a category choice for a photo that lives only on the device.
@@ -2501,15 +2512,6 @@ class PhotoViewerViewModel @Inject constructor(
     // Delegated to the shared [MoveToFolderController], the same relocation the timeline and the
     // device-folder detail offer, so the viewer can send the one photo it is showing into another
     // DCIM folder. Only the photo's own device uri moves; nothing cloud is touched.
-
-    /** Existing device folders offered as move targets, kept warm for the picker. */
-    val moveTargetFolders = moveController.targetFolders(viewModelScope)
-
-    /** One-shot system write-consent request a foreign-file move needs; the host's launcher drives it. */
-    val pendingMoveIntent = moveController.pendingMoveIntent
-
-    /** Destination folder of a completed move, for the host's snackbar. */
-    val moveConfirmation = moveController.moveConfirmation
 
     /** Move the single viewed device photo into [folderName] under DCIM/. */
     fun moveToFolder(uri: String, folderName: String) =

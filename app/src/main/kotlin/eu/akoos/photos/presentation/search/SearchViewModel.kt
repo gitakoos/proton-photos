@@ -427,26 +427,6 @@ class SearchViewModel @Inject constructor(
         LabelQuery.parse(_query.value, labelKeywords.value)?.let { _query.value = it.rest }
     }
 
-    init {
-        // A picked label the account no longer has (deleted, renamed, another account) leaves the filter.
-        viewModelScope.launch {
-            labelUsageSource.collect { usage ->
-                val filter = _contentFilter.value
-                val pruned = LabelFilter.prune(filter, usage)
-                if (pruned != filter) _contentFilter.value = pruned
-            }
-        }
-        // "labels:<name>" naming one of the account's labels becomes its pill once typing settles.
-        viewModelScope.launch {
-            combine(_query.debounce(LABEL_SETTLE_MS), labelUsageSource) { q, usage -> q to usage }
-                .collect { (q, usage) ->
-                    if (q != _query.value) return@collect
-                    val typing = LabelQuery.parse(q, labelKeywords.value) ?: return@collect
-                    LabelQuery.named(typing, usage)?.let { pickLabel(it.labelKey) }
-                }
-        }
-    }
-
     /** Every located photo's city and country, folded, by its location key. Empty until the index has
      *  geocoded the library's spots, so a first search never waits on it and the place matches join in
      *  when it lands. */
@@ -455,16 +435,6 @@ class SearchViewModel @Inject constructor(
         .catch { emit(emptyMap()) }
         .onStart { emit(emptyMap()) }
         .flowOn(Dispatchers.Default)
-
-    /** The typed side of the keyword match: the settled query, and the localized names, folded labels
-     *  and folded places it is matched against, travelling as one value to keep the combine within its
-     *  arity. */
-    private data class TypedInput(
-        val q: String,
-        val text: LocalizedText,
-        val labels: Map<String, String>,
-        val places: Map<String, String>,
-    )
 
     /** The keyword + metadata matches, the search path that has always been here: the merged library
      *  narrowed by the typed query, the content filter, the category chip and the People rail. Folded
@@ -507,20 +477,6 @@ class SearchViewModel @Inject constructor(
     private val textModelFetched = modelDownloadState.status
         .map { it[ModelDownloadKind.SEMANTIC_TEXT]?.phase == ModelDownloadPhase.DONE }
         .distinctUntilChanged()
-
-    init {
-        // Content search that rests on another device's embeddings needs the text model here; it is
-        // fetched on an unmetered connection, and again whenever Wi-Fi returns while it is still missing.
-        viewModelScope.launch {
-            combine(semanticEnabled, networkObserver.isUnmetered) { available, unmetered -> available to unmetered }
-                .distinctUntilChanged()
-                .collect { (available, unmetered) -> textModelProvisioner.requestIfNeeded(available, unmetered) }
-        }
-    }
-
-    /** The content-search feed: whether a search is still running for the current query, and the
-     *  resolved matches so far. Held as one value so the loading flag and the matches never disagree. */
-    private data class SemanticFeed(val loading: Boolean, val items: List<GalleryItem>)
 
     /**
      * The image-content search as (still-running, ranked photo keys). Gated on [semanticEnabled]
@@ -657,10 +613,6 @@ class SearchViewModel @Inject constructor(
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** What decides which shortcut tiles a name can reach: the Albums tab's own order and hidden set,
-     *  the People tile's own visibility is read separately ([PeopleVisibility]). */
-    private data class TileSettings(val order: String?, val hidden: Set<String>)
-
     private val tileSettings: Flow<TileSettings> = context.settingsDataStore.data
         .map {
             TileSettings(
@@ -687,6 +639,93 @@ class SearchViewModel @Inject constructor(
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The years the library has photos from, newest first: what a typed month is offered with. */
+    private val availableYears: StateFlow<List<Int>> = allItems
+        .map { items ->
+            val calendar = java.util.Calendar.getInstance()
+            val seen = HashSet<Int>()
+            for (item in items) {
+                if (item.captureTimeMs <= 0L) continue
+                calendar.timeInMillis = item.captureTimeMs
+                seen.add(calendar.get(java.util.Calendar.YEAR))
+            }
+            seen.sortedDescending()
+        }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Dates the end of the typed query could mean, to pick as a filter instead of matching as text. */
+    val dateSuggestions: StateFlow<List<DateSuggestion>> =
+        combine(_query, availableYears, localizedText) { q, years, text ->
+            if (typingLabel(q)) emptyList()
+            else DateSuggestions.suggest(q, text.months, years, text.monthAbbreviations)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The chips the category rail shows, in its order, so only a chip the page offers is selected. */
+    private val railCategories: Flow<List<GalleryFilter>> = context.settingsDataStore.data
+        .map { visibleCategories(it[SettingsKeys.CATEGORY_RAIL_ORDER], it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()) }
+        .distinctUntilChanged()
+
+    val sel = selectionFactory.create(viewModelScope)
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the screen's host drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    init {
+        // A picked label the account no longer has (deleted, renamed, another account) leaves the filter.
+        viewModelScope.launch {
+            labelUsageSource.collect { usage ->
+                val filter = _contentFilter.value
+                val pruned = LabelFilter.prune(filter, usage)
+                if (pruned != filter) _contentFilter.value = pruned
+            }
+        }
+        // "labels:<name>" naming one of the account's labels becomes its pill once typing settles.
+        viewModelScope.launch {
+            combine(_query.debounce(LABEL_SETTLE_MS), labelUsageSource) { q, usage -> q to usage }
+                .collect { (q, usage) ->
+                    if (q != _query.value) return@collect
+                    val typing = LabelQuery.parse(q, labelKeywords.value) ?: return@collect
+                    LabelQuery.named(typing, usage)?.let { pickLabel(it.labelKey) }
+                }
+        }
+    }
+
+    /** The typed side of the keyword match: the settled query, and the localized names, folded labels
+     *  and folded places it is matched against, travelling as one value to keep the combine within its
+     *  arity. */
+    private data class TypedInput(
+        val q: String,
+        val text: LocalizedText,
+        val labels: Map<String, String>,
+        val places: Map<String, String>,
+    )
+
+    init {
+        // Content search that rests on another device's embeddings needs the text model here; it is
+        // fetched on an unmetered connection, and again whenever Wi-Fi returns while it is still missing.
+        viewModelScope.launch {
+            combine(semanticEnabled, networkObserver.isUnmetered) { available, unmetered -> available to unmetered }
+                .distinctUntilChanged()
+                .collect { (available, unmetered) -> textModelProvisioner.requestIfNeeded(available, unmetered) }
+        }
+    }
+
+    /** The content-search feed: whether a search is still running for the current query, and the
+     *  resolved matches so far. Held as one value so the loading flag and the matches never disagree. */
+    private data class SemanticFeed(val loading: Boolean, val items: List<GalleryItem>)
+
+    /** What decides which shortcut tiles a name can reach: the Albums tab's own order and hidden set,
+     *  the People tile's own visibility is read separately ([PeopleVisibility]). */
+    private data class TileSettings(val order: String?, val hidden: Set<String>)
 
     init {
         // If the people list empties while a person filter is active (AI turned off, sign-out), drop
@@ -750,29 +789,6 @@ class SearchViewModel @Inject constructor(
     /** The app's language as the screen resolves it, so the typed month and category names follow it. */
     fun setLocale(locale: Locale) { _locale.value = locale }
 
-    /** The years the library has photos from, newest first: what a typed month is offered with. */
-    private val availableYears: StateFlow<List<Int>> = allItems
-        .map { items ->
-            val calendar = java.util.Calendar.getInstance()
-            val seen = HashSet<Int>()
-            for (item in items) {
-                if (item.captureTimeMs <= 0L) continue
-                calendar.timeInMillis = item.captureTimeMs
-                seen.add(calendar.get(java.util.Calendar.YEAR))
-            }
-            seen.sortedDescending()
-        }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** Dates the end of the typed query could mean, to pick as a filter instead of matching as text. */
-    val dateSuggestions: StateFlow<List<DateSuggestion>> =
-        combine(_query, availableYears, localizedText) { q, years, text ->
-            if (typingLabel(q)) emptyList()
-            else DateSuggestions.suggest(q, text.months, years, text.monthAbbreviations)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     /** Takes a suggested date: the words that spelled it leave the text and it becomes the date filter. */
     fun applyDateSuggestion(suggestion: DateSuggestion) {
         _query.value = SearchFilter.dropLastWords(_query.value, suggestion.consumedTokens)
@@ -780,11 +796,6 @@ class SearchViewModel @Inject constructor(
             year = suggestion.year, month = suggestion.month, day = null, dayEnd = null, dateFrom = null, dateTo = null,
         )
     }
-
-    /** The chips the category rail shows, in its order, so only a chip the page offers is selected. */
-    private val railCategories: Flow<List<GalleryFilter>> = context.settingsDataStore.data
-        .map { visibleCategories(it[SettingsKeys.CATEGORY_RAIL_ORDER], it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()) }
-        .distinctUntilChanged()
 
     init {
         // A month name or a whole year at the end of the settled query becomes the date filter, shown as a
@@ -835,7 +846,6 @@ class SearchViewModel @Inject constructor(
     // Delegates to the shared [GalleryItemSelectionController] (the timeline uses the same one), so
     // every selection action, the delete + strip permission handshakes and the Undo offer live in
     // one place. Only Select-all needs local context — the current results list.
-    val sel = selectionFactory.create(viewModelScope)
 
     val selectedItems: StateFlow<Set<GalleryItem>> get() = sel.selectedItems
     val albums: StateFlow<List<Album>> get() = sel.albums
@@ -881,15 +891,6 @@ class SearchViewModel @Inject constructor(
     // ── Move to a device folder (logged-out, device data only) ──────────────────────────────────
     // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a
     // search selection can send its device photos into a DCIM folder.
-
-    /** Existing device folders offered as move targets, kept warm for the picker. */
-    val moveTargetFolders = moveController.targetFolders(viewModelScope)
-
-    /** One-shot system write-consent request a foreign-file move needs; the screen's host drives it. */
-    val pendingMoveIntent = moveController.pendingMoveIntent
-
-    /** Destination folder of a completed move, for the host's snackbar. */
-    val moveConfirmation = moveController.moveConfirmation
 
     /** The selected photos that carry a device file, mapped to their uris; a cloud-only one has none. */
     private fun selectedDeviceUris(): List<String> = selectedItems.value.mapNotNull { item ->
