@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -34,11 +35,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
@@ -48,7 +51,6 @@ import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -179,6 +181,28 @@ class GetGalleryItemsUseCase @Inject constructor(
         }
     }
 
+    /**
+     * The device files and the Drive photos the merge pairs, before any album hide drops a photo: the
+     * sides a screen weighs a sync link on with [syncedRowsShownAsOne], the same inputs [invoke] gives
+     * [linkShowsAsOne]. Both sources are shared, so this starts no second scan or listing read, and it
+     * is throttled like the merge. Empty until the first sides arrive and after a failure, so a proven
+     * link stands at once and a screen's flow carries on with proven links alone.
+     */
+    @OptIn(FlowPreview::class)
+    fun linkSides(userId: UserId): Flow<LinkSides> =
+        combine(
+            localRepo.observeLocalMedia().distinctUntilChanged(),
+            cloudRepo.observeCloudPhotos(userId).distinctUntilChanged(),
+            ::LinkSides,
+        )
+            .sample(RECOMPUTE_THROTTLE_MS)
+            .retryOnDbTear("LinkSides")
+            .onStart { emit(LinkSides.NONE) }
+            .catch { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("GetGalleryItems", "link sides unavailable: ${e.message}")
+            }
+
     /** Session-free gallery feed for the no-account (local-only) mode: the device's own media with
      *  no Proton session. Merges the local source against zero cloud photos and empty sync state, so
      *  it yields EXACTLY the [GalleryItem.LocalOnly] rows [invoke] produces, sorted identically. The
@@ -275,7 +299,7 @@ class GetGalleryItemsUseCase @Inject constructor(
     ): List<GalleryItem> {
         // A device file pairs with a Drive photo on the same basis the sync layer links them: the
         // file's sync_state row names the photo (a link reconcile made by name only while the file
-        // still agrees with the photo, see [rowLinkShows]), or the bytes the row recorded hash to the
+        // still agrees with the photo, see [linkShowsAsOne]), or the bytes the row recorded hash to the
         // photo's Drive content hash. A shared name, capture time or size is no proof the bytes are the same:
         // paired on one, a different file of the same name read as the photo's copy on this device,
         // and the Drive photo could not be saved from the gallery. An unproven pair shows as two
@@ -302,7 +326,7 @@ class GetGalleryItemsUseCase @Inject constructor(
             val cloudFromSync = sync?.let(cloudFileIdOf)
                 ?.takeIf { it !in usedCloudIds }
                 ?.let { cloudByLinkId[it] }
-                ?.takeIf { rowLinkShows(linkBasisOf(sync), localItem, it) }
+                ?.takeIf { linkShowsAsOne(linkBasisOf(sync), localItem, it) }
             // localHash is the bare SHA-1; cloudByHash is keyed by the cloud ContentHash
             // (HMAC-SHA256(rootNodeHashKey, sha1Hex)), so convert before the lookup — this pairs a
             // photo to its cloud copy by content even when rename-on-upload changed the cloud name.
@@ -368,21 +392,6 @@ class GetGalleryItemsUseCase @Inject constructor(
             if (byTime != 0) byTime else ids[a]!!.compareTo(ids[b]!!) // ascending stableId tiebreak
         })
         return order.map { visible[it] }
-    }
-
-    /**
-     * Whether a row's link of [local] to [cloud] shows them as one item, by what the link rests on
-     * ([LinkBasis]). A proven link always does. A link reconcile made by name does while the file still
-     * agrees with the Drive photo on the exact name and capture second; one whose upload rewrote the
-     * bytes ([LinkBasis.NAME_REWRITTEN]) also takes the re-encoded name. Drive's listing reports no size,
-     * so the size is not weighed. A file with the same name and another capture second shows apart.
-     */
-    internal fun rowLinkShows(basis: Int, local: LocalMediaItem, cloud: CloudPhoto): Boolean {
-        if (basis == LinkBasis.PROVEN) return true
-        if (local.dateTaken / 1000L != cloud.captureTime) return false
-        return cloud.displayName == local.displayName ||
-            (basis == LinkBasis.NAME_REWRITTEN &&
-                cloud.displayName == UploadFormatNaming.reencodedName(local.displayName, local.mimeType))
     }
 
     /** A gallery item belongs to a hidden album when its cloud copy's linkId is a hidden-album

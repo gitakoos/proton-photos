@@ -104,6 +104,7 @@ import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.GalleryDownloads
 import eu.akoos.photos.presentation.common.awaitUnlessStopped
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
@@ -112,6 +113,8 @@ import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
 import eu.akoos.photos.domain.usecase.PendingMove
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
+import eu.akoos.photos.domain.usecase.LinkSides
+import eu.akoos.photos.domain.usecase.syncedRowsShownAsOne
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.StripResult
@@ -206,15 +209,22 @@ private data class GalleryComputed(
 
 /**
  * Cloud ids of the SYNCED rows that name a device file: the backed-up photos this device also holds.
- * A row with a blank uri names no file and leaves its id out. With no such row the answer is the
- * snapshot's own [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
+ * A row with a blank uri names no file and leaves its id out. A row resting on a name counts only
+ * while [syncedRowsShownAsOne] shows its file and photo as one on the merge's own [sides], the check the
+ * gallery's pairing makes, so the badge never says "on device" for a photo the gallery shows apart.
+ * With neither kind of row the answer is the snapshot's own
+ * [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
  */
-internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
-    if (sync.rows.none { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }) {
+internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows, sides: LinkSides): Set<String> =
+    if (sync.rows.none {
+            it.status == SyncStatus.SYNCED && (it.localUri.isBlank() || it.linkBasis != LinkBasis.PROVEN)
+        }
+    ) {
         sync.syncedCloudIds
     } else {
+        val shown = syncedRowsShownAsOne(sync.rows, sides)
         sync.rows.asSequence()
-            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() }
+            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() && shown(it) }
             .mapNotNull { it.cloudFileId }
             .toSet()
     }
@@ -440,7 +450,11 @@ class GalleryViewModel @Inject constructor(
     val downloadedCloudLinkIds: StateFlow<Set<String>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptySet())
-            else syncStateSnapshot.observe(userId).map { syncedCloudIdsOnDevice(it) }
+            // With the merge's own sides, so a row resting on a name is weighed by the check the
+            // gallery's pairing makes.
+            else combine(syncStateSnapshot.observe(userId), getGalleryItems.linkSides(userId)) { sync, sides ->
+                syncedCloudIdsOnDevice(sync, sides)
+            }.distinctUntilChanged()
         }
         .flowOn(Dispatchers.Default)
         .retryOnDbTear("GalleryDownloadedIds")

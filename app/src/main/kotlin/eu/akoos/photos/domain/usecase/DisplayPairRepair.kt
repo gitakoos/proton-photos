@@ -51,6 +51,9 @@ internal const val PAIR_REPAIR_MAX_FILES = 400
 /** Bytes one run reads at most; the first file is read whatever its size. */
 internal const val PAIR_REPAIR_MAX_BYTES = 1024L * 1024 * 1024
 
+/** How long one run, periodic or one-off, spends linking device files to their Drive photos at most. */
+internal const val PAIR_REPAIR_TIME_LIMIT_MS: Long = 2L * 60 * 1000
+
 /** Names, or Drive photos, one listing lookup carries, under SQLite's bind-variable limit. */
 private const val PAIR_REPAIR_NAME_CHUNK = 500
 

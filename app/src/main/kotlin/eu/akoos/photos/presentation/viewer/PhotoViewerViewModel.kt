@@ -76,6 +76,8 @@ import eu.akoos.photos.presentation.common.buildHideUndoAction
 import eu.akoos.photos.presentation.gallery.isItemFavorite
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.usecase.LinkSides
+import eu.akoos.photos.domain.usecase.syncedRowsShownAsOne
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.data.db.dao.LabelUsage
@@ -203,13 +205,17 @@ internal fun peopleBelongTo(loadedFor: String?, item: GalleryItem?): Boolean {
 
 /**
  * Cloud linkId to device uri for every SYNCED row that names a device file: the backed-up photos this
- * device also holds. Where two rows share a linkId, the later row's uri stands.
+ * device also holds. A row resting on a name counts only while [syncedRowsShownAsOne] shows its file
+ * and photo as one on the merge's own [sides], the check the gallery's pairing makes. Where two rows
+ * share a linkId, the later row's uri stands.
  */
-internal fun syncedLocalUrisByCloudId(rows: List<SyncStateLite>): Map<String, String> =
-    rows.asSequence()
+internal fun syncedLocalUrisByCloudId(rows: List<SyncStateLite>, sides: LinkSides): Map<String, String> {
+    val shown = syncedRowsShownAsOne(rows, sides)
+    return rows.asSequence()
         .filter { it.status == SyncStatus.SYNCED }
-        .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
+        .filter { it.cloudFileId != null && it.localUri.isNotBlank() && shown(it) }
         .associate { it.cloudFileId!! to it.localUri }
+}
 
 /**
  * Whether the viewer may run a face search of its own on [photoKey]: only when the photo holds no face
@@ -681,7 +687,9 @@ class PhotoViewerViewModel @Inject constructor(
     val localUriByLinkId: StateFlow<Map<String, String>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyMap())
-            else syncStateSnapshot.observe(userId).map { syncedLocalUrisByCloudId(it.rows) }
+            else combine(syncStateSnapshot.observe(userId), getGalleryItems.linkSides(userId)) { sync, sides ->
+                syncedLocalUrisByCloudId(sync.rows, sides)
+            }.distinctUntilChanged()
         }
         .flowOn(Dispatchers.Default)
         .retryOnDbTear("ViewerLocalUris")

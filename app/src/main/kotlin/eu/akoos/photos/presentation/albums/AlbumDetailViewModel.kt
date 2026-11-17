@@ -92,6 +92,8 @@ import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.usecase.LinkSides
+import eu.akoos.photos.domain.usecase.syncedRowsShownAsOne
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.util.stripForShareOrOriginal
@@ -107,12 +109,21 @@ private const val PHOTO_OBSERVE_MAX_RETRIES = 5L
 
 /**
  * Cloud linkId to device uri for every SYNCED row with a linkId. Only a SYNCED row stands for a file on
- * the device: a CLOUD_ONLY row can keep the stale uri of a freed-up file. Where two rows share a
- * linkId, the later row's uri stands.
+ * the device: a CLOUD_ONLY row can keep the stale uri of a freed-up file. A row resting on a name counts
+ * only while [syncedRowsShownAsOne] shows its file and photo as one on the merge's own [sides], the
+ * check the gallery's pairing makes, so an album never treats as on the device a photo the gallery
+ * shows apart. The album's [members] stand in for a Drive photo the stream does not list. Where two
+ * rows share a linkId, the later row's uri stands.
  */
-internal fun albumLocalUrisByLinkId(rows: List<SyncStateLite>): Map<String, String> =
-    rows.filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
+internal fun albumLocalUrisByLinkId(
+    rows: List<SyncStateLite>,
+    sides: LinkSides,
+    members: List<CloudPhoto>,
+): Map<String, String> {
+    val shown = syncedRowsShownAsOne(rows, sides, members)
+    return rows.filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null && shown(it) }
         .associate { it.cloudFileId!! to it.localUri }
+}
 
 /** Summary of a bulk invite-by-email batch. [failures] is the raw error message per failed email. */
 data class InviteBatchResult(
@@ -415,8 +426,14 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            syncStateSnapshot.observe(userId)
-                .map { albumLocalUrisByLinkId(it.rows) }
+            // With the merge's own sides, so a row resting on a name is weighed by the gallery's own
+            // check; the members stand in for a photo the stream does not list.
+            combine(
+                syncStateSnapshot.observe(userId),
+                getGalleryItems.linkSides(userId),
+                _uiState.map { it.photos }.distinctUntilChanged(),
+            ) { sync, sides, members -> albumLocalUrisByLinkId(sync.rows, sides, members) }
+                .distinctUntilChanged()
                 .flowOn(Dispatchers.Default)
                 .retryOnDbTear("AlbumDetailSync")
                 .collect { map -> _uiState.update { it.copy(localUriByLinkId = map) } }

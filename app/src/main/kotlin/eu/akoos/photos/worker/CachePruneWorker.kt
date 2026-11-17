@@ -36,6 +36,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.domain.usecase.DisplayPairRepair
+import eu.akoos.photos.domain.usecase.PAIR_REPAIR_TIME_LIMIT_MS
 import eu.akoos.photos.util.DeviceHealthPolicy
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -141,9 +142,6 @@ class CachePruneWorker @AssistedInject constructor(
         const val UNIQUE_NAME = "cache_prune_periodic"
         private const val TAG = "cache_prune_worker"
         private const val INTERVAL_MINUTES = 30L
-
-        /** How long one run spends linking device files to their Drive photos at most. */
-        private val PAIR_REPAIR_TIME_LIMIT_MS: Long = TimeUnit.MINUTES.toMillis(2)
 
         /** Age past which a picked-but-never-confirmed import stage is swept: its import_staged
          *  rows and cached thumbnails. Far longer than any real staging session, so only a

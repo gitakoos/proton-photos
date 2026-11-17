@@ -24,8 +24,10 @@ package eu.akoos.photos.data.repository.drive
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.work.WorkManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -372,6 +374,16 @@ internal data class RefreshPassOutcome(
      */
     val detailComplete: Boolean,
 )
+
+/**
+ * Sets the sticky "listed at least once" flag [key] and returns whether it was not set before: the first
+ * complete listing since the account was signed in on this install.
+ */
+internal fun MutablePreferences.markListingEverComplete(key: Preferences.Key<Boolean>): Boolean {
+    val first = this[key] != true
+    this[key] = true
+    return first
+}
 
 internal fun refreshPassOutcome(paginationComplete: Boolean, failedBatches: Int) = RefreshPassOutcome(
     paginationComplete = paginationComplete,
@@ -1438,6 +1450,7 @@ class PhotoStreamService @Inject constructor(
             // stub row in the dedup index, so a pass with a failed detail batch still can't cause a
             // re-upload (the backfill fills the row, the next fresh walk completes it).
             if (outcome.paginationComplete) {
+                var firstComplete = false
                 context.settingsDataStore.edit {
                     // The stored flag promises the DB holds the whole library, which a failed detail
                     // batch breaks, so this one keeps the batch condition. Left false, the next pass
@@ -1446,8 +1459,14 @@ class PhotoStreamService @Inject constructor(
                     // Sticky "listed at least once" marker — keyed on pagination success (not
                     // failedBatches) so a transient 429 on a detail batch can't strand the upload on
                     // "Preparing backup"; never cleared at a later walk start (only on sign-out).
-                    it[everCompleteKey] = true
+                    firstComplete = it.markListingEverComplete(everCompleteKey)
                     it.remove(cursorKey)
+                }
+                // The first complete listing, as after a reinstall: pair the device files with the
+                // Drive photos now rather than at the next periodic repair, up to 30 minutes away.
+                if (firstComplete) {
+                    runCatching { eu.akoos.photos.worker.DisplayPairRepairWorker.enqueueOnce(WorkManager.getInstance(context)) }
+                        .onFailure { e -> Log.w(TAG, "refreshCloudPhotos: pair repair not queued: ${e.message}") }
                 }
             } else {
                 Log.d(TAG, "refreshCloudPhotos: pass ended mid-listing (fresh=$startedFresh, failedBatches=$failedBatches) — cursor kept, sweep deferred to whichever pass reaches the end")
