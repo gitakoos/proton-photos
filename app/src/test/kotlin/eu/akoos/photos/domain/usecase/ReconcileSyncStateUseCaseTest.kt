@@ -50,6 +50,7 @@ import eu.akoos.photos.data.db.dao.PhotoPairingRow
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
 import eu.akoos.photos.domain.entity.SyncState
@@ -611,7 +612,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-known" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-known" &&
+                            it.linkBasis == LinkBasis.PROVEN
+                    }
                 },
                 userId,
             )
@@ -640,7 +643,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-hash" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-hash" &&
+                            it.linkBasis == LinkBasis.PROVEN
+                    }
                 },
                 userId,
             )
@@ -697,7 +702,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-nd" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-nd" &&
+                            it.linkBasis == LinkBasis.NAME
+                    }
                 },
                 userId,
             )
@@ -732,7 +739,8 @@ class ReconcileSyncStateUseCaseTest {
                 match { states ->
                     states.any {
                         it.localUri == "uri://1" && it.status == SyncStatus.SYNCED &&
-                            it.cloudFileId == "link-hashed" && it.backedUpAtMs == null
+                            it.cloudFileId == "link-hashed" && it.backedUpAtMs == null &&
+                            it.linkBasis == LinkBasis.NAME
                     }
                 },
                 userId,
@@ -765,7 +773,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-strip" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-strip" &&
+                            it.linkBasis == LinkBasis.NAME_REWRITTEN
+                    }
                 },
                 userId,
             )
@@ -801,7 +811,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-compress" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-compress" &&
+                            it.linkBasis == LinkBasis.NAME_REWRITTEN
+                    }
                 },
                 userId,
             )

@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation
 
 import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.repository.SyncStateSnapshot
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.presentation.albums.albumLocalUrisByLinkId
@@ -90,6 +91,25 @@ class SyncSnapshotReadersTest {
         assertEquals("the later of two rows on one cloud id stands", "uri://twin-b", fromLean["c-twin"])
         assertFalse("a freed-up file's stale uri stays out", "c-freed" in fromLean)
         assertFalse("a vaulted photo is not on the device", "c-vaulted" in fromLean)
+    }
+
+    @Test
+    fun `a link made by name alone does not count as the photo being on the device`() {
+        val withNameLinks = table + listOf(
+            row("uri://by-name", "c-by-name", SyncStatus.SYNCED).copy(linkBasis = LinkBasis.NAME),
+            row("uri://rewritten", "c-rewritten", SyncStatus.SYNCED).copy(linkBasis = LinkBasis.NAME_REWRITTEN),
+        )
+        val sync = SyncStateSnapshot.Rows(lean(withNameLinks))
+        val noBlank = SyncStateSnapshot.Rows(lean(withNameLinks.filterNot { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }))
+
+        for (ids in listOf(syncedCloudIdsOnDevice(sync), syncedCloudIdsOnDevice(noBlank))) {
+            assertFalse("c-by-name" in ids)
+            assertFalse("c-rewritten" in ids)
+        }
+        val albumUris = albumLocalUrisByLinkId(lean(withNameLinks))
+        assertFalse("c-by-name" in albumUris)
+        assertFalse("c-rewritten" in albumUris)
+        assertEquals("uri://synced-1", albumUris["c-1"])
     }
 
     @Test
@@ -185,7 +205,7 @@ class SyncSnapshotReadersTest {
 
     /** The columns the DAO's lean read projects out of each row, in the same order. */
     private fun lean(states: List<SyncState>): List<SyncStateLite> =
-        states.map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, it.queued) }
+        states.map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, it.queued, it.linkBasis) }
 
     private fun row(uri: String, cloudId: String?, status: SyncStatus, queued: Boolean = false) = SyncState(
         localUri = uri,

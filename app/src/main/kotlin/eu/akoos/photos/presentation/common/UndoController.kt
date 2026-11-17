@@ -34,6 +34,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -273,6 +274,9 @@ class UndoController @Inject constructor(
                     lastSyncSuccessMs = now,
                     backedUpAtMs = if (onDrive) now else null,
                     sizeBytes = relink.sizeBytes,
+                    // A link the delete's row made by name stays one, unless the bytes now prove it.
+                    linkBasis = if (onDrive) LinkBasis.PROVEN
+                        else prior?.takeIf { it.cloudFileId == relink.cloudLinkId }?.linkBasis ?: LinkBasis.PROVEN,
                 )
             }
     }

@@ -48,6 +48,7 @@ import eu.akoos.photos.data.upload.LocalRewrites
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -683,6 +684,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // was taken off above never earns one through its cloud id alone.
             val contentCertain = byContentHash != null || (byId != null && storedHash == null)
             val computed = SyncState(
+                linkBasis = linkBasisOf(
+                    matchedLinkId = matchedCloud?.linkId,
+                    byIdLinkId = byId?.linkId,
+                    byContentHashLinkId = byContentHash?.linkId,
+                    byNameUnverifiable = byNameUnverifiable != null,
+                    rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload),
+                    existingBasis = existingSync?.linkBasis,
+                ),
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
                 localHash = deviceHash ?: recomputedHash ?: existingSync?.localHash.orEmpty(),
@@ -854,6 +863,28 @@ class ReconcileSyncStateUseCase @Inject constructor(
 /** A display name with a capture second or a byte size: the name matchers' lookup key. Equal exactly
  *  when both parts are, as a Pair of the two is, without boxing the number. */
 private data class NameKey(val name: String, val value: Long)
+
+/**
+ * What a row reconcile pairs rests on, a [LinkBasis] value. A link the content hash makes is proven. A link
+ * the stored cloud id makes keeps the mark the row carries, so a name link stays one on every later pass
+ * until the content hash proves it. A link a name rule makes is marked by name: [LinkBasis.NAME_REWRITTEN]
+ * where the upload rewrites the bytes ([rewritesBytes]) and the name and capture second are all a match can
+ * have, else [LinkBasis.NAME]. An unpaired row has no link to mark.
+ */
+internal fun linkBasisOf(
+    matchedLinkId: String?,
+    byIdLinkId: String?,
+    byContentHashLinkId: String?,
+    byNameUnverifiable: Boolean,
+    rewritesBytes: Boolean,
+    existingBasis: Int?,
+): Int = when {
+    matchedLinkId == null -> LinkBasis.PROVEN
+    matchedLinkId == byContentHashLinkId -> LinkBasis.PROVEN
+    matchedLinkId == byIdLinkId -> existingBasis ?: LinkBasis.PROVEN
+    byNameUnverifiable && rewritesBytes -> LinkBasis.NAME_REWRITTEN
+    else -> LinkBasis.NAME
+}
 
 /**
  * Whether the upload may have rewritten this file's bytes, so its cloud copy can't hash-match the

@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import me.proton.core.domain.entity.UserId
@@ -48,6 +49,7 @@ internal suspend fun SyncStateRepository.requeueChangedDeviceCopy(
             backedUpAtMs = null,
             lastSyncSuccessMs = null,
             sizeBytes = sizeBytes.takeIf { it > 0L } ?: row.sizeBytes,
+            linkBasis = LinkBasis.PROVEN,
         ),
         userId,
     )

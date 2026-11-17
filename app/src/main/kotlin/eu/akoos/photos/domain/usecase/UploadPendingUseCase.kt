@@ -61,6 +61,7 @@ import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -1164,6 +1165,8 @@ class UploadPendingUseCase @Inject constructor(
                 backedUpAtMs = System.currentTimeMillis(),
                 sizeBytes = (if (temps.deviceRewritten) deviceFiles.deviceFileLength(state.localUri) else null)
                     ?: rawLocalItem.sizeBytes.takeIf { it > 0L } ?: state.sizeBytes,
+                // This app's own upload: the link is proven whatever rule paired the row before.
+                linkBasis = LinkBasis.PROVEN,
             )
             withContext(NonCancellable) {
                 syncStateRepo.upsert(syncedState, userId)

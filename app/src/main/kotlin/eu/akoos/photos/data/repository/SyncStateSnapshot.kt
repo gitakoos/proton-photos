@@ -45,6 +45,7 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.util.FreshQueryGate
 import eu.akoos.photos.util.retryBackoffMs
@@ -124,9 +125,13 @@ class SyncStateSnapshot @Inject constructor(
             rows.asSequence().filter { it.status == SyncStatus.HIDDEN }.mapNotNull { it.cloudFileId }.toSet()
         }
 
-        /** Cloud ids on the rows at [SyncStatus.SYNCED]: the Drive copies paired to a device file. */
+        /** Cloud ids on the rows at [SyncStatus.SYNCED] whose link is proven: the Drive copies paired to a
+         *  device file. A link reconcile made by name alone ([LinkBasis]) is left out. */
         val syncedCloudIds: Set<String> by lazy {
-            rows.asSequence().filter { it.status == SyncStatus.SYNCED }.mapNotNull { it.cloudFileId }.toSet()
+            rows.asSequence()
+                .filter { it.status == SyncStatus.SYNCED && it.linkBasis == LinkBasis.PROVEN }
+                .mapNotNull { it.cloudFileId }
+                .toSet()
         }
 
         override fun equals(other: Any?): Boolean = other is Rows && other.rows == rows

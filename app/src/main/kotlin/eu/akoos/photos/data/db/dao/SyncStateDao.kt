@@ -56,6 +56,8 @@ data class SyncStateLite(
     val localHash: String,
     val status: SyncStatus,
     val queued: Boolean,
+    /** What [cloudFileId] rests on, a [eu.akoos.photos.domain.entity.LinkBasis] value. */
+    val linkBasis: Int = 0,
 )
 
 @Dao
@@ -74,7 +76,7 @@ interface SyncStateDao {
      *  [eu.akoos.photos.data.repository.SyncStateSnapshot] decides when it runs, so a burst of writes
      *  costs one read instead of one per write. One transaction, like [observeAll]. */
     @Transaction
-    @Query("SELECT localUri, cloudFileId, localHash, status, queued FROM sync_state WHERE userId = :userId")
+    @Query("SELECT localUri, cloudFileId, localHash, status, queued, linkBasis FROM sync_state WHERE userId = :userId")
     suspend fun getAllLite(userId: String): List<SyncStateLite>
 
     /** [userId]'s queued rows plus the rows of [localUris], every column, through the same userId index as
@@ -127,6 +129,7 @@ interface SyncStateDao {
             lastSyncSuccessMs = :lastSyncSuccessMs,
             backedUpAtMs = :backedUpAtMs,
             sizeBytes = :sizeBytes,
+            linkBasis = :linkBasis,
             originalHash = CASE WHEN localHash = :localHash AND cloudFileId IS :cloudFileId
                 THEN originalHash ELSE NULL END
         WHERE localUri = :localUri
@@ -143,6 +146,7 @@ interface SyncStateDao {
         lastSyncSuccessMs: Long?,
         backedUpAtMs: Long?,
         sizeBytes: Long,
+        linkBasis: Int,
     )
 
     /**
@@ -165,6 +169,7 @@ interface SyncStateDao {
             lastSyncSuccessMs = :lastSyncSuccessMs,
             backedUpAtMs = :backedUpAtMs,
             sizeBytes = :sizeBytes,
+            linkBasis = :linkBasis,
             originalHash = CASE WHEN localHash = :localHash AND cloudFileId IS :cloudFileId
                 THEN originalHash ELSE NULL END
         WHERE localUri = :localUri AND NOT (status = 'SYNCED' AND cloudFileId IS NOT NULL)
@@ -181,6 +186,7 @@ interface SyncStateDao {
         lastSyncSuccessMs: Long?,
         backedUpAtMs: Long?,
         sizeBytes: Long,
+        linkBasis: Int,
     ): Int
 
     @Transaction
@@ -198,6 +204,7 @@ interface SyncStateDao {
                 lastSyncSuccessMs = entity.lastSyncSuccessMs,
                 backedUpAtMs = entity.backedUpAtMs,
                 sizeBytes = entity.sizeBytes,
+                linkBasis = entity.linkBasis,
             )
         }
     }
@@ -253,6 +260,7 @@ interface SyncStateDao {
                 lastSyncSuccessMs = entity.lastSyncSuccessMs,
                 backedUpAtMs = entity.backedUpAtMs,
                 sizeBytes = entity.sizeBytes,
+                linkBasis = entity.linkBasis,
             )
             if (changed == 0) untouched += entity.localUri
         }

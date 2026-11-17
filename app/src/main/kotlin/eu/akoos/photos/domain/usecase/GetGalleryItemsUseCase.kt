@@ -48,6 +48,7 @@ import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -231,6 +232,7 @@ class GetGalleryItemsUseCase @Inject constructor(
         syncByUri = syncStates.associateBy { it.localUri },
         cloudFileIdOf = { it.cloudFileId },
         localHashOf = { it.localHash },
+        linkBasisOf = { it.linkBasis },
         hiddenSyncedLinkIds = syncStates.asSequence()
             .filter { it.status == SyncStatus.HIDDEN }
             .mapNotNull { it.cloudFileId }
@@ -251,6 +253,7 @@ class GetGalleryItemsUseCase @Inject constructor(
         syncByUri = sync.byUri,
         cloudFileIdOf = { it.cloudFileId },
         localHashOf = { it.localHash },
+        linkBasisOf = { it.linkBasis },
         hiddenSyncedLinkIds = sync.hiddenCloudIds,
         hiddenLinkIds = hiddenLinkIds,
     )
@@ -266,12 +269,14 @@ class GetGalleryItemsUseCase @Inject constructor(
         syncByUri: Map<String, R>,
         cloudFileIdOf: (R) -> String?,
         localHashOf: (R) -> String,
+        linkBasisOf: (R) -> Int,
         hiddenSyncedLinkIds: Set<String>,
         hiddenLinkIds: Set<String>,
     ): List<GalleryItem> {
         // A device file pairs with a Drive photo on the same basis the sync layer links them: the
-        // file's sync_state row names the photo, or the bytes the row recorded hash to the photo's
-        // Drive content hash. A shared name, capture time or size is no proof the bytes are the same:
+        // file's sync_state row names the photo (a link reconcile made by name only while the file
+        // still agrees with the photo, see [rowLinkShows]), or the bytes the row recorded hash to the
+        // photo's Drive content hash. A shared name, capture time or size is no proof the bytes are the same:
         // paired on one, a different file of the same name read as the photo's copy on this device,
         // and the Drive photo could not be saved from the gallery. An unproven pair shows as two
         // items, the device file and the Drive photo, until a backup, reconcile or save links them.
@@ -297,6 +302,7 @@ class GetGalleryItemsUseCase @Inject constructor(
             val cloudFromSync = sync?.let(cloudFileIdOf)
                 ?.takeIf { it !in usedCloudIds }
                 ?.let { cloudByLinkId[it] }
+                ?.takeIf { rowLinkShows(linkBasisOf(sync), localItem, it) }
             // localHash is the bare SHA-1; cloudByHash is keyed by the cloud ContentHash
             // (HMAC-SHA256(rootNodeHashKey, sha1Hex)), so convert before the lookup — this pairs a
             // photo to its cloud copy by content even when rename-on-upload changed the cloud name.
@@ -362,6 +368,24 @@ class GetGalleryItemsUseCase @Inject constructor(
             if (byTime != 0) byTime else ids[a]!!.compareTo(ids[b]!!) // ascending stableId tiebreak
         })
         return order.map { visible[it] }
+    }
+
+    /**
+     * Whether a row's link of [local] to [cloud] shows them as one item, by what the link rests on
+     * ([LinkBasis]). A proven link always does. A link reconcile made by name does only when the file
+     * still agrees with the Drive photo on the exact name and capture second, and on the size too unless
+     * the upload rewrote the bytes ([LinkBasis.NAME_REWRITTEN], which also accepts the re-encoded name).
+     * Drive reporting no size for the photo is no agreement. Otherwise the two show apart.
+     */
+    internal fun rowLinkShows(basis: Int, local: LocalMediaItem, cloud: CloudPhoto): Boolean {
+        if (basis == LinkBasis.PROVEN) return true
+        if (local.dateTaken / 1000L != cloud.captureTime) return false
+        return if (basis == LinkBasis.NAME_REWRITTEN) {
+            cloud.displayName == local.displayName ||
+                cloud.displayName == UploadFormatNaming.reencodedName(local.displayName, local.mimeType)
+        } else {
+            cloud.displayName == local.displayName && cloud.sizeBytes > 0L && cloud.sizeBytes == local.sizeBytes
+        }
     }
 
     /** A gallery item belongs to a hidden album when its cloud copy's linkId is a hidden-album

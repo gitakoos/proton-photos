@@ -412,6 +412,7 @@ class SyncStateDaoTest {
         lastSyncSuccessMs = null,
         backedUpAtMs = null,
         sizeBytes = 1024L,
+        linkBasis = 0,
     )
 
     @Test

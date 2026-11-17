@@ -29,6 +29,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.QueueSource
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -168,6 +169,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     lastSyncSuccessMs = now,
                     backedUpAtMs = now,
                     sizeBytes = querySizeBytes(deviceUri).takeIf { it > 0L } ?: resumeExisting.sizeBytes,
+                    linkBasis = LinkBasis.PROVEN,
                 ),
                 userId,
             )
@@ -274,6 +276,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     localHash = sha1,
                     status = SyncStatus.UPLOADING,
                     lastSyncAttemptMs = now,
+                    linkBasis = LinkBasis.PROVEN,
                 ),
                 userId,
             )
@@ -350,6 +353,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     backedUpAtMs = pairedNow,
                     // The size of the corrected bytes just uploaded, not the one recorded before the edit.
                     sizeBytes = item.sizeBytes.takeIf { it > 0L } ?: existing.sizeBytes,
+                    linkBasis = LinkBasis.PROVEN,
                 ),
                 userId,
             )

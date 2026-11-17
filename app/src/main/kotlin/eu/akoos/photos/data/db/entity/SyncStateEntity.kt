@@ -59,6 +59,8 @@ data class SyncStateEntity(
     // pairing stay as they are and clear it when either changes. Never written by an insert of a domain
     // SyncState.
     val originalHash: String? = null,
+    // What cloudFileId rests on, a LinkBasis value; written with the domain columns.
+    val linkBasis: Int = 0,
 ) {
     fun toDomain() = SyncState(
         localUri = localUri,
@@ -74,6 +76,7 @@ data class SyncStateEntity(
         queueSource = queueSource,
         queuedAt = queuedAt,
         originalHash = originalHash,
+        linkBasis = linkBasis,
     )
 }
 
@@ -95,4 +98,5 @@ fun SyncState.toEntity(userId: String) = SyncStateEntity(
     queued = queued,
     queueSource = queueSource,
     queuedAt = queuedAt,
+    linkBasis = linkBasis,
 )

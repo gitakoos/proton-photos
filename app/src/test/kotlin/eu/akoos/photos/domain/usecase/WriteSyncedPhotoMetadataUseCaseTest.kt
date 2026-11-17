@@ -36,6 +36,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import org.junit.Assert.assertEquals
@@ -174,6 +175,20 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         assertEquals(newLinkId, row.cloudFileId)
         assertEquals(expectedSha1, row.localHash)
         assertFalse("the editor queue intent must be cleared once paired", row.queued)
+    }
+
+    @Test
+    fun `a correction of a photo linked by name leaves its row proven on the new copy`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        val deviceUri = "content://media/42"
+        registerContent(deviceUri, "edited-device-bytes".toByteArray())
+        sync.seed(syncedRow(deviceUri, "orig", localHash = "").copy(linkBasis = LinkBasis.NAME))
+
+        val result = useCase(original, deviceUri, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteSyncedPhotoMetadataUseCase.Result.Success, result)
+        assertEquals("the upload of these bytes proves the link", LinkBasis.PROVEN, sync.getByUri(deviceUri)!!.linkBasis)
     }
 
     @Test

@@ -104,6 +104,7 @@ import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.GalleryDownloads
 import eu.akoos.photos.presentation.common.awaitUnlessStopped
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
@@ -205,16 +206,16 @@ private data class GalleryComputed(
 )
 
 /**
- * Cloud ids of the SYNCED rows that name a device file: the backed-up photos this device also holds.
- * A row with a blank uri names no file and leaves its id out. With no such row the answer is the
- * snapshot's own [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
+ * Cloud ids of the SYNCED rows with a proven link that name a device file: the backed-up photos this
+ * device also holds. A row with a blank uri names no file and leaves its id out. With no such row the
+ * answer is the snapshot's own [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
  */
 internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
     if (sync.rows.none { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }) {
         sync.syncedCloudIds
     } else {
         sync.rows.asSequence()
-            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() }
+            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() && it.linkBasis == LinkBasis.PROVEN }
             .mapNotNull { it.cloudFileId }
             .toSet()
     }

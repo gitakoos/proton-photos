@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.common
 
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import org.junit.Assert.assertEquals
@@ -75,5 +76,24 @@ class UndoRelinkTest {
 
         val unstamped = UndoController.relinkedRow(prior(backedUpAtMs = null), relink, null, onDrive = false, now = now)
         assertNull(unstamped.backedUpAtMs)
+    }
+
+    @Test
+    fun `a link made by name stays one after the undo unless the bytes now prove it`() {
+        val byName = prior(backedUpAtMs = null).copy(linkBasis = LinkBasis.NAME_REWRITTEN)
+
+        val kept = UndoController.relinkedRow(byName, relink, sha1 = "other", onDrive = false, now = now)
+        assertEquals(LinkBasis.NAME_REWRITTEN, kept.linkBasis)
+        assertNull(kept.backedUpAtMs)
+
+        val proven = UndoController.relinkedRow(byName, relink, sha1 = "drive-bytes", onDrive = true, now = now)
+        assertEquals(LinkBasis.PROVEN, proven.linkBasis)
+    }
+
+    @Test
+    fun `a name mark on a row paired to another cloud copy is not carried over`() {
+        val other = prior(cloudId = "cloud-2", backedUpAtMs = null).copy(linkBasis = LinkBasis.NAME)
+
+        assertEquals(LinkBasis.PROVEN, UndoController.relinkedRow(other, relink, null, onDrive = false, now = now).linkBasis)
     }
 }

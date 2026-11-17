@@ -39,6 +39,7 @@ import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -365,6 +366,81 @@ class GetGalleryItemsUseCaseTest {
         assertTrue("claimed cloud video must not resurface as CloudOnly", result.none { it is GalleryItem.CloudOnly })
     }
 
+    // ─── a link reconcile made by name ─────────────────────────────────────────
+    // Such a row pairs for display only while the file still agrees with the Drive photo on the exact name
+    // and capture second, and on the size unless the upload rewrote the bytes.
+
+    private fun nameRow(uri: String, linkId: String, basis: Int) = syncState(uri, linkId).copy(linkBasis = basis)
+
+    @Test
+    fun `a name link to a Drive photo reporting no size shows two items`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 0L))
+
+        val result = useCase.merge(local, cloud, listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME)))
+
+        assertTrue(result.none { it is GalleryItem.Synced })
+        assertEquals("link-p1", result.filterIsInstance<GalleryItem.CloudOnly>().single().cloud.linkId)
+    }
+
+    @Test
+    fun `a name link that agrees on name, capture second and size shows one item`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_400L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 4096L))
+
+        val result = useCase.merge(local, cloud, listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME)))
+
+        assertEquals("link-p1", result.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+    }
+
+    @Test
+    fun `a name link off by a capture second shows two items`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_136_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 4096L))
+
+        val result = useCase.merge(local, cloud, listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME)))
+
+        assertTrue(result.none { it is GalleryItem.Synced })
+        assertEquals(2, result.size)
+    }
+
+    @Test
+    fun `a name link of rewritten bytes pairs on name and capture second, the re-encoded name too`() {
+        val local = listOf(
+            LocalMediaItem(
+                uri = "uri://p1", dateTaken = 1_783_507_135_000L, displayName = "IMG_0001.heic",
+                mimeType = "image/heic", sizeBytes = 9_000L, bucketName = "Camera",
+            ),
+        )
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 0L))
+
+        val result = useCase.merge(local, cloud, listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME_REWRITTEN)))
+
+        assertEquals("link-p1", result.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+    }
+
+    @Test
+    fun `a name link of rewritten bytes off by a capture second shows two items`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_200_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 0L))
+
+        val result = useCase.merge(local, cloud, listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME_REWRITTEN)))
+
+        assertTrue(result.none { it is GalleryItem.Synced })
+    }
+
+    @Test
+    fun `the lean sync rows carry the link mark, so they show a name link the same way`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 0L))
+        val rows = listOf(nameRow("uri://p1", "link-p1", LinkBasis.NAME))
+
+        assertEquals(
+            useCase.merge(local, cloud, rows),
+            useCase.merge(local, cloud, SyncStateSnapshot.Rows(rows.map { it.lite() })),
+        )
+    }
+
     @Test
     fun `merge drops a cloud-only photo that belongs to a hidden album`() {
         val cloud = listOf(cloudPhoto("hidden-1"), cloudPhoto("visible-1"))
@@ -569,6 +645,7 @@ class GetGalleryItemsUseCaseTest {
         localHash = localHash,
         status = status,
         queued = queued,
+        linkBasis = linkBasis,
     )
 
     private fun fullRow(

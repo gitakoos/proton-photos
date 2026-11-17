@@ -70,6 +70,7 @@ internal class ReconcileReferencePass(
         }
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
+        val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
 
         val scanStartMs = System.currentTimeMillis()
         val scan = localRepo.freshScan()
@@ -207,6 +208,14 @@ internal class ReconcileReferencePass(
                 backedUpAtMs = if (deviceChanged) null
                     else existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
                 sizeBytes = if (keepStoredSize && existingSync != null) existingSync.sizeBytes else local.sizeBytes,
+                linkBasis = linkBasisOf(
+                    matchedLinkId = matchedCloud?.linkId,
+                    byIdLinkId = byId?.linkId,
+                    byContentHashLinkId = byContentHash?.linkId,
+                    byNameUnverifiable = byNameUnverifiable != null,
+                    rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload),
+                    existingBasis = existingSync?.linkBasis,
+                ),
             )
             if (status == SyncStatus.LOCAL_ONLY) {
                 val src = existingSync?.queueSource

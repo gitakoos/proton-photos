@@ -77,6 +77,7 @@ class SyncStateRepositoryImpl @Inject constructor(
             lastSyncSuccessMs = entity.lastSyncSuccessMs,
             backedUpAtMs = entity.backedUpAtMs,
             sizeBytes = entity.sizeBytes,
+            linkBasis = entity.linkBasis,
         )
     }
 

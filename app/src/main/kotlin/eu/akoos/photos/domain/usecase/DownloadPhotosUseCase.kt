@@ -34,6 +34,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -174,8 +175,9 @@ class DownloadPhotosUseCase @Inject constructor(
                         // here avoids a needless re-download.
                         // Its row is left as it is: it already links this photo, and a fresh backup stamp
                         // would vouch for whatever the file holds now.
+                        // A link reconcile made by name alone is no sign the photo is on the device.
                         val syncedUri = syncStateRepo.getByCloudId(photo.linkId)
-                            ?.takeIf { it.status == SyncStatus.SYNCED }
+                            ?.takeIf { it.status == SyncStatus.SYNCED && it.linkBasis == LinkBasis.PROVEN }
                             ?.localUri?.takeIf { it.isNotBlank() && localUriExists(it) }
                         val driveHash = driveContentHash(photo, prefetch)
                         val existing = if (syncedUri != null) null else verifiedOnDevice(photo, driveHash, savingSha1 = null)

@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -294,6 +295,7 @@ class FreeUpSpaceUseCase @Inject constructor(
         editorLookSince: Long?,
         unsettled: MutableList<SyncState>,
     ): DeviceCopyCheck {
+        keptForNameLink(row)?.let { return it }
         val stamp = localRepo.fileStamp(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
         val sha1 = localRepo.sha1(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
         val linkId = row.cloudFileId
@@ -349,6 +351,27 @@ class FreeUpSpaceUseCase @Inject constructor(
             // The file stays on the device either way; the next run looks at it again.
         }
         return verdict
+    }
+
+    /**
+     * Keeps [row]'s device file when its link to the Drive photo rests on a name rule alone
+     * ([LinkBasis]), however it was stamped: nothing showed the Drive photo holds these bytes. It is
+     * kept UNCHECKED, recorded with its file's stamp like any unchecked copy, so it is reported once and
+     * stays out of the list until the file or its row changes. Null for a proven link, which is checked
+     * as usual.
+     */
+    private suspend fun keptForNameLink(row: SyncState): DeviceCopyCheck? {
+        if (row.linkBasis == LinkBasis.PROVEN) return null
+        try {
+            localRepo.fileStamp(row.localUri)?.let { stamp ->
+                uncheckedStore.mark(row.localUri, FreeUpUncheckedStore.Kept(stamp, uncheckedRowKey(row)))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The file stays on the device either way; the next run keeps it again.
+        }
+        return DeviceCopyCheck.UNCHECKED
     }
 
     /**
