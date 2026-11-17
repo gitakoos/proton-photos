@@ -89,6 +89,11 @@ object AccountScopedPreferences {
             SettingsKeys.ALBUM_BUCKET_MAP,
             SettingsKeys.PENDING_DELETE_URIS,
             SettingsKeys.FREE_UP_UNCHECKED,
+            // The short Drive copies waiting for the trash and the deletes held back for them. The link ids
+            // recorded as short or unverifiable stay: they keep those copies out of every pairing and
+            // free-up check if the same account signs in again.
+            SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS,
+            SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS,
             SettingsKeys.OFFLINE_PIN_IDS,
             SettingsKeys.RECENT_UPLOAD_IDS,
             // Hide-photos-in-albums is a per-user view preference. Without

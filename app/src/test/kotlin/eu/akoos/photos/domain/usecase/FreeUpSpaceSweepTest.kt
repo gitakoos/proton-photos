@@ -27,11 +27,14 @@ import android.content.Context
 import android.net.Uri
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
+import eu.akoos.photos.data.api.dto.LinkFileActiveRevisionDto
+import eu.akoos.photos.data.api.dto.LinkFilePropertiesDto
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.data.api.dto.LinkPhotoDto
 import eu.akoos.photos.domain.entity.DeviceFileStamp
+import eu.akoos.photos.domain.repository.DriveCopyXAttr
 import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -72,6 +75,7 @@ class FreeUpSpaceSweepTest {
     private lateinit var useCase: FreeUpSpaceUseCase
     private val unchecked = InMemoryFreeUpUncheckedStore()
     private val shortCopies = InMemoryShortCloudCopyStore()
+    private val claimed = FakeClaimedSizes()
 
     private fun eligible(i: Int) = SyncState(
         localUri = "content://media/external/images/media/$i",
@@ -101,7 +105,7 @@ class FreeUpSpaceSweepTest {
         cloudRepo = mockk(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
         localRepo = mockk(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo, unchecked, shortCopies)
+        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo, unchecked, shortCopies, claimed)
         // By default every device file is exactly what was backed up: its size, and the SHA-1 its row recorded.
         coEvery { localRepo.fileStamp(any()) } answers { deviceFile(firstArg(), sizeBytes = 1024L) }
         coEvery { localRepo.sha1(any()) } answers { "hash-" + firstArg<String>().substringAfterLast('/') }
@@ -573,6 +577,8 @@ class FreeUpSpaceSweepTest {
         )
         coEvery { localRepo.queryByUri(edit.localUri) } returns named(edit, "IMG_1_edit_20260801_101500.jpg")
         coEvery { localRepo.queryByUri(plain.localUri) } returns named(plain, "IMG_2.jpg")
+        // The edit's upload declared the size from before its EXIF write.
+        claimed.sizes["cloud-1"] = 1024L - 484L
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
@@ -580,7 +586,81 @@ class FreeUpSpaceSweepTest {
         coVerify(exactly = 1) { repo.updateStatusAndDeleteLocal(plain.localUri, SyncStatus.CLOUD_ONLY) }
         coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(edit.localUri, any()) }
         assertEquals(setOf("cloud-1"), shortCopies.ids)
+        assertEquals("cloud-1", shortCopies.replacements[edit.localUri])
         coVerify { repo.markQueued(edit.localUri, QueueSource.MANUAL, any()) }
+        assertTrue(("cloud-1" to true) in claimed.asked)
+    }
+
+    @Test
+    fun `until the look ran, an editor copy that declares the whole file is reclaimed`() = runTest {
+        shortCopies.checked = false
+        val edit = eligible(1).copy(backedUpAtMs = EDITOR_SHORT_COPIES_SINCE_MS + 1_000L)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(edit)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.queryByUri(edit.localUri) } returns named(edit, "IMG_1_edit_20260801_101500.jpg")
+        claimed.sizes["cloud-1"] = 1024L
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(1, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertTrue(shortCopies.ids.isEmpty())
+    }
+
+    @Test
+    fun `until the look ran, an editor copy whose declared size cannot be read is kept and not queued`() = runTest {
+        shortCopies.checked = false
+        val edit = eligible(1).copy(backedUpAtMs = EDITOR_SHORT_COPIES_SINCE_MS + 1_000L)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.queryByUri(edit.localUri) } returns named(edit, "IMG_1_edit_20260801_101500.jpg")
+
+        assertTrue(useCase.confirmForDeletion(userId, listOf(edit)).isEmpty())
+        coVerify(exactly = 0) { repo.markQueued(any(), any(), any()) }
+        // Not set aside until the file changes: the next run reads the size again.
+        assertTrue(unchecked.entries.isEmpty())
+    }
+
+    @Test
+    fun `an editor copy whose device file is not the uploaded bytes is kept for good and never queued`() = runTest {
+        shortCopies.checked = false
+        val edit = eligible(1).copy(backedUpAtMs = EDITOR_SHORT_COPIES_SINCE_MS + 1_000L)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.queryByUri(edit.localUri) } returns named(edit, "IMG_1_edit_20260801_101500.jpg")
+        coEvery { localRepo.sha1(edit.localUri) } returns "stripped-apart"
+        claimed.sizes["cloud-1"] = 900L
+
+        assertTrue(useCase.confirmForDeletion(userId, listOf(edit)).isEmpty())
+        assertEquals(setOf("cloud-1"), shortCopies.unverifiableIds)
+        coVerify(exactly = 0) { repo.markQueued(any(), any(), any()) }
+
+        // Recorded so, it stays kept once the look has run too.
+        shortCopies.checked = true
+        assertTrue(useCase.confirmForDeletion(userId, listOf(edit)).isEmpty())
+    }
+
+    @Test
+    fun `the declared size decides over Drive's stored size`() = runTest {
+        val short = eligible(1)
+        val whole = eligible(2)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(short, whole)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf(
+            // Stored size reads whole, the declared size short.
+            "cloud-1" to claimingLink("cloud-1", "hash-1", size = 5000L),
+            // Stored size reads short, the declared size whole.
+            "cloud-2" to claimingLink("cloud-2", "hash-2", size = 500L),
+        )
+        claimed.sizes["cloud-1"] = 600L
+        claimed.sizes["cloud-2"] = 1024L
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(1, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        coVerify(exactly = 1) { repo.updateStatusAndDeleteLocal(whole.localUri, SyncStatus.CLOUD_ONLY) }
+        assertEquals(setOf("cloud-1"), shortCopies.ids)
+        // The routine check reads only the listing's cached XAttr.
+        assertTrue(claimed.asked.all { !it.second })
     }
 
     @Test
@@ -590,8 +670,12 @@ class FreeUpSpaceSweepTest {
         coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to linkAt("cloud-1", state = 1))
         coEvery { localRepo.queryByUri(edit.localUri) } returns named(edit, "IMG_1_edit_20260801_101500.jpg")
+        claimed.sizes["cloud-1"] = 600L
 
-        assertTrue(useCase.confirmForDeletion(userId, listOf(edit)).isEmpty())
+        val check = useCase.confirmPendingDeletes(userId, listOf(edit))
+
+        assertTrue(check.deletable.isEmpty())
+        assertEquals(listOf(edit), check.afterWholeBackup)
         coVerify { repo.markQueued(edit.localUri, QueueSource.MANUAL, any()) }
     }
 
@@ -622,5 +706,46 @@ class FreeUpSpaceSweepTest {
             FreeUpSpaceUseCase.DeviceCopyCheck.UNREADABLE,
             FreeUpSpaceUseCase.deviceCopyVerdict(row, 1024L, 0L, null, false, null, driveShort = true),
         )
+    }
+
+    @Test
+    fun `the declared size is read from the XAttr the batch lookup returned`() = runTest {
+        val row = eligible(1)
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(row)
+        every { cloudRepo.cloudContentHash("hash-1") } returns "drive-hash-1"
+        val link = BatchLinkDto(
+            link = LinkCoreDto(
+                linkId = "cloud-1", type = 2, state = 1, size = 5000L,
+                parentLinkId = "root", nodeKey = "nk", nodePassphrase = "np",
+                fileProperties = LinkFilePropertiesDto(activeRevision = LinkFileActiveRevisionDto(id = "r1", xAttr = "armored")),
+            ),
+            photo = LinkPhotoDto(contentHash = "drive-hash-1"),
+        )
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf("cloud-1" to link)
+        claimed.sizes["cloud-1"] = 600L
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(setOf("cloud-1"), shortCopies.ids)
+        assertEquals(
+            DriveCopyXAttr("armored", "nk", "np", "root", volumeId),
+            claimed.freshGiven["cloud-1"],
+        )
+    }
+
+    @Test
+    fun `the pending delete check names an editor copy it could not tell apart for a later check`() = runTest {
+        shortCopies.checked = false
+        val edit = eligible(1).copy(backedUpAtMs = EDITOR_SHORT_COPIES_SINCE_MS + 1_000L)
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
+            mapOf("cloud-1" to linkAt("cloud-1", state = 1))
+        coEvery { localRepo.queryByUri(edit.localUri) } returns named(edit, "IMG_1_edit_20260801_101500.jpg")
+
+        val check = useCase.confirmPendingDeletes(userId, listOf(edit))
+
+        assertTrue(check.deletable.isEmpty())
+        assertTrue(check.afterWholeBackup.isEmpty())
+        assertEquals(listOf(edit), check.checkAgain)
     }
 }

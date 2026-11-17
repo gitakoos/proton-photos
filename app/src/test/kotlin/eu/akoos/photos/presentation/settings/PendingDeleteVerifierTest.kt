@@ -26,6 +26,7 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.domain.usecase.InMemoryShortCloudCopyStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -48,6 +49,7 @@ class PendingDeleteVerifierTest {
     private lateinit var repo: SyncStateRepository
     private lateinit var freeUp: FreeUpSpaceUseCase
     private lateinit var verifier: PendingDeleteVerifier
+    private val shortCopies = InMemoryShortCloudCopyStore()
 
     private fun row(i: Int, status: SyncStatus = SyncStatus.SYNCED, backedUpAtMs: Long? = 1L) = SyncState(
         localUri = "content://media/external/images/media/$i",
@@ -65,7 +67,7 @@ class PendingDeleteVerifierTest {
     fun setUp() {
         repo = mockk(relaxed = true)
         freeUp = mockk(relaxed = true)
-        verifier = PendingDeleteVerifier(repo, freeUp)
+        verifier = PendingDeleteVerifier(repo, freeUp, shortCopies)
     }
 
     @Test
@@ -75,7 +77,7 @@ class PendingDeleteVerifierTest {
         coEvery { repo.cloudPairedLinkIds(userId, any()) } returns rows.associate { it.localUri to it.cloudFileId!! }
         coEvery { repo.getByUris(any()) } returns rows
         // Row 2's Drive copy was trashed elsewhere; row 3's device file was edited.
-        coEvery { freeUp.confirmForDeletion(userId, rows) } returns listOf(rows[0])
+        coEvery { freeUp.confirmPendingDeletes(userId, rows) } returns FreeUpSpaceUseCase.PendingDeleteCheck(listOf(rows[0]), emptyList())
 
         val outcome = verifier.verify(userId, uris)
 
@@ -93,13 +95,13 @@ class PendingDeleteVerifierTest {
         coEvery { repo.cloudPairedLinkIds(userId, any()) } returns
             listOf(mine, notBackedUp, cloudOnly).associate { it.localUri to it.cloudFileId!! }
         coEvery { repo.getByUris(any()) } returns listOf(mine, notBackedUp, cloudOnly)
-        coEvery { freeUp.confirmForDeletion(userId, listOf(mine)) } returns listOf(mine)
+        coEvery { freeUp.confirmPendingDeletes(userId, listOf(mine)) } returns FreeUpSpaceUseCase.PendingDeleteCheck(listOf(mine), emptyList())
 
         val outcome = verifier.verify(userId, uris)
 
         assertEquals(setOf(mine.localUri), outcome.confirmed)
         assertEquals(uris - mine.localUri, outcome.failed)
-        coVerify(exactly = 1) { freeUp.confirmForDeletion(userId, listOf(mine)) }
+        coVerify(exactly = 1) { freeUp.confirmPendingDeletes(userId, listOf(mine)) }
     }
 
     @Test
@@ -107,7 +109,7 @@ class PendingDeleteVerifierTest {
         val rows = listOf(row(1))
         coEvery { repo.cloudPairedLinkIds(userId, any()) } returns mapOf(rows[0].localUri to "cloud-1")
         coEvery { repo.getByUris(any()) } returns rows
-        coEvery { freeUp.confirmForDeletion(userId, rows) } throws IOException("offline")
+        coEvery { freeUp.confirmPendingDeletes(userId, rows) } throws IOException("offline")
 
         var thrown: IOException? = null
         try {
@@ -117,5 +119,35 @@ class PendingDeleteVerifierTest {
         }
 
         assertTrue(thrown != null)
+    }
+
+    @Test
+    fun `a URI kept for a short Drive copy leaves the queue and is recorded to be deleted after its whole backup`() = runTest {
+        val rows = listOf(row(1), row(2))
+        coEvery { repo.cloudPairedLinkIds(userId, any()) } returns rows.associate { it.localUri to it.cloudFileId!! }
+        coEvery { repo.getByUris(any()) } returns rows
+        coEvery { freeUp.confirmPendingDeletes(userId, rows) } returns
+            FreeUpSpaceUseCase.PendingDeleteCheck(listOf(rows[0]), afterWholeBackup = listOf(rows[1]))
+
+        val outcome = verifier.verify(userId, rows.map { it.localUri }.toSet())
+
+        assertEquals(setOf(rows[0].localUri), outcome.confirmed)
+        assertEquals(setOf(rows[1].localUri), outcome.failed)
+        assertEquals(setOf(rows[1].localUri), shortCopies.deleteAfterWhole)
+    }
+
+    @Test
+    fun `a URI whose Drive copy could not be told whole or short stays in the queue`() = runTest {
+        val rows = listOf(row(1), row(2))
+        coEvery { repo.cloudPairedLinkIds(userId, any()) } returns rows.associate { it.localUri to it.cloudFileId!! }
+        coEvery { repo.getByUris(any()) } returns rows
+        coEvery { freeUp.confirmPendingDeletes(userId, rows) } returns
+            FreeUpSpaceUseCase.PendingDeleteCheck(listOf(rows[0]), emptyList(), checkAgain = listOf(rows[1]))
+
+        val outcome = verifier.verify(userId, rows.map { it.localUri }.toSet())
+
+        assertEquals(setOf(rows[0].localUri), outcome.confirmed)
+        assertTrue(outcome.failed.isEmpty())
+        assertTrue(shortCopies.deleteAfterWhole.isEmpty())
     }
 }

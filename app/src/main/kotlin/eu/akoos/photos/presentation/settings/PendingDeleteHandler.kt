@@ -71,6 +71,7 @@ import javax.inject.Inject
 class PendingDeleteVerifier @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val freeUpSpace: FreeUpSpaceUseCase,
+    private val shortCopies: eu.akoos.photos.domain.repository.ShortCloudCopyStore,
 ) {
     /** [confirmed] may go into the trash request; [failed] no longer may and leave the queue. */
     data class Outcome(val confirmed: Set<String>, val failed: Set<String>)
@@ -80,14 +81,23 @@ class PendingDeleteVerifier @Inject constructor(
      * (a SYNCED row of that account with a backup stamp, an active Drive link, and the device file
      * as backed up; [FreeUpSpaceUseCase.confirmForDeletion]) and the rest. A Drive lookup that fails
      * throws, so the caller asks for nothing on an unconfirmed answer.
+     *
+     * A file kept because its Drive copy is short leaves the queue too; it is recorded to be deleted once
+     * its whole backup is up ([eu.akoos.photos.domain.repository.ShortCloudCopyStore.deleteAfterWholeBackup]),
+     * when the upload deletes it the way delete-after-backup does. One whose Drive copy could not be told
+     * whole or short now stays in the queue.
      */
     suspend fun verify(userId: UserId, uris: Set<String>): Outcome {
         if (uris.isEmpty()) return Outcome(emptySet(), emptySet())
         val paired = syncStateRepo.cloudPairedLinkIds(userId, uris.toList()).keys
         val rows = syncStateRepo.getByUris(paired.toList())
             .filter { it.status == SyncStatus.SYNCED && it.backedUpAtMs != null && it.localUri in uris }
-        val confirmed = freeUpSpace.confirmForDeletion(userId, rows).mapTo(HashSet()) { it.localUri }
-        return Outcome(confirmed, uris - confirmed)
+        val checked = freeUpSpace.confirmPendingDeletes(userId, rows)
+        val confirmed = checked.deletable.mapTo(HashSet()) { it.localUri }
+        shortCopies.addDeleteAfterWholeBackup(checked.afterWholeBackup.map { it.localUri })
+        // A file whose Drive copy could not be told whole or short now stays queued for the next check.
+        val checkAgain = checked.checkAgain.mapTo(HashSet()) { it.localUri }
+        return Outcome(confirmed, uris - confirmed - checkAgain)
     }
 }
 

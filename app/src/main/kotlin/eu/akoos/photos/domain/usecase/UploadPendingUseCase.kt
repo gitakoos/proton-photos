@@ -112,6 +112,7 @@ class UploadPendingUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val shortCopyReplacer: eu.akoos.photos.data.upload.ShortCopyReplacer? = null,
 ) {
     private val mutex = Mutex()
 
@@ -379,6 +380,10 @@ class UploadPendingUseCase @Inject constructor(
         // queue is empty (one DataStore read, no network) and never blocks the actual upload work.
         runCatching { cloudRepo.retryPendingOrphanDeletes(userId) }
             .onFailure { e -> Log.w(UPLOAD_TAG, "Pending orphan-delete sweep failed: ${e.message}") }
+
+        // A short Drive copy whose whole replacement is already up but could not be moved to the trash
+        // then (an album that did not take the whole copy, a failed trash call) is tried again.
+        shortCopyReplacer?.retryPending(userId) { uri -> syncStateRepo.getByUri(uri) }
 
         // Age-sweep abandoned upload temps. A retryable failure deliberately preserves its resume
         // dir, and a process death can strand any other upload temp; none are otherwise age-swept, so
@@ -1171,6 +1176,16 @@ class UploadPendingUseCase @Inject constructor(
                 syncStateRepo.clearQueuedForSynced(state.localUri)
             }
 
+            // uploadFile read and hashed every byte of the file before its commit, so this copy is whole: a
+            // short Drive copy it replaces moves to Drive's trash, after the whole one joins its albums. A
+            // link recorded as short is never taken for the whole copy, nor deleted after.
+            val landedOnShortCopy = shortCopyReplacer?.isShortCopy(state.localUri, cloudId) == true
+            if (landedOnShortCopy) {
+                Log.w(UPLOAD_TAG, "Upload of $logRef returned a link recorded as short; the device file stays")
+            } else {
+                shortCopyReplacer?.replaced(userId, state.localUri, cloudId)
+            }
+
             // Mirror the cloud rename onto the on-device file now that the upload is committed (and
             // never before — a failed upload must not rename a file with no Drive copy). Silent with
             // MANAGE_MEDIA; the URI is stable across a DISPLAY_NAME change, so the SYNCED row above
@@ -1190,10 +1205,13 @@ class UploadPendingUseCase @Inject constructor(
             // The removal and the CLOUD_ONLY flip share one non-cancellable window so
             // an interrupt between them cannot leave the row claiming a device copy
             // that is already gone.
+            // A file the pending delete queue let go because its Drive copy was short is deleted now that
+            // its whole copy is up, as delete-after-backup asked when it queued it.
+            val deleteAfterWholeBackup = shortCopyReplacer?.deleteAfterWholeBackup(state.localUri) == true
             val removal = resolveDeleteAfterBackupRemoval(
                 sdkInt = Build.VERSION.SDK_INT,
-                deleteLocalAfterBackup = deleteLocalAfterBackup,
-                uploadSucceeded = cloudId.isNotBlank(),
+                deleteLocalAfterBackup = deleteLocalAfterBackup || deleteAfterWholeBackup,
+                uploadSucceeded = cloudId.isNotBlank() && !landedOnShortCopy,
             )
             // The device file is read once more right before the removal: it may have changed since the
             // upload read it, and then the only copy of those bytes is the device file. A file that no
@@ -1254,6 +1272,7 @@ class UploadPendingUseCase @Inject constructor(
                             // row here would let a later free-up-space pass re-select the same photo
                             // and raise a consent dialog for a file that is no longer on the device.
                             syncStateRepo.upsert(syncedState.copy(status = SyncStatus.CLOUD_ONLY), userId)
+                            if (deleteAfterWholeBackup) shortCopyReplacer?.deleteHandedOn(state.localUri)
                             val verb = if (removal == Removal.TRASH) "trashed" else "removed"
                             Log.d(UPLOAD_TAG, "Delete after backup: $verb ${localItem.displayName}")
                         } else {
@@ -1261,6 +1280,7 @@ class UploadPendingUseCase @Inject constructor(
                                 val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
                                 p[SettingsKeys.PENDING_DELETE_URIS] = existing + state.localUri
                             }
+                            if (deleteAfterWholeBackup) shortCopyReplacer?.deleteHandedOn(state.localUri)
                             Log.d(UPLOAD_TAG, "Delete after backup: queued ${localItem.displayName} for batched consent dialog")
                         }
                     }

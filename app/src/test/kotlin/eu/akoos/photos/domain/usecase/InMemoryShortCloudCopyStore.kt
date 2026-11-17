@@ -35,6 +35,38 @@ internal class InMemoryShortCloudCopyStore(var checked: Boolean = true) : ShortC
         ids += linkIds
     }
 
+    val unverifiableIds = LinkedHashSet<String>()
+    val replacements = LinkedHashMap<String, String>()
+    val deleteAfterWhole = LinkedHashSet<String>()
+
+    override suspend fun unverifiable(): Set<String> = unverifiableIds.toSet()
+
+    override suspend fun addUnverifiable(linkIds: Collection<String>) {
+        unverifiableIds += linkIds
+    }
+
+    override suspend fun replacedBy(deviceUri: String): String? = replacements[deviceUri]
+
+    override suspend fun addReplacement(deviceUri: String, linkId: String) {
+        replacements[deviceUri] = linkId
+    }
+
+    override suspend fun replacements(): Map<String, String> = replacements.toMap()
+
+    override suspend fun removeReplacement(deviceUri: String) {
+        replacements.remove(deviceUri)
+    }
+
+    override suspend fun deleteAfterWholeBackup(deviceUri: String): Boolean = deviceUri in deleteAfterWhole
+
+    override suspend fun addDeleteAfterWholeBackup(deviceUris: Collection<String>) {
+        deleteAfterWhole += deviceUris
+    }
+
+    override suspend fun removeDeleteAfterWholeBackup(deviceUri: String) {
+        deleteAfterWhole.remove(deviceUri)
+    }
+
     override suspend fun editorCopiesCheckStartedMs(userId: String, nowMs: Long): Long =
         startedMs ?: nowMs.also { startedMs = it }
 

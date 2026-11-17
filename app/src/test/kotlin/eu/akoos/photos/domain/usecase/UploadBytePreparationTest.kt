@@ -32,8 +32,10 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
+import eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.data.upload.MirrorSourceCheck
+import eu.akoos.photos.data.upload.ShortCopyReplacer
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.data.upload.compression.VideoUploadCompression
@@ -54,6 +56,7 @@ import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.VideoMetadataStripper
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
@@ -113,6 +116,7 @@ class UploadBytePreparationTest {
     private data class Sent(val item: LocalMediaItem, val hash: String, val uri: String, val bytes: ByteArray)
 
     private val sent = mutableListOf<Sent>()
+    private val shortCopies = InMemoryShortCloudCopyStore()
     private var uploadThrows: Exception? = null
 
     @Before
@@ -169,6 +173,7 @@ class UploadBytePreparationTest {
             context = context,
             appScope = appScope,
             albumListEvents = AlbumListEventBus(),
+            shortCopyReplacer = ShortCopyReplacer(cloud, db.albumPhotoMembershipDao(), shortCopies),
         )
     }
 
@@ -635,5 +640,106 @@ class UploadBytePreparationTest {
         val row = syncRepo.getByUri(item.uri)!!
         assertTrue("not queued to be backed up again", row.cloudFileId != null && row.backedUpAtMs != null)
     }
-}
 
+    @Test
+    fun `a whole re-upload moves the short Drive copy it replaces to the trash and records the new link`() = runTest {
+        prefs { }
+        val (_, item) = deviceFile("IMG_1_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addReplacement(item.uri, "short-1")
+        coEvery { cloud.deleteFiles(userId, listOf("short-1")) } returns CloudTrashOutcome(setOf("short-1"), emptySet())
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertEquals(2048, s.bytes.size)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals("cloud-1", row.cloudFileId)
+        coVerify(exactly = 1) { cloud.deleteFiles(userId, listOf("short-1")) }
+        assertNull(shortCopies.replacedBy(item.uri))
+    }
+
+    @Test
+    fun `a failed re-upload leaves the short Drive copy where it is`() = runTest {
+        prefs { }
+        val (_, item) = deviceFile("IMG_2_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addReplacement(item.uri, "short-2")
+        uploadThrows = IllegalStateException("upload failed")
+
+        useCase(userId)
+
+        coVerify(exactly = 0) { cloud.deleteFiles(any(), any()) }
+        assertEquals("short-2", shortCopies.replacedBy(item.uri))
+    }
+
+    @Test
+    fun `a file the pending delete queue let go for a short copy is deleted once its whole copy is up`() = runTest {
+        // Delete after backup is off now; the file was queued for deletion while it was on.
+        prefs { }
+        val (_, item) = deviceFile("IMG_3_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addDeleteAfterWholeBackup(listOf(item.uri))
+
+        useCase(userId)
+
+        assertEquals(
+            "the trash is asked for",
+            1,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertFalse(shortCopies.deleteAfterWholeBackup(item.uri))
+    }
+
+    @Test
+    fun `without a held-back delete an upload with delete after backup off keeps the device file`() = runTest {
+        prefs { }
+        val (_, item) = deviceFile("IMG_4.jpg", "image/jpeg", ByteArray(64) { 2 })
+
+        useCase(userId)
+
+        assertEquals(
+            0,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertEquals(SyncStatus.SYNCED, syncRepo.getByUri(item.uri)!!.status)
+    }
+
+    @Test
+    fun `an upload that returns the short link itself trashes nothing and keeps the device file`() = runTest {
+        prefs { it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true }
+        val (file, item) = deviceFile("IMG_5_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addReplacement(item.uri, "short-5")
+        shortCopies.addDeleteAfterWholeBackup(listOf(item.uri))
+        coEvery { cloud.uploadFile(userId, any(), any(), any(), any(), any()) } returns "short-5"
+
+        useCase(userId)
+
+        coVerify(exactly = 0) { cloud.deleteFiles(any(), any()) }
+        assertEquals(
+            0,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertTrue(file.exists())
+        assertEquals("short-5", shortCopies.replacedBy(item.uri))
+        assertTrue(shortCopies.deleteAfterWholeBackup(item.uri))
+    }
+
+    @Test
+    fun `a held-back delete stays recorded when the file changed before its removal`() = runTest {
+        prefs { }
+        val (file, item) = deviceFile("IMG_6_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addDeleteAfterWholeBackup(listOf(item.uri))
+        coEvery { cloud.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            // Another app edits the file while the upload finishes.
+            file.writeBytes(ByteArray(2048) { 9 })
+            "cloud-6"
+        }
+
+        useCase(userId)
+
+        assertEquals(
+            0,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertTrue(shortCopies.deleteAfterWholeBackup(item.uri))
+    }
+}

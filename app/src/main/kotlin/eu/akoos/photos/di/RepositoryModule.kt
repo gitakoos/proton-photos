@@ -28,11 +28,13 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import eu.akoos.photos.data.preferences.FreeUpUncheckedStoreImpl
 import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
+import eu.akoos.photos.data.repository.XAttrClaimedSizeReader
 import eu.akoos.photos.data.repository.DrivePhotoRepositoryImpl
 import eu.akoos.photos.data.repository.LocalMediaRepositoryImpl
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
+import eu.akoos.photos.domain.repository.DriveCopyClaimedSize
 import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -67,4 +69,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindShortCloudCopyStore(impl: ShortCloudCopyStoreImpl): ShortCloudCopyStore
+
+    @Binds
+    @Singleton
+    abstract fun bindDriveCopyClaimedSize(impl: XAttrClaimedSizeReader): DriveCopyClaimedSize
 }

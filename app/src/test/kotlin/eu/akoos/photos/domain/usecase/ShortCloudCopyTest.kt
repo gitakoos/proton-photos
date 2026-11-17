@@ -29,6 +29,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -117,5 +118,29 @@ class ShortCloudCopyTest {
         }
         coVerify { repo.markQueued(r.localUri, QueueSource.MANUAL, any()) }
         coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any(), any()) }
+    }
+
+    @Test
+    fun `an editor copy is short only when it declares fewer bytes than the file its hash names`() {
+        val r = row(localHash = "abc")
+        assertEquals(EditorCopyVerdict.SHORT, editorCopyVerdict(r, claimedBytes = 10_000L, deviceSha1 = "ABC", deviceBytes = 10_484L))
+        assertEquals(EditorCopyVerdict.WHOLE, editorCopyVerdict(r, claimedBytes = 10_484L, deviceSha1 = "abc", deviceBytes = 10_484L))
+        // The device file holds other bytes (a strip on upload), so the whole length is not known.
+        assertEquals(EditorCopyVerdict.UNVERIFIABLE, editorCopyVerdict(r, claimedBytes = 10_000L, deviceSha1 = "other", deviceBytes = 10_484L))
+        assertEquals(EditorCopyVerdict.UNRESOLVED, editorCopyVerdict(r, claimedBytes = null, deviceSha1 = "abc", deviceBytes = 10_484L))
+        assertEquals(EditorCopyVerdict.UNRESOLVED, editorCopyVerdict(r, claimedBytes = 10_000L, deviceSha1 = null, deviceBytes = 10_484L))
+    }
+
+    @Test
+    fun `a short copy is recorded with its replacement and its row queued again`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true)
+        val store = InMemoryShortCloudCopyStore()
+        val r = row()
+
+        store.recordShortAndRequeue(repo, UserId("u1"), r)
+
+        assertEquals(setOf("L1"), store.ids)
+        assertEquals("L1", store.replacements[r.localUri])
+        coVerify { repo.markQueued(r.localUri, QueueSource.MANUAL, any()) }
     }
 }

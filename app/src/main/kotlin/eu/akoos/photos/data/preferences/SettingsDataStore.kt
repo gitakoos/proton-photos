@@ -611,8 +611,19 @@ object SettingsKeys {
      *  ([eu.akoos.photos.domain.repository.ShortCloudCopyStore]). */
     val SHORT_CLOUD_COPY_IDS = stringSetPreferencesKey("short_cloud_copy_ids")
 
+    /** Drive link ids of photo editor copies whose shortness cannot be told: kept on the device for good. */
+    val UNVERIFIABLE_CLOUD_COPY_IDS = stringSetPreferencesKey("unverifiable_cloud_copy_ids")
+
+    /** `linkId|deviceUri` for each short Drive copy whose device file is queued to be backed up again; the
+     *  short copy goes to Drive's trash once the whole one is up. */
+    val SHORT_CLOUD_COPY_REPLACEMENTS = stringSetPreferencesKey("short_cloud_copy_replacements")
+
+    /** Device uris taken off the pending delete queue because their Drive copy was short; deleted after
+     *  their whole backup, as delete-after-backup asked. */
+    val DELETE_AFTER_WHOLE_BACKUP_URIS = stringSetPreferencesKey("delete_after_whole_backup_uris")
+
     /** Whether the one-time look for the photo editor's short Drive copies ran for this account. Until it
-     *  has, free-up deletes nothing for it. */
+     *  has, free-up checks each such copy itself. */
     fun editorCopiesCheckedKey(userId: String) =
         booleanPreferencesKey("editor_copies_checked_$userId")
 

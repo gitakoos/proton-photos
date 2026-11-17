@@ -30,6 +30,7 @@ import eu.akoos.photos.data.db.dao.PhotoPairingRow
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.upload.LocalRewrites
+import eu.akoos.photos.domain.entity.DeviceFileStamp
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
@@ -75,6 +76,7 @@ class ReconcileDeviceChangeTest {
     private lateinit var listingDao: PhotoListingDao
     private lateinit var useCase: ReconcileSyncStateUseCase
     private val shortCopies = InMemoryShortCloudCopyStore()
+    private val claimed = FakeClaimedSizes()
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     private val userId = UserId("test-user")
     private val written = slot<List<SyncState>>()
@@ -87,6 +89,7 @@ class ReconcileDeviceChangeTest {
         // Strict: any hash the pass reads must be stubbed by the test.
         localRepo = mockk()
         coEvery { localRepo.confirmedGone(any()) } answers { firstArg<Collection<String>>().toSet() }
+        coEvery { localRepo.fileStamp(any()) } returns null
         cloudRepo = mockk(relaxed = true)
         every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
         syncStateRepo = mockk(relaxed = true)
@@ -108,7 +111,7 @@ class ReconcileDeviceChangeTest {
         every { prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
         every { prefs.asMap() } returns emptyMap()
 
-        useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope, shortCopies)
+        useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope, shortCopies, claimed)
     }
 
     @After
@@ -427,9 +430,13 @@ class ReconcileDeviceChangeTest {
     }
 
     @Test
-    fun `the one-time look queues the editor's copies backed up since the short uploads began`() = runTest {
+    fun `the one-time look queues the editor's copies whose Drive copy declares fewer bytes`() = runTest {
         shortCopies.checked = false
         val since = EDITOR_SHORT_COPIES_SINCE_MS
+        // The upload declared the size from before the EXIF write: 484 bytes short of the file.
+        claimed.sizes["L1"] = 2048L - 484L
+        coEvery { localRepo.sha1("uri://IMG_1_edit_20260801_101500") } returns "a"
+        coEvery { localRepo.fileStamp("uri://IMG_1_edit_20260801_101500") } returns DeviceFileStamp(2048L, 0L)
         val out = pass(
             listOf(
                 device("uri://IMG_1_edit_20260801_101500", 2048L),
@@ -448,9 +455,77 @@ class ReconcileDeviceChangeTest {
 
         requeued("uri://IMG_1_edit_20260801_101500")
         assertEquals(setOf("L1"), shortCopies.ids)
+        assertEquals("L1", shortCopies.replacements["uri://IMG_1_edit_20260801_101500"])
         assertTrue(shortCopies.checked)
+        assertEquals(listOf("L1" to true), claimed.asked)
         assertEquals(since - 1_000L, out.getValue("uri://IMG_2_edit_20260101_101500").backedUpAtMs)
         assertEquals(since + 1_000L, out.getValue("uri://IMG_3").backedUpAtMs)
+    }
+
+    private fun editorRows(vararg links: String) = links.mapIndexed { i, link ->
+        row("uri://IMG_${i}_edit_20260801_10150$i", link, "h$i", 2048L, backedUpAtMs = EDITOR_SHORT_COPIES_SINCE_MS + 1_000L)
+    }
+
+    private fun editorDevices(vararg links: String) = links.indices.map { i -> device("uri://IMG_${i}_edit_20260801_10150$i", 2048L) }
+
+    @Test
+    fun `the one-time look leaves an editor copy that declares the whole file alone`() = runTest {
+        shortCopies.checked = false
+        claimed.sizes["L0"] = 2048L
+        coEvery { localRepo.sha1("uri://IMG_0_edit_20260801_101500") } returns "h0"
+        coEvery { localRepo.fileStamp("uri://IMG_0_edit_20260801_101500") } returns DeviceFileStamp(2048L, 0L)
+
+        val out = pass(editorDevices("L0"), editorRows("L0"), listOf(stored("L0", "hmac-h0", 2100L)))
+
+        assertEquals("L0", out.getValue("uri://IMG_0_edit_20260801_101500").cloudFileId)
+        assertTrue(shortCopies.ids.isEmpty())
+        assertTrue(shortCopies.checked)
+        coVerify(exactly = 0) { syncStateRepo.markQueued(any(), any(), any()) }
+    }
+
+    @Test
+    fun `an editor copy whose declared size cannot be read is kept for a later look`() = runTest {
+        shortCopies.checked = false
+
+        val out = pass(editorDevices("L0"), editorRows("L0"), listOf(stored("L0", "hmac-h0", 2100L)))
+
+        assertEquals("L0", out.getValue("uri://IMG_0_edit_20260801_101500").cloudFileId)
+        assertTrue(shortCopies.ids.isEmpty())
+        assertFalse(shortCopies.checked)
+        coVerify(exactly = 0) { syncStateRepo.markQueued(any(), any(), any()) }
+    }
+
+    @Test
+    fun `an editor copy whose device file is not the uploaded bytes is recorded unverifiable and not uploaded again`() = runTest {
+        shortCopies.checked = false
+        claimed.sizes["L0"] = 1500L
+        coEvery { localRepo.sha1("uri://IMG_0_edit_20260801_101500") } returns "stripped-apart"
+        coEvery { localRepo.fileStamp("uri://IMG_0_edit_20260801_101500") } returns DeviceFileStamp(2048L, 0L)
+
+        pass(editorDevices("L0"), editorRows("L0"), listOf(stored("L0", "hmac-h0", 2100L)))
+
+        assertEquals(setOf("L0"), shortCopies.unverifiableIds)
+        assertTrue(shortCopies.ids.isEmpty())
+        assertTrue(shortCopies.checked)
+        coVerify(exactly = 0) { syncStateRepo.markQueued(any(), any(), any()) }
+    }
+
+    @Test
+    fun `the one-time look measures the device file, not the size the scan reported`() = runTest {
+        shortCopies.checked = false
+        // The scan reports the size from before the EXIF write, the same size the upload declared.
+        claimed.sizes["L0"] = 1564L
+        coEvery { localRepo.sha1("uri://IMG_0_edit_20260801_101500") } returns "h0"
+        coEvery { localRepo.fileStamp("uri://IMG_0_edit_20260801_101500") } returns DeviceFileStamp(2048L, 0L)
+
+        pass(
+            listOf(device("uri://IMG_0_edit_20260801_101500", 1564L)),
+            listOf(row("uri://IMG_0_edit_20260801_101500", "L0", "h0", 1564L, backedUpAtMs = EDITOR_SHORT_COPIES_SINCE_MS + 1_000L)),
+            listOf(stored("L0", "hmac-h0", 2100L)),
+        )
+
+        requeued("uri://IMG_0_edit_20260801_101500")
+        assertEquals(setOf("L0"), shortCopies.ids)
     }
 
     private suspend fun partialPass(devices: List<LocalMediaItem>, rows: List<SyncState>, listing: List<PhotoPairingRow>) {

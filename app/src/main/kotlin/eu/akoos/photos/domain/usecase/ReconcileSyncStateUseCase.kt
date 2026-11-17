@@ -56,6 +56,7 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
+import eu.akoos.photos.domain.repository.DriveCopyClaimedSize
 import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -95,6 +96,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     @AppScope private val appScope: CoroutineScope,
     private val shortCopies: ShortCloudCopyStore = ShortCloudCopyStoreImpl(context),
+    private val claimedSizes: DriveCopyClaimedSize? = null,
 ) {
     private val gates = ConcurrentHashMap<String, SharedRunGate<Int>>()
 
@@ -220,14 +222,16 @@ class ReconcileSyncStateUseCase @Inject constructor(
     }
 
     /**
-     * The one-time look for the photo editor's short Drive copies ([maybeShortEditorCopy]), over every
-     * backed-up device file the scan found, in or out of the backup folders: each one found has its Drive
-     * copy recorded as short and its device file queued to be backed up again whole.
+     * The one-time look for the photo editor's short Drive copies, over every backed-up device file the scan
+     * found, in or out of the backup folders. Each suspect ([maybeShortEditorCopy]) is told apart by its Drive
+     * copy's declared size ([editorCopyVerdict]): a short one is recorded and its device file queued to be
+     * backed up again whole, a whole one is left as it is, one whose length cannot be known is recorded as
+     * unverifiable (never freed), and one whose size or file cannot be read now waits for a later pass.
      *
      * It waits for a pass that starts with backed-up rows: on a fresh install or after cleared data the
-     * pairing that follows backs the files up again, and a later pass looks at them. Marked done once the
-     * scan saw the whole device, or saw the file of every row backed up in the window; until then free-up
-     * checks each suspect itself ([FreeUpSpaceUseCase]).
+     * pairing that follows backs the files up again, and a later pass looks at them. Marked done once every
+     * suspect was told apart and the scan saw the whole device, or saw the file of every row backed up in the
+     * window; until then free-up checks each suspect itself ([FreeUpSpaceUseCase]).
      */
     private suspend fun checkEditorCopies(
         userId: UserId,
@@ -254,13 +258,31 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // Fixed at the first look, so a copy the corrected editor uploads while the look waits for a whole
         // scan is never taken for an old one.
         val since = shortCopies.editorCopiesCheckStartedMs(userId.id, checkStartedMs)
-        val found = suspects.filter { (it.backedUpAtMs ?: Long.MAX_VALUE) < since }
-        if (found.isNotEmpty()) {
-            shortCopies.add(found.mapNotNull { it.cloudFileId })
-            found.forEach { syncStateRepo.requeueAfterShortCopy(userId, it) }
-            Log.w(TAG, "reconcile: ${found.size} edited copies queued to be backed up again whole")
+        var unresolved = 0
+        val unverifiable = ArrayList<String>()
+        var short = 0
+        for (row in suspects) {
+            if ((row.backedUpAtMs ?: Long.MAX_VALUE) >= since) continue
+            val linkId = row.cloudFileId ?: continue
+            val claimed = claimedSizes?.claimedSize(userId, linkId, fetchIfUncached = true)
+            val sha1 = if (claimed == null) null else localRepo.sha1(row.localUri)
+            // The file's own length: the scan's size can predate the editor's EXIF write through a descriptor.
+            val deviceBytes = if (sha1 == null) 0L else localRepo.fileStamp(row.localUri)?.sizeBytes ?: 0L
+            when (editorCopyVerdict(row, claimed, sha1, deviceBytes)) {
+                EditorCopyVerdict.SHORT -> {
+                    shortCopies.recordShortAndRequeue(syncStateRepo, userId, row)
+                    short++
+                }
+                EditorCopyVerdict.WHOLE -> Unit
+                EditorCopyVerdict.UNVERIFIABLE -> unverifiable += linkId
+                EditorCopyVerdict.UNRESOLVED -> unresolved++
+            }
         }
-        if (scanComplete || unseen.none { it < since }) shortCopies.markEditorCopiesChecked(userId.id)
+        shortCopies.addUnverifiable(unverifiable)
+        if (short > 0) Log.w(TAG, "reconcile: $short edited copies short on Drive, queued to be backed up again whole")
+        if (unresolved == 0 && (scanComplete || unseen.none { it < since })) {
+            shortCopies.markEditorCopiesChecked(userId.id)
+        }
     }
 
     /** What [pairAndRecord] leaves for the queue clean-up after it. */
@@ -377,8 +399,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // A Drive copy found short: recorded so nothing pairs with it again, and its device file queued to
         // be backed up again whole. The device file stays.
         if (shortPaired.isNotEmpty()) {
-            shortCopies.add(shortPaired.mapNotNull { it.cloudFileId })
-            shortPaired.forEach { syncStateRepo.requeueAfterShortCopy(userId, it) }
+            shortPaired.forEach { shortCopies.recordShortAndRequeue(syncStateRepo, userId, it) }
             Log.w(TAG, "reconcile: ${shortPaired.size} Drive copies shorter than their device file; queued again")
         }
 

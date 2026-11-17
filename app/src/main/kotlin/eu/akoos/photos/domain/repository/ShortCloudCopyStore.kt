@@ -35,6 +35,33 @@ interface ShortCloudCopyStore {
     /** Records [linkIds] as short. */
     suspend fun add(linkIds: Collection<String>)
 
+    /** Photo editor copies whose shortness cannot be told from what the device holds: never freed. */
+    suspend fun unverifiable(): Set<String>
+
+    /** Records [linkIds] as copies whose shortness cannot be told. */
+    suspend fun addUnverifiable(linkIds: Collection<String>)
+
+    /** The short Drive copy, by link id, that the whole backup of [deviceUri] replaces, if any. */
+    suspend fun replacedBy(deviceUri: String): String?
+
+    /** Records that the whole backup of [deviceUri] replaces the short copy [linkId]. */
+    suspend fun addReplacement(deviceUri: String, linkId: String)
+
+    /** Every recorded replacement: device uri to the short copy's link id. */
+    suspend fun replacements(): Map<String, String>
+
+    /** Forgets the replacement recorded for [deviceUri]. */
+    suspend fun removeReplacement(deviceUri: String)
+
+    /** Whether [deviceUri] left the pending delete queue for a short Drive copy and is deleted after its whole backup. */
+    suspend fun deleteAfterWholeBackup(deviceUri: String): Boolean
+
+    /** Records [deviceUris] to be deleted after their whole backup. */
+    suspend fun addDeleteAfterWholeBackup(deviceUris: Collection<String>)
+
+    /** Forgets the delete recorded for [deviceUri]. */
+    suspend fun removeDeleteAfterWholeBackup(deviceUri: String)
+
     /** When the one-time look for the photo editor's short copies first ran for [userId]: the stored moment,
      *  or [nowMs], stored now, on the first call. */
     suspend fun editorCopiesCheckStartedMs(userId: String, nowMs: Long): Long

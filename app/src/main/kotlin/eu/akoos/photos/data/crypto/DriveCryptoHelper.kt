@@ -92,6 +92,18 @@ fun parsePhotoDuration(xAttrJson: String): Long? = runCatching {
     Math.round(seconds * 1000.0)
 }.getOrNull()
 
+/**
+ * The plaintext size an upload declared for its file, the Common.Size of a plaintext XAttr JSON blob: the
+ * byte count the uploading client set out to send (the SDK reports it as the revision's claimed size). Drive
+ * stores the encrypted blocks apart from it, and the link's own Size counts encrypted storage. A missing,
+ * malformed or non-positive value returns null. Pure and main-process safe.
+ */
+fun parseXAttrClaimedSize(xAttrJson: String): Long? = runCatching {
+    val common = JSONObject(xAttrJson).optJSONObject("Common") ?: return@runCatching null
+    if (!common.has("Size")) return@runCatching null
+    common.getLong("Size").takeIf { it > 0L }
+}.getOrNull()
+
 data class NodeKeyMaterial(
     val armoredPrivateKey: String,
     val passphraseBytes: ByteArray,

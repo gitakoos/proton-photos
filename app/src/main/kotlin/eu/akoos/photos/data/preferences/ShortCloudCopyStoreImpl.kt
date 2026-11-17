@@ -46,6 +46,54 @@ class ShortCloudCopyStoreImpl @Inject constructor(
         }
     }
 
+    override suspend fun unverifiable(): Set<String> =
+        context.settingsDataStore.data.first()[SettingsKeys.UNVERIFIABLE_CLOUD_COPY_IDS] ?: emptySet()
+
+    override suspend fun addUnverifiable(linkIds: Collection<String>) {
+        if (linkIds.isEmpty()) return
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.UNVERIFIABLE_CLOUD_COPY_IDS] = (p[SettingsKeys.UNVERIFIABLE_CLOUD_COPY_IDS] ?: emptySet()) + linkIds
+        }
+    }
+
+    override suspend fun replacedBy(deviceUri: String): String? =
+        (context.settingsDataStore.data.first()[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS] ?: emptySet())
+            .firstNotNullOfOrNull { entry -> entry.substringBefore('|').takeIf { entry.substringAfter('|') == deviceUri } }
+
+    override suspend fun addReplacement(deviceUri: String, linkId: String) {
+        context.settingsDataStore.edit { p ->
+            val kept = (p[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS] ?: emptySet()).filterNot { it.substringAfter('|') == deviceUri }
+            p[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS] = kept.toSet() + "$linkId|$deviceUri"
+        }
+    }
+
+    override suspend fun replacements(): Map<String, String> =
+        (context.settingsDataStore.data.first()[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS] ?: emptySet())
+            .associate { it.substringAfter('|') to it.substringBefore('|') }
+
+    override suspend fun removeReplacement(deviceUri: String) {
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS] =
+                (p[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS] ?: emptySet()).filterNot { it.substringAfter('|') == deviceUri }.toSet()
+        }
+    }
+
+    override suspend fun deleteAfterWholeBackup(deviceUri: String): Boolean =
+        deviceUri in (context.settingsDataStore.data.first()[SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS] ?: emptySet())
+
+    override suspend fun addDeleteAfterWholeBackup(deviceUris: Collection<String>) {
+        if (deviceUris.isEmpty()) return
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS] = (p[SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS] ?: emptySet()) + deviceUris
+        }
+    }
+
+    override suspend fun removeDeleteAfterWholeBackup(deviceUri: String) {
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS] = (p[SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS] ?: emptySet()) - deviceUri
+        }
+    }
+
     override suspend fun editorCopiesCheckStartedMs(userId: String, nowMs: Long): Long {
         var started = nowMs
         context.settingsDataStore.edit { p ->

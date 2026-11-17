@@ -107,4 +107,21 @@ class AccountScopedPreferencesTest {
         assertEquals(setOf("Trip", "Other"), prefs[SettingsKeys.HIDDEN_FOLDER_NAMES])
         assertEquals(setOf(kept, gone, "content://media/9"), prefs[SettingsKeys.FAVORITE_IDS])
     }
+
+    @Test
+    fun `the pending short-copy work goes with the account and the short link ids stay`() {
+        val prefs = mutablePreferencesOf(
+            SettingsKeys.SHORT_CLOUD_COPY_IDS to setOf("L-1"),
+            SettingsKeys.UNVERIFIABLE_CLOUD_COPY_IDS to setOf("L-2"),
+            SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS to setOf("L-1|content://media/1"),
+            SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS to setOf("content://media/1"),
+        )
+
+        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = emptySet(), keepFavorites = false, isVaultUri = isVault)
+
+        assertEquals(setOf("L-1"), prefs[SettingsKeys.SHORT_CLOUD_COPY_IDS])
+        assertEquals(setOf("L-2"), prefs[SettingsKeys.UNVERIFIABLE_CLOUD_COPY_IDS])
+        assertNull(prefs[SettingsKeys.SHORT_CLOUD_COPY_REPLACEMENTS])
+        assertNull(prefs[SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS])
+    }
 }
