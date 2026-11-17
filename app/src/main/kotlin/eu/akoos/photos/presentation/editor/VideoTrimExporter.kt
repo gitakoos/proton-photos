@@ -46,6 +46,7 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import eu.akoos.photos.util.VideoLocation
 import eu.akoos.photos.util.VideoLocationMetadata
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -123,7 +124,7 @@ internal fun videoFrameRate(extractor: MediaExtractor): Float? {
  *
  * [rotationDeltaDegrees] is the turn the user added on top of the source's own rotation, written into
  * the track's display matrix. [removeAudio] drops the sound. [location] is written as the output's
- * location. Throws on any export failure, after deleting [outputFile].
+ * location, with the source's own string when it has one. Throws on any export failure, after deleting [outputFile].
  */
 @OptIn(UnstableApi::class)
 internal suspend fun exportExactTrim(
@@ -133,7 +134,7 @@ internal suspend fun exportExactTrim(
     windows: List<VideoSegment>,
     rotationDeltaDegrees: Int,
     removeAudio: Boolean,
-    location: Pair<Double, Double>?,
+    location: VideoLocation?,
     onProgress: (Float) -> Unit,
 ) {
     require(windows.isNotEmpty()) { "no kept window" }
@@ -155,6 +156,7 @@ internal suspend fun exportExactTrim(
                 startExport(context.applicationContext, composition, muxerFactory, outputFile, handler, onProgress, cont)
             }
         }
+        VideoLocationMetadata.carryOver(outputFile, location)
     } catch (t: Throwable) {
         runCatching { outputFile.delete() }
         throw t

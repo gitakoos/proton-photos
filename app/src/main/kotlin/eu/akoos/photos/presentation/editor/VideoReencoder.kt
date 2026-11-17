@@ -32,6 +32,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import coil.imageLoader
 import eu.akoos.photos.R
+import eu.akoos.photos.util.VideoLocation
+import eu.akoos.photos.util.VideoLocationMetadata
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -91,8 +93,8 @@ internal class VideoReencoder(private val context: Context) {
         onProgress: (Float) -> Unit,
         /** Cooperative cancellation probe checked per loop iteration; false → release codecs and throw. */
         isActive: () -> Boolean = { true },
-        /** Latitude and longitude written as the output's location; null writes none. */
-        location: Pair<Double, Double>? = null,
+        /** The output's location, with the source's own string when it has one; null writes none. */
+        location: VideoLocation? = null,
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var audioPfd: ParcelFileDescriptor? = null
@@ -493,6 +495,7 @@ internal class VideoReencoder(private val context: Context) {
             runCatching { sourcePfd?.close() }
             runCatching { audioPfd?.close() }
         }
+        VideoLocationMetadata.carryOver(outputFile, location)
     }
 
     /**
@@ -519,8 +522,8 @@ internal class VideoReencoder(private val context: Context) {
         onProgress: (Float) -> Unit,
         /** Cancellation probe; see [transcode]. */
         isActive: () -> Boolean = { true },
-        /** Latitude and longitude written as the output's location; null writes none. */
-        location: Pair<Double, Double>? = null,
+        /** The output's location, with the source's own string when it has one; null writes none. */
+        location: VideoLocation? = null,
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var videoExtractor: MediaExtractor? = null
@@ -697,6 +700,7 @@ internal class VideoReencoder(private val context: Context) {
             runCatching { streamCopyAudioExtractor?.release() }
             runCatching { streamCopyAudioPfd?.close() }
         }
+        VideoLocationMetadata.carryOver(outputFile, location)
     }
 
     /** Local copy of VideoEditorViewModel.extractorFlagsToBufferFlags to avoid cross-class plumbing. */
@@ -829,12 +833,14 @@ internal fun audioNeedsReencode(
     overlayDelayed
 
 /**
- * Writes [location] as [muxer]'s location; the platform muxer writes none unless told to. Must run
- * before the muxer starts. A null location, or one the muxer refuses as out of range, writes none.
+ * Writes [location]'s latitude and longitude as [muxer]'s location; the platform muxer writes none unless
+ * told to. Must run before the muxer starts. A null location, or one the muxer refuses as out of range,
+ * writes none. The muxer has no altitude, so the source's own string goes in once the file is closed
+ * ([VideoLocationMetadata.carryOver]).
  */
-internal fun writeMuxerLocation(muxer: MediaMuxer, location: Pair<Double, Double>?) {
-    val (lat, lng) = location ?: return
-    runCatching { muxer.setLocation(lat.toFloat(), lng.toFloat()) }
+internal fun writeMuxerLocation(muxer: MediaMuxer, location: VideoLocation?) {
+    location ?: return
+    runCatching { muxer.setLocation(location.latitude.toFloat(), location.longitude.toFloat()) }
 }
 
 /**

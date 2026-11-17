@@ -2705,7 +2705,7 @@ class VideoEditorViewModel @Inject constructor(
         windows: List<VideoSegment>,
         orientationDegrees: Int,
         stripAudio: Boolean = false,
-        location: Pair<Double, Double>? = null,
+        location: eu.akoos.photos.util.VideoLocation? = null,
     ) {
         var pfd: ParcelFileDescriptor? = null
         var extractor: MediaExtractor? = null
@@ -2846,6 +2846,7 @@ class VideoEditorViewModel @Inject constructor(
             runCatching { extractor?.release() }
             runCatching { pfd?.close() }
         }
+        eu.akoos.photos.util.VideoLocationMetadata.carryOver(outputFile, location)
     }
 
     /**

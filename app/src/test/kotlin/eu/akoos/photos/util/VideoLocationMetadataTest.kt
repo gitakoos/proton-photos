@@ -26,7 +26,10 @@ import androidx.media3.common.Metadata
 import androidx.media3.container.MdtaMetadataEntry
 import androidx.media3.container.Mp4LocationData
 import androidx.media3.container.Mp4TimestampData
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** The location a transcoded video is written with: the source's own fix, or none at all when stripped. */
@@ -44,7 +47,7 @@ class VideoLocationMetadataTest {
     fun `the source fix is written when the extractor found none`() {
         val entries = mutableSetOf<Metadata.Entry>(timestamp, fps)
 
-        VideoLocationMetadata.apply(entries, 47.4979 to 19.0402, stripLocation = false)
+        VideoLocationMetadata.apply(entries, VideoLocation(47.4979, 19.0402), stripLocation = false)
 
         assertEquals(setOf(timestamp, fps, Mp4LocationData(47.4979f, 19.0402f)), entries)
     }
@@ -53,7 +56,7 @@ class VideoLocationMetadataTest {
     fun `the source fix replaces the extractor's location`() {
         val entries = mutableSetOf<Metadata.Entry>(Mp4LocationData(1f, 2f), timestamp)
 
-        VideoLocationMetadata.apply(entries, -33.8688 to 151.2093, stripLocation = false)
+        VideoLocationMetadata.apply(entries, VideoLocation(-33.8688, 151.2093), stripLocation = false)
 
         assertEquals(setOf(timestamp, Mp4LocationData(-33.8688f, 151.2093f)), entries)
     }
@@ -62,7 +65,7 @@ class VideoLocationMetadataTest {
     fun `the source fix replaces a QuickTime location key too`() {
         val entries = mutableSetOf<Metadata.Entry>(isoLocation, fps)
 
-        VideoLocationMetadata.apply(entries, 47.4979 to 19.0402, stripLocation = false)
+        VideoLocationMetadata.apply(entries, VideoLocation(47.4979, 19.0402), stripLocation = false)
 
         assertEquals(setOf(fps, Mp4LocationData(47.4979f, 19.0402f)), entries)
     }
@@ -80,8 +83,35 @@ class VideoLocationMetadataTest {
     fun `a stripped location removes every location entry and keeps the rest`() {
         val entries = mutableSetOf<Metadata.Entry>(Mp4LocationData(1f, 2f), isoLocation, timestamp, fps)
 
-        VideoLocationMetadata.apply(entries, 47.4979 to 19.0402, stripLocation = true)
+        VideoLocationMetadata.apply(entries, VideoLocation(47.4979, 19.0402), stripLocation = true)
 
         assertEquals(setOf(timestamp, fps), entries)
+    }
+
+    @Test
+    fun `the source string read from the file is kept with its fix`() {
+        val location = VideoLocationMetadata.locationOf("+47.4979+019.0402+120.000/") { error("not asked") }
+
+        assertEquals(VideoLocation(47.4979, 19.0402, "+47.4979+019.0402+120.000/"), location)
+    }
+
+    @Test
+    fun `without a usable string the platform fix is used alone`() {
+        assertEquals(VideoLocation(47.4979, 19.0402), VideoLocationMetadata.locationOf(null) { 47.4979 to 19.0402 })
+        assertEquals(VideoLocation(47.4979, 19.0402), VideoLocationMetadata.locationOf("+95.0000+019.0402/") { 47.4979 to 19.0402 })
+        assertNull(VideoLocationMetadata.locationOf(null) { null })
+    }
+
+    @Test
+    fun `no string to carry over leaves the output alone`() {
+        val f = java.io.File.createTempFile("loc_", ".mp4")
+        try {
+            f.writeBytes(byteArrayOf(1, 2, 3))
+            assertFalse(VideoLocationMetadata.carryOver(f, VideoLocation(47.4979, 19.0402)))
+            assertFalse(VideoLocationMetadata.carryOver(f, null))
+            assertArrayEquals(byteArrayOf(1, 2, 3), f.readBytes())
+        } finally {
+            f.delete()
+        }
     }
 }

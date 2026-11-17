@@ -59,6 +59,7 @@ import eu.akoos.photos.domain.entity.compression.VideoCodec
 import eu.akoos.photos.domain.entity.compression.VideoCompressionPlan
 import eu.akoos.photos.domain.entity.compression.VideoSourceInfo
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.VideoLocation
 import eu.akoos.photos.util.VideoLocationMetadata
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -150,12 +151,15 @@ object VideoUploadCompressor {
         val produced = attempt.file
             ?: return Outcome(null, CompressionOutcome.FAILED, CompressionSkipReason.ENCODER_ERROR, detail = attempt.error)
         val outputMime = attempt.outputMime ?: plan.codec.mimeType
-        val outputBytes = produced.length()
         if (verdict != TranscodeAcceptance.Verdict.ACCEPT) {
-            Log.d(TAG, "discarding output: $verdict (src=${source.sizeBytes} out=$outputBytes)")
+            val discardedBytes = produced.length()
+            Log.d(TAG, "discarding output: $verdict (src=${source.sizeBytes} out=$discardedBytes)")
             produced.delete()
-            return Outcome(null, CompressionOutcome.SKIPPED, TranscodeAcceptance.reasonFor(verdict), outputMime, outputBytes)
+            return Outcome(null, CompressionOutcome.SKIPPED, TranscodeAcceptance.reasonFor(verdict), outputMime, discardedBytes)
         }
+        // The muxer writes the fix as two numbers; the source's own string (with its altitude) replaces them.
+        VideoLocationMetadata.carryOver(produced, location.source)
+        val outputBytes = produced.length()
         // The capture date the upload uses can differ from the source container's creation time, which
         // InAppMp4Muxer copies, so stamp it explicitly. Then read the file back: a muxer or stamp problem
         // must never reach Drive.
@@ -176,7 +180,7 @@ object VideoUploadCompressor {
     }
 
     /** The location the output is written with: the [source]'s fix, or none at all when [strip]. */
-    private class OutputLocation(val source: Pair<Double, Double>?, val strip: Boolean)
+    private class OutputLocation(val source: VideoLocation?, val strip: Boolean)
 
     /** One export: the finished temp (not yet judged) and its codec, or the [error] that stopped it. */
     private class Attempt(val file: File?, val outputMime: String?, val error: String?) {

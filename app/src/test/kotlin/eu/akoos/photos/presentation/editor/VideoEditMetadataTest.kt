@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.editor
 
 import android.media.MediaMuxer
+import eu.akoos.photos.util.VideoLocation
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -55,7 +56,7 @@ class VideoEditMetadataTest {
     fun `a re-encoded edit is written with the source location`() {
         val muxer = mockk<MediaMuxer>(relaxed = true)
 
-        writeMuxerLocation(muxer, 47.4979 to 19.0402)
+        writeMuxerLocation(muxer, VideoLocation(47.4979, 19.0402, "+47.4979+019.0402+120.000/"))
 
         verify(exactly = 1) { muxer.setLocation(47.4979f, 19.0402f) }
     }
@@ -74,6 +75,6 @@ class VideoEditMetadataTest {
         val muxer = mockk<MediaMuxer>(relaxed = true)
         every { muxer.setLocation(any(), any()) } throws IllegalArgumentException("out of range")
 
-        writeMuxerLocation(muxer, 95.0 to 19.0)
+        writeMuxerLocation(muxer, VideoLocation(95.0, 19.0))
     }
 }
