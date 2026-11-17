@@ -64,6 +64,10 @@ interface SyncStateRepository {
         now: Long,
     ): Boolean = false
 
+    /** Drops [localUri]'s link to [cloudFileId], made by name, once its bytes were found to differ; see
+     *  [eu.akoos.photos.data.db.dao.SyncStateDao.unlinkNameLink]. True when the row was changed. */
+    suspend fun unlinkNameLink(userId: UserId, localUri: String, cloudFileId: String): Boolean = false
+
     /** Guarded domain-column write for reconcile: rewrites [state]'s domain columns UNLESS the row is
      *  already a finished upload (SYNCED with a cloud id), returning the rows changed. Reconcile derives
      *  a demotion from a snapshot that can go stale before it writes, so this leaves a row an upload

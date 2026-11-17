@@ -537,6 +537,18 @@ interface SyncStateDao {
         originalHash: String,
         now: Long,
     ): Int
+
+    /** Drops a link made by name ([eu.akoos.photos.domain.entity.LinkBasis.NAME]) once the device file was
+     *  found to hold other bytes than the Drive photo: the row goes back to LOCAL_ONLY with no cloud id, so
+     *  the file is backed up as a photo of its own. Only while the row still links [cloudFileId] at SYNCED
+     *  by name. */
+    @Query(
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, cloudHash = NULL, originalHash = NULL, " +
+            "backedUpAtMs = NULL, linkBasis = 0 " +
+            "WHERE userId = :userId AND localUri = :localUri AND cloudFileId = :cloudFileId " +
+            "AND status = 'SYNCED' AND linkBasis = 1"
+    )
+    suspend fun unlinkNameLink(userId: String, localUri: String, cloudFileId: String): Int
 }
 
 /** A row of a [SyncStateDao.pageByStatus] page and its rowid, the key the next page starts after. */

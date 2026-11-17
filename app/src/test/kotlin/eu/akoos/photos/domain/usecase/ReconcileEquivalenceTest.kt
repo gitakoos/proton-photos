@@ -46,6 +46,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
@@ -259,6 +260,38 @@ class ReconcileEquivalenceTest {
         assertTrue(reference.table.any { it.startsWith("content://m/91|") && "|LOCAL_ONLY|" in it })
     }
 
+    @Test
+    fun `a name link the bytes disprove is unlinked and queued alike, a stamped one is kept`() = runTest(timeout = 60.seconds) {
+        val now = System.currentTimeMillis()
+        val device = listOf(
+            // Another photo of the same name and size, a minute and a half after the Drive one.
+            deviceFile("content://n/1", "IMG_N1.jpg", sec = BASE_SEC + 90),
+            // A download this app stamped: other bytes, the Drive photo's own name and second.
+            deviceFile("content://n/2", "IMG_N2.jpg"),
+            // Linked by name to a Drive photo that carries no hash yet: nothing to weigh it by.
+            deviceFile("content://n/3", "IMG_N3.jpg", sec = BASE_SEC + 90),
+        )
+        val listing = listOf(
+            listed("LN1", "IMG_N1.jpg", hash = "hmac-sN1-drive"),
+            listed("LN2", "IMG_N2.jpg", hash = "hmac-sN2-drive"),
+            listed("LN3", "IMG_N3.jpg"),
+            listed("LX", "IMG_X.jpg", hash = "hmac-sX"),
+        )
+        val rows = listOf(
+            row("content://n/1", SyncStatus.SYNCED, cloudId = "LN1", localHash = "sN1-device", basis = LinkBasis.NAME),
+            row("content://n/2", SyncStatus.SYNCED, cloudId = "LN2", localHash = "sN2-stamped", basis = LinkBasis.NAME),
+            row("content://n/3", SyncStatus.SYNCED, cloudId = "LN3", localHash = "sN3-device", basis = LinkBasis.NAME),
+        )
+        for (settings in listOf(variants[0], variants[1])) {
+            val reference = assertSamePass(Fixture("name links", now, device, listing, rows, emptyMap(), settings))
+            assertTrue(reference.calls.any { it == "unlinkNameLink ${userId.id} content://n/1 LN1 changed=true" })
+            assertTrue(reference.calls.none { it.startsWith("unlinkNameLink ${userId.id} content://n/2") || it.startsWith("unlinkNameLink ${userId.id} content://n/3") })
+            assertTrue(reference.table.any { it.startsWith("content://n/1|${userId.id}|null|") && "|LOCAL_ONLY|" in it && "|true|AUTO_FOLDER|" in it })
+            assertTrue(reference.table.any { it.startsWith("content://n/2|${userId.id}|LN2|") && "|SYNCED|" in it })
+            assertTrue(reference.table.any { it.startsWith("content://n/3|${userId.id}|LN3|") && "|SYNCED|" in it })
+        }
+    }
+
     /** Runs the reference on [fixture], then the pass at each of [pageSizes], and fails on the first
      *  difference. Returns the reference run. */
     private suspend fun assertSamePass(fixture: Fixture, pageSizes: List<Int> = PAGE_SIZES): Outcome {
@@ -382,6 +415,7 @@ class ReconcileEquivalenceTest {
         source: String? = null,
         user: String = userId.id,
         queuedAt: Long? = if (queued) 2_000L else null,
+        basis: Int = LinkBasis.PROVEN,
     ) = SyncStateEntity(
         localUri = uri,
         userId = user,
@@ -396,6 +430,7 @@ class ReconcileEquivalenceTest {
         queued = queued,
         queueSource = source,
         queuedAt = queuedAt,
+        linkBasis = basis,
     )
 
     /** One device file, listing row or table row per rule of the pass, plus look-alikes that must
@@ -669,6 +704,10 @@ class ReconcileEquivalenceTest {
         override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int =
             real.updateDomainColumnsIfNotSyncedWithCloud(state, userId)
                 .also { log += "guardedUpdate ${userId.id} ${describe(state)} changed=$it" }
+
+        override suspend fun unlinkNameLink(userId: UserId, localUri: String, cloudFileId: String): Boolean =
+            real.unlinkNameLink(userId, localUri, cloudFileId)
+                .also { log += "unlinkNameLink ${userId.id} $localUri $cloudFileId changed=$it" }
 
         override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int =
             real.demoteToLocalIfCloudIdMatches(localUri, expectedCloudId)

@@ -121,7 +121,9 @@ internal data class PairRepairCandidate(
  * proven only while its row still links that photo.
  *
  * A file whose bytes this app changed as it saved it (a date, a place or a video creation time stamped
- * in) no longer hashes to the Drive photo and stays apart.
+ * in) no longer hashes to the Drive photo and stays apart. A name link whose file holds other bytes and
+ * no longer agrees with its photo on the exact name and capture second is dropped (see
+ * [nameLinkDisproved]), so the file is backed up as a photo of its own.
  */
 @Singleton
 class DisplayPairRepair internal constructor(
@@ -203,6 +205,15 @@ class DisplayPairRepair internal constructor(
                 // No key to turn the SHA-1 into Drive's hash: nothing in this run can be compared.
                 val keyed = cloudRepo.cloudContentHash(sha1) ?: break@budget
                 if (keyed != driveHash) {
+                    // A name link whose file is another photo by its bytes, and no longer agrees with
+                    // the photo on the exact name and capture second, is dropped: the file is then
+                    // backed up as its own photo instead of hiding behind the Drive one.
+                    if (candidate.upgrade &&
+                        nameLinkDisproved(LinkBasis.NAME, keyed, driveHash, linkShowsAsOne(LinkBasis.NAME, candidate.file, photo)) &&
+                        syncStateRepo.unlinkNameLink(userId, candidate.file.uri, photo.linkId)
+                    ) {
+                        Log.w(TAG, "a device file linked by name holds other bytes than its Drive photo; unlinked")
+                    }
                     misses.record(candidate.file.uri, candidate.fingerprint)
                     continue
                 }

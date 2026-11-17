@@ -218,6 +218,9 @@ class SyncStateRepositoryImpl @Inject constructor(
         now: Long,
     ): Boolean = dao.markLinkProven(userId.id, localUri, cloudFileId, cloudHash, originalHash, now) > 0
 
+    override suspend fun unlinkNameLink(userId: UserId, localUri: String, cloudFileId: String): Boolean =
+        dao.unlinkNameLink(userId.id, localUri, cloudFileId) > 0
+
     override suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
         cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedCloudIdsAmong(userId.id, chunk) }.toHashSet()
 

@@ -93,6 +93,8 @@ class DisplayPairRepairTest {
         val hashed = ArrayList<String>()
         /** (uri, linkId) of each name link marked proven. */
         val proven = ArrayList<Pair<String, String>>()
+        /** (uri, linkId) of each name link dropped. */
+        val unlinked = ArrayList<Pair<String, String>>()
         val localRepo = mockk<LocalMediaRepository>()
         val cloudRepo = mockk<DrivePhotoRepository>()
         val syncRepo = mockk<SyncStateRepository>(relaxed = true)
@@ -123,6 +125,10 @@ class DisplayPairRepairTest {
             }
             coEvery { syncRepo.markLinkProven(user, any(), any(), any(), any(), any()) } answers {
                 proven += secondArg<String>() to thirdArg<String>()
+                true
+            }
+            coEvery { syncRepo.unlinkNameLink(user, any(), any()) } answers {
+                unlinked += secondArg<String>() to thirdArg<String>()
                 true
             }
         }
@@ -410,8 +416,28 @@ class DisplayPairRepairTest {
 
         assertEquals(0, h.run())
         assertTrue(h.proven.isEmpty())
+        assertTrue("a file on the photo's own name and second keeps its link", h.unlinked.isEmpty())
         h.run()
         assertEquals(listOf("uri://cam"), h.hashed)
+    }
+
+    @Test
+    fun `a name link whose bytes and capture second differ is unlinked so the file is backed up`() {
+        // Another photo of the same name, saved later: its bytes are not Drive's and neither is its second.
+        val file = device("uri://decoy", "IMG_0003.jpg", dateTaken = otherSecond + 97_000L)
+        val photo = drive("link-3", "IMG_0003.jpg", contentHash = "hmac-sha-drive")
+        val row = nameRow("uri://decoy", "link-3")
+        val h = Harness(listOf(file), listOf(photo), mapOf("uri://decoy" to "sha-other"), rows = listOf(row))
+
+        assertEquals(0, h.run())
+
+        assertEquals(listOf("uri://decoy" to "link-3"), h.unlinked)
+        assertTrue(h.proven.isEmpty())
+        assertTrue(h.written.isEmpty())
+        // With the link gone the library shows the file and the Drive photo apart.
+        assertEquals(2, merger().merge(listOf(file), listOf(photo), emptyList<SyncState>()).size)
+        h.run()
+        assertEquals("the file is read once", listOf("uri://decoy"), h.hashed)
     }
 
     @Test

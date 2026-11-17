@@ -39,13 +39,33 @@ import eu.akoos.photos.domain.entity.SyncStatus
  * The one check behind every surface that says a Drive photo is also on the device: the merged
  * library, the gallery's and the viewer's on-device lookups and an album's member-to-device map.
  */
-internal fun linkShowsAsOne(basis: Int, local: LocalMediaItem, cloud: CloudPhoto): Boolean {
+internal fun linkShowsAsOne(basis: Int, local: LocalMediaItem, cloud: CloudPhoto): Boolean =
+    linkShowsAsOne(basis, local, cloud.displayName, cloud.captureTime)
+
+/** [linkShowsAsOne] on the Drive photo's name and capture second (Unix seconds) alone. */
+internal fun linkShowsAsOne(basis: Int, local: LocalMediaItem, cloudName: String, cloudCaptureTime: Long): Boolean {
     if (basis == LinkBasis.PROVEN) return true
-    if (local.dateTaken / 1000L != cloud.captureTime) return false
-    return cloud.displayName == local.displayName ||
+    if (local.dateTaken / 1000L != cloudCaptureTime) return false
+    return cloudName == local.displayName ||
         (basis == LinkBasis.NAME_REWRITTEN &&
-            cloud.displayName == UploadFormatNaming.reencodedName(local.displayName, local.mimeType))
+            cloudName == UploadFormatNaming.reencodedName(local.displayName, local.mimeType))
 }
+
+/**
+ * Whether the bytes show a link made by name ([LinkBasis.NAME]) to be false: the device file's SHA-1 in
+ * Drive's form ([fileDriveHash]) is not the Drive photo's content hash ([driveHash]), and the file does
+ * not agree with the photo on the exact name and capture second either ([showsAsOne], see
+ * [linkShowsAsOne]). Such a file is another photo that only shares a name with the Drive one: left
+ * linked it would never be backed up. A file that does agree on name and second keeps its link, as a
+ * download this app stamped (a date or a place written in) no longer hashes to Drive's copy. A link of
+ * rewritten bytes ([LinkBasis.NAME_REWRITTEN]) can never be checked by hash, and a proven one needs no check.
+ */
+internal fun nameLinkDisproved(basis: Int, fileDriveHash: String?, driveHash: String?, showsAsOne: Boolean): Boolean =
+    basis == LinkBasis.NAME &&
+        !fileDriveHash.isNullOrEmpty() &&
+        !driveHash.isNullOrEmpty() &&
+        fileDriveHash != driveHash &&
+        !showsAsOne
 
 /**
  * The two sides the merge weighs a sync link on: the device files and the Drive photos of the own

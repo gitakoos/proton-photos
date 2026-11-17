@@ -329,7 +329,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val allLocalUris: Set<String> = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
 
         // Unpacked, so each part can go after its last use below instead of living through every write.
-        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudAbsent, goneCandidates, shortPaired) =
+        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudAbsent, goneCandidates, shortPaired, falseNameLinks) =
             matchLocals(
                 userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload,
                 allLocalUris, scanComplete, scanStartMs,
@@ -378,6 +378,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // the pairing read it is never clobbered back to LOCAL_ONLY: the guarded update no-ops on a row
         // now finished uploading, while a genuinely new row (which must still INSERT) and every
         // SYNCED/promote write go through the plain batch.
+        // A name link the bytes disproved is unlinked first, while it still links the photo the pass saw, so
+        // the guarded write below then finds the row no longer SYNCED and makes it a queued device file.
+        for (state in falseNameLinks) syncStateRepo.unlinkNameLink(userId, state.localUri, state.cloudFileId!!)
         syncStateRepo.upsertAll(plainWrites, userId)
         // A guarded update that changed no row means the row is SYNCED now (the upload won the race),
         // so its uri must not be re-queued below: a finished upload is never queued for a duplicate.
@@ -433,6 +436,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val goneCandidates: Map<String, SyncState>,
         /** Backed-up rows paired to a Drive copy that holds fewer bytes than their device file. */
         val shortPaired: List<SyncState>,
+        /** SYNCED rows linked by name whose device file the bytes showed to be another photo. */
+        val falseNameLinks: List<SyncState>,
     )
 
     /** Matches each in-scope device file to its cloud copy and computes the row it gets. */
@@ -464,9 +469,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
         //                      original local file's DATE_TAKEN, so for any photo our app
         //                      uploaded the cloud side has the matching value to 1-second
         //                      precision (item.dateTaken / 1000 in PhotoUploadService).
-        //   4. byName          last-resort name+size. Kept for compatibility with rows that
-        //                      somehow have no captureTime, but matches first by captureTime
-        //                      because size is fragile across strip-on-upload.
+        //   4. byName          last-resort name+size, only for a cloud copy with no captureTime.
+        //                      One that has a capture time and disagrees on the second is another
+        //                      photo as far as a name can tell: a same-named, same-sized file of other
+        //                      bytes linked on it would never be backed up.
         // One walk in listing order fills all four, a later row replacing an earlier one under the
         // same key, so each lookup keeps the same row a per-lookup associateBy would.
         val cloudByLinkId = HashMap<String, PhotoPairingRow>()
@@ -483,7 +489,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val hash = cloud.contentHash
             if (!hash.isNullOrEmpty()) cloudByHash[hash] = cloud
             if (cloud.captureTime > 0) cloudByNameAndDate[NameKey(cloud.displayName, cloud.captureTime)] = cloud
-            cloudByNameSize[NameKey(cloud.displayName, cloud.sizeBytes)] = cloud
+            if (cloud.captureTime <= 0) cloudByNameSize[NameKey(cloud.displayName, cloud.sizeBytes)] = cloud
         }
         Log.d(TAG, "reconcile: ${localItems.size} local, ${cloudItems.size} cloud " +
             "(${cloudByHash.size} with hash, ${cloudByNameAndDate.size} with captureTime)")
@@ -523,6 +529,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // Local URIs paired to a cloud copy this pass (status SYNCED). Their queued flag is cleared
         // after the bulk upsert (RULE 1) so a just-paired row can't be re-queued for a duplicate.
         val pairedSyncedUris = mutableListOf<String>()
+        // Name links the bytes showed to be false (see [nameLinkDisproved]): each row, with the cloud id it
+        // linked, is unlinked before the writes so its file is backed up as a photo of its own.
+        val falseNameLinks = ArrayList<SyncState>()
 
         // A compressed or strip-transcoded photo went up as JPEG (IMG.heic as IMG.jpg), a compressed
         // video as MP4 (clip.mov as clip.mp4), so while that rewrite is on, look for that name too.
@@ -556,7 +565,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 existingByUri = syncStateRepo.getOwnByUris(userId, chunk.map { it.uri }).associateBy { it.localUri }
                 // Asked only for the twins the re-pair can weigh: those of files no cloud id pairs yet.
                 val repairTwins = chunk.mapNotNullTo(HashSet()) { file ->
-                    val pairedById = existingByUri[file.uri]?.cloudFileId?.let { cloudByLinkId[it] } != null
+                    // A link made by name may be dropped below, so its file's twin is asked about too.
+                    val row = existingByUri[file.uri]
+                    val pairedById = row?.cloudFileId?.let { cloudByLinkId[it] } != null && row?.linkBasis != LinkBasis.NAME
                     if (pairedById) null else nameDateTwinOf(file)?.linkId
                 }
                 claimedCloudIds =
@@ -635,15 +646,31 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val localHashHex: String? = storedHash
                 ?: if (hashDecides && initialListingComplete && cloudByHash.isNotEmpty())
                     localRepo.sha1(local.uri).also { recomputedHash = it } else null
-            val byContentHash = localHashHex?.takeIf { hashDecides }
-                ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            val localDriveHash = localHashHex?.takeIf { hashDecides }?.let { cloudRepo.cloudContentHash(it) }
+            val byContentHash = localDriveHash?.let { cloudByHash[it] }
                 ?.takeUnless { it.linkId in shortIds }
+            // A link made by name whose file holds other bytes than the photo, and that no longer agrees
+            // with it on the exact name and capture second either, is another photo: it loses the link and
+            // is backed up as its own. One that agrees keeps it (a download this app stamped).
+            val falseNameLink = byId != null && existingSync != null &&
+                existingSync.status == SyncStatus.SYNCED &&
+                existingSync.linkBasis == LinkBasis.NAME &&
+                nameLinkDisproved(
+                    existingSync.linkBasis, localDriveHash, byId.contentHash,
+                    linkShowsAsOne(existingSync.linkBasis, local, byId.displayName, byId.captureTime),
+                )
+            if (falseNameLink) {
+                Log.w(TAG, "reconcile: ${local.displayName} holds other bytes than the Drive photo it was linked to by name; unlinked")
+                falseNameLinks += existingSync!!
+            }
+            val linkedById = byId.takeUnless { falseNameLink }
+            val falseLinkId = byId?.linkId?.takeIf { falseNameLink }
 
             val localCaptureTimeSec = local.dateTaken / 1000L
-            val nameDateTwin = nameDateTwinOf(local)?.takeUnless { it.linkId in shortIds }
+            val nameDateTwin = nameDateTwinOf(local)?.takeUnless { it.linkId in shortIds || it.linkId == falseLinkId }
             val nameCandidate = nameDateTwin
                 ?: cloudByNameSize[NameKey(local.displayName, local.sizeBytes)]
-                    ?.takeIf { it.sizeBytes > 0 && it.linkId !in shortIds }
+                    ?.takeIf { it.sizeBytes > 0 && it.linkId !in shortIds && it.linkId != falseLinkId }
             // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
             // photo carries no ContentHash to check, or strip-on-upload / compress-on-upload changed
             // the bytes so the same photo can't hash-match its rewritten cloud copy. When the cloud
@@ -662,12 +689,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // [contentCertain] below, so it suppresses a duplicate re-upload after a reinstall WITHOUT
             // ever letting free-up-space delete the local on this looser proof.
             val byNameDateRepair = repairTwinLinkId(
-                strong = byId != null || byContentHash != null,
+                strong = linkedById != null || byContentHash != null,
                 hasLegacyNameMatch = byNameUnverifiable != null,
                 nameDateTwinLinkId = nameDateTwin?.linkId,
                 claimedTwinLinkIds = claimedCloudIds,
             )?.let { cloudByLinkId[it] }
-            val matchedCloud = byId ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
+            val matchedCloud = linkedById ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
             if (matchedCloud == null) {
                 Log.d(TAG, "LOCAL_ONLY: ${local.displayName} (size=${local.sizeBytes}, " +
                     "captureSec=$localCaptureTimeSec, existingCloudId=${existingSync?.cloudFileId})")
@@ -682,15 +709,15 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // A direct cloud id counts only for a row with no stored hash to check it by (a download);
             // a stored hash must itself match a cloud copy, so a name-paired row or a file whose stamp
             // was taken off above never earns one through its cloud id alone.
-            val contentCertain = byContentHash != null || (byId != null && storedHash == null)
+            val contentCertain = byContentHash != null || (linkedById != null && storedHash == null)
             val computed = SyncState(
                 linkBasis = linkBasisOf(
                     matchedLinkId = matchedCloud?.linkId,
-                    byIdLinkId = byId?.linkId,
+                    byIdLinkId = linkedById?.linkId,
                     byContentHashLinkId = byContentHash?.linkId,
                     byNameUnverifiable = byNameUnverifiable != null,
                     rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload),
-                    existingBasis = existingSync?.linkBasis,
+                    existingBasis = existingSync?.linkBasis.takeUnless { falseNameLink },
                 ),
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
@@ -722,7 +749,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         return Matched(
             total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris,
-            cloudAbsent.values.toList(), goneCandidates, shortPaired,
+            cloudAbsent.values.toList(), goneCandidates, shortPaired, falseNameLinks,
         )
     }
 
