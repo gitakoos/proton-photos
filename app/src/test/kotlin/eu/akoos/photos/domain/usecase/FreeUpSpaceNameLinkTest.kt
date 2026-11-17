@@ -91,7 +91,7 @@ class FreeUpSpaceNameLinkTest {
         val cloudRepo = mockk<DrivePhotoRepository>(relaxed = true)
         linkDetailHelpers = mockk(relaxed = true)
         localRepo = mockk(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo, unchecked)
+        useCase = FreeUpSpaceUseCase(context, repo, cloudRepo, linkDetailHelpers, localRepo, unchecked, InMemoryShortCloudCopyStore())
         coEvery { localRepo.fileStamp(any()) } returns DeviceFileStamp(1024L, 0L)
         coEvery { localRepo.sha1(any()) } answers { "hash-" + firstArg<String>().substringAfterLast('/') }
         coEvery { cloudRepo.getVolumeId(userId) } returns volumeId
