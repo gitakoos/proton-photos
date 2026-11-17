@@ -457,4 +457,20 @@ class DateSuggestionsTest {
             assertNull("'$query'", DateSuggestions.term(query, english))
         }
     }
+
+    @Test
+    fun `a month or year inside quotes is never a date`() {
+        assertNull(DateSuggestions.term("\"june\"", english))
+        assertNull(DateSuggestions.term("\"beach june", english))
+        assertNull(DateSuggestions.term("“beach 2023”", english))
+        assertTrue(DateSuggestions.suggest("\"june 20", english, years).isEmpty())
+        assertNull(DateSuggestions.relative("\"last week\"", mapOf(RelativeDate.LastWeek to setOf("last week"))))
+    }
+
+    @Test
+    fun `a date typed after a closed quote still becomes one, leaving the quote as typed`() {
+        assertEquals(DateTerm(2023, null, 1), DateSuggestions.term("\"beach june\" 2023", english))
+        assertEquals(DateTerm(null, 6, 1), DateSuggestions.term("\"beach\" june", english))
+        assertEquals("\"beach  june\"", SearchFilter.dropLastWords("\"beach  june\" 2023", 1))
+    }
 }

@@ -139,4 +139,12 @@ class CategorySuggestionsTest {
         assertEquals("beach", SearchFilter.dropLastWords(" beach  live photos ", 2))
         assertEquals("", SearchFilter.dropLastWords("screenshots", 1))
     }
+
+    @Test
+    fun `a category name inside quotes is never a category`() {
+        assertNull(match("\"screenshots\""))
+        assertNull(match("\"beach videos"))
+        assertNull(match("«live photos»"))
+        assertEquals(hit(GalleryFilter.Videos), match("\"beach\" videos"))
+    }
 }

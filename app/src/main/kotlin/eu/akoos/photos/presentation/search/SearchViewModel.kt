@@ -462,7 +462,8 @@ class SearchViewModel @Inject constructor(
         .flatMapLatest { (on, userId) ->
             if (!on) flowOf(RankStep(false, emptyList()))
             else _query.map { it.trim() }.distinctUntilChanged().flatMapLatest { q ->
-                if (q.length < SEMANTIC_MIN_CHARS) flowOf(RankStep(false, emptyList()))
+                // A quoted term asks for that exact text only, so neither content nor theme search runs.
+                if (q.length < SEMANTIC_MIN_CHARS || SearchQuery.hasQuote(q)) flowOf(RankStep(false, emptyList()))
                 else flow {
                     emit(RankStep(true, null))
                     delay(QUERY_SETTLE_MS)
@@ -552,7 +553,7 @@ class SearchViewModel @Inject constructor(
      * gate, so the people are summed up over the library once, not once for each list.
      */
     val peopleSuggestions: StateFlow<List<PersonUi>> = combine(people, debouncedQuery) { named, q ->
-        peopleMatching(named, q)
+        peopleMatching(named, SearchQuery.stripped(q))
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -570,7 +571,7 @@ class SearchViewModel @Inject constructor(
     /** The albums and device folders whose name matches the typed query, by [SearchAlbums.matches].
      *  Empty while the query is blank. */
     val albumSuggestions: StateFlow<List<SearchAlbum>> =
-        combine(albumSource, debouncedQuery) { source, q -> SearchAlbums.matches(source, q) }
+        combine(albumSource, debouncedQuery) { source, q -> SearchAlbums.matches(source, SearchQuery.stripped(q)) }
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -599,7 +600,7 @@ class SearchViewModel @Inject constructor(
                     else -> true
                 }
             }
-            SearchDestinations.match(q, offered.mapNotNull { tile -> text.tileNames[tile]?.let { tile to it } })
+            SearchDestinations.match(SearchQuery.stripped(q), offered.mapNotNull { tile -> text.tileNames[tile]?.let { tile to it } })
         }
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)

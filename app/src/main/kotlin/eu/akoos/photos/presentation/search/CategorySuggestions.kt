@@ -41,7 +41,7 @@ internal object CategorySuggestions {
         foldedNames: Map<GalleryFilter, String>,
         selected: GalleryFilter,
     ): CategorySuggestion? {
-        val tokens = SearchFilter.fold(query.trim()).split(SPACES).filter { it.isNotEmpty() }
+        val tokens = SearchFilter.fold(SearchQuery.pillText(query).trim()).split(SPACES).filter { it.isNotEmpty() }
         val last = tokens.lastOrNull() ?: return null
         val lastTwo = tokens.getOrNull(tokens.size - 2)?.let { "$it $last" }
         val candidates = foldedNames.entries

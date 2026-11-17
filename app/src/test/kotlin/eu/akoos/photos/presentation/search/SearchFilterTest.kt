@@ -824,4 +824,61 @@ class SearchFilterTest {
         assertEquals("december", englishMonths.last())
         assertFalse("a folded name never keeps an accent", hungarianMonths.any { it.any { c -> c.code > 127 } })
     }
+
+    // ── quoted text ───────────────────────────────────────────────────────────────────────────────
+
+    private val phraseLibrary = listOf(
+        local("summer beach party.jpg"), local("beach summer.jpg"), local("forest.jpg"),
+    )
+
+    @Test
+    fun `a quoted phrase finds only that exact text, spaces included`() {
+        assertEquals(
+            listOf("summer beach party.jpg", "beach summer.jpg"),
+            namesFrom(search(phraseLibrary, q = "summer beach")),
+        )
+        assertEquals(listOf("summer beach party.jpg"), namesFrom(search(phraseLibrary, q = "\"summer beach\"")))
+    }
+
+    @Test
+    fun `curly and angle quote marks quote like straight ones`() {
+        for (q in listOf("“summer beach”", "„summer beach“", "«summer beach»")) {
+            assertEquals(q, listOf("summer beach party.jpg"), namesFrom(search(phraseLibrary, q = q)))
+        }
+    }
+
+    @Test
+    fun `a comma inside quotes is part of the text, not a separator`() {
+        val items = listOf(local("paris, france.jpg"), local("paris.jpg"), local("france.jpg"))
+        assertEquals(3, search(items, q = "paris, france").size)
+        assertEquals(listOf("paris, france.jpg"), namesFrom(search(items, q = "\"paris, france\"")))
+    }
+
+    @Test
+    fun `an unclosed quote runs to the end of the query`() {
+        assertEquals(listOf("summer beach party.jpg"), namesFrom(search(phraseLibrary, q = "\"summer beach")))
+    }
+
+    @Test
+    fun `quoted and plain terms keep the comma and space rules`() {
+        assertEquals(
+            listOf("summer beach party.jpg", "forest.jpg"),
+            namesFrom(search(phraseLibrary, q = "\"summer beach\" party, forest")),
+        )
+        assertTrue(search(phraseLibrary, q = "\"summer beach\" forest").isEmpty())
+    }
+
+    @Test
+    fun `a quoted phrase is folded but never spans two fields of the metadata`() {
+        assertEquals(listOf("summer beach party.jpg"), namesFrom(search(phraseLibrary, q = "\"SUMMÉR beach\"")))
+        val june = local("x.jpg", at = juneDay)
+        assertEquals(1, search(listOf(june), q = "2024 june").size)
+        assertEquals(1, search(listOf(june), q = "\"june\"").size)
+        assertTrue(search(listOf(june), q = "\"2024 june\"").isEmpty())
+    }
+
+    @Test
+    fun `quote marks alone are no query`() {
+        assertTrue(search(phraseLibrary, q = "\"\"").isEmpty())
+    }
 }
