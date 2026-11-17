@@ -41,10 +41,12 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
@@ -848,7 +850,11 @@ class UploadPendingUseCaseTest {
         }
 
         val batch = launch { useCase(userId) }
-        withTimeout(10_000L) { allPhotosInFlight.await() }
+        // The uploads run on real worker threads, so the wait is measured in real time: a virtual-time
+        // timeout under runTest fires at once whenever the test scheduler has nothing else to run.
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(10_000L) { allPhotosInFlight.await() }
+        }
         // The photos made it through while the transcode was still running.
         assertTrue(!transcodeRelease.isCompleted)
         transcodeRelease.complete(Unit)

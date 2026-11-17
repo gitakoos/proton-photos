@@ -2088,8 +2088,10 @@ class VideoEditorViewModel @Inject constructor(
         val multiWindow = windows.size > 1
         val keptWindowsUs = windows.map { it.startMs * 1000L..it.endMs * 1000L }
         val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
+        // Only the re-encodes read it here; the trim path reads its own.
+        val location = if (needsReencode) eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUri.toString()) else null
         when {
-            needsReencode && (needsGl || multiWindow) -> {
+            needsReencode && reencodeRendersFrames(needsGl, multiWindow) { streamCopyStartsOnTime(sourceUri, windows) } -> {
                 val crop = cropInSourcePixels(s)
                 VideoReencoder(context).transcode(
                     sourceUri = sourceUri,
@@ -2111,6 +2113,7 @@ class VideoEditorViewModel @Inject constructor(
                     keptWindowsUs = keptWindowsUs,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                     isActive = { isActive },
+                    location = location,
                 )
             }
             needsReencode -> {
@@ -2128,6 +2131,7 @@ class VideoEditorViewModel @Inject constructor(
                     musicAudioGain = s.musicAudioGain,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                     isActive = { isActive },
+                    location = location,
                 )
             }
             else -> muxTrimmedOrReencode(
@@ -2257,6 +2261,7 @@ class VideoEditorViewModel @Inject constructor(
         if (needsReencode) {
             val crop = cropInSourcePixels(s)
             val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
+            val location = eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUriStr)
             VideoReencoder(context).transcode(
                 sourceUri = sourceUri,
                 outputFile = tempFile,
@@ -2277,6 +2282,7 @@ class VideoEditorViewModel @Inject constructor(
                 keptWindowsUs = s.exportWindows().map { it.startMs * 1000L..it.endMs * 1000L },
                 onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                 isActive = { isActive },
+                location = location,
             )
         } else {
             muxTrimmedOrReencode(
@@ -2438,6 +2444,7 @@ class VideoEditorViewModel @Inject constructor(
         try {
             val crop = cropInSourcePixels(s)
             val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
+            val location = eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUriStr)
             VideoReencoder(context).transcode(
                 sourceUri = sourceUri,
                 outputFile = tempFile,
@@ -2460,6 +2467,7 @@ class VideoEditorViewModel @Inject constructor(
                     _state.update { it.copy(saveProgress = p) }
                 },
                 isActive = { isActive },
+                location = location,
             )
             // The encoder stamps its own run time into the output's mvhd, which is the box MediaStore
             // derives DATE_TAKEN from on scan, so the source's capture instant goes back in before the
@@ -2737,8 +2745,7 @@ class VideoEditorViewModel @Inject constructor(
             if (maxBufferSize <= 0) maxBufferSize = 1 shl 20 // 1 MB fallback
 
             muxer.setOrientationHint(orientationDegrees)
-            // The platform muxer writes no location unless told to, so the source's goes in here.
-            location?.let { (lat, lng) -> runCatching { muxer.setLocation(lat.toFloat(), lng.toFloat()) } }
+            writeMuxerLocation(muxer, location)
             muxer.start()
 
             var buffer = ByteBuffer.allocate(maxBufferSize)
@@ -2951,16 +2958,17 @@ class VideoEditorViewModel @Inject constructor(
             val remuxed = stripGps && VideoMetadataStripper.remuxWithoutLocation(
                 context, Uri.fromFile(tempFile).toString(), out,
             )
-            if (stripGps && !remuxed) {
-                // The edited copy carries the source's location, so a failed strip must not upload it.
-                // The callers then keep the edit on the device only, so it reaches Drive through the backup
-                // and that upload's own strip.
+            if (!remuxed) {
+                // No GPS strip requested, or the remux failed: copy the bytes so we can stamp without
+                // touching the device copy.
+                tempFile.inputStream().use { input -> out.outputStream().use { input.copyTo(it) } }
+            }
+            if (stripGps && !remuxed && !eu.akoos.photos.util.Mp4LocationAtoms.erase(out)) {
+                // The edited copy carries the source's location, so a strip that fails both ways must not
+                // upload it. The callers then keep the edit on the device only, so it reaches Drive through
+                // the backup and that upload's own strip.
                 out.delete()
                 error("Location strip of the edited video failed")
-            }
-            if (!remuxed) {
-                // No GPS strip requested: copy the bytes so we can stamp without touching the device copy.
-                tempFile.inputStream().use { input -> out.outputStream().use { input.copyTo(it) } }
             }
             // Stamp the mvhd AFTER any remux (MediaMuxer resets the creation time): the ORIGINAL when only
             // GPS was stripped, or "now" when the timestamp is stripped.
@@ -2991,11 +2999,15 @@ class VideoEditorViewModel @Inject constructor(
                     VideoMetadataStripper.remuxWithoutLocation(context, Uri.fromFile(file).toString(), tmp)
                 }.getOrDefault(false)
                 // A rename in the same directory replaces the file in one step, so a failure part way can
-                // never leave the edited copy truncated; a rename that fails keeps it unstripped.
-                if (ok && !tmp.renameTo(file)) {
-                    Log.w(TAG, "Mirror strip rename failed; edited copy kept unstripped")
-                }
+                // never leave the edited copy truncated.
+                val replaced = ok && tmp.renameTo(file)
                 tmp.delete()
+                // A remux or rename that fails erases the location atom in place instead, so the device
+                // copy never keeps a location the user asked to strip; a file that refuses both fails the
+                // save rather than keep it.
+                if (!replaced && !eu.akoos.photos.util.Mp4LocationAtoms.erase(file)) {
+                    error("Location strip of the edited video failed")
+                }
             }
             eu.akoos.photos.util.Mp4CreationTime.stamp(
                 file, if (stripTimestamp) System.currentTimeMillis() else originalCaptureMs,

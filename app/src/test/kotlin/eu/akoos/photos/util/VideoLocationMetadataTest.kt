@@ -59,6 +59,15 @@ class VideoLocationMetadataTest {
     }
 
     @Test
+    fun `the source fix replaces a QuickTime location key too`() {
+        val entries = mutableSetOf<Metadata.Entry>(isoLocation, fps)
+
+        VideoLocationMetadata.apply(entries, 47.4979 to 19.0402, stripLocation = false)
+
+        assertEquals(setOf(fps, Mp4LocationData(47.4979f, 19.0402f)), entries)
+    }
+
+    @Test
     fun `a source without a fix leaves the entries as they are`() {
         val entries = mutableSetOf<Metadata.Entry>(Mp4LocationData(1f, 2f), isoLocation, timestamp)
 

@@ -69,6 +69,16 @@ private const val DEFAULT_FRAME_US = 33_333L
 internal fun streamCopyStartsOnTime(inPointsUs: List<Long>, keyframeStartsUs: List<Long>, frameUs: Long): Boolean =
     inPointsUs.zip(keyframeStartsUs).all { (inUs, keyUs) -> inUs - keyUs < frameUs }
 
+/**
+ * Whether an edit that has to re-encode something renders its frames through the re-encoder rather
+ * than copying the video and re-mixing only the audio. A crop or colour filter ([needsGl]) and cut
+ * sections ([multiWindow]) need the frames; so does a start between keyframes, which a video copy
+ * would move back to the keyframe before it. [startsOnTime] probes the source only when the other
+ * two leave the copy possible. Pure.
+ */
+internal inline fun reencodeRendersFrames(needsGl: Boolean, multiWindow: Boolean, startsOnTime: () -> Boolean): Boolean =
+    needsGl || multiWindow || !startsOnTime()
+
 /** One frame's duration at [frameRate] frames per second, or 30 fps when the rate is unknown. Pure. */
 internal fun frameDurationUs(frameRate: Float?): Long =
     if (frameRate == null || frameRate.isNaN() || frameRate < 1f) DEFAULT_FRAME_US else (1_000_000f / frameRate).toLong()

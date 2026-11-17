@@ -49,8 +49,9 @@ object VideoLocationMetadata {
 
     /**
      * Rewrites the muxer's metadata [entries] for the output: with [stripLocation] every location entry
-     * goes, so a source that still carries one cannot leak it; otherwise the extractor's location entry
-     * is replaced by [sourceLocation] when that is known. Every other entry stays as it is.
+     * goes, so a source that still carries one cannot leak it; otherwise the extractor's location entries
+     * are replaced by [sourceLocation] when that is known, which leaves the fix in the one `©xyz` atom
+     * [Mp4LocationAtoms.erase] can remove. Every other entry stays as it is.
      */
     @OptIn(UnstableApi::class)
     fun apply(entries: MutableSet<Metadata.Entry>, sourceLocation: Pair<Double, Double>?, stripLocation: Boolean) {
@@ -59,7 +60,7 @@ object VideoLocationMetadata {
             return
         }
         if (sourceLocation == null) return
-        entries.removeAll { it is Mp4LocationData }
+        entries.removeAll { it is Mp4LocationData || isLocationMdta(it) }
         entries.add(Mp4LocationData(sourceLocation.first.toFloat(), sourceLocation.second.toFloat()))
     }
 

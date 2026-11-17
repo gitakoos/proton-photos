@@ -214,7 +214,7 @@ internal class VideoReencoder(private val context: Context) {
             // Rotation via container orientation hint (matches muxTrimmed); GL pixel-rotation double-rotated.
             val outputRotation = ((rotationDegrees % 360) + 360) % 360
             muxer.setOrientationHint(outputRotation)
-            location?.let { (lat, lng) -> runCatching { muxer.setLocation(lat.toFloat(), lng.toFloat()) } }
+            writeMuxerLocation(muxer, location)
 
             videoExtractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
@@ -519,6 +519,8 @@ internal class VideoReencoder(private val context: Context) {
         onProgress: (Float) -> Unit,
         /** Cancellation probe; see [transcode]. */
         isActive: () -> Boolean = { true },
+        /** Latitude and longitude written as the output's location; null writes none. */
+        location: Pair<Double, Double>? = null,
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var videoExtractor: MediaExtractor? = null
@@ -537,6 +539,7 @@ internal class VideoReencoder(private val context: Context) {
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             val outputRotation = ((rotationDegrees % 360) + 360) % 360
             muxer.setOrientationHint(outputRotation)
+            writeMuxerLocation(muxer, location)
             val videoMuxerTrack = muxer.addTrack(videoFormat)
 
             // Audio decision tree — same logic as transcode's audio path.
@@ -824,6 +827,15 @@ internal fun audioNeedsReencode(
     (useOverlayAudio && !overlayIsAac) ||
     overlayHasGaps ||
     overlayDelayed
+
+/**
+ * Writes [location] as [muxer]'s location; the platform muxer writes none unless told to. Must run
+ * before the muxer starts. A null location, or one the muxer refuses as out of range, writes none.
+ */
+internal fun writeMuxerLocation(muxer: MediaMuxer, location: Pair<Double, Double>?) {
+    val (lat, lng) = location ?: return
+    runCatching { muxer.setLocation(lat.toFloat(), lng.toFloat()) }
+}
 
 /**
  * Where a stream copy asked to start at [inPointUs] really begins: [keyframeUs], the sync sample a
