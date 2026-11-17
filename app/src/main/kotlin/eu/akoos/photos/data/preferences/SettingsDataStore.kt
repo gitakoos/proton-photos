@@ -607,6 +607,19 @@ object SettingsKeys {
     fun cloudVerifiedAtKey(userId: String) =
         longPreferencesKey("cloud_verified_at_$userId")
 
+    /** Drive link ids whose copy holds fewer bytes than the device file it came from
+     *  ([eu.akoos.photos.domain.repository.ShortCloudCopyStore]). */
+    val SHORT_CLOUD_COPY_IDS = stringSetPreferencesKey("short_cloud_copy_ids")
+
+    /** Whether the one-time look for the photo editor's short Drive copies ran for this account. Until it
+     *  has, free-up deletes nothing for it. */
+    fun editorCopiesCheckedKey(userId: String) =
+        booleanPreferencesKey("editor_copies_checked_$userId")
+
+    /** When that look first ran for this account, as epoch millis; only copies backed up before it count. */
+    fun editorCopiesCheckStartedKey(userId: String) =
+        longPreferencesKey("editor_copies_check_started_$userId")
+
     /** Notification preferences. Producers read these before posting; the Notifications settings
      *  screen toggles them. NOTIFY_ALBUM_DOWNLOAD and NOTIFY_DELETE_REMINDER are opt-OUTS: absent =
      *  true (shown). NOTIFY_BACKUP_STATUS is the opposite, an opt-IN: absent = false (hidden), since

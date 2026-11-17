@@ -27,6 +27,7 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.InMemoryShortCloudCopyStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -46,7 +47,8 @@ class OwnDeviceWriteRecorderTest {
     private val backedUpAtMs = 1_700_000_000_000L
     private val syncRepo = mockk<SyncStateRepository>(relaxed = true)
     private val cloud = mockk<DrivePhotoRepository> { every { cloudContentHash(any()) } returns null }
-    private val recorder = OwnDeviceWriteRecorder(syncRepo, cloud)
+    private val shortCopies = InMemoryShortCloudCopyStore()
+    private val recorder = OwnDeviceWriteRecorder(syncRepo, cloud, shortCopies)
 
     private fun row(localHash: String, originalHash: String? = null) = SyncState(
         localUri = uri, cloudFileId = "cloud-1", localHash = localHash, cloudHash = "drive",
@@ -64,6 +66,17 @@ class OwnDeviceWriteRecorderTest {
         recorder.record(OwnDeviceWrite(uri, "ORIG", DeviceFileStamp(1000L, afterBackupSec), "written"))
 
         coVerify { syncRepo.recordOwnDeviceWrite(uri, "ORIG", "written") }
+    }
+
+    @Test
+    fun `a rewrite of a file whose Drive copy is short is not recorded`() = runTest {
+        coEvery { syncRepo.getByUri(uri) } returns row(localHash = "uploaded", originalHash = "orig")
+        shortCopies.ids += "cloud-1"
+
+        recorder.record(OwnDeviceWrite(uri, "ORIG", DeviceFileStamp(1000L, afterBackupSec), "written"))
+
+        coVerify(exactly = 0) { syncRepo.recordOwnDeviceWrite(any(), any(), any()) }
+        coVerify(exactly = 0) { syncRepo.recordOwnDeviceWriteOverRow(any(), any(), any(), any()) }
     }
 
     @Test

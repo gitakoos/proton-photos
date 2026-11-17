@@ -27,11 +27,13 @@ import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import eu.akoos.photos.data.preferences.FreeUpUncheckedStoreImpl
+import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
 import eu.akoos.photos.data.repository.DrivePhotoRepositoryImpl
 import eu.akoos.photos.data.repository.LocalMediaRepositoryImpl
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
+import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.CloudPhotoExifRewriter
@@ -61,4 +63,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindFreeUpUncheckedStore(impl: FreeUpUncheckedStoreImpl): FreeUpUncheckedStore
+
+    @Binds
+    @Singleton
+    abstract fun bindShortCloudCopyStore(impl: ShortCloudCopyStoreImpl): ShortCloudCopyStore
 }

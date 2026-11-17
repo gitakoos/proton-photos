@@ -39,6 +39,8 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
+import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import javax.inject.Inject
 
 class FreeUpSpaceUseCase @Inject constructor(
@@ -48,6 +50,7 @@ class FreeUpSpaceUseCase @Inject constructor(
     private val linkDetailHelpers: LinkDetailHelpers,
     private val localRepo: LocalMediaRepository,
     private val uncheckedStore: FreeUpUncheckedStore,
+    private val shortCopies: ShortCloudCopyStore = ShortCloudCopyStoreImpl(context),
 ) {
     /** What a device copy is, measured against the backup it is about to be deleted on. */
     enum class DeviceCopyCheck {
@@ -56,6 +59,13 @@ class FreeUpSpaceUseCase @Inject constructor(
 
         /** The file changed since its backup: kept, and queued to be backed up again. */
         CHANGED,
+
+        /**
+         * Drive's copy holds fewer bytes than the device file it claims to be: kept, the Drive copy recorded
+         * as short ([ShortCloudCopyStore]) so nothing pairs with it again, and the file queued to be backed up
+         * again whole.
+         */
+        SHORT_ON_DRIVE,
 
         /** The file could not be read just now: kept as it is, and checked again next run. */
         UNREADABLE,
@@ -195,14 +205,21 @@ class FreeUpSpaceUseCase @Inject constructor(
         confirmed: List<Pair<SyncState, BatchLinkDto>>,
     ): Checked {
         var unchecked = 0
+        val shortIds = if (confirmed.isEmpty()) emptySet() else shortCopies.all()
+        // Until reconcile has looked for the photo editor's short copies, each row is looked at here.
+        val editorLookSince = if (confirmed.isEmpty() || shortCopies.editorCopiesChecked(userId.id)) {
+            null
+        } else {
+            shortCopies.editorCopiesCheckStartedMs(userId.id, System.currentTimeMillis())
+        }
         val deletable = confirmed.mapNotNull { (row, link) ->
-            when (checkDeviceCopy(userId, row, link)) {
+            when (checkDeviceCopy(userId, row, link, shortIds, editorLookSince)) {
                 DeviceCopyCheck.UNCHANGED -> row
                 DeviceCopyCheck.UNREADABLE, DeviceCopyCheck.UNCHECKED -> {
                     unchecked++
                     null
                 }
-                DeviceCopyCheck.CHANGED -> null
+                DeviceCopyCheck.CHANGED, DeviceCopyCheck.SHORT_ON_DRIVE -> null
             }
         }
         return Checked(deletable, unchecked)
@@ -215,17 +232,42 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [deviceCopyVerdict] decides. A CHANGED file is queued to be backed up again as a photo of its own
      * (the Drive copy stays as it is); an UNCHECKED one is recorded with its file's stamp so the list
      * leaves it out until the file changes.
+     *
+     * Drive's content hash is what the uploading app said the bytes hash to, so a match alone does not
+     * prove Drive holds them: a copy recorded as short ([shortIds]), or one whose stored size is below the
+     * device file's while its hash claims those very bytes, is SHORT_ON_DRIVE. It is recorded as short and
+     * its file queued to be backed up again whole. So is a copy the photo editor may have cut short
+     * ([maybeShortEditorCopy]) while reconcile's look for them has not run ([editorLookSince] set); a file
+     * that cannot be looked up then is kept unchecked.
      */
-    private suspend fun checkDeviceCopy(userId: UserId, row: SyncState, link: BatchLinkDto): DeviceCopyCheck {
+    private suspend fun checkDeviceCopy(
+        userId: UserId,
+        row: SyncState,
+        link: BatchLinkDto,
+        shortIds: Set<String>,
+        editorLookSince: Long?,
+    ): DeviceCopyCheck {
         val stamp = localRepo.fileStamp(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
         val sha1 = localRepo.sha1(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
         val driveHash = link.photo?.contentHash
         val onDrive = !driveHash.isNullOrEmpty() && cloudRepo.cloudContentHash(sha1) == driveHash
-        val verdict = deviceCopyVerdict(row, stamp.sizeBytes, stamp.modifiedSec, sha1, onDrive, driveHash)
+        val editorSuspect = if (editorLookSince == null) {
+            false
+        } else {
+            val file = localRepo.queryByUri(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
+            maybeShortEditorCopy(row, file.displayName, file.mimeType, editorLookSince)
+        }
+        val driveShort = editorSuspect || row.cloudFileId in shortIds ||
+            (onDrive && driveCopyShortOf(link.link.size, stamp.sizeBytes))
+        val verdict = deviceCopyVerdict(row, stamp.sizeBytes, stamp.modifiedSec, sha1, onDrive, driveHash, driveShort)
         try {
             when (verdict) {
                 DeviceCopyCheck.CHANGED ->
                     syncStateRepo.requeueChangedDeviceCopy(userId, row, sha1, stamp.sizeBytes)
+                DeviceCopyCheck.SHORT_ON_DRIVE -> {
+                    row.cloudFileId?.let { shortCopies.add(listOf(it)) }
+                    syncStateRepo.requeueChangedDeviceCopy(userId, row, sha1, stamp.sizeBytes)
+                }
                 DeviceCopyCheck.UNCHECKED ->
                     uncheckedStore.mark(row.localUri, FreeUpUncheckedStore.Kept(stamp, uncheckedRowKey(row)))
                 DeviceCopyCheck.UNCHANGED, DeviceCopyCheck.UNREADABLE -> Unit
@@ -446,6 +488,8 @@ class FreeUpSpaceUseCase @Inject constructor(
          *
          * In order:
          * - bytes that could not be read are UNREADABLE;
+         * - a Drive copy that holds fewer bytes than the device file it claims to be ([driveShort]) is
+         *   SHORT_ON_DRIVE, whatever the hashes say: the device copy may be the only whole one;
          * - bytes Drive holds as they are are UNCHANGED, and so are bytes with the hash the row recorded,
          *   on a row from before device bytes were recorded only when written as the row was stamped;
          * - a Drive copy whose content hash is no longer the one paired is UNCHECKED: the device copy may
@@ -468,8 +512,10 @@ class FreeUpSpaceUseCase @Inject constructor(
             deviceSha1: String?,
             deviceOnDrive: Boolean,
             driveHash: String?,
+            driveShort: Boolean = false,
         ): DeviceCopyCheck {
             if (deviceSha1 == null) return DeviceCopyCheck.UNREADABLE
+            if (driveShort) return DeviceCopyCheck.SHORT_ON_DRIVE
             if (deviceOnDrive) return DeviceCopyCheck.UNCHANGED
             val pairedHash = row.cloudHash
             if (!pairedHash.isNullOrEmpty() && !driveHash.isNullOrEmpty() && pairedHash != driveHash) {

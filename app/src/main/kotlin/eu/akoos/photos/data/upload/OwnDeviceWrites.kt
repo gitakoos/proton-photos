@@ -27,6 +27,7 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -79,15 +80,20 @@ object OwnDeviceWrites {
  * download) holds no such record; for it the old file counts as backed up exactly when free-up would have
  * deleted it as such ([FreeUpSpaceUseCase.deviceCopyVerdict] on the measures taken before the write), and
  * the record is taken only if the row is still as it was read.
+ *
+ * Nothing is recorded for a row paired to a Drive copy recorded as short ([ShortCloudCopyStore]): that
+ * copy is no backup of either the old bytes or the new ones.
  */
 @Singleton
 class OwnDeviceWriteRecorder @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val cloudRepo: DrivePhotoRepository,
+    private val shortCopies: ShortCloudCopyStore,
 ) {
     suspend fun record(write: OwnDeviceWrite) {
         try {
             val row = syncStateRepo.getByUri(write.uri) ?: return
+            if (row.cloudFileId != null && row.cloudFileId in shortCopies.all()) return
             val recorded = write.before.equals(row.originalHash, ignoreCase = true) ||
                 (write.before.equals(row.localHash, ignoreCase = true) && !row.originalHash.isNullOrEmpty())
             if (recorded) {

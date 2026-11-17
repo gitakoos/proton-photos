@@ -55,6 +55,8 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
+import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
+import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -92,6 +94,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     @ApplicationContext private val context: Context,
     @AppScope private val appScope: CoroutineScope,
+    private val shortCopies: ShortCloudCopyStore = ShortCloudCopyStoreImpl(context),
 ) {
     private val gates = ConcurrentHashMap<String, SharedRunGate<Int>>()
 
@@ -189,6 +192,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 .also { Log.d(TAG, "Folder filter applied: ${it.size}/${allLocalItems.size} items") }
         }
 
+        // Before the pairing reads the table, so the copies it finds are already out of the match.
+        checkEditorCopies(userId, allLocalItems, scan.complete, askedAtMs)
+
         val recorded = pairAndRecord(
             userId, allLocalItems, localItems, initialListingComplete, stripOnUpload, compressOnUpload,
             compressVideosOnUpload, scan.complete, scanStartMs,
@@ -211,6 +217,50 @@ class ReconcileSyncStateUseCase @Inject constructor(
         }
 
         return recorded.total
+    }
+
+    /**
+     * The one-time look for the photo editor's short Drive copies ([maybeShortEditorCopy]), over every
+     * backed-up device file the scan found, in or out of the backup folders: each one found has its Drive
+     * copy recorded as short and its device file queued to be backed up again whole.
+     *
+     * It waits for a pass that starts with backed-up rows: on a fresh install or after cleared data the
+     * pairing that follows backs the files up again, and a later pass looks at them. Marked done once the
+     * scan saw the whole device, or saw the file of every row backed up in the window; until then free-up
+     * checks each suspect itself ([FreeUpSpaceUseCase]).
+     */
+    private suspend fun checkEditorCopies(
+        userId: UserId,
+        allLocalItems: List<LocalMediaItem>,
+        scanComplete: Boolean,
+        checkStartedMs: Long,
+    ) {
+        if (shortCopies.editorCopiesChecked(userId.id)) return
+        val byUri = allLocalItems.associateBy { it.uri }
+        val suspects = ArrayList<SyncState>()
+        // Backup times of the rows in the window whose file this scan did not return.
+        val unseen = ArrayList<Long>()
+        var synced = 0
+        forEachRowAt(userId, SyncStatus.SYNCED) { row ->
+            synced++
+            val file = byUri[row.localUri]
+            if (file == null) {
+                row.backedUpAtMs?.takeIf { it >= EDITOR_SHORT_COPIES_SINCE_MS }?.let { unseen += it }
+            } else if (maybeShortEditorCopy(row, file.displayName, file.mimeType, Long.MAX_VALUE)) {
+                suspects += row
+            }
+        }
+        if (synced == 0) return
+        // Fixed at the first look, so a copy the corrected editor uploads while the look waits for a whole
+        // scan is never taken for an old one.
+        val since = shortCopies.editorCopiesCheckStartedMs(userId.id, checkStartedMs)
+        val found = suspects.filter { (it.backedUpAtMs ?: Long.MAX_VALUE) < since }
+        if (found.isNotEmpty()) {
+            shortCopies.add(found.mapNotNull { it.cloudFileId })
+            found.forEach { syncStateRepo.requeueAfterShortCopy(userId, it) }
+            Log.w(TAG, "reconcile: ${found.size} edited copies queued to be backed up again whole")
+        }
+        if (scanComplete || unseen.none { it < since }) shortCopies.markEditorCopiesChecked(userId.id)
     }
 
     /** What [pairAndRecord] leaves for the queue clean-up after it. */
@@ -256,7 +306,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val allLocalUris: Set<String> = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
 
         // Unpacked, so each part can go after its last use below instead of living through every write.
-        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudAbsent, goneCandidates) =
+        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudAbsent, goneCandidates, shortPaired) =
             matchLocals(
                 userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload,
                 allLocalUris, scanComplete, scanStartMs,
@@ -324,10 +374,19 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // intent is never touched here (those rows are LOCAL_ONLY, not in this set).
         syncStateRepo.clearQueuedForSyncedAll(pairedSyncedUris)
 
+        // A Drive copy found short: recorded so nothing pairs with it again, and its device file queued to
+        // be backed up again whole. The device file stays.
+        if (shortPaired.isNotEmpty()) {
+            shortCopies.add(shortPaired.mapNotNull { it.cloudFileId })
+            shortPaired.forEach { syncStateRepo.requeueAfterShortCopy(userId, it) }
+            Log.w(TAG, "reconcile: ${shortPaired.size} Drive copies shorter than their device file; queued again")
+        }
+
         // Every in-scope local this pass wrote a row for; the out-of-scope de-queue below spares these.
-        val inScopeUris = HashSet<String>(plainWrites.size + guardedDemotions.size)
+        val inScopeUris = HashSet<String>(plainWrites.size + guardedDemotions.size + shortPaired.size)
         plainWrites.mapTo(inScopeUris) { it.localUri }
         guardedDemotions.mapTo(inScopeUris) { it.localUri }
+        shortPaired.mapTo(inScopeUris) { it.localUri }
         return Recorded(total, allLocalUris, inScopeUris)
     }
 
@@ -350,6 +409,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val cloudAbsent: List<SyncState>,
         /** SYNCED rows whose device file the scan did not find, by uri, in table order; not yet confirmed. */
         val goneCandidates: Map<String, SyncState>,
+        /** Backed-up rows paired to a Drive copy that holds fewer bytes than their device file. */
+        val shortPaired: List<SyncState>,
     )
 
     /** Matches each in-scope device file to its cloud copy and computes the row it gets. */
@@ -390,8 +451,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val cloudByHash = HashMap<String, PhotoPairingRow>()
         val cloudByNameAndDate = HashMap<NameKey, PhotoPairingRow>()
         val cloudByNameSize = HashMap<NameKey, PhotoPairingRow>()
+        // Drive copies holding fewer bytes than their device file. Their content hash names the whole file,
+        // so they pair with nothing by hash or name; a row paired to one by id is queued to be backed up
+        // again. Grows during the pass as more are found.
+        val shortIds: MutableSet<String> = HashSet(shortCopies.all())
         for (cloud in cloudItems) {
             cloudByLinkId[cloud.linkId] = cloud
+            if (cloud.linkId in shortIds) continue
             val hash = cloud.contentHash
             if (!hash.isNullOrEmpty()) cloudByHash[hash] = cloud
             if (cloud.captureTime > 0) cloudByNameAndDate[NameKey(cloud.displayName, cloud.captureTime)] = cloud
@@ -423,6 +489,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         val plainWrites = ArrayList<SyncState>(localItems.size)
         val guardedDemotions = ArrayList<SyncState>()
+        // Backed-up rows whose Drive copy this pass found short: queued to be backed up again once the
+        // pairing is written.
+        val shortPaired = ArrayList<SyncState>()
         // In-scope local URIs that need an AUTO_FOLDER queue stamp this pass. Covers TWO cases: a
         // freshly-created LOCAL_ONLY row (unmatched, no row before), AND an already-LOCAL_ONLY row that
         // is not yet queued (or is queued AUTO_FOLDER), the latter re-queuing a row after its folder is
@@ -483,7 +552,27 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // The editor owns the row until its upload finishes; touching it here would
             // race the editor and produce a duplicate Drive entry. Same skip shape as HIDDEN.
             if (existingSync?.status == SyncStatus.UPLOADING) continue
-            val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
+            val rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload)
+            val pairedCloud = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
+            // A Drive copy that claims this file's bytes by hash yet stores fewer bytes than the file holds
+            // is not its backup. Only a file still at the size its row recorded is measured so: the row's
+            // hash is then of these bytes, while a file that changed size is the device-change check's. The
+            // content hash is looked up only once the sizes already disagree.
+            if (pairedCloud != null && existingSync != null && existingSync.status == SyncStatus.SYNCED && (
+                    pairedCloud.linkId in shortIds || (
+                        existingSync.sizeBytes == local.sizeBytes &&
+                            driveCopyShortOf(pairedCloud.sizeBytes, local.sizeBytes) &&
+                            hashStandsForDeviceBytes(existingSync) &&
+                            !pairedCloud.contentHash.isNullOrEmpty() &&
+                            cloudRepo.cloudContentHash(existingSync.localHash) == pairedCloud.contentHash
+                        )
+                    )
+            ) {
+                shortIds += pairedCloud.linkId
+                shortPaired += existingSync
+                continue
+            }
+            val byId = pairedCloud
 
             // A backed-up file another app edited in place keeps its uri and so its pairing; only its size
             // shows the change. Such a file is re-hashed: bytes that match the stored hash or the cloud
@@ -526,11 +615,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
                     localRepo.sha1(local.uri).also { recomputedHash = it } else null
             val byContentHash = localHashHex?.takeIf { hashDecides }
                 ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+                ?.takeUnless { it.linkId in shortIds }
 
             val localCaptureTimeSec = local.dateTaken / 1000L
-            val nameDateTwin = nameDateTwinOf(local)
+            val nameDateTwin = nameDateTwinOf(local)?.takeUnless { it.linkId in shortIds }
             val nameCandidate = nameDateTwin
-                ?: cloudByNameSize[NameKey(local.displayName, local.sizeBytes)]?.takeIf { it.sizeBytes > 0 }
+                ?: cloudByNameSize[NameKey(local.displayName, local.sizeBytes)]
+                    ?.takeIf { it.sizeBytes > 0 && it.linkId !in shortIds }
             // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
             // photo carries no ContentHash to check, or strip-on-upload / compress-on-upload changed
             // the bytes so the same photo can't hash-match its rewritten cloud copy. When the cloud
@@ -540,8 +631,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // uploaded. (No name-only fallback either: a recurring camera name like IMG_0001.jpg must
             // never pair on its own.)
             val byNameUnverifiable = nameCandidate?.takeIf {
-                it.contentHash.isNullOrEmpty() ||
-                    uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload)
+                it.contentHash.isNullOrEmpty() || rewritesBytes
             }
             // Last resort, downloads-only: re-pair to a still-present cloud twin by name + EXACT capture
             // second even when that twin HAS a hash. A download stamps the twin's own capture time into
@@ -602,7 +692,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         return Matched(
             total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris,
-            cloudAbsent.values.toList(), goneCandidates,
+            cloudAbsent.values.toList(), goneCandidates, shortPaired,
         )
     }
 

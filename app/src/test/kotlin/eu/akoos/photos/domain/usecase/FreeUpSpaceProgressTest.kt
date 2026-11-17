@@ -85,7 +85,7 @@ class FreeUpSpaceProgressTest {
         // path is covered in FreeUpSpaceVerifyTest, so relaxed stand-ins are enough for construction.
         useCase = FreeUpSpaceUseCase(
             context, repo, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
-            InMemoryFreeUpUncheckedStore(),
+            InMemoryFreeUpUncheckedStore(), InMemoryShortCloudCopyStore(),
         )
     }
 

@@ -137,7 +137,7 @@ class ReconcileSingleFlightTest {
         val listing = mockk<PhotoListingDao>()
         coEvery { listing.getOwnStreamPairingRows(any()) } returns emptyList()
         val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
-        return ReconcileSyncStateUseCase(localRepo, mockk<DrivePhotoRepository>(relaxed = true), syncStateRepo, listing, context, scope)
+        return ReconcileSyncStateUseCase(localRepo, mockk<DrivePhotoRepository>(relaxed = true), syncStateRepo, listing, context, scope, InMemoryShortCloudCopyStore())
     }
 
     @Test
