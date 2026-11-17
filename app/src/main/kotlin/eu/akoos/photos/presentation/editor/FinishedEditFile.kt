@@ -23,7 +23,6 @@
 package eu.akoos.photos.presentation.editor
 
 import eu.akoos.photos.domain.entity.SyncState
-import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import me.proton.core.domain.entity.UserId
 import java.io.File
@@ -45,42 +44,51 @@ internal inline fun finishEditFile(file: File, writes: () -> Unit): FinishedEdit
     )
 }
 
-/**
- * Whether the copy uploaded for a synced edit holds the bytes of its device copy. The upload is a second
- * encoding of the edit, so only the bytes show it: the device file's SHA-1 [deviceSha1] is the upload's
- * [uploadSha1], or the device bytes put through the upload strip ([strippedDeviceSha1], read only when the
- * first does not match) are. A device file that could not be read proves nothing.
- */
-internal inline fun editCopyOnDrive(deviceSha1: String?, uploadSha1: String, strippedDeviceSha1: () -> String?): Boolean {
-    if (deviceSha1 == null) return false
-    if (deviceSha1.equals(uploadSha1, ignoreCase = true)) return true
-    return strippedDeviceSha1()?.equals(uploadSha1, ignoreCase = true) == true
+/** The type a saved edit's file holds, as its upload names it. */
+internal enum class SavedImageType(val mimeType: String, val extension: String) {
+    JPEG("image/jpeg", "jpg"),
+    PNG("image/png", "png"),
+    WEBP("image/webp", "webp"),
 }
 
+/** The type [header], the first bytes of a file the editor saved, shows: null for anything else. Pure. */
+internal fun savedImageType(header: ByteArray): SavedImageType? = when {
+    header.size >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte() ->
+        SavedImageType.JPEG
+    header.size >= 8 && header.copyOfRange(0, 8).contentEquals(PNG_SIGNATURE) -> SavedImageType.PNG
+    header.size >= 12 && String(header, 0, 4, Charsets.US_ASCII) == "RIFF" &&
+        String(header, 8, 4, Charsets.US_ASCII) == "WEBP" -> SavedImageType.WEBP
+    else -> null
+}
+
+/** [savedImageType] of [file]'s first bytes. */
+internal fun savedImageType(file: File): SavedImageType? {
+    val header = ByteArray(12)
+    var read = 0
+    file.inputStream().use { input ->
+        while (read < header.size) {
+            val n = input.read(header, read, header.size - read)
+            if (n < 0) break
+            read += n
+        }
+    }
+    return savedImageType(header.copyOf(read))
+}
+
+private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+
 /**
- * Writes [backedUp], the SYNCED row of a synced edit's device copy, once its upload is in. A device copy whose
- * bytes are proven on Drive ([provenDeviceSha1]) records them as what was backed up. Any other has its Drive
- * copy recorded as one that cannot vouch for the device file ([ShortCloudCopyStore.addUnverifiable]) before
- * the row is written, so free-up keeps that file for good.
+ * Writes [backedUp], the SYNCED row of a synced edit's device copy, once its upload is in, and records
+ * [deviceSha1], the device copy's bytes the upload was made from, as what was backed up: the same record a
+ * backup of the file makes, so free-up measures the device file against those bytes.
  */
 internal suspend fun recordSyncedEditCopy(
     repo: SyncStateRepository,
-    shortCopies: ShortCloudCopyStore,
     userId: UserId,
-    provenDeviceSha1: String?,
+    deviceSha1: String,
     backedUp: SyncState,
 ) {
-    val linkId = backedUp.cloudFileId
-    if (provenDeviceSha1 == null && linkId != null) {
-        try {
-            shortCopies.addUnverifiable(listOf(linkId))
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            // Free-up still keeps an edited copy whose bytes are not on Drive by its name.
-        }
-    }
     repo.upsert(backedUp, userId)
     // After the upsert, which clears the recorded device bytes of a row whose hash or link changed.
-    if (provenDeviceSha1 != null) repo.setOriginalHash(backedUp.localUri, provenDeviceSha1)
+    repo.setOriginalHash(backedUp.localUri, deviceSha1)
 }

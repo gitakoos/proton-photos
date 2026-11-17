@@ -52,7 +52,7 @@ import org.junit.Test
 
 /**
  * A device copy linked to its Drive photo by a name rule alone is never counted as backed up: free-up
- * keeps it, reports it once as a copy it could not check, and leaves it out of the next list.
+ * does not list it, and the deletion check keeps it and reports it as a copy it could not check.
  */
 class FreeUpSpaceNameLinkTest {
 
@@ -107,13 +107,14 @@ class FreeUpSpaceNameLinkTest {
     }
 
     @Test
-    fun `a copy linked by name is kept, reported once, and left out of the next list`() = runTest {
+    fun `a copy linked by name is not listed, and kept when handed to the deletion`() = runTest {
         val proven = row(1, LinkBasis.PROVEN)
         val byName = row(2, LinkBasis.NAME)
         val rewritten = row(3, LinkBasis.NAME_REWRITTEN)
         coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(proven, byName, rewritten)
+        assertEquals(listOf(proven), useCase.candidates(userId, Long.MAX_VALUE))
 
-        val result = useCase.verifyAndReclaim(userId, useCase.candidates(userId, Long.MAX_VALUE))
+        val result = useCase.verifyAndReclaim(userId, listOf(proven, byName, rewritten))
 
         assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 1, unchecked = 2), result)
         coVerify(exactly = 1) { repo.updateStatusAndDeleteLocal(proven.localUri, SyncStatus.CLOUD_ONLY) }
@@ -124,13 +125,6 @@ class FreeUpSpaceNameLinkTest {
         coVerify(exactly = 0) { repo.markQueued(byName.localUri, any(), any()) }
         assertTrue(byName.localUri in unchecked.entries)
         assertTrue(rewritten.localUri in unchecked.entries)
-
-        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(byName, rewritten)
-        assertEquals(
-            "reported once: not listed again while the file is as it was",
-            emptyList<SyncState>(),
-            useCase.candidates(userId, Long.MAX_VALUE),
-        )
     }
 
     @Test
@@ -140,7 +134,7 @@ class FreeUpSpaceNameLinkTest {
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
-        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 0, unchecked = 1), result)
+        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 0), result)
         verify(exactly = 0) { resolver.delete(any(), any(), any()) }
     }
 

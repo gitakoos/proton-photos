@@ -59,9 +59,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The device copy of an edit saved from a backed-up photo is backed up by the editor's own upload, a second
- * encoding of the edit. Free-up may delete that device copy only when its bytes are proven on Drive. The rows
- * are written through the real sync table, the way the editor writes them.
+ * The device copy of an edit saved from a backed-up photo is backed up by the editor's own upload. Free-up lists
+ * and deletes that device copy only when its bytes are proven on Drive. The rows are written through the real
+ * sync table, the way the editor writes them.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -144,9 +144,9 @@ class SyncedEditCopyFreeUpTest {
     private suspend fun storedRow(): SyncState = repo.getByUri(uri)!!
 
     @Test
-    fun `an edited copy written as backed up while its bytes are not on Drive is no longer deleted`() = runTest {
-        // A synced PNG edited and saved as a copy: the device copy was a PNG, the upload a JPEG, and the row
-        // was written as an ordinary backup, as before this change.
+    fun `an edited copy written as backed up while its bytes are not on Drive is neither listed nor deleted`() = runTest {
+        // A row an earlier version wrote: a synced PNG edited and saved as a copy, the device copy a PNG, the
+        // upload a JPEG encoded apart, and the row written as an ordinary backup of the device copy.
         repo.upsert(placeholder().backedUp(), userId)
         deviceFile("Screenshot_1_edit_20261117_094842.png", sha1 = "b2".repeat(20))
         val row = storedRow()
@@ -158,58 +158,76 @@ class SyncedEditCopyFreeUpTest {
             FreeUpSpaceUseCase.DeviceCopyCheck.UNCHANGED,
             FreeUpSpaceUseCase.deviceCopyVerdict(row, deviceSize, savedAtSec, "b2".repeat(20), false, "drive-$uploadSha1"),
         )
+        assertTrue(useCase.candidates(userId, Long.MAX_VALUE).isEmpty())
         assertTrue(useCase.confirmForDeletion(userId, listOf(row)).isEmpty())
         assertTrue(uri in unchecked.entries)
     }
 
     @Test
-    fun `an edited copy that holds the uploaded bytes is recorded with them and may be freed`() = runTest {
+    fun `an edited copy an earlier version recorded is listed and freed when it holds the uploaded bytes`() = runTest {
         // The run's case: a JPEG copy whose device file is the file the editor uploaded.
-        recordSyncedEditCopy(repo, shortCopies, userId, provenDeviceSha1 = uploadSha1, backedUp = placeholder().backedUp())
+        repo.upsert(placeholder().backedUp(), userId)
         deviceFile("pfpt_ec_edit_20261117_094842.jpg", sha1 = uploadSha1)
         val row = storedRow()
-        assertEquals(SyncStatus.SYNCED, row.status)
-        assertEquals(uploadSha1, row.originalHash)
-        assertTrue(shortCopies.unverifiableIds.isEmpty())
 
         assertEquals(listOf(row), useCase.candidates(userId, Long.MAX_VALUE))
         assertEquals(listOf(row), useCase.confirmForDeletion(userId, listOf(row)))
     }
 
     @Test
-    fun `an edited copy whose upload was stripped of its metadata may be freed once that is proven`() = runTest {
-        val deviceSha1 = "c3".repeat(20)
-        recordSyncedEditCopy(repo, shortCopies, userId, provenDeviceSha1 = deviceSha1, backedUp = placeholder().backedUp())
-        deviceFile("pfpt_ec_edit_20261117_094842.jpg", sha1 = deviceSha1)
+    fun `an edited PNG copy backed up from its own bytes is listed and may be freed`() = runTest {
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D)
+        assertEquals(SavedImageType.PNG, savedImageType(png))
+        assertEquals("image/png", SavedImageType.PNG.mimeType)
+        assertEquals("png", SavedImageType.PNG.extension)
+        // The upload sent the device copy's bytes as they are, so its hash is theirs.
+        recordSyncedEditCopy(repo, userId, deviceSha1 = uploadSha1, backedUp = placeholder().backedUp())
+        deviceFile("Screenshot_1_edit_20261117_094842.png", sha1 = uploadSha1)
         val row = storedRow()
-        assertEquals(deviceSha1, row.originalHash)
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals(uploadSha1, row.originalHash)
 
+        assertEquals(listOf(row), useCase.candidates(userId, Long.MAX_VALUE))
         assertEquals(listOf(row), useCase.confirmForDeletion(userId, listOf(row)))
     }
 
     @Test
-    fun `an edited copy whose bytes are not proven on Drive is kept for good, whatever its name`() = runTest {
-        recordSyncedEditCopy(repo, shortCopies, userId, provenDeviceSha1 = null, backedUp = placeholder().backedUp())
-        deviceFile("renamed.jpg", sha1 = "d4".repeat(20))
+    fun `an edited copy whose upload was stripped of its metadata is recorded like a backup and may be freed`() = runTest {
+        val deviceSha1 = "c3".repeat(20)
+        recordSyncedEditCopy(repo, userId, deviceSha1 = deviceSha1, backedUp = placeholder().backedUp())
+        deviceFile("pfpt_ec_edit_20261117_094842.jpg", sha1 = deviceSha1)
         val row = storedRow()
-        assertEquals(SyncStatus.SYNCED, row.status)
-        assertNull(row.originalHash)
-        assertEquals(setOf(linkId), shortCopies.unverifiableIds)
+        assertEquals(deviceSha1, row.originalHash)
 
-        assertTrue(useCase.confirmForDeletion(userId, listOf(row)).isEmpty())
-        assertTrue(uri in unchecked.entries)
+        assertEquals(listOf(row), useCase.candidates(userId, Long.MAX_VALUE))
+        assertEquals(listOf(row), useCase.confirmForDeletion(userId, listOf(row)))
     }
 
     @Test
-    fun `the upload stands for the device copy only when the bytes match`() {
-        var strippedRead = false
-        assertTrue(editCopyOnDrive(uploadSha1, uploadSha1) { strippedRead = true; null })
-        assertFalse("the strip is not run for bytes that already match", strippedRead)
-        assertTrue(editCopyOnDrive(uploadSha1.uppercase(), uploadSha1) { null })
-        assertTrue(editCopyOnDrive("e5".repeat(20), uploadSha1) { uploadSha1 })
-        assertFalse(editCopyOnDrive("e5".repeat(20), uploadSha1) { "f6".repeat(20) })
-        assertFalse(editCopyOnDrive("e5".repeat(20), uploadSha1) { null })
-        assertFalse(editCopyOnDrive(null, uploadSha1) { uploadSha1 })
+    fun `a copy whose Drive copy cannot vouch for it is neither listed nor deleted`() = runTest {
+        repo.upsert(placeholder().backedUp(), userId)
+        shortCopies.unverifiableIds += linkId
+        deviceFile("renamed.jpg", sha1 = "d4".repeat(20))
+        val row = storedRow()
+
+        assertTrue(useCase.candidates(userId, Long.MAX_VALUE).isEmpty())
+        assertTrue(useCase.confirmForDeletion(userId, listOf(row)).isEmpty())
+    }
+
+    @Test
+    fun `a copy linked by a name rule alone is not listed`() = runTest {
+        repo.upsert(placeholder().backedUp().copy(linkBasis = LinkBasis.NAME), userId)
+        deviceFile("IMG_1.jpg", sha1 = uploadSha1)
+
+        assertTrue(useCase.candidates(userId, Long.MAX_VALUE).isEmpty())
+    }
+
+    @Test
+    fun `the saved type is read from the file's first bytes`() {
+        assertEquals(SavedImageType.JPEG, savedImageType(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE1.toByte())))
+        assertEquals(SavedImageType.WEBP, savedImageType("RIFF0000WEBPVP8 ".toByteArray(Charsets.US_ASCII)))
+        assertNull(savedImageType("GIF89a".toByteArray(Charsets.US_ASCII)))
+        assertNull(savedImageType(ByteArray(0)))
     }
 
     @Test

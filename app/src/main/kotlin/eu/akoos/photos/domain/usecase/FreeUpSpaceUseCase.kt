@@ -131,17 +131,54 @@ class FreeUpSpaceUseCase @Inject constructor(
      *
      * A copy an earlier run kept unchecked ([DeviceCopyCheck.UNCHECKED]) stays out while its file is
      * as it was then; one written since comes back to be checked again.
+     *
+     * Nothing the deletion check keeps whatever it measures is listed either: a copy linked by a name rule
+     * alone ([keptForNameLink]), one whose Drive copy is recorded as short or as unable to vouch for it
+     * ([ShortCloudCopyStore]), and a copy the photo editor saved whose bytes nothing proves on Drive
+     * ([withoutUnprovenEditorCopies]). What only the deletion can tell (a file changed since its backup, a
+     * Drive copy gone since) is still measured there.
      */
     suspend fun candidates(
         userId: UserId,
         olderThanMs: Long,
         protectDownloaded: Boolean = false,
     ): List<SyncState> = withContext(Dispatchers.IO) {
-        withoutUnchecked(
-            syncStateRepo.getSyncedBefore(userId, olderThanMs)
-                .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) },
+        val rows = syncStateRepo.getSyncedBefore(userId, olderThanMs)
+            .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) }
+        val keptIds = if (rows.isEmpty()) emptySet() else shortCopies.all() + shortCopies.unverifiable()
+        withoutUnprovenEditorCopies(
+            withoutUnchecked(rows.filter { it.linkBasis == LinkBasis.PROVEN && it.cloudFileId !in keptIds }),
         )
     }
+
+    /**
+     * [rows] without the copies the photo editor saved that record no backed-up device bytes and whose file
+     * does not hold the bytes their row says were uploaded: the deletion check keeps those
+     * ([deviceCopyVerdict]'s editorCopy), so they are not offered. A file whose name or bytes cannot be read
+     * now is left out too. Names come from one device scan when one is needed.
+     */
+    private suspend fun withoutUnprovenEditorCopies(rows: List<SyncState>): List<SyncState> {
+        val unrecorded = rows.filter { it.originalHash.isNullOrEmpty() }
+        if (unrecorded.isEmpty()) return rows
+        val scanned = try {
+            localRepo.freshMedia().associate { it.uri to it.displayName }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        val left = HashSet<String>()
+        for (row in unrecorded) {
+            val name = scanned[row.localUri] ?: localRepo.queryByUri(row.localUri)?.displayName
+            val keep = name != null && (!isEditorCopyName(name) || holdsUploadedBytes(row))
+            if (!keep) left += row.localUri
+        }
+        return if (left.isEmpty()) rows else rows.filter { it.localUri !in left }
+    }
+
+    /** Whether [row]'s device file holds the bytes its row records as uploaded. */
+    private suspend fun holdsUploadedBytes(row: SyncState): Boolean =
+        row.localHash.isNotEmpty() && localRepo.sha1(row.localUri)?.equals(row.localHash, ignoreCase = true) == true
 
     /** What of [row] its UNCHECKED verdict was read from, so a row backed up or recorded again is checked again. */
     private fun uncheckedRowKey(row: SyncState): String =

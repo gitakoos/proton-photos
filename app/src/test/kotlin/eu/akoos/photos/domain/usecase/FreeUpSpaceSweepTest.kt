@@ -523,7 +523,9 @@ class FreeUpSpaceSweepTest {
         coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to claimingLink("cloud-1", "hash-1", size = 4096L))
 
-        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+        // Not offered, and kept and queued again when the deletion is handed it anyway.
+        assertTrue(useCase.candidates(userId, Long.MAX_VALUE).isEmpty())
+        val result = useCase.verifyAndReclaim(userId, listOf(row))
 
         assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
         coVerify(exactly = 0) { repo.updateStatusAndDeleteLocal(any(), any()) }
