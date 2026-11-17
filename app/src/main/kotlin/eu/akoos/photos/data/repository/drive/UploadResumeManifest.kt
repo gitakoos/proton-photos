@@ -85,6 +85,10 @@ internal data class UploadResumeManifest(
     @SerialName("totalBlocks") val totalBlocks: Int,
     @SerialName("blockSize") val blockSize: Int,
     @SerialName("sizeBytes") val sizeBytes: Long,
+    /** SHA-1 hex of the bytes the blocks were encrypted from. A resume needs the same one: a file
+     *  rewritten at the same length is uploaded from scratch. Null in a record written before it was kept,
+     *  which is then never resumed. */
+    @SerialName("contentSha1") val contentSha1: String? = null,
     /** Server-issued file identifier from createFileByVolume. Reused on
      *  resume so the cached blocks correlate to the right Drive record. If the server
      *  has TTL-cleaned this stale uncommitted file by the time we resume, commit fails

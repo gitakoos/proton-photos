@@ -81,7 +81,21 @@ class SdkPhotoUpload(
      * draft, so a draft is never dropped once its commit may have gone through.
      */
     val matchingBefore: List<SdkUploadResult>? = null,
-)
+) {
+    /** What the SDK read of [uploadUri], filled in once it asked for the SHA-1 (see [SdkSentBytes]). */
+    val sent = SdkSentBytes()
+}
+
+/**
+ * The bytes an SDK upload actually read: how many, and their SHA-1, which is also the SHA-1 Drive is
+ * told. [count] stays -1 until the SDK asks for the SHA-1, which it does once the stream is read.
+ */
+class SdkSentBytes {
+    @Volatile var count: Long = -1L
+        internal set
+    @Volatile var sha1: ByteArray? = null
+        internal set
+}
 
 private const val TAG = "SdkPhotoUploadOps"
 
@@ -130,12 +144,19 @@ class SdkPhotoUploadOps @Inject constructor(
                 coroutineScope {
                     val input = eu.akoos.photos.data.localcrypto.PlainContent.open(context, upload.uploadUri)
                         ?: throw SdkUploadException("the file cannot be opened")
-                    input.use { stream ->
+                    // Counted and hashed on the way through: Drive is told the SHA-1 of the bytes the SDK
+                    // read, and the caller compares them with the ones it recorded.
+                    eu.akoos.photos.data.repository.drive.Sha1CountingInputStream(input).use { stream ->
                         val controller = uploader.uploadFromStream(
                             coroutineScope = this,
                             channel = Channels.newChannel(stream),
                             thumbnails = upload.thumbnails,
-                            sha1Provider = { upload.sha1 },
+                            sha1Provider = {
+                                stream.sha1().also { digest ->
+                                    upload.sent.count = stream.count
+                                    upload.sent.sha1 = digest
+                                }
+                            },
                         )
                         try {
                             val progress = controller.progressFlow

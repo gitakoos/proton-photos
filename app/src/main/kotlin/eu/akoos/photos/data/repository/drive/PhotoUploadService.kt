@@ -37,6 +37,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -211,6 +212,8 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
  * [retryUploadCall]'s `shouldRetry` so the two decisions stay aligned.
  */
 internal fun isRetryableUploadFailure(e: Throwable): Boolean {
+    // A file unlike the one its caller measured and hashed is hashed again by the caller, never resumed.
+    if (generateSequence(e) { it.cause }.take(4).any { it is UploadSourceChangedException }) return false
     // Local encrypted bytes never become a photo, however often they are tried.
     if (generateSequence(e) { it.cause }.take(4).any { it is eu.akoos.photos.data.localcrypto.EncryptedBytesException }) return false
     // Ask the shared predicate first: it reads the HTTP status off the error itself, which is the
@@ -274,12 +277,17 @@ class PhotoUploadService @Inject constructor(
     // running in parallel. The global cryptoLock in DriveCryptoHelper still serialises PGP work.
 
     /**
-     * Encrypts and uploads [item] to the Photos volume. [sha1HexContentDigest] MUST be the
+     * Encrypts and uploads [requestedItem] to the Photos volume. [sha1HexContentDigest] MUST be the
      * lowercase SHA-1 hex of the plaintext bytes (see [DrivePhotoRepository.uploadFile]).
+     *
+     * Exactly the bytes [uploadUri] holds go up: the length is measured here, whatever
+     * [LocalMediaItem.sizeBytes] says, and the upload is refused before its commit
+     * ([UploadSourceChangedException]) when the bytes read are not that length or do not hash to
+     * [sha1HexContentDigest]. So the SHA-1 a caller records for a returned link is the SHA-1 of what Drive holds.
      */
     suspend fun uploadFile(
         userId: UserId,
-        item: LocalMediaItem,
+        requestedItem: LocalMediaItem,
         sha1HexContentDigest: String,
         uploadUri: String,
         xAttrMetadata: UploadXAttrMetadata = UploadXAttrMetadata(),
@@ -293,6 +301,18 @@ class PhotoUploadService @Inject constructor(
     ): String =
         withContext(Dispatchers.IO) {
             val hash = sha1HexContentDigest
+            // The size a caller recorded can be older than the file: a write after it was measured (an
+            // EXIF block put back, an in-place strip) would otherwise be cut off the end, or announced
+            // longer than it is. Every step below, the SDK's declared size and the xAttr included, takes
+            // the length the file has now.
+            val measuredBytes = uploadLength(sourceSizeBytes(Uri.parse(uploadUri)), requestedItem.sizeBytes)
+            if (measuredBytes != requestedItem.sizeBytes) {
+                Log.w(TAG, "uploadFile: recorded size ${requestedItem.sizeBytes} differs from the file's $measuredBytes; sending $measuredBytes")
+                eu.akoos.photos.util.SyncDiagnostics.log(
+                    "upload ${eu.akoos.photos.util.uploadLogRef(requestedItem.uri)}: recorded size ${requestedItem.sizeBytes}, file $measuredBytes",
+                )
+            }
+            val item = requestedItem.copy(sizeBytes = measuredBytes)
             // Setup timing (in-app log): the gap from here to the encrypt loop is the create-photo /
             // create-revision / verification-code API round-trips (and any rate-limit backoff inside
             // them) — the suspected real cost behind a "slow encryption".
@@ -386,6 +406,9 @@ class PhotoUploadService @Inject constructor(
             // Set just before the commit request goes out. From then on a cancel cannot tell whether the
             // photo landed, so the draft is no longer a cleanup target.
             var commitStarted = false
+            // The SHA-1 of the file read once more, start to end, alongside the encryption and the CDN
+            // upload, and checked against the caller's before the commit.
+            var contentCheck: kotlinx.coroutines.Deferred<Result<String?>>? = null
             try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
@@ -406,7 +429,9 @@ class PhotoUploadService @Inject constructor(
             val priorManifest = UploadResumeManifest.load(tempDir)?.takeIf { m ->
                 m.totalBlocks == numBlocks &&
                     m.blockSize == blockSize &&
-                    m.sizeBytes == totalBytes
+                    m.sizeBytes == totalBytes &&
+                    // Blocks encrypted from other bytes of the same length are never sent with these.
+                    m.contentSha1.equals(hash, ignoreCase = true)
             }
             if (priorManifest == null && tempDir.listFiles()?.isNotEmpty() == true) {
                 // Tempdir present but no usable manifest (older format or changed source) — wipe
@@ -601,6 +626,7 @@ class PhotoUploadService @Inject constructor(
                             totalBlocks = numBlocks,
                             blockSize = blockSize,
                             sizeBytes = totalBytes,
+                            contentSha1 = hash,
                             fileId = fileId,
                             revisionId = revisionId,
                             useVolumeEndpoints = useVolumeEndpoints,
@@ -661,13 +687,9 @@ class PhotoUploadService @Inject constructor(
                                         // reaches an already-running block.
                                         val offset = idx.toLong() * blockSize
                                         // Size the buffer to the remaining bytes (final block may be
-                                        // short). When sizeBytes is missing (e.g. MediaStore SIZE not
-                                        // yet published for a fresh photo) ask for a full block so we
-                                        // read what's there rather than truncate.
-                                        val want = if (totalBytes > 0L)
-                                            minOf(blockSize.toLong(), totalBytes - offset).toInt()
-                                                .coerceAtLeast(0)
-                                        else blockSize
+                                        // short). totalBytes is the file's length measured at the start.
+                                        val want = minOf(blockSize.toLong(), totalBytes - offset).toInt()
+                                            .coerceAtLeast(0)
                                         if (want == 0) {
                                             // Zero-length tail block; filterNotNull() drops this slot.
                                             return@withPermit
@@ -679,7 +701,13 @@ class PhotoUploadService @Inject constructor(
                                             if (n <= 0) break
                                             totalRead += n
                                         }
-                                        if (totalRead == 0) return@withPermit
+                                        // A file that ends early changed after it was measured; nothing
+                                        // short of the whole block goes up.
+                                        if (totalRead < want) {
+                                            throw UploadSourceChangedException(
+                                                "block $idx read $totalRead of $want bytes; the file changed during the upload",
+                                            )
+                                        }
                                         val chunk = if (totalRead == buf.array().size) buf.array()
                                             else buf.array().copyOf(totalRead)
 
@@ -751,6 +779,10 @@ class PhotoUploadService @Inject constructor(
                 onProgress(UploadPhase.Encrypting, denom, denom)
             }
             val blockInfos: List<BlockSpill> = blockArr.filterNotNull()
+            // Every byte of the measured length is in a block, and the file still has that length.
+            requireAllBytesRead(blockInfos.sumOf { it.plaintextSize }, totalBytes)
+            requireAllBytesRead(sourceSizeBytes(Uri.parse(uploadUri)) ?: totalBytes, totalBytes)
+            contentCheck = async(Dispatchers.IO) { runCatching { sha1HexCancellable(uploadUri) } }
             Log.d(TAG, "uploadFile: spilled ${blockInfos.size} block(s) to ${tempDir.absolutePath}")
             eu.akoos.photos.util.SyncDiagnostics.log(
                 "upload $logRef ${totalBytes / 1024}KB: ${blockInfos.size} blocks, " +
@@ -1004,6 +1036,12 @@ class PhotoUploadService @Inject constructor(
             }
             // From here a cancel of this one photo lets it finish: once the commit is out, whether it
             // landed cannot be told. A cancel that came first stops it now, while the draft can still go.
+            // The bytes encrypted above are the ones the caller hashed: the same length, and the file read
+            // whole hashes to the SHA-1 Drive is told. Anything else is never committed.
+            requireSameContent(hash, contentCheck.await().getOrElse { e ->
+                if (e is CancellationException) throw e
+                null
+            })
             if (!eu.akoos.photos.data.transfer.ItemCommitPoint.reach()) {
                 throw CancellationException("upload cancelled by the user before its commit")
             }
@@ -1072,6 +1110,7 @@ class PhotoUploadService @Inject constructor(
                 .onFailure { Log.w(TAG, "uploadFile: success cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
             fileId
             } catch (e: CancellationException) {
+                contentCheck?.cancel()
                 // User-initiated cancel (back-out of the editor, app being closed, parent
                 // batch being torn down). No point hoarding a partial upload's blocks
                 // since the user explicitly walked away. Wipe and rethrow so structured
@@ -1103,6 +1142,7 @@ class PhotoUploadService @Inject constructor(
                 }
                 throw e
             } catch (e: Throwable) {
+                contentCheck?.cancel()
                 // Non-cancel failure. Split by retry-eligibility:
                 //  - retryable (network / IO / transient) → KEEP tempDir so the caller's
                 //    next batch run resumes from the manifest instead of restarting from
@@ -1293,6 +1333,22 @@ class PhotoUploadService @Inject constructor(
                 eu.akoos.photos.data.sdk.sdkUploadAfterFailure(before, findUploadedOrNull(userId, item.displayName, sha1))
             },
         )
+        // Drive was told the SHA-1 of the bytes the SDK read. A photo whose bytes are not the ones the caller
+        // measured and hashed is moved to Drive's trash (it is committed, so only the trash takes it), and no
+        // caller records it as the copy of its file.
+        val sentCount = upload.sent.count
+        val sentSha1 = upload.sent.sha1
+        if (sentSha1 != null && sdkSentBytesDiffer(sentCount, sentSha1, item.sizeBytes, sha1)) {
+            Log.w(TAG, "uploadViaSdk: sent $sentCount bytes unlike the ${item.sizeBytes}-byte file it was given; trashing ${result.linkId}")
+            withContext(NonCancellable) {
+                runCatching {
+                    apiProvider.get<DriveApiService>(userId).invoke {
+                        trashPhotos(volumeId, eu.akoos.photos.data.api.dto.DeleteLinksRequest(listOf(result.linkId)))
+                    }.valueOrThrow
+                }.onFailure { Log.w(TAG, "uploadViaSdk: trashing ${result.linkId} failed: ${it.message}") }
+            }
+            throw UploadSourceChangedException("the SDK read other bytes than the file it was given")
+        }
         return SdkUploadedPhoto(result.linkId, result.revisionId, thumbnails[me.proton.drive.sdk.entity.ThumbnailType.THUMBNAIL])
     }
 
@@ -1313,6 +1369,22 @@ class PhotoUploadService @Inject constructor(
     private fun sourceSizeBytes(uri: Uri): Long? = runCatching {
         context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
     }.getOrNull()?.takeIf { it > 0L }
+
+    /** Hex SHA-1 of every byte [uri] holds, read start to end; stops when its coroutine is cancelled. */
+    private suspend fun sha1HexCancellable(uri: String): String? {
+        val input = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
+        input.use { stream ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                kotlin.coroutines.coroutineContext.ensureActive()
+                val read = stream.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
 
     /**
      * Applies the favourite the user gave [localUri] to the photo it was just uploaded as, through
@@ -1604,6 +1676,13 @@ internal suspend fun deleteDraftTracked(
     if (dropped) runCatching { forget() }
     return dropped
 }
+
+/**
+ * Whether an SDK upload read other bytes than its file: [sentCount] bytes hashing to [sentSha1], against the
+ * [expectedBytes] measured and the [expectedSha1] the caller recorded. Pure.
+ */
+internal fun sdkSentBytesDiffer(sentCount: Long, sentSha1: ByteArray, expectedBytes: Long, expectedSha1: ByteArray): Boolean =
+    sentCount != expectedBytes || !sentSha1.contentEquals(expectedSha1)
 
 /**
  * Whether an upload may go through the Drive SDK at all: not while a draft of the app's own upload waits on
