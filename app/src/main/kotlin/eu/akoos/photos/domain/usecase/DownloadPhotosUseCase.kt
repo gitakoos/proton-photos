@@ -589,8 +589,8 @@ class DownloadPhotosUseCase @Inject constructor(
         // Same problem for videos: MediaStore derives DATE_TAKEN from the mp4 mvhd on scan, and a
         // downloaded video otherwise carries the upload/mux time (or none), so it lands at "today" on
         // strict scanners. Stamp the original capture time into the mvhd before publishing. The bytes
-        // change, but a download pairs by cloud id (SyncState) on this install and by name+date after a
-        // reinstall, not by content hash, so this does not orphan the file from its cloud twin.
+        // change, but a download pairs by the cloud id its SyncState row records, not by content hash, so
+        // this does not orphan the file from its cloud twin.
         if (isVideo && captureTimeSeconds > 0L) {
             Mp4CreationTime.stamp(file, captureTimeSeconds * 1000L)
         }

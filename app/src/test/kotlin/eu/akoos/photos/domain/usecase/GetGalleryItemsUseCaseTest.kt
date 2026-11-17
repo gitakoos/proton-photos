@@ -200,12 +200,11 @@ class GetGalleryItemsUseCaseTest {
         assertTrue(result.any { it is GalleryItem.CloudOnly })
     }
 
-    // ─── video name-only pairing fallback ─────────────────────────────────────
-    // A cloud video on the photo volume reports sizeBytes = 0, so a name+size join is dead, and an
-    // edited video's device copy drifts off the cloud copy's ORIGINAL capture time, so name+second
-    // misses too. merge() therefore pairs the ONE unclaimed cloud video that shares the exact name.
-    // The defaults below keep the higher-priority keyed paths from firing (cloud size 0, capture
-    // times differ) so these tests exercise the name-only branch specifically.
+    // ─── pairing needs the sync layer's proof ─────────────────────────────────
+    // A device file pairs with a Drive photo only through its sync_state row: the cloud id the row
+    // names, or the hash the row recorded equal to the photo's Drive content hash. A shared name,
+    // capture second or size pairs nothing, so a different file of the same name shows as a device
+    // item next to a Drive item that can still be saved.
 
     private fun localVideo(uri: String, name: String, dateTaken: Long = 5000L, size: Long = 999L) =
         LocalMediaItem(
@@ -230,50 +229,96 @@ class GetGalleryItemsUseCaseTest {
             revisionId = "rev1",
         )
 
+    private fun namedPhoto(uri: String, name: String, dateTakenMs: Long, size: Long) = LocalMediaItem(
+        uri = uri, dateTaken = dateTakenMs, displayName = name, mimeType = "image/jpeg", sizeBytes = size, bucketName = "Camera",
+    )
+
+    private fun namedDrivePhoto(linkId: String, name: String, captureSec: Long, size: Long, contentHash: String? = null) = CloudPhoto(
+        linkId = linkId, shareId = "share1", volumeId = "vol1", captureTime = captureSec, displayName = name,
+        mimeType = "image/jpeg", sizeBytes = size, thumbnailUrl = null, revisionId = "rev1", contentHash = contentHash,
+    )
+
     @Test
-    fun `a device video pairs with a same-named cloud video by name alone`() {
-        // Cloud Size is 0 so name+size is dead, and the capture times differ (local 5s, cloud 1s) so
-        // name+second misses. Only the video name-only fallback can pair them into one Synced item.
-        val local = listOf(localVideo("uri://v1", "VID_0001.mp4", dateTaken = 5000L))
-        val cloud = listOf(cloudVideo("link-v1", "VID_0001.mp4", captureTime = 1L, size = 0L))
+    fun `a device file of the same name and size as a Drive photo stays apart from it with no row`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_900_000_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 4096L, contentHash = "hmac-other"))
 
         val result = useCase.merge(local, cloud, emptyList())
 
-        assertEquals(1, result.size)
-        val item = result.first()
-        assertTrue("Expected Synced, got $item", item is GalleryItem.Synced)
-        assertEquals("link-v1", (item as GalleryItem.Synced).cloud.linkId)
-        assertEquals("uri://v1", item.local.uri)
+        assertEquals(2, result.size)
+        assertEquals("uri://p1", result.filterIsInstance<GalleryItem.LocalOnly>().single().local.uri)
+        assertEquals(
+            "the Drive photo stays a cloud item, so it can still be saved",
+            "link-p1", result.filterIsInstance<GalleryItem.CloudOnly>().single().cloud.linkId,
+        )
     }
 
     @Test
-    fun `two cloud videos sharing a name do NOT pair the device video`() {
-        // Ambiguous: singleOrNull refuses to guess which cloud twin the device video belongs to, so
-        // it stays LocalOnly and both cloud videos surface as CloudOnly instead of a wrong merge.
-        val local = listOf(localVideo("uri://v1", "VID_0001.mp4"))
+    fun `the same name and capture second pairs nothing without a row`() {
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "IMG_0001.jpg", 1_783_507_135L, size = 0L))
+
+        val result = useCase.merge(local, cloud, emptyList())
+
+        assertTrue(result.none { it is GalleryItem.Synced })
+        assertEquals(1, result.count { it is GalleryItem.LocalOnly })
+        assertEquals(1, result.count { it is GalleryItem.CloudOnly })
+    }
+
+    @Test
+    fun `a device video of the same name and size as a Drive video stays apart from it with no row`() {
+        val local = listOf(localVideo("uri://v1", "VID_0001.mp4", size = 5_000_000L))
+        val cloud = listOf(cloudVideo("link-v1", "VID_0001.mp4", size = 5_000_000L))
+
+        val result = useCase.merge(local, cloud, emptyList())
+
+        assertTrue(result.none { it is GalleryItem.Synced })
+        assertEquals(1, result.count { it is GalleryItem.LocalOnly })
+        assertEquals(1, result.count { it is GalleryItem.CloudOnly })
+    }
+
+    @Test
+    fun `a same-named Drive photo stays apart when the row ties the file to another one`() {
+        // The row links the device file to its real Drive copy; a second Drive photo of the same name is
+        // not its copy and stays a cloud item.
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_507_135_000L, size = 4096L))
         val cloud = listOf(
-            cloudVideo("link-a", "VID_0001.mp4"),
-            cloudVideo("link-b", "VID_0001.mp4"),
+            namedDrivePhoto("link-real", "IMG_0001 (1).jpg", 1_783_507_135L, size = 0L),
+            namedDrivePhoto("link-other", "IMG_0001.jpg", 1_783_507_135L, size = 0L),
         )
 
-        val result = useCase.merge(local, cloud, emptyList())
+        val result = useCase.merge(local, cloud, listOf(syncState("uri://p1", "link-real")))
 
-        assertEquals(3, result.size)
-        assertTrue("ambiguous name must not pair", result.none { it is GalleryItem.Synced })
-        assertEquals(1, result.count { it is GalleryItem.LocalOnly })
-        assertEquals(2, result.count { it is GalleryItem.CloudOnly })
+        assertEquals("link-real", result.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+        assertEquals("link-other", result.filterIsInstance<GalleryItem.CloudOnly>().single().cloud.linkId)
     }
 
     @Test
-    fun `a device photo with a lost date pairs its same-named cloud photo and shows the cloud date`() {
-        // A re-downloaded PNG can land with no reliable DATE_TAKEN (reads as the download day), and cloud
-        // Size is 0, so name+second and name+size both miss after a reinstall. The name-only fallback
-        // pairs the ONE unclaimed cloud photo of that name, and the Synced item reports the CLOUD capture
-        // time, so the gallery shows the right date instead of today.
+    fun `a row whose recorded hash is the Drive photo's pairs it whatever the names`() {
+        val cloudRepo = mockk<DrivePhotoRepository>()
+        every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
+        val merger = GetGalleryItemsUseCase(
+            mockk<LocalMediaRepository>(), cloudRepo, mockk<SyncStateSnapshot>(),
+            CoroutineScope(Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ -> }),
+        )
+        val local = listOf(namedPhoto("uri://p1", "IMG_0001.jpg", 1_783_900_000_000L, size = 4096L))
+        val cloud = listOf(namedDrivePhoto("link-p1", "renamed.jpg", 1_783_507_135L, size = 0L, contentHash = "hmac-sha-p1"))
+        val row = syncState("uri://p1", cloudId = null, status = SyncStatus.LOCAL_ONLY).copy(localHash = "sha-p1")
+
+        val result = merger.merge(local, cloud, listOf(row))
+
+        assertEquals("link-p1", result.filterIsInstance<GalleryItem.Synced>().single().cloud.linkId)
+    }
+
+    @Test
+    fun `a row reconcile makes again after a reinstall pairs the file and shows the Drive date`() {
+        // After a reinstall reconcile writes the row anew: the Drive photo's cloud id and no hash yet.
+        // The pair reads its date from the Drive copy, so a PNG whose device date is the download day
+        // shows the photo's own date.
         val local = listOf(
             LocalMediaItem(
                 uri = "uri://p1",
-                dateTaken = 1_783_900_000_000L, // the download day, far off the cloud second
+                dateTaken = 1_783_900_000_000L,
                 displayName = "Oops!.png",
                 mimeType = "image/png",
                 sizeBytes = 4096L,
@@ -294,64 +339,30 @@ class GetGalleryItemsUseCaseTest {
             ),
         )
 
-        val result = useCase.merge(local, cloud, emptyList())
+        val result = useCase.merge(local, cloud, listOf(syncState("uri://p1", "link-p1")))
 
         assertEquals(1, result.size)
-        val item = result.first()
-        assertTrue("Expected Synced, got $item", item is GalleryItem.Synced)
-        item as GalleryItem.Synced
+        val item = result.single() as GalleryItem.Synced
         assertEquals("link-p1", item.cloud.linkId)
         assertEquals("the paired photo must show the cloud capture time", 1_783_507_135_000L, item.captureTimeMs)
     }
 
     @Test
-    fun `two cloud photos sharing a name do NOT pair the device photo`() {
-        // Same singleOrNull guard as the video path: a recurring name (IMG_0001.jpg across devices) is
-        // ambiguous, so the device photo stays LocalOnly rather than merging a wrong pair.
-        val local = listOf(
-            LocalMediaItem(
-                uri = "uri://p1",
-                dateTaken = 1_783_900_000_000L,
-                displayName = "IMG_0001.jpg",
-                mimeType = "image/jpeg",
-                sizeBytes = 4096L,
-                bucketName = "Camera",
-            ),
-        )
-        val cloud = listOf(
-            CloudPhoto(linkId = "link-a", shareId = "share1", volumeId = "vol1", captureTime = 1_783_507_135L,
-                displayName = "IMG_0001.jpg", mimeType = "image/jpeg", sizeBytes = 0L, thumbnailUrl = null, revisionId = "rev1"),
-            CloudPhoto(linkId = "link-b", shareId = "share1", volumeId = "vol1", captureTime = 1_783_507_200L,
-                displayName = "IMG_0001.jpg", mimeType = "image/jpeg", sizeBytes = 0L, thumbnailUrl = null, revisionId = "rev1"),
-        )
-
-        val result = useCase.merge(local, cloud, emptyList())
-
-        assertTrue("ambiguous name must not pair", result.none { it is GalleryItem.Synced })
-        assertEquals(1, result.count { it is GalleryItem.LocalOnly })
-        assertEquals(2, result.count { it is GalleryItem.CloudOnly })
-    }
-
-    @Test
-    fun `a cloud video already claimed is not reused by a second same-named video`() {
-        // Two device videos share one cloud twin's name. The first claims it via the name-only
-        // fallback; the usedCloudIds guard then refuses to hand the SAME cloud video to the second,
-        // which stays LocalOnly rather than producing a duplicate Synced pair.
+    fun `a Drive photo two rows name is paired with the first device file only`() {
         val local = listOf(
             localVideo("uri://first", "VID_0001.mp4"),
             localVideo("uri://second", "VID_0001.mp4"),
         )
         val cloud = listOf(cloudVideo("link-v1", "VID_0001.mp4"))
+        val rows = listOf(syncState("uri://first", "link-v1"), syncState("uri://second", "link-v1"))
 
-        val result = useCase.merge(local, cloud, emptyList())
+        val result = useCase.merge(local, cloud, rows)
 
         assertEquals(2, result.size)
-        assertEquals(1, result.count { it is GalleryItem.Synced })
-        assertEquals(1, result.count { it is GalleryItem.LocalOnly })
-        assertTrue("claimed cloud video must not resurface as CloudOnly", result.none { it is GalleryItem.CloudOnly })
         val synced = result.filterIsInstance<GalleryItem.Synced>().single()
-        assertEquals("link-v1", synced.cloud.linkId)
         assertEquals("uri://first", synced.local.uri)
+        assertEquals("uri://second", result.filterIsInstance<GalleryItem.LocalOnly>().single().local.uri)
+        assertTrue("claimed cloud video must not resurface as CloudOnly", result.none { it is GalleryItem.CloudOnly })
     }
 
     @Test
@@ -632,7 +643,7 @@ class GetGalleryItemsUseCaseTest {
         // A stored cloud id Drive no longer lists falls through to the stored content hash.
         fullRow("uri://stale-id", "c-gone", SyncStatus.SYNCED, localHash = "sha-2"),
         fullRow("uri://hash", null, SyncStatus.LOCAL_ONLY, localHash = "sha-3"),
-        // A row with neither id nor hash leaves the pairing to name and capture second.
+        // A row with neither id nor hash pairs nothing, whatever the name and capture second share.
         fullRow("uri://name-date", null, SyncStatus.LOCAL_ONLY),
         // Its cloud id is already claimed by the row above, so it must not pair a second time.
         fullRow("uri://claimed-twice", "c-paired", SyncStatus.SYNCED),
@@ -675,19 +686,19 @@ class GetGalleryItemsUseCaseTest {
                 "uri://paired" to "c-paired",
                 "uri://stale-id" to "c-by-hash",
                 "uri://hash" to "c-by-hash-only",
-                "uri://name-date" to "c-by-name-date",
-                "uri://video" to "c-video",
-                "uri://name-only" to "c-name-only",
             ),
             fromLean.filterIsInstance<GalleryItem.Synced>().associate { it.local.uri to it.cloud.linkId },
         )
         assertEquals(
-            setOf("uri://claimed-twice", "uri://local-only", "uri://hash-miss"),
+            setOf(
+                "uri://claimed-twice", "uri://local-only", "uri://hash-miss",
+                "uri://name-date", "uri://video", "uri://name-only",
+            ),
             fromLean.filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri }.toSet(),
         )
         assertEquals(
             "the vaulted twin and both album-hidden photos are gone",
-            listOf("c-same-time-a", "c-same-time-b", "c-cloud-only"),
+            listOf("c-same-time-a", "c-same-time-b", "c-cloud-only", "c-name-only", "c-by-name-date", "c-video"),
             fromLean.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId },
         )
     }

@@ -362,10 +362,10 @@ class HiddenVaultJournal @Inject constructor(
      * only from the sync table. A row with no recorded Drive copy is a device-only photo and is left
      * to the delete's own transition.
      *
-     * The write is an upsert rather than a status update, because a photo can be paired to its Drive
-     * copy without any row at all: the gallery also pairs by content hash, by name and capture second
-     * and by name alone, none of which puts anything in the sync table. A status update would then
-     * touch nothing and the Drive copy would go on being drawn while its device file sat in the vault.
+     * The write is an upsert rather than a status update, because the row a photo is paired through
+     * need not name its Drive copy: the gallery also pairs a row whose recorded hash is the Drive
+     * copy's, and the hide's own records can know a pairing the table lacks. A status update would then
+     * leave the Drive copy unnamed and it would go on being drawn while its device file sat in the vault.
      *
      * A failure is swallowed: the bytes are in the vault and the original is gone, so refusing to
      * publish over a status write would put the photo nowhere at all.
