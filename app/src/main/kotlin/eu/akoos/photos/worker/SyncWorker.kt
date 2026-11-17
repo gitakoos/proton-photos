@@ -43,6 +43,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.await
 import android.util.Log
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -412,9 +413,14 @@ class SyncWorker @AssistedInject constructor(
                     contentTriggerPolicy(armed)
                 }.getOrDefault(ExistingWorkPolicy.KEEP)
             }
+            // The system's own delays are 10 s after the last change and at most 2 min after the first, so a
+            // device that keeps writing media (a long burst, another app saving files) held a new photo back
+            // for up to 2 min. These bound it to a minute; a fire mid-burst only queues a run behind the one going.
             val constraints = Constraints.Builder()
                 .addContentUriTrigger(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
                 .addContentUriTrigger(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
+                .setTriggerContentUpdateDelay(java.time.Duration.ofMillis(CONTENT_TRIGGER_UPDATE_DELAY_MS))
+                .setTriggerContentMaxDelay(java.time.Duration.ofMillis(CONTENT_TRIGGER_MAX_DELAY_MS))
                 .build()
             val request = OneTimeWorkRequestBuilder<SyncContentTriggerWorker>()
                 .setConstraints(constraints)
@@ -440,6 +446,50 @@ class SyncWorker @AssistedInject constructor(
             if (open.any { it.isTriggerWorker }) return ExistingWorkPolicy.KEEP
             if (open.any { it.state == WorkInfo.State.RUNNING }) return ExistingWorkPolicy.APPEND_OR_REPLACE
             return ExistingWorkPolicy.REPLACE
+        }
+
+        /** How long the content trigger waits for MediaStore to go quiet before it fires. */
+        internal const val CONTENT_TRIGGER_UPDATE_DELAY_MS = 5_000L
+        /** The longest the content trigger waits after the first change, however busy MediaStore stays. */
+        internal const val CONTENT_TRIGGER_MAX_DELAY_MS = 60_000L
+
+        /**
+         * Queues the backup run a content trigger asks for ([SyncContentTriggerWorker]), with no battery
+         * condition so a new capture is backed up promptly. [runNow] appends behind whatever is under
+         * [NAME_ONESHOT], including a run that is only waiting: one held for a battery that is not low, or
+         * one in its retry backoff. The new file then sat until that run could start, so the policy is
+         * picked from what is queued now ([triggeredRunPolicy]).
+         */
+        internal suspend fun queueTriggeredRun(context: Context) {
+            ensureChannel(context)
+            val workManager = WorkManager.getInstance(context)
+            // A state that cannot be read falls back to runNow's own policy.
+            val policy = runCatching {
+                val queued = workManager.getWorkInfosForUniqueWorkFlow(NAME_ONESHOT).first().map { it.state }
+                triggeredRunPolicy(queued)
+            }.getOrDefault(ExistingWorkPolicy.APPEND_OR_REPLACE)
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .addTag(TAG_ONESHOT)
+                .build()
+            // Awaited, so the trigger worker arms its successor (which stops it) only once the run is queued.
+            workManager.enqueueUniqueWork(NAME_ONESHOT, policy, request).await()
+        }
+
+        /**
+         * How to queue a triggered run over the states under [NAME_ONESHOT].
+         *  - Nothing running: REPLACE. A waiting run only stands for "do one pass", and the triggered run is
+         *    that pass with the loosest conditions, so it takes the waiting run's place instead of waiting
+         *    behind it. Finished entries are dropped as well.
+         *  - A run going and another queued behind it: KEEP. The queued one starts after it and reads the
+         *    device afresh, so it already covers the new file, and a burst of fires queues no more runs.
+         *  - A run going and nothing behind it: APPEND_OR_REPLACE, a run after it, never stopping it.
+         */
+        internal fun triggeredRunPolicy(states: List<WorkInfo.State>): ExistingWorkPolicy {
+            val open = states.filterNot { it.isFinished }
+            if (WorkInfo.State.RUNNING !in open) return ExistingWorkPolicy.REPLACE
+            if (open.any { it != WorkInfo.State.RUNNING }) return ExistingWorkPolicy.KEEP
+            return ExistingWorkPolicy.APPEND_OR_REPLACE
         }
 
         const val NAME_CONTENT_OBSERVER = "sync_worker_content_observer"

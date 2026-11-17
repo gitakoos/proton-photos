@@ -24,6 +24,7 @@ package eu.akoos.photos.worker
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import eu.akoos.photos.util.WorkManagerTestSetup
@@ -32,17 +33,21 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.TimeUnit
 
 /**
  * The content trigger must never stop a backup in progress: arming it again (activity start, settings change,
  * the end of every run) keeps a live trigger, and a running request from an older build, which was itself the
- * backup, gets the new trigger queued after it instead of being replaced.
+ * backup, gets the new trigger queued after it instead of being replaced. The run a trigger queues starts
+ * promptly: it takes the place of a run that is only waiting instead of queueing behind it.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -57,12 +62,14 @@ class SyncContentTriggerTest {
         WorkManagerTestSetup.initialize(context)
         workManager = WorkManager.getInstance(context)
         workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER).result.get()
+        workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT).result.get()
         workManager.pruneWork().result.get()
     }
 
     @After
     fun tearDown() {
         workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER).result.get()
+        workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT).result.get()
     }
 
     // ─── policy ───────────────────────────────────────────────────────────────
@@ -110,7 +117,89 @@ class SyncContentTriggerTest {
         )
     }
 
+    @Test
+    fun `a triggered run takes the place of runs that are only waiting`() {
+        assertEquals(ExistingWorkPolicy.REPLACE, SyncWorker.triggeredRunPolicy(emptyList()))
+        assertEquals(ExistingWorkPolicy.REPLACE, SyncWorker.triggeredRunPolicy(listOf(WorkInfo.State.ENQUEUED)))
+        assertEquals(
+            ExistingWorkPolicy.REPLACE,
+            SyncWorker.triggeredRunPolicy(listOf(WorkInfo.State.SUCCEEDED, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED)),
+        )
+    }
+
+    @Test
+    fun `a triggered run is queued after a running one and never stops it`() {
+        assertEquals(ExistingWorkPolicy.APPEND_OR_REPLACE, SyncWorker.triggeredRunPolicy(listOf(WorkInfo.State.RUNNING)))
+        assertEquals(
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            SyncWorker.triggeredRunPolicy(listOf(WorkInfo.State.FAILED, WorkInfo.State.RUNNING)),
+        )
+    }
+
+    @Test
+    fun `a run already queued after a running one covers the trigger`() {
+        assertEquals(
+            ExistingWorkPolicy.KEEP,
+            SyncWorker.triggeredRunPolicy(listOf(WorkInfo.State.RUNNING, WorkInfo.State.BLOCKED)),
+        )
+    }
+
     // ─── WorkManager ──────────────────────────────────────────────────────────
+
+    private fun oneShots(): List<WorkInfo> = runBlocking {
+        workManager.getWorkInfosForUniqueWorkFlow(SyncWorker.NAME_ONESHOT).first()
+    }
+
+    /** A backup run under the one-shot name that is not running yet and will not start soon, as one held
+     *  for a battery that is not low or one in its retry backoff. */
+    private fun enqueueWaitingRun(): java.util.UUID {
+        val waiting = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInitialDelay(1, TimeUnit.HOURS)
+            .addTag(SyncWorker.TAG_ONESHOT)
+            .build()
+        workManager.enqueueUniqueWork(SyncWorker.NAME_ONESHOT, ExistingWorkPolicy.REPLACE, waiting).result.get()
+        return waiting.id
+    }
+
+    @Test
+    fun `a run queued the usual way behind a waiting run waits with it`() {
+        val waiting = enqueueWaitingRun()
+
+        SyncWorker.runNow(context, allowLowBattery = true)
+
+        // runNow does not wait for its enqueue to land.
+        var added: WorkInfo? = null
+        val deadline = System.currentTimeMillis() + 10_000L
+        while (added == null && System.currentTimeMillis() < deadline) {
+            added = oneShots().singleOrNull { it.id != waiting }
+            if (added == null) Thread.sleep(50)
+        }
+        assertEquals(WorkInfo.State.BLOCKED, added!!.state)
+    }
+
+    @Test
+    fun `the trigger's run is not left waiting behind a waiting run`() = runBlocking {
+        val waiting = enqueueWaitingRun()
+
+        SyncWorker.queueTriggeredRun(context)
+
+        // The replaced run is cancelled, or already dropped from the name.
+        val infos = oneShots()
+        infos.singleOrNull { it.id == waiting }?.let { assertEquals(WorkInfo.State.CANCELLED, it.state) }
+        val added = infos.single { it.id != waiting }
+        assertNotEquals(WorkInfo.State.BLOCKED, added.state)
+        assertFalse(added.constraints.requiresBatteryNotLow())
+        assertTrue(SyncWorker.TAG_ONESHOT in added.tags)
+    }
+
+    @Test
+    fun `the trigger fires within a minute of the first change however busy MediaStore stays`() = runBlocking {
+        SyncWorker.scheduleContentObserver(context)
+        val constraints = armed().single { !it.state.isFinished }.constraints
+        assertEquals(SyncWorker.CONTENT_TRIGGER_UPDATE_DELAY_MS, constraints.contentTriggerUpdateDelayMillis)
+        assertEquals(SyncWorker.CONTENT_TRIGGER_MAX_DELAY_MS, constraints.contentTriggerMaxDelayMillis)
+        assertTrue(constraints.contentTriggerMaxDelayMillis <= 60_000L)
+    }
 
     private fun armed(): List<WorkInfo> = runBlocking {
         workManager.getWorkInfosForUniqueWorkFlow(SyncWorker.NAME_CONTENT_OBSERVER).first()

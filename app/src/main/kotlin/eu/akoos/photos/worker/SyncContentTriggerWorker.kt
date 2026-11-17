@@ -27,14 +27,11 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import eu.akoos.photos.data.preferences.SettingsKeys
-import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
-import kotlinx.coroutines.flow.first
 
 /**
  * The MediaStore content trigger of the backup ([SyncWorker.scheduleContentObserver]). It runs when a photo
- * or video changes on the device, queues a backup run behind any run already going ([SyncWorker.runNow]) and
+ * or video changes on the device, queues a backup run behind any run already going ([SyncWorker.queueTriggeredRun]) and
  * arms the next trigger. It never uploads itself, so arming the trigger again can only ever replace this
  * quick request, never a backup partway through a file.
  */
@@ -49,9 +46,8 @@ class SyncContentTriggerWorker @AssistedInject constructor(
         // Backup effectively off (auto-sync on, no folder selected): nothing to queue, and the trigger is not
         // armed again, so an idle fire stops here.
         if (!syncEffectivelyEnabled(context)) return Result.success()
-        val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-        // No battery condition, like the trigger run this replaces: a new capture is backed up promptly.
-        SyncWorker.runNow(context, wifiOnly, allowLowBattery = true)
+        // No battery condition, and never left waiting behind a run that is itself only waiting.
+        SyncWorker.queueTriggeredRun(context)
         // Last: arming the successor replaces this very request, which stops it.
         SyncWorker.armContentTrigger(context, selfRearm = true)
         return Result.success()
