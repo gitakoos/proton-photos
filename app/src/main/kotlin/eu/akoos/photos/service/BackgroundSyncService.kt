@@ -261,20 +261,19 @@ class BackgroundSyncService : Service() {
     }
 
     /**
-     * Called after the debounce window expires. Reads the wifiOnly preference and hands
-     * off to the existing one-shot upload runner — we deliberately do NOT duplicate the
-     * upload pipeline, just kick the worker.
+     * Called after the debounce window expires. Hands off to the triggered backup run
+     * ([SyncWorker.queueTriggeredRun]), the same one the MediaStore content trigger queues;
+     * the upload pipeline is not duplicated here, the worker is only kicked.
      *
-     * Runs on the service-scoped IO dispatcher so the DataStore cold-cache read doesn't
-     * block the main thread (a blocking read costs up to ~100ms on slow flash).
+     * Runs on the service-scoped IO dispatcher so the WorkManager state read doesn't
+     * block the main thread.
      * Losing one kick is harmless — the next MediaStore change or the periodic safety
      * net will pick the photos up.
      */
     private fun fireSync() {
         scope.launch {
             try {
-                val wifiOnly = applicationContext.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-                SyncWorker.runNow(applicationContext, wifiOnly)
+                SyncWorker.queueTriggeredRun(applicationContext)
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 Log.w(TAG, "fireSync failed: ${t.message}")

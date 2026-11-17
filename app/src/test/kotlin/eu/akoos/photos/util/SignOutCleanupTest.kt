@@ -75,6 +75,15 @@ class SignOutCleanupTest {
     }
 
     @Test
+    fun `stopping the account's work also stops a backup run a new photo queued`() {
+        val workManager = mockk<WorkManager>(relaxed = true)
+
+        SignOutCleanup.stopBackgroundWork(context, workManager)
+
+        verify { workManager.cancelUniqueWork(eu.akoos.photos.worker.SyncWorker.NAME_TRIGGERED) }
+    }
+
+    @Test
     fun `stopping the account's work also stops its saves to the device`() {
         val workManager = mockk<WorkManager>(relaxed = true)
 

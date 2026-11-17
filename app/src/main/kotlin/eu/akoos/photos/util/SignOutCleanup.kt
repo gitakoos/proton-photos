@@ -78,6 +78,7 @@ object SignOutCleanup {
         runCatching {
             SyncWorker.cancel(workManager)
             workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT)
+            workManager.cancelUniqueWork(SyncWorker.NAME_TRIGGERED)
             workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER)
             workManager.cancelAllWorkByTag(AlbumDownloadWorker.TAG)
             workManager.cancelAllWorkByTag(PhotoSaveWorker.TAG)

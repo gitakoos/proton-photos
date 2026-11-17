@@ -391,8 +391,8 @@ class LocalMediaRepositoryImpl @Inject constructor(
      * run instead of pinging the worker once per file.
      *
      * Each onChange resets the pending kick — so the timer only fires after the user stops
-     * adding files for [syncSettleMs] milliseconds. The kick itself is a OneTime enqueue,
-     * which KEEP-coalesces with any in-flight periodic / oneshot worker.
+     * adding files for [syncSettleMs] milliseconds. The kick itself is [SyncWorker.queueTriggeredRun],
+     * which coalesces with a triggered run already waiting.
      */
     private val syncKickHandler = Handler(Looper.getMainLooper())
     private val syncSettleMs: Long = 2_000L
@@ -411,7 +411,6 @@ class LocalMediaRepositoryImpl @Inject constructor(
         try {
             val prefs: Preferences = context.settingsDataStore.data.first()
             val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
-            val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
             val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
             val selectedFolders = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
             if (!autoSync) return
@@ -420,7 +419,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
             // new mode (without picking folders) would never see auto-upload because this
             // gate would early-return on a null selectedFolders set.
             if (!backupEverything && selectedFolders.isNullOrEmpty()) return
-            SyncWorker.runNow(context, wifiOnly)
+            // The same run the MediaStore content trigger queues: no battery condition, and never
+            // waiting behind a run that is.
+            SyncWorker.queueTriggeredRun(context)
         } catch (_: Throwable) {
             // Losing one kick is harmless — the next MediaStore change or the periodic
             // fallback will pick the photos up.
