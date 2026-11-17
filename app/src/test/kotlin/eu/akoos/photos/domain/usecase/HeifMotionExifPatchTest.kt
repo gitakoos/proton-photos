@@ -24,8 +24,9 @@ package eu.akoos.photos.domain.usecase
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import eu.akoos.photos.util.HeifExifGps
+import eu.akoos.photos.util.HeifExifStrip
 import eu.akoos.photos.util.HeifTestFiles
+import eu.akoos.photos.util.MetadataStripConfig
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -37,10 +38,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
 
-/** The verified GPS patch the motion strip applies to a HEIF motion photo it cannot rewrite. */
+/** The verified EXIF patch the motion strip applies to a HEIF motion photo it cannot rewrite. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
-class HeifMotionGpsPatchTest {
+class HeifMotionExifPatchTest {
+
+    private val gpsOnly = MetadataStripConfig(stripGps = true)
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val stripper = UploadStructuralStripper(context)
@@ -60,10 +63,10 @@ class HeifMotionGpsPatchTest {
         val source = file(built.bytes)
         val joined = file(built.bytes)
 
-        assertTrue(stripper.eraseHeifMotionGps(source, joined, built.clipStart.toLong()))
+        assertTrue(stripper.stripHeifMotionExif(source, joined, built.clipStart.toLong(), gpsOnly))
 
         val after = joined.readBytes()
-        assertEquals(0, HeifExifGps.gpsEntryCount(joined))
+        assertEquals(0, HeifExifStrip.gpsEntryCount(joined))
         assertArrayEquals(built.bytes.copyOfRange(0, built.exifStart), after.copyOfRange(0, built.exifStart))
         assertArrayEquals(built.bytes.copyOfRange(built.exifEnd, built.bytes.size), after.copyOfRange(built.exifEnd, after.size))
         assertArrayEquals("the source is never written", built.bytes, source.readBytes())
@@ -75,7 +78,7 @@ class HeifMotionGpsPatchTest {
         val source = file(built.bytes)
         val joined = file(built.bytes)
 
-        assertFalse(stripper.eraseHeifMotionGps(source, joined, built.clipStart.toLong()))
+        assertFalse(stripper.stripHeifMotionExif(source, joined, built.clipStart.toLong(), gpsOnly))
 
         assertArrayEquals(built.bytes, joined.readBytes())
     }
@@ -87,10 +90,25 @@ class HeifMotionGpsPatchTest {
         val joined = file(built.bytes)
 
         // A clip said to start inside the Exif item fails the check that the patch stays before it.
-        assertFalse(stripper.eraseHeifMotionGps(source, joined, built.exifStart.toLong()))
+        assertFalse(stripper.stripHeifMotionExif(source, joined, built.exifStart.toLong(), gpsOnly))
 
         assertArrayEquals(built.bytes, joined.readBytes())
-        assertEquals(4, HeifExifGps.gpsEntryCount(joined))
+        assertEquals(4, HeifExifStrip.gpsEntryCount(joined))
+    }
+
+    @Test
+    fun `camera and time tags are stripped in place with the clip untouched`() {
+        val built = HeifTestFiles.heic(exif = HeifTestFiles.exifFull())
+        val source = file(built.bytes)
+        val joined = file(built.bytes)
+        val config = MetadataStripConfig(stripGps = true, stripCameraInfo = true, stripTimestamp = true)
+
+        assertTrue(stripper.stripHeifMotionExif(source, joined, built.clipStart.toLong(), config))
+
+        assertEquals(emptySet<Int>(), HeifExifStrip.presentTags(joined, HeifExifStrip.tagsFor(config)))
+        assertEquals(0, HeifExifStrip.gpsEntryCount(joined))
+        val after = joined.readBytes()
+        assertArrayEquals(built.bytes.copyOfRange(built.exifEnd, built.bytes.size), after.copyOfRange(built.exifEnd, after.size))
     }
 
     @Test
@@ -99,7 +117,7 @@ class HeifMotionGpsPatchTest {
         val source = file(built.bytes)
         val joined = file(built.bytes)
 
-        assertTrue(stripper.eraseHeifMotionGps(source, joined, built.clipStart.toLong()))
+        assertTrue(stripper.stripHeifMotionExif(source, joined, built.clipStart.toLong(), gpsOnly))
 
         assertArrayEquals(built.bytes, joined.readBytes())
     }

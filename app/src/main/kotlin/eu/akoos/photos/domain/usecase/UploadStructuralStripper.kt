@@ -27,9 +27,10 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import androidx.exifinterface.media.ExifInterface
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.util.ExifHelper
-import eu.akoos.photos.util.HeifExifGps
+import eu.akoos.photos.util.HeifExifStrip
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.UltraHdrUtil
@@ -127,9 +128,9 @@ class UploadStructuralStripper @Inject constructor(
                 }
             }
             // A HEIC primary cannot be rewritten by the EXIF writer, so the join above is byte-exact.
-            // Its GPS is then emptied in place, leaving the clip and every offset where they were.
-            if (strippedPrimary == null && stripConfig.stripGps && HeifExifGps.isHeif(source)) {
-                eraseHeifMotionGps(source, joined, info.videoOffset)
+            // Its EXIF is then stripped in place, leaving the clip and every offset where they were.
+            if (strippedPrimary == null && !stripConfig.isNoOp && HeifExifStrip.isHeif(source)) {
+                stripHeifMotionExif(source, joined, info.videoOffset, stripConfig)
             }
             strippedPrimary?.delete()
             primary?.delete()
@@ -145,17 +146,18 @@ class UploadStructuralStripper @Inject constructor(
     }
 
     /**
-     * Empties the GPS of [joined], a byte-exact copy of the HEIF motion photo [source] whose clip starts
-     * at [videoOffset], and keeps the patch only once the copy proves it: the same length, every byte
-     * outside the Exif item unchanged (so the image items and the clip are untouched), no GPS entry left,
-     * no location read back and the same image size. True when [joined] now carries no GPS. Otherwise
-     * [joined] is restored to [source], one diagnostics line says why, and the photo uploads as before.
+     * Strips what [config] asks for from [joined], a byte-exact copy of the HEIF motion photo [source]
+     * whose clip starts at [videoOffset], and keeps the patch only once the copy proves it: the same
+     * length, every byte outside the Exif item unchanged (so the image items and the clip are untouched),
+     * no stripped tag left or read back, and the same image size. True when [joined] now carries none of
+     * them. Otherwise [joined] is restored to [source], one diagnostics line says why, and the photo
+     * uploads as before.
      */
-    internal fun eraseHeifMotionGps(source: File, joined: File, videoOffset: Long): Boolean {
-        val reason = when (val result = HeifExifGps.erase(joined)) {
-            HeifExifGps.Result.NoGps -> return true
-            is HeifExifGps.Result.Unsupported -> result.reason
-            is HeifExifGps.Result.Erased -> heifPatchProblem(source, joined, result, videoOffset) ?: return true
+    internal fun stripHeifMotionExif(source: File, joined: File, videoOffset: Long, config: MetadataStripConfig): Boolean {
+        val reason = when (val result = HeifExifStrip.strip(joined, config)) {
+            HeifExifStrip.Result.Unchanged -> return true
+            is HeifExifStrip.Result.Unsupported -> result.reason
+            is HeifExifStrip.Result.Stripped -> heifPatchProblem(source, joined, result, videoOffset, config) ?: return true
         }
         runCatching { source.copyTo(joined, overwrite = true) }
         eu.akoos.photos.util.SyncDiagnostics.log("motion photo location patch skipped: $reason")
@@ -163,15 +165,33 @@ class UploadStructuralStripper @Inject constructor(
     }
 
     /** Why the patched [joined] cannot be kept, or null when every check passes. */
-    private fun heifPatchProblem(source: File, joined: File, erased: HeifExifGps.Result.Erased, videoOffset: Long): String? {
+    private fun heifPatchProblem(
+        source: File,
+        joined: File,
+        stripped: HeifExifStrip.Result.Stripped,
+        videoOffset: Long,
+        config: MetadataStripConfig,
+    ): String? {
         if (joined.length() != source.length()) return "length changed"
-        if (erased.exifEnd > videoOffset) return "exif past the clip"
-        if (!sameOutside(source, joined, erased.exifStart, erased.exifEnd)) return "bytes outside the exif changed"
-        if (HeifExifGps.gpsEntryCount(joined) != 0) return "gps left"
-        val readBack = runCatching { androidx.exifinterface.media.ExifInterface(joined.absolutePath).latLong }.getOrNull()
-        if (readBack != null) return "location read back"
+        if (stripped.exifEnd > videoOffset) return "exif past the clip"
+        if (!sameOutside(source, joined, stripped.exifStart, stripped.exifEnd)) return "bytes outside the exif changed"
+        if (config.stripGps && HeifExifStrip.gpsEntryCount(joined) != 0) return "gps left"
+        if (HeifExifStrip.presentTags(joined, HeifExifStrip.tagsFor(config)) != emptySet<Int>()) return "tags left"
+        val exif = runCatching { ExifInterface(joined.absolutePath) }.getOrNull()
+        if (exif != null) {
+            if (config.stripGps && runCatching { exif.latLong }.getOrNull() != null) return "location read back"
+            if (readBackTags(config).any { runCatching { exif.getAttribute(it) }.getOrNull() != null }) return "tags read back"
+        }
         if (boundsOf(source) != boundsOf(joined)) return "size changed"
         return null
+    }
+
+    /** The ExifInterface names read back after a HEIF strip, one or more per stripped group. */
+    private fun readBackTags(config: MetadataStripConfig): List<String> = buildList {
+        if (config.stripCameraInfo) addAll(listOf(ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL, ExifInterface.TAG_LENS_MODEL))
+        if (config.stripTimestamp) addAll(listOf(ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED))
+        if (config.stripSoftwareInfo) add(ExifInterface.TAG_SOFTWARE)
+        if (config.stripAuthorship) addAll(listOf(ExifInterface.TAG_ARTIST, ExifInterface.TAG_COPYRIGHT))
     }
 
     /** True when [a] and [b] hold the same bytes everywhere outside [from, to). */

@@ -156,7 +156,7 @@ internal class UploadBytePreparer(
                 // it waits like any other photo whose strip left its location. A HEIF one whose layout
                 // the in-place GPS patch refused uploads as it is, which the stripper has logged.
                 val motionKeepsLocation = stripConfig.stripGps &&
-                    !eu.akoos.photos.util.HeifExifGps.isHeif(motionTemp) &&
+                    !eu.akoos.photos.util.HeifExifStrip.isHeif(motionTemp) &&
                     photoHasLocation(android.net.Uri.fromFile(motionTemp).toString())
                 if (motionKeepsLocation) temps.locationStripOwed = true
                 // Mirror: a motion photo can't be wiped in place (an EXIF rewrite drops its

@@ -87,6 +87,65 @@ internal object HeifTestFiles {
         return u32(6, true) + "Exif\u0000\u0000".toByteArray() + out.toByteArray()
     }
 
+    /** One TIFF field; [data] already holds the value in the file's byte order. */
+    class Field(val tag: Int, val type: Int, val count: Int, val data: ByteArray)
+
+    private fun ascii(tag: Int, text: String) = (text + "\u0000").toByteArray().let { Field(tag, 2, it.size, it) }
+
+    /**
+     * An Exif item with IFD0 (Make, Orientation, Software, DateTime), an Exif sub-IFD (FNumber,
+     * DateTimeOriginal, PixelXDimension) and the GPS IFD [exif] writes, laid out in that order.
+     */
+    fun exifFull(big: Boolean = true): ByteArray {
+        val ifd0 = listOf(
+            ascii(0x010F, "Apple"),
+            Field(0x0112, 3, 1, u16(1, big) + ByteArray(2)),
+            ascii(0x0131, "G998BXXU9FXA1"),
+            ascii(0x0132, "2024:05:01 10:00:00"),
+        )
+        val exifIfd = listOf(
+            Field(0x829D, 5, 1, u32(18, big) + u32(10, big)),
+            ascii(0x9003, "2024:05:01 09:59:58"),
+            Field(0xA002, 4, 1, u32(4000, big)),
+        )
+        val gps = listOf(
+            Field(1, 2, 2, "N\u0000\u0000\u0000".toByteArray()),
+            Field(2, 5, 3, rationals(big, 47 to 1, 29 to 1, 5244 to 100)),
+            Field(3, 2, 2, "E\u0000\u0000\u0000".toByteArray()),
+            Field(4, 5, 3, rationals(big, 19 to 1, 2 to 1, 2472 to 100)),
+        )
+        fun ifdSize(n: Int) = 2 + n * 12 + 4
+        fun outOfLine(fields: List<Field>) = fields.sumOf { if (it.data.size > 4) it.data.size else 0 }
+        val ifd0At = 8
+        val exifAt = ifd0At + ifdSize(ifd0.size + 2) + outOfLine(ifd0)
+        val gpsAt = exifAt + ifdSize(exifIfd.size) + outOfLine(exifIfd)
+        val out = ByteArrayOutputStream()
+        out.write(if (big) "MM".toByteArray() else "II".toByteArray())
+        out.write(u16(42, big))
+        out.write(u32(ifd0At, big))
+        fun writeIfd(at: Int, fields: List<Field>) {
+            var values = at + ifdSize(fields.size)
+            val tail = ByteArrayOutputStream()
+            out.write(u16(fields.size, big))
+            for (f in fields.sortedBy { it.tag }) {
+                out.write(u16(f.tag, big) + u16(f.type, big) + u32(f.count, big))
+                if (f.data.size > 4) {
+                    out.write(u32(values, big))
+                    tail.write(f.data)
+                    values += f.data.size
+                } else {
+                    out.write(f.data + ByteArray(4 - f.data.size))
+                }
+            }
+            out.write(u32(0, big))
+            out.write(tail.toByteArray())
+        }
+        writeIfd(ifd0At, ifd0 + Field(0x8769, 4, 1, u32(exifAt, big)) + Field(0x8825, 4, 1, u32(gpsAt, big)))
+        writeIfd(exifAt, exifIfd)
+        writeIfd(gpsAt, gps)
+        return u32(6, true) + "Exif\u0000\u0000".toByteArray() + out.toByteArray()
+    }
+
     fun mp4Clip(): ByteArray = box("ftyp", "mp42".toByteArray(), ByteArray(4), "isommp42".toByteArray()) +
         box("mdat", ByteArray(48) { (it * 7).toByte() })
 
