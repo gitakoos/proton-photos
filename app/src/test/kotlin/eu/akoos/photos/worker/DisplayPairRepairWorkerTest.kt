@@ -25,7 +25,9 @@ package eu.akoos.photos.worker
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ListenableWorker
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
@@ -75,5 +77,21 @@ class DisplayPairRepairWorkerTest {
         assertFalse(request.captured.workSpec.constraints.requiresBatteryNotLow())
         assertEquals("starts at once", 0L, request.captured.workSpec.initialDelay)
         assertFalse("never periodic", request.captured.workSpec.isPeriodic)
+        assertEquals(BackoffPolicy.LINEAR, request.captured.workSpec.backoffPolicy)
+    }
+
+    @Test
+    fun `a run that could not start is tried again a bounded number of times`() {
+        val attempts = DisplayPairRepairWorker.MAX_ATTEMPTS
+        for (attempt in 0 until attempts - 1) {
+            assertEquals("attempt $attempt", ListenableWorker.Result.retry(), DisplayPairRepairWorker.resultFor(false, attempt))
+        }
+        assertEquals("the last attempt gives up", ListenableWorker.Result.success(), DisplayPairRepairWorker.resultFor(false, attempts - 1))
+    }
+
+    @Test
+    fun `a run that started is done whatever it linked`() {
+        assertEquals(ListenableWorker.Result.success(), DisplayPairRepairWorker.resultFor(true, 0))
+        assertEquals(ListenableWorker.Result.success(), DisplayPairRepairWorker.resultFor(true, 3))
     }
 }

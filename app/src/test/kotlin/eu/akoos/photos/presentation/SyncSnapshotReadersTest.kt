@@ -206,6 +206,7 @@ class SyncSnapshotReadersTest {
         assertEquals(pairedInGallery, syncedCloudIdsOnDevice(SyncStateSnapshot.Rows(lean(rows)), sides))
         assertEquals(pairedInGallery, albumLocalUrisByLinkId(lean(rows), sides, emptyList()).keys)
         assertEquals(pairedInGallery, syncedLocalUrisByCloudId(lean(rows), sides).keys)
+        assertEquals(pairedInGallery, looseDeviceCopies(setOf("c-a", "c-b"), lean(rows), sides))
     }
 
     @Test
@@ -218,11 +219,11 @@ class SyncSnapshotReadersTest {
         )
 
         for (ids in hiddenIdSets) {
-            assertEquals("hidden ids $ids", fullRowLooseCopies(ids, table), looseDeviceCopies(ids, rows))
+            assertEquals("hidden ids $ids", fullRowLooseCopies(ids, table), looseDeviceCopies(ids, rows, LinkSides.NONE))
         }
         assertEquals(
             setOf("c-1", "c-mixed", "c-blank"),
-            looseDeviceCopies(setOf("c-1", "c-mixed", "c-blank", "c-vaulted", "c-freed", "c-demoted", "c-gone"), rows),
+            looseDeviceCopies(setOf("c-1", "c-mixed", "c-blank", "c-vaulted", "c-freed", "c-demoted", "c-gone"), rows, LinkSides.NONE),
         )
     }
 
@@ -243,7 +244,7 @@ class SyncSnapshotReadersTest {
         assertEquals(fullRowGalleryHiddenIds(none), sync.hiddenCloudIds)
         assertEquals(fullRowViewerUris(none), syncedLocalUrisByCloudId(sync.rows, LinkSides.NONE))
         assertEquals(fullRowAlbumUris(none), albumLocalUrisByLinkId(sync.rows, LinkSides.NONE, emptyList()))
-        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), sync.rows))
+        assertEquals(fullRowLooseCopies(setOf("c-1"), none), looseDeviceCopies(setOf("c-1"), sync.rows, LinkSides.NONE))
         assertEquals(fullRowPendingUris(none), pendingUploadUris(sync.rows))
     }
 

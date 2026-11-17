@@ -148,11 +148,21 @@ class DisplayPairRepair internal constructor(
         misses as PairRepairMisses,
     )
 
-    /** One run for the signed-in account, none without one. Returns the files it linked. */
-    suspend fun runForPrimaryUser(): Int {
-        val userId = accountManager?.getPrimaryUserId()?.first() ?: return 0
-        if (!listingComplete(userId)) return 0
-        return run(userId)
+    /**
+     * One run for the signed-in account. Returns the files it linked, or null when it could not start:
+     * no account, no complete listing, or no device list yet (the first device scan of an install has
+     * not been written).
+     */
+    suspend fun runForPrimaryUser(): Int? {
+        val userId = accountManager?.getPrimaryUserId()?.first() ?: return null
+        if (!listingComplete(userId)) return null
+        return runWhenReady(userId)
+    }
+
+    /** [run] for [userId] once a device list is in hand, or null while there is none. */
+    internal suspend fun runWhenReady(userId: UserId): Int? {
+        val device = localRepo.lastKnownMedia()?.takeIf { it.isNotEmpty() } ?: return null
+        return runOn(userId, device)
     }
 
     private suspend fun listingComplete(userId: UserId): Boolean {
@@ -165,8 +175,9 @@ class DisplayPairRepair internal constructor(
      * Drive photo is not listed or carries no content hash is passed over before any byte is read, so it
      * never takes a place in the run's budget; only files actually read count against it.
      */
-    internal suspend fun run(userId: UserId): Int = withContext(Dispatchers.IO) {
-        val device = localRepo.lastKnownMedia()?.takeIf { it.isNotEmpty() } ?: return@withContext 0
+    internal suspend fun run(userId: UserId): Int = runWhenReady(userId) ?: 0
+
+    private suspend fun runOn(userId: UserId, device: List<LocalMediaItem>): Int = withContext(Dispatchers.IO) {
         misses.keepOnly(device.mapTo(HashSet(device.size * 2)) { it.uri })
         val found = candidates(userId, device, syncStateSnapshot.current(userId))
         val linked = HashSet<String>()

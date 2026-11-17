@@ -431,8 +431,29 @@ class DisplayPairRepairTest {
     fun `no signed-in account or no complete listing runs nothing`() {
         val h = Harness(listOf(device("uri://dl", "IMG_0001.jpg")), emptyList(), emptyMap())
 
-        assertEquals(0, runBlocking { h.repair.runForPrimaryUser() })
+        assertNull("could not start", runBlocking { h.repair.runForPrimaryUser() })
         assertTrue(h.hashed.isEmpty())
         assertNull(h.misses.fingerprintOf("uri://dl"))
+    }
+
+    @Test
+    fun `with no device list yet the run reports it could not start`() {
+        val noScan = Harness(emptyList(), listOf(drive("link-dl", "IMG_0001.jpg", "hmac-sha-dl")), emptyMap())
+        coEvery { noScan.localRepo.lastKnownMedia() } returns null
+
+        assertNull(runBlocking { noScan.repair.runWhenReady(user) })
+        assertNull("an empty list is no scan either", runBlocking { Harness(emptyList(), emptyList(), emptyMap()).repair.runWhenReady(user) })
+        assertEquals(0, runBlocking { noScan.repair.run(user) })
+    }
+
+    @Test
+    fun `with a device list the run starts and reports what it linked`() {
+        val h = Harness(
+            listOf(device("uri://dl", "IMG_0001.jpg")),
+            listOf(drive("link-dl", "IMG_0001.jpg", "hmac-sha-dl")),
+            mapOf("uri://dl" to "sha-dl"),
+        )
+
+        assertEquals(1, runBlocking { h.repair.runWhenReady(user) })
     }
 }

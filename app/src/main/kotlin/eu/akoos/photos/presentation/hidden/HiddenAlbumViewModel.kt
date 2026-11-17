@@ -68,6 +68,9 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.LinkSides
+import eu.akoos.photos.domain.usecase.syncedRowsShownAsOne
 import eu.akoos.photos.presentation.albums.DeviceFolder
 import eu.akoos.photos.presentation.albums.DeviceFolderCards
 import eu.akoos.photos.util.friendlyNetworkError
@@ -81,16 +84,17 @@ internal const val HIDDEN_CLOUD_SELECTION_PREFIX = "hidden_cloud_"
 /**
  * The linkIds among [hiddenIds] that a SYNCED row pairs to a device file: individually hidden cloud
  * photos whose device copy is still in the phone's gallery. A vaulted photo's row reads HIDDEN, so it
- * never counts.
+ * never counts. A row resting on a name counts only while [syncedRowsShownAsOne] shows its file and
+ * photo as one on the merge's own [sides], the check the gallery's pairing makes.
  */
-internal fun looseDeviceCopies(hiddenIds: Set<String>, rows: List<SyncStateLite>): Set<String> =
+internal fun looseDeviceCopies(hiddenIds: Set<String>, rows: List<SyncStateLite>, sides: LinkSides): Set<String> =
     if (hiddenIds.isEmpty()) {
         emptySet()
     } else {
+        val shown = syncedRowsShownAsOne(rows, sides)
         rows.asSequence()
-            .filter { it.status == SyncStatus.SYNCED }
+            .filter { it.status == SyncStatus.SYNCED && it.cloudFileId in hiddenIds && shown(it) }
             .mapNotNull { it.cloudFileId }
-            .filter { it in hiddenIds }
             .toSet()
     }
 
@@ -164,6 +168,7 @@ class HiddenAlbumViewModel @Inject constructor(
     private val hiddenVaultRestorer: HiddenVaultRestorer,
     private val driveRepo: DrivePhotoRepository,
     private val syncStateSnapshot: SyncStateSnapshot,
+    private val getGalleryItems: GetGalleryItemsUseCase,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     vaultPasswordStore: VaultPasswordStore,
 ) : ViewModel() {
@@ -389,8 +394,8 @@ class HiddenAlbumViewModel @Inject constructor(
             val hiddenIds = context.settingsDataStore.data
                 .map { it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet() }
                 .distinctUntilChanged()
-            combine(hiddenIds, syncStateSnapshot.observe(userId)) { ids, sync ->
-                looseDeviceCopies(ids, sync.rows)
+            combine(hiddenIds, syncStateSnapshot.observe(userId), getGalleryItems.linkSides(userId)) { ids, sync, sides ->
+                looseDeviceCopies(ids, sync.rows, sides)
             }
                 .flowOn(Dispatchers.Default)
                 .distinctUntilChanged()

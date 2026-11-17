@@ -26,6 +26,7 @@ package eu.akoos.photos.worker
 import android.content.Context
 import android.util.Log
 import androidx.hilt.work.HiltWorker
+import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
@@ -37,12 +38,15 @@ import dagger.assisted.AssistedInject
 import eu.akoos.photos.domain.usecase.DisplayPairRepair
 import eu.akoos.photos.domain.usecase.PAIR_REPAIR_TIME_LIMIT_MS
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.TimeUnit
 
 /**
  * One run of [DisplayPairRepair], queued the moment an account's Drive listing completes for the first
  * time, as after a reinstall or a new sign-in. The device files a reinstall left unlinked then pair with
  * their Drive photos within the minute the listing lands instead of at the next [CachePruneWorker] pass,
- * up to 30 minutes later. The periodic pass carries on with whatever this run's budget left.
+ * up to 30 minutes later. The periodic pass carries on with whatever this run's budget left. A run that
+ * could not start, because the first device scan of the install is not written yet, is tried again a
+ * few times over the next minutes.
  */
 @HiltWorker
 class DisplayPairRepairWorker @AssistedInject constructor(
@@ -52,22 +56,35 @@ class DisplayPairRepairWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        var started = true
         try {
-            withTimeoutOrNull(PAIR_REPAIR_TIME_LIMIT_MS) { displayPairRepair.runForPrimaryUser() }
+            withTimeoutOrNull(PAIR_REPAIR_TIME_LIMIT_MS) { started = displayPairRepair.runForPrimaryUser() != null }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "display pair repair failed: ${e.message}")
         }
-        return Result.success()
+        return resultFor(started, runAttemptCount)
     }
 
     companion object {
         const val UNIQUE_NAME = "display_pair_repair_once"
         private const val TAG = "display_pair_repair"
 
+        /** Runs one try of the repair makes at most, the first included. */
+        internal const val MAX_ATTEMPTS = 6
+
+        /** The wait before the first retry, growing by as much before each later one. */
+        private const val RETRY_STEP_SECONDS = 30L
+
+        /** A run that started is done; one that could not start is tried again until [MAX_ATTEMPTS]. */
+        internal fun resultFor(started: Boolean, runAttemptCount: Int): Result =
+            if (!started && runAttemptCount + 1 < MAX_ATTEMPTS) Result.retry() else Result.success()
+
         /** The one-off request: no constraints, so it starts as soon as WorkManager can run it. */
-        internal fun request(): OneTimeWorkRequest = OneTimeWorkRequestBuilder<DisplayPairRepairWorker>().build()
+        internal fun request(): OneTimeWorkRequest = OneTimeWorkRequestBuilder<DisplayPairRepairWorker>()
+            .setBackoffCriteria(BackoffPolicy.LINEAR, RETRY_STEP_SECONDS, TimeUnit.SECONDS)
+            .build()
 
         /** Queues the one run. A run already queued or running stays, and this request is dropped. */
         fun enqueueOnce(workManager: WorkManager) {
