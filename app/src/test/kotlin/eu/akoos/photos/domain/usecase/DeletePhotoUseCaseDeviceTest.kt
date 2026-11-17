@@ -30,13 +30,17 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
 import org.junit.Assert.assertEquals
@@ -260,5 +264,141 @@ class DeletePhotoUseCaseDeviceTest {
     fun `a delete that keeps the device files is a single chunk`() {
         val items = (1..5).map { synced("content://media/$it", "link-$it") }
         assertEquals(listOf(items), DeletePhotoUseCase.requestChunks(items, freeUpSpace = false, maxUris = 2))
+    }
+
+    // ── The selection as it stands when the delete runs ──────────────────────────────
+
+    private fun row(uri: String, linkId: String?, basis: Int = LinkBasis.PROVEN, status: SyncStatus = SyncStatus.SYNCED) = SyncState(
+        localUri = uri, cloudFileId = linkId, localHash = "", cloudHash = null, status = status,
+        lastSyncAttemptMs = 0L, lastSyncSuccessMs = null, backedUpAtMs = 1L, sizeBytes = 10L, linkBasis = basis,
+    )
+
+    @Test
+    fun `a device photo whose upload finished after it was picked loses its Drive copy too`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { getOwnByUris(userId, listOf("content://media/1")) } returns listOf(row("content://media/1", "link-1"))
+            coEvery { syncedUrisByCloudId(userId, listOf("link-1")) } returns mapOf("link-1" to listOf("content://media/1"))
+        }
+        coEvery { cloudRepo.observePhotosByLinkIds(listOf("link-1")) } returns flowOf(listOf(cloud("link-1")))
+
+        val result = DeletePhotoUseCase(repo, cloudRepo, FakeDevice(asksConsent = false))(
+            userId, listOf(localOnly("content://media/1")), freeUpSpace = true, deleteFromCloud = true,
+        )
+
+        coVerify(exactly = 1) { cloudRepo.deleteFiles(userId, listOf("link-1")) }
+        coVerify(exactly = 1) { repo.updateStatusAndDeleteLocal("content://media/1", SyncStatus.CLOUD_ONLY) }
+        assertEquals(
+            "the undo is built from the photo as it was deleted",
+            listOf(synced("content://media/1", "link-1")),
+            (result as DeletePhotoUseCase.Result.Success).landed(listOf(localOnly("content://media/1"))),
+        )
+    }
+
+    @Test
+    fun `a device photo linked by name alone keeps the Drive photo of that name`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { getOwnByUris(userId, listOf("content://media/1")) } returns
+                listOf(row("content://media/1", "link-1", basis = LinkBasis.NAME))
+        }
+
+        DeletePhotoUseCase(repo, cloudRepo, FakeDevice(asksConsent = false))(
+            userId, listOf(localOnly("content://media/1")), freeUpSpace = true, deleteFromCloud = true,
+        )
+
+        coVerify(exactly = 0) { cloudRepo.deleteFiles(any(), any()) }
+    }
+
+    @Test
+    fun `a Drive photo saved to the device after it was picked loses its device copy too`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { syncedUrisByCloudId(userId, listOf("link-1")) } returns mapOf("link-1" to listOf("content://media/1"))
+            coEvery { getByUri("content://media/1") } returns row("content://media/1", "link-1")
+        }
+        val localRepo = mockk<LocalMediaRepository>(relaxed = true) {
+            coEvery { queryByUri("content://media/1") } returns local("content://media/1")
+        }
+        val device = FakeDevice(asksConsent = true)
+
+        val result = DeletePhotoUseCase(repo, cloudRepo, device, localRepo)(
+            userId, listOf(GalleryItem.CloudOnly(cloud("link-1"))), freeUpSpace = true, deleteFromCloud = true,
+        ) as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+
+        assertEquals(listOf(listOf(Uri.parse("content://media/1"))), device.requests)
+        assertEquals(listOf("link-1"), result.cloudLinkIds)
+        assertEquals(listOf(synced("content://media/1", "link-1")), result.itemsBeingDeleted)
+    }
+
+    @Test
+    fun `a Drive photo whose saved file is gone from the device stays a Drive delete`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { syncedUrisByCloudId(userId, listOf("link-1")) } returns mapOf("link-1" to listOf("content://media/1"))
+            coEvery { getByUri("content://media/1") } returns row("content://media/1", "link-1")
+        }
+        val localRepo = mockk<LocalMediaRepository>(relaxed = true) {
+            coEvery { queryByUri("content://media/1") } returns null
+        }
+        val device = FakeDevice(asksConsent = true)
+
+        val result = DeletePhotoUseCase(repo, cloudRepo, device, localRepo)(
+            userId, listOf(GalleryItem.CloudOnly(cloud("link-1"))), freeUpSpace = true, deleteFromCloud = true,
+        )
+
+        assertTrue(device.requests.isEmpty())
+        assertEquals(DeletePhotoUseCase.Result.Success(), result)
+        coVerify(exactly = 1) { cloudRepo.deleteFiles(userId, listOf("link-1")) }
+    }
+
+    @Test
+    fun `a counterpart the selection already holds is not named twice`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { getOwnByUris(userId, listOf("content://media/1")) } returns listOf(row("content://media/1", "link-1"))
+            coEvery { syncedUrisByCloudId(userId, any()) } returns mapOf("link-1" to listOf("content://media/1"))
+            coEvery { getByUri("content://media/1") } returns row("content://media/1", "link-1")
+        }
+        val picked = listOf(localOnly("content://media/1"), GalleryItem.CloudOnly(cloud("link-1")))
+        val useCase = DeletePhotoUseCase(repo, cloudRepo, FakeDevice(asksConsent = false))
+
+        assertEquals(picked, useCase.withCurrentPairs(userId, picked))
+    }
+
+    @Test
+    fun `a device photo whose Drive photo another device file holds keeps that Drive photo`() = runTest {
+        // Two device files paired to one Drive photo: the gallery pairs it with one and shows the other as
+        // a device photo. Deleting that second file must not take the Drive copy the first one is paired to.
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { getOwnByUris(userId, listOf("content://media/2")) } returns listOf(row("content://media/2", "link-1"))
+            coEvery { syncedUrisByCloudId(userId, listOf("link-1")) } returns
+                mapOf("link-1" to listOf("content://media/1", "content://media/2"))
+        }
+        coEvery { cloudRepo.observePhotosByLinkIds(listOf("link-1")) } returns flowOf(listOf(cloud("link-1")))
+
+        DeletePhotoUseCase(repo, cloudRepo, FakeDevice(asksConsent = false))(
+            userId, listOf(localOnly("content://media/2")), freeUpSpace = true, deleteFromCloud = true,
+        )
+
+        coVerify(exactly = 0) { cloudRepo.deleteFiles(any(), any()) }
+    }
+
+    @Test
+    fun `a Drive photo two device files hold is deleted on Drive alone`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { syncedUrisByCloudId(userId, listOf("link-1")) } returns
+                mapOf("link-1" to listOf("content://media/1", "content://media/2"))
+        }
+        val useCase = DeletePhotoUseCase(repo, cloudRepo, FakeDevice(asksConsent = false), mockk(relaxed = true))
+        val picked = listOf(GalleryItem.CloudOnly(cloud("link-1")))
+
+        assertEquals(picked, useCase.withCurrentPairs(userId, picked))
+    }
+
+    @Test
+    fun `a hide keeps the selection as it was picked`() = runTest {
+        val repo = mockk<SyncStateRepository>(relaxed = true) {
+            coEvery { getOwnByUris(userId, any()) } returns listOf(row("content://media/1", "link-1"))
+        }
+        DeletePhotoUseCase(repo, cloudRepo, FakeDevice(asksConsent = false))(
+            userId, listOf(localOnly("content://media/1")), freeUpSpace = true, deleteFromCloud = false, hide = true,
+        )
+        coVerify(exactly = 0) { repo.getOwnByUris(any(), any()) }
     }
 }

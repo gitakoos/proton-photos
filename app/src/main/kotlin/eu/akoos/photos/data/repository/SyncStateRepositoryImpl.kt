@@ -202,6 +202,10 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun getOwnByUris(userId: UserId, localUris: List<String>): List<SyncState> =
         dao.getByUris(localUris).mapNotNull { row -> row.takeIf { it.userId == userId.id }?.toDomain() }
 
+    override suspend fun syncedUrisByCloudId(userId: UserId, cloudFileIds: Collection<String>): Map<String, List<String>> =
+        cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedPairsForCloudIds(userId.id, chunk) }
+            .groupBy({ it.cloudFileId }, { it.localUri })
+
     override suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
         cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedCloudIdsAmong(userId.id, chunk) }.toHashSet()
 

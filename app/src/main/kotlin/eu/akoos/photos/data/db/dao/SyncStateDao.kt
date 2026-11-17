@@ -511,6 +511,14 @@ interface SyncStateDao {
             "WHERE userId = :userId AND status = 'SYNCED' AND cloudFileId IN (:cloudFileIds)"
     )
     suspend fun syncedCloudIdsAmong(userId: String, cloudFileIds: List<String>): List<String>
+
+    /** The SYNCED rows of [userId]'s paired to one of [cloudFileIds]: each device uri and its cloud id. The
+     *  caller keeps the list within the host-variable limit. */
+    @Query(
+        "SELECT localUri, cloudFileId FROM sync_state " +
+            "WHERE userId = :userId AND status = 'SYNCED' AND cloudFileId IN (:cloudFileIds)"
+    )
+    suspend fun syncedPairsForCloudIds(userId: String, cloudFileIds: List<String>): List<CloudPairRow>
 }
 
 /** A row of a [SyncStateDao.pageByStatus] page and its rowid, the key the next page starts after. */

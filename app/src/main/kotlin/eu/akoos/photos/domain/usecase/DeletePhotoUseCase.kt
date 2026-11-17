@@ -31,7 +31,10 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LinkBasis
+import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import kotlinx.coroutines.flow.first
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -42,6 +45,9 @@ private const val TAG = "DeletePhotoUseCase"
 /** Device uris one system trash or delete request carries. The request crosses a Binder transaction,
  *  which a library-sized batch outgrows, so a larger delete asks once per chunk. */
 internal const val DEVICE_REQUEST_CHUNK = 1_000
+
+/** Device uris one sync-row lookup carries, under SQLite's bind-variable limit. */
+private const val PAIR_LOOKUP_CHUNK = 500
 
 /** The device side of a delete, apart from the use case so a test can stand in for MediaStore. */
 internal interface DeviceMediaDeletes {
@@ -76,11 +82,19 @@ class DeletePhotoUseCase internal constructor(
          * consent), or a follow-up system request could not be built. Their rows and Drive copies
          * are left as they were.
          */
-        data class Success(val keptOnDevice: List<GalleryItem> = emptyList()) : Result {
-            /** [items] less the ones [keptOnDevice] names: what the delete carried out. */
-            fun landed(items: List<GalleryItem>): List<GalleryItem> =
-                if (keptOnDevice.isEmpty()) items
-                else keptOnDevice.toHashSet().let { kept -> items.filterNot { it in kept } }
+        data class Success(
+            val keptOnDevice: List<GalleryItem> = emptyList(),
+            /** The items the delete acted on, each as it stood when the delete ran (see [invoke]); null
+             *  when the caller's own list is that already. */
+            val acted: List<GalleryItem>? = null,
+        ) : Result {
+            /** The items the delete acted on ([acted], else [items]) less the ones [keptOnDevice] names:
+             *  what the delete carried out. */
+            fun landed(items: List<GalleryItem>): List<GalleryItem> {
+                val ran = acted ?: items
+                return if (keptOnDevice.isEmpty()) ran
+                else keptOnDevice.toHashSet().let { kept -> ran.filterNot { it in kept } }
+            }
         }
 
         /**
@@ -127,6 +141,13 @@ class DeletePhotoUseCase internal constructor(
         deleteFromCloud: Boolean,
         hide: Boolean = false,
     ): Result {
+        // A selection is a snapshot: a photo can finish its upload or download between the tap that picked
+        // it and this delete. Each item is taken as it stands now, so the delete removes what the user
+        // asked for. A hide vaults only what was picked, so it keeps the snapshot.
+        val selected = items
+        @Suppress("NAME_SHADOWING")
+        val items = if (hide) selected else withCurrentPairs(userId, selected)
+        val acted = items.takeIf { it != selected }
         val (cloudLinkIds, localUriStrings) = computeDeleteTargets(items, freeUpSpace, deleteFromCloud)
 
         // Batch shape up front: item count (overload signal) plus the type mix and cloud/local
@@ -160,7 +181,7 @@ class DeletePhotoUseCase internal constructor(
 
         if (localUriStrings.isEmpty()) {
             if (cloudLinkIds.isNotEmpty() && !trashInCloud(userId, cloudLinkIds)) return Result.CloudDeleteFailed
-            return Result.Success()
+            return Result.Success(acted = acted)
         }
 
         // Before Android 11 each device file is removed directly and checked on its own: Android 10
@@ -171,7 +192,7 @@ class DeletePhotoUseCase internal constructor(
         if (kept.isNotEmpty()) {
             Log.w(TAG, "Direct delete left ${kept.size}/${localUriStrings.size} device file(s) in place")
         }
-        val outcome = Result.Success(kept)
+        val outcome = Result.Success(kept, acted)
         val settled = outcome.landed(items)
         localRepo?.forgetRemoved(gone)
         updateSyncStateAfterLocalDelete(settled, freeUpSpace, hide)
@@ -181,6 +202,63 @@ class DeletePhotoUseCase internal constructor(
         if (settledLinks.isNotEmpty() && !trashInCloud(userId, settledLinks)) return Result.CloudDeleteFailed
         return outcome
     }
+
+    /**
+     * [items] with each device-only or Drive-only photo that is paired by now taken as the pair: a device
+     * file whose upload finished since it was picked, or a Drive photo saved to the device since. Only a
+     * proven SYNCED link counts ([LinkBasis.PROVEN]); one reconcile made by name alone could name a
+     * different photo. A Drive photo's device file is taken only while the device still lists it, since a
+     * stale uri would fail the whole trash request. A link a second device file holds too is left alone:
+     * the gallery pairs that Drive photo with the other file, so trashing it would take that file's backup.
+     * A counterpart the selection already holds is left as picked, so no copy is named twice. With no
+     * signed-in user there is no Drive copy to pair with.
+     */
+    internal suspend fun withCurrentPairs(userId: UserId?, items: List<GalleryItem>): List<GalleryItem> {
+        if (userId == null || items.all { it is GalleryItem.Synced }) return items
+        val pickedLinks = HashSet<String>()
+        val pickedUris = HashSet<String>()
+        for (item in items) {
+            when (item) {
+                is GalleryItem.Synced -> { pickedLinks += item.cloud.linkId; pickedUris += item.local.uri }
+                is GalleryItem.CloudOnly -> pickedLinks += item.cloud.linkId
+                is GalleryItem.LocalOnly -> pickedUris += item.local.uri
+            }
+        }
+        val deviceOnly = items.filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri }
+        val rowsByUri = deviceOnly.chunked(PAIR_LOOKUP_CHUNK)
+            .flatMap { syncStateRepo.getOwnByUris(userId, it) }
+            .filter(::provenPair)
+            .associateBy { it.localUri }
+        val newLinks = rowsByUri.values.mapNotNull { it.cloudFileId }.filter { it !in pickedLinks }.distinct()
+        val driveOnly = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId }
+        val lookup = (newLinks + driveOnly).distinct()
+        val holders = if (lookup.isEmpty()) emptyMap() else syncStateRepo.syncedUrisByCloudId(userId, lookup)
+        // The one device file a link names, or null when it names none or more than one.
+        fun soleHolder(linkId: String): String? =
+            holders[linkId]?.filter { it.isNotBlank() }?.distinct()?.singleOrNull()
+        val cloudById = if (newLinks.isEmpty()) emptyMap()
+            else cloudRepo.observePhotosByLinkIds(newLinks).first().associateBy { it.linkId }
+        return items.map { item ->
+            when (item) {
+                is GalleryItem.Synced -> item
+                is GalleryItem.LocalOnly ->
+                    rowsByUri[item.local.uri]?.cloudFileId
+                        ?.takeIf { it !in pickedLinks && soleHolder(it) == item.local.uri }
+                        ?.let { cloudById[it] }
+                        ?.let { GalleryItem.Synced(it, item.local) }
+                        ?: item
+                is GalleryItem.CloudOnly -> {
+                    val linkId = item.cloud.linkId
+                    val uri = soleHolder(linkId)?.takeIf { it !in pickedUris }
+                        ?.takeIf { syncStateRepo.getByUri(it)?.let { row -> provenPair(row) && row.cloudFileId == linkId } == true }
+                    uri?.let { localRepo?.queryByUri(it) }?.let { GalleryItem.Synced(item.cloud, it) } ?: item
+                }
+            }
+        }
+    }
+
+    private fun provenPair(row: SyncState): Boolean =
+        row.status == SyncStatus.SYNCED && !row.cloudFileId.isNullOrBlank() && row.linkBasis == LinkBasis.PROVEN
 
     /**
      * Called by the caller AFTER the user confirmed the Android 11+ system trash dialog. Runs the

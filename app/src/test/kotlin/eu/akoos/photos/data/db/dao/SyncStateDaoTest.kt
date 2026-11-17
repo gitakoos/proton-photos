@@ -392,6 +392,19 @@ class SyncStateDaoTest {
         assertNull(dao.getQueueSource("uri://1"))
     }
 
+    @Test
+    fun `the synced pairs of a cloud id list every device file that holds it`() = runTest {
+        dao.upsert(entity("uri://a", status = SyncStatus.SYNCED, cloudFileId = "c1"))
+        dao.upsert(entity("uri://b", status = SyncStatus.SYNCED, cloudFileId = "c1"))
+        dao.upsert(entity("uri://c", status = SyncStatus.CLOUD_ONLY, cloudFileId = "c1"))
+        dao.upsert(entity("uri://d", userId = "user2", status = SyncStatus.SYNCED, cloudFileId = "c1"))
+        dao.upsert(entity("uri://e", status = SyncStatus.SYNCED, cloudFileId = "c2"))
+
+        val pairs = dao.syncedPairsForCloudIds("user1", listOf("c1"))
+
+        assertEquals(setOf("uri://a", "uri://b"), pairs.map { it.localUri }.toSet())
+    }
+
     // ── updateDomainColumnsIfNotSyncedWithCloud: reconcile cannot clobber a just-promoted upload ──
 
     /** The guarded domain write reconcile uses for a demotion: same columns as updateDomainColumns,
