@@ -109,4 +109,20 @@ class LocalExifCheckRulesTest {
         val left = checkAfterRead("content://m/1", 100, first.gps, gpsFound = false, first.date, prior = null)
         assertEquals(OwedLegs(gps = false, date = false), owed(left))
     }
+
+    @Test
+    fun `the walk measures the EXIF date against the column, not the item's fallback date`() {
+        val emptied = eu.akoos.photos.domain.entity.LocalMediaItem(
+            uri = "content://m/1", dateTaken = 1_794_900_000_000L, displayName = "a.jpg",
+            mimeType = "image/jpeg", sizeBytes = 1, bucketName = null, dateTakenIsExplicit = false,
+        )
+        assertEquals(0L, columnDateTaken(emptied))
+        assertEquals(1_794_900_000_000L, columnDateTaken(emptied.copy(dateTakenIsExplicit = true)))
+        // With the column read as empty, an offsetless EXIF date a day from the added time is still taken.
+        val exifMs = 1_794_900_000_000L - 20 * 60 * 60 * 1000L
+        assertEquals(
+            exifMs,
+            eu.akoos.photos.util.CaptureDateOverride.captureDateCorrection(columnDateTaken(emptied), exifMs, exifHasOffset = false),
+        )
+    }
 }

@@ -65,6 +65,9 @@ class LocalOverwriteGuard(private val context: Context) {
      * new bytes as backed up when the old ones were. [announce] is false for one that changes the picture or
      * whose bytes go to Drive on their own (a pixel edit, an upload's mirror strip): it must not be taken
      * for the backed-up photo.
+     *
+     * A gallery photo whose date inside the file the rewrite left as it was keeps the capture date its row
+     * reported before, through [RewriteCaptureDate].
      */
     fun <T> run(
         uri: String,
@@ -73,6 +76,7 @@ class LocalOverwriteGuard(private val context: Context) {
         mutate: () -> T,
     ): T {
         val parsed = Uri.parse(uri)
+        val galleryRow = RewriteCaptureDate.applies(parsed)
         val originalSize = imageSize(parsed)
         val wanted = expectedSize ?: originalSize
         // A hidden photo is edited as a scratch copy whose vault file stays untouched until the edited copy is
@@ -82,6 +86,7 @@ class LocalOverwriteGuard(private val context: Context) {
             if (wanted != null && imageSize(parsed) != wanted) throw java.io.IOException("rewritten image does not decode")
             return result
         }
+        val dateBefore = if (galleryRow) RewriteCaptureDate.before(context, uri) else null
         val before = if (announce && OwnDeviceWrites.listening) sha1(uri) else null
         val beforeStamp = before?.let { runCatching { DeviceFileStamps.read(context, uri) }.getOrNull() }
         val result = MirrorOverwriteJournal.guardedMutation(
@@ -104,6 +109,7 @@ class LocalOverwriteGuard(private val context: Context) {
             verify = { wanted == null || imageSize(parsed) == wanted },
         )
         fileLength(parsed)?.let { LocalRewrites.note(uri, it) }
+        dateBefore?.let { RewriteCaptureDate.after(context, uri, it) }
         if (before != null) {
             sha1(uri)?.let { after -> OwnDeviceWrites.wrote(OwnDeviceWrite(uri, before, beforeStamp, after)) }
         }

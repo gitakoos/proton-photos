@@ -576,4 +576,75 @@ class CaptureDateOverrideTest {
         )
         assertNull(CaptureDateOverride.upsert(emptySet(), emptyMap(), emptyMap()))
     }
+
+    // ── keptAcrossRewrite: an in-place rewrite that leaves the date in the file keeps the photo's date ──
+
+    private val exifDate = "2026:11:10 12:00:00|2026:11:10 12:00:00|null|null"
+
+    private fun kept(
+        before: String? = exifDate,
+        after: String? = before,
+        embeddedMs: Long? = null,
+        hasOffset: Boolean = false,
+        column: Long = 0L,
+        entry: CaptureDateOverride.Entry? = null,
+        fileModified: Long? = null,
+    ) = CaptureDateOverride.keptAcrossRewrite(
+        embeddedBefore = before, embeddedAfter = after, embeddedMs = embeddedMs, embeddedHasOffset = hasOffset,
+        rawDateTakenMs = column, entry = entry, modifiedSecondsBefore = modifiedSeconds,
+        fileModifiedSecondsBefore = fileModified,
+    )
+
+    @Test
+    fun `a rewrite that kept an offsetless date carries the column the rescan empties`() {
+        val k = kept(embeddedMs = captureMs + hourMs, column = captureMs)
+        assertEquals(captureMs, k)
+        // Without it the emptied column resolves to the day the file was added.
+        assertEquals(downloadSeconds * 1000L, CaptureDateOverride.resolveDateTaken(0L, null, downloadSeconds, downloadSeconds + 600))
+        assertEquals(captureMs, CaptureDateOverride.resolveDateTaken(0L, k, downloadSeconds, downloadSeconds + 600))
+    }
+
+    @Test
+    fun `a date with an offset is left to the scan, which re-derives it`() {
+        assertNull(kept(embeddedMs = captureMs, hasOffset = true, column = captureMs))
+    }
+
+    @Test
+    fun `a current entry outranks the column across a rewrite, offset or not`() {
+        val entry = CaptureDateOverride.Entry(captureMs, modifiedSeconds)
+        assertEquals(captureMs, kept(column = captureMs + dayMs, entry = entry))
+        assertEquals(captureMs, kept(hasOffset = true, column = captureMs + dayMs, entry = entry))
+        assertEquals(captureMs, kept(before = null, entry = CaptureDateOverride.Entry(captureMs, null)))
+    }
+
+    @Test
+    fun `an entry a rewrite just stamped stays current before the column catches up`() {
+        // A second rewrite before the rescan: the column still holds the old time, the file the new one.
+        val stamped = CaptureDateOverride.Entry(captureMs, modifiedSeconds + 500)
+        assertEquals(captureMs, kept(before = null, entry = stamped, fileModified = modifiedSeconds + 500))
+    }
+
+    @Test
+    fun `an entry the file had already outgrown gives way to the column`() {
+        val stale = CaptureDateOverride.Entry(captureMs, modifiedSeconds - 50)
+        assertEquals(captureMs + dayMs, kept(column = captureMs + dayMs, entry = stale, fileModified = modifiedSeconds))
+        assertNull(kept(before = null, entry = stale, fileModified = modifiedSeconds))
+    }
+
+    @Test
+    fun `an empty column falls back to the date inside the file`() {
+        assertEquals(captureMs, kept(embeddedMs = captureMs))
+    }
+
+    @Test
+    fun `a rewrite that changed or removed the date inside the file records nothing`() {
+        assertNull(kept(after = null, embeddedMs = captureMs, column = captureMs))
+        assertNull(kept(after = "2027:01:01 00:00:00|2027:01:01 00:00:00|+01:00|+01:00", embeddedMs = captureMs, column = captureMs))
+        assertNull(kept(after = null, column = captureMs, entry = CaptureDateOverride.Entry(captureMs, modifiedSeconds)))
+    }
+
+    @Test
+    fun `a file with no date anywhere gets none invented`() {
+        assertNull(kept(before = null))
+    }
 }

@@ -37,11 +37,12 @@ import kotlin.math.abs
  * date carries the opposite fault: a non-zero column holding the wrong instant. The map answers both.
  *
  * The trailing field is the DATE_MODIFIED (seconds) the file carried when the entry was written, so
- * an entry can be held against the file it describes. A file whose modified time has moved on was
- * edited by something outside the app, and since an entry outranks the column nothing else would ever
- * notice: such an entry is void ([isCurrent]), and dropping it is what lets the file be read from
- * scratch. An entry written without that field carries no modified time, which reads as unknown and
- * is never current, so it too is re-derived once.
+ * an entry can be held against the file it describes. The app's own in-place rewrites re-stamp the
+ * entry with the time they leave ([keptAcrossRewrite]), so a file whose modified time has moved on
+ * otherwise was edited by something outside the app, and since an entry outranks the column nothing
+ * else would ever notice: such an entry is void ([isCurrent]), and dropping it is what lets the file be
+ * read from scratch. An entry written without that field carries no modified time, which the EXIF walk
+ * takes over with the file's current one.
  *
  * Centralised so the write sides (the downloader, the EXIF read) and the read side (the media scan)
  * share one encoding and can be verified without a device.
@@ -84,6 +85,45 @@ object CaptureDateOverride {
      *  and the walk re-derives it. */
     fun isCurrent(entry: Entry, modifiedSeconds: Long): Boolean =
         entry.modifiedSeconds != null && entry.modifiedSeconds == modifiedSeconds
+
+    /**
+     * The capture date to record for a file the app just rewrote in place, or null to record nothing.
+     *
+     * The rewrite moves the file's modified time to now. The media scan that follows keeps a datetime
+     * without an EXIF OffsetTimeOriginal only while it lies within a day of the modified time or of a GPS
+     * time, so it empties the DATE_TAKEN column of an older photo and the photo would fall to the day it
+     * was added. When the date inside the file is the same before and after ([embeddedBefore] equals
+     * [embeddedAfter]), the date the row reported before is kept:
+     *  - its [entry], re-stamped, while the entry still matched the file: its modified time equals the
+     *    column's [modifiedSecondsBefore] or the file's own [fileModifiedSecondsBefore] (an earlier rewrite
+     *    stamps the file's time before the column catches up), or it carries none;
+     *  - nothing when the file carries an offset ([embeddedHasOffset]): the scan re-derives that exact
+     *    instant into the column itself;
+     *  - else the [rawDateTakenMs] column, else the file's own EXIF date ([embeddedMs]).
+     * A rewrite that changed or removed the date inside the file records nothing, and neither does a file
+     * that had no date at all.
+     */
+    fun keptAcrossRewrite(
+        embeddedBefore: String?,
+        embeddedAfter: String?,
+        embeddedMs: Long?,
+        embeddedHasOffset: Boolean,
+        rawDateTakenMs: Long,
+        entry: Entry?,
+        modifiedSecondsBefore: Long,
+        fileModifiedSecondsBefore: Long? = null,
+    ): Long? {
+        if (embeddedBefore != embeddedAfter) return null
+        if (entry != null &&
+            (entry.modifiedSeconds == null || entry.modifiedSeconds == modifiedSecondsBefore ||
+                entry.modifiedSeconds == fileModifiedSecondsBefore)
+        ) {
+            return entry.captureMs
+        }
+        if (embeddedHasOffset) return null
+        if (rawDateTakenMs > 0L) return rawDateTakenMs
+        return embeddedMs?.takeIf { it > 0L }
+    }
 
     /** Flatten a recorded correction into its persisted entry. An unknown [modifiedSeconds] writes the
      *  two-field form, which is what [parse] reads back as unknown. */

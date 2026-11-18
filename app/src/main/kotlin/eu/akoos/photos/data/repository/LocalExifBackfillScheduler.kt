@@ -206,7 +206,7 @@ class LocalExifBackfillScheduler @Inject constructor(
                 else Pending(
                     uri = item.uri,
                     isVideo = item.mimeType.startsWith("video/"),
-                    dateTaken = item.dateTaken,
+                    dateTaken = columnDateTaken(item),
                     dateModified = item.dateModified,
                     needsGps = needsGps,
                     needsDate = needsDate,
@@ -418,6 +418,13 @@ class LocalExifBackfillScheduler @Inject constructor(
         const val CHECK_FLUSH_BATCH = 500
     }
 }
+
+/**
+ * The date [item]'s DATE_TAKEN column holds, 0 when it holds none. The item's own date falls back to the
+ * file's modified or added time, and measuring the EXIF date against that fallback would leave a photo
+ * whose column the media scan emptied at the day it was added whenever the two lie close together.
+ */
+internal fun columnDateTaken(item: LocalMediaItem): Long = if (item.dateTakenIsExplicit) item.dateTaken else 0L
 
 /** The legs one device file still owes the walk. */
 internal data class OwedLegs(val gps: Boolean, val date: Boolean)
