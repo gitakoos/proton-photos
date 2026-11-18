@@ -65,6 +65,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -621,6 +622,29 @@ class PhotoViewerViewModel @Inject constructor(
      *  empty per photo and filled lazily by [loadDetailsAlbums] so the sheet never blocks on it. */
     private val _detailsAlbums = MutableStateFlow(DetailsAlbums())
     val detailsAlbums: StateFlow<DetailsAlbums> = _detailsAlbums.asStateFlow()
+
+    /** The device file the Folder box asks about, set by [loadDetailsFolders]; null asks nothing. */
+    private val detailsFolderUri = MutableStateFlow<String?>(null)
+
+    /** The device folders for the details sheet's Folder box. Read from the device listing itself, so a
+     *  move shows at once and nothing here needs an account. */
+    val detailsFolders: StateFlow<DetailsFolders?> = detailsFolderUri
+        .flatMapLatest { uri ->
+            if (uri == null) flowOf(null)
+            else combine(
+                localMediaRepo.observeLocalMedia(),
+                context.settingsDataStore.data
+                    .map { FolderCoverMap.parse(it[SettingsKeys.FOLDER_COVER_URI_MAP]) }
+                    .distinctUntilChanged(),
+            ) { items, covers -> detailsFoldersFor(uri, items, covers) }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Points [detailsFolders] at the device file [uri], or at nothing. */
+    fun loadDetailsFolders(uri: String?) {
+        detailsFolderUri.value = uri
+    }
 
     private val _isAddingToAlbum = MutableStateFlow(false)
     val isAddingToAlbum: StateFlow<Boolean> = _isAddingToAlbum.asStateFlow()
@@ -2508,10 +2532,10 @@ class PhotoViewerViewModel @Inject constructor(
     /** Clear any per-photo public-link state so a stale link can't show on the next photo. */
     private fun resetPublicLinkState() = publicLink.reset()
 
-    // ── Move the viewed photo to a device folder (logged-out, single on-device photo) ────────────
+    // ── Move the viewed photo to a device folder (single on-device photo) ────────────
     // Delegated to the shared [MoveToFolderController], the same relocation the timeline and the
     // device-folder detail offer, so the viewer can send the one photo it is showing into another
-    // DCIM folder. Only the photo's own device uri moves; nothing cloud is touched.
+    // DCIM folder. Only the photo's own device uri moves; the Drive albums of mirrored folders follow it.
 
     /** Move the single viewed device photo into [folderName] under DCIM/. */
     fun moveToFolder(uri: String, folderName: String) =

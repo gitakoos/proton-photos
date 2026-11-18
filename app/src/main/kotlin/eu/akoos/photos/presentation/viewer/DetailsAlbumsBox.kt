@@ -53,7 +53,6 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +62,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
+import eu.akoos.photos.presentation.common.photoVideoCountText
+import eu.akoos.photos.presentation.gallery.InAlbumMark
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -92,6 +93,34 @@ internal fun <T> coversAndRest(list: List<T>, max: Int = DETAILS_ALBUM_COVERS): 
     list.take(max) to (list.size - max).coerceAtLeast(0)
 
 /**
+ * One cover the Albums or the Folder box draws and one row of its page: [cover] is the image model (null
+ * draws the plain tile), [pending] dims the cover and names the wait, [mark] is the row's button, and
+ * [tappable] says whether a tap on the row does anything.
+ */
+internal data class DetailsCoverEntry(
+    val key: String,
+    val name: String,
+    val cover: Any?,
+    val count: Int,
+    val videoCount: Int = 0,
+    val pending: Boolean = false,
+    val mark: DetailsRowMark? = null,
+    val tappable: Boolean = mark == DetailsRowMark.Add || mark == DetailsRowMark.Remove,
+)
+
+internal enum class DetailsRowMark { Add, Remove, Current }
+
+private fun DetailsAlbumEntry.asCover() = DetailsCoverEntry(
+    key = album.linkId,
+    name = album.name,
+    cover = album.coverThumbnailUrl,
+    count = album.photoCount,
+    pending = pending,
+    // Taking a photo out of an album takes the same right as adding to it.
+    mark = if (album.canAddPhotos) DetailsRowMark.Remove else null,
+)
+
+/**
  * The main page's Albums section: up to three covers of the albums the photo is in and a count of the rest,
  * or the dashed Add to album chip when it is in none. A cover opens its album through [onOpenAlbum], Edit and
  * the count open the Albums page through [onOpen], and the chip goes straight to the album picker through
@@ -104,22 +133,46 @@ internal fun DetailsAlbumsSection(
     onOpenAlbum: (Album) -> Unit,
     onAdd: () -> Unit,
 ) {
+    DetailsCoversSection(
+        title = stringResource(R.string.gallery_tab_albums),
+        addLabel = stringResource(R.string.gallery_add_to_album),
+        entries = member.map { it.asCover() },
+        onOpen = onOpen,
+        onOpenEntry = { cover -> member.firstOrNull { it.album.linkId == cover.key }?.let { onOpenAlbum(it.album) } },
+        onAdd = onAdd,
+    )
+}
+
+/**
+ * A main-page section of covers under [title]: up to three and a count of the rest, or the dashed [addLabel]
+ * chip when there are none. A cover opens through [onOpenEntry], Edit and the count open the section's page
+ * through [onOpen] (no Edit while it is null), and the chip runs [onAdd].
+ */
+@Composable
+internal fun DetailsCoversSection(
+    title: String,
+    addLabel: String,
+    entries: List<DetailsCoverEntry>,
+    onOpen: (() -> Unit)?,
+    onOpenEntry: (DetailsCoverEntry) -> Unit,
+    onAdd: () -> Unit,
+) {
     Column {
-        DetailsSectionHeader(stringResource(R.string.gallery_tab_albums), onEdit = onOpen)
-        if (member.isEmpty()) {
+        DetailsSectionHeader(title, onEdit = onOpen)
+        if (entries.isEmpty()) {
             Box(Modifier.padding(top = 6.dp)) {
-                DetailsAddChip(stringResource(R.string.gallery_add_to_album), onClick = onAdd)
+                DetailsAddChip(addLabel, onClick = onAdd)
             }
             return@Column
         }
-        val (covers, rest) = coversAndRest(member)
+        val (covers, rest) = coversAndRest(entries)
         Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             covers.forEach { entry ->
-                AlbumTile(name = entry.album.name, onClick = { onOpenAlbum(entry.album) }) {
-                    AlbumCover(entry.album, size = 64, modifier = if (entry.pending) Modifier.alpha(0.55f) else Modifier)
+                AlbumTile(name = entry.name, onClick = { onOpenEntry(entry) }) {
+                    AlbumCover(entry.cover, size = 64, modifier = if (entry.pending) Modifier.alpha(0.55f) else Modifier)
                 }
             }
-            if (rest > 0) {
+            if (rest > 0 && onOpen != null) {
                 AlbumTile(name = stringResource(R.string.viewer_menu_more), onClick = onOpen) {
                     Box(
                         modifier = Modifier
@@ -134,7 +187,7 @@ internal fun DetailsAlbumsSection(
                 }
             }
         }
-        if (member.any { it.pending }) {
+        if (entries.any { it.pending }) {
             Text(
                 stringResource(R.string.details_albums_pending),
                 color = FgMute, fontSize = 11.5.sp, modifier = Modifier.padding(top = 8.dp),
@@ -143,7 +196,7 @@ internal fun DetailsAlbumsSection(
     }
 }
 
-/** A cover over the album's name, both tapping through to [onClick]. */
+/** A cover over its name, both tapping through to [onClick]. */
 @Composable
 private fun AlbumTile(name: String, onClick: () -> Unit, cover: @Composable () -> Unit) {
     Column(
@@ -161,14 +214,14 @@ private fun AlbumTile(name: String, onClick: () -> Unit, cover: @Composable () -
     }
 }
 
-/** The album's cover image, or a plain tile while it has none. */
+/** The cover image, or a plain tile while there is none. */
 @Composable
-private fun AlbumCover(album: Album, size: Int, modifier: Modifier = Modifier) {
+private fun AlbumCover(model: Any?, size: Int, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(if (size >= 60) 12.dp else 10.dp)
     val base = modifier.size(size.dp).clip(shape).background(Bg0)
-    if (album.coverThumbnailUrl != null) {
+    if (model != null) {
         AsyncImage(
-            model = album.coverThumbnailUrl,
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = base,
@@ -180,9 +233,8 @@ private fun AlbumCover(album: Album, size: Int, modifier: Modifier = Modifier) {
 
 /**
  * The Albums page: Add to album, which opens the album picker through [onAdd], then the albums the photo is
- * in, each with a remove button where this user may take it out. The page itself does not scroll: the list
- * takes the room left on the page and scrolls inside it, and a scroll that reaches its top stays there
- * instead of pulling the sheet down. While a removal runs, the buttons wait and the header shows a spinner.
+ * in, each with a remove button where this user may take it out. While a removal runs, the buttons wait and
+ * the header shows a spinner.
  */
 @Composable
 internal fun ColumnScope.DetailsAlbumsPage(
@@ -192,7 +244,36 @@ internal fun ColumnScope.DetailsAlbumsPage(
     onRemove: (Album) -> Unit,
     onAdd: () -> Unit,
 ) {
-    DetailsPageHeader(stringResource(R.string.gallery_tab_albums), onBack = onBack, busy = busy)
+    DetailsCoversPage(
+        title = stringResource(R.string.gallery_tab_albums),
+        addLabel = stringResource(R.string.gallery_add_to_album),
+        listTitle = stringResource(R.string.details_albums_in),
+        entries = member.map { it.asCover() },
+        busy = busy,
+        onBack = onBack,
+        onAdd = onAdd,
+        onRow = { cover -> member.firstOrNull { it.album.linkId == cover.key }?.let { onRemove(it.album) } },
+    )
+}
+
+/**
+ * A section's page: the dashed [addLabel] row, which runs [onAdd], then [entries] under [listTitle], a tap on
+ * a tappable row running [onRow]. The page itself does not scroll: the list takes the room left on the page
+ * and scrolls inside it, and a scroll that reaches its top stays there instead of pulling the sheet down.
+ * While [busy], the rows wait and the header shows a spinner.
+ */
+@Composable
+internal fun ColumnScope.DetailsCoversPage(
+    title: String,
+    addLabel: String,
+    listTitle: String,
+    entries: List<DetailsCoverEntry>,
+    busy: Boolean,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onRow: (DetailsCoverEntry) -> Unit,
+) {
+    DetailsPageHeader(title, onBack = onBack, busy = busy)
     DetailsCard {
         Row(
             modifier = Modifier
@@ -211,23 +292,21 @@ internal fun ColumnScope.DetailsAlbumsPage(
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
             }
-            Text(stringResource(R.string.gallery_add_to_album), color = Accent, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(addLabel, color = Accent, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
-    if (member.isEmpty()) return
-    DetailsListTitle(stringResource(R.string.details_albums_in))
+    if (entries.isEmpty()) return
+    DetailsListTitle(listTitle)
     Box(Modifier.weight(1f, fill = false)) {
         DetailsCard {
             Column(modifier = Modifier.nestedScroll(KeepScrollInside).verticalScroll(rememberScrollState())) {
-                member.forEachIndexed { index, entry ->
+                entries.forEachIndexed { index, entry ->
                     if (index > 0) DetailsDivider()
                     AlbumRow(
-                        album = entry.album,
+                        entry = entry,
                         subtitle = if (entry.pending) stringResource(R.string.details_albums_pending) else null,
-                        // Taking a photo out of an album takes the same right as adding to it.
-                        button = if (entry.album.canAddPhotos) AlbumRowButton.Remove else null,
                         enabled = !busy,
-                        onClick = { onRemove(entry.album) },
+                        onClick = { onRow(entry) },
                     )
                 }
             }
@@ -244,8 +323,6 @@ private val KeepScrollInside = object : NestedScrollConnection {
     override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
 }
 
-private enum class AlbumRowButton { Add, Remove }
-
 /** A small capitals title over one of the page's cards. */
 @Composable
 private fun DetailsListTitle(text: String) {
@@ -256,44 +333,44 @@ private fun DetailsListTitle(text: String) {
     )
 }
 
-/** One album on the page: its cover, name and photo count (or [subtitle]), and the add or remove button. */
+/** One row on the page: its cover, name and photo count (or [subtitle]), and its button. */
 @Composable
 private fun AlbumRow(
-    album: Album,
+    entry: DetailsCoverEntry,
     subtitle: String?,
-    button: AlbumRowButton?,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled && button != null, onClick = onClick)
+            .clickable(enabled = enabled && entry.tappable, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        AlbumCover(album, size = 44)
+        AlbumCover(entry.cover, size = 44)
         Column(modifier = Modifier.weight(1f)) {
-            Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(entry.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                subtitle ?: pluralStringResource(R.plurals.count_photos_plural, album.photoCount, album.photoCount),
+                subtitle ?: photoVideoCountText(entry.count - entry.videoCount, entry.videoCount),
                 color = FgMute, fontSize = 12.sp,
             )
         }
-        when (button) {
-            AlbumRowButton.Remove -> RoundButton(
+        when (entry.mark) {
+            DetailsRowMark.Remove -> RoundButton(
                 icon = Icons.Default.Remove,
                 description = stringResource(R.string.album_remove_from_album),
                 tint = ErrorColor,
                 enabled = enabled,
             )
-            AlbumRowButton.Add -> RoundButton(
+            DetailsRowMark.Add -> RoundButton(
                 icon = Icons.Default.Add,
                 description = stringResource(R.string.gallery_add_to_album),
                 tint = Accent,
                 enabled = enabled,
             )
+            DetailsRowMark.Current -> InAlbumMark(description = null)
             null -> Unit
         }
     }

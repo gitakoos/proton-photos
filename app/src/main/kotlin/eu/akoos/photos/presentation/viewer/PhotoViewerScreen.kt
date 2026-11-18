@@ -434,6 +434,8 @@ fun PhotoViewerScreen(
     onOpenPerson: (Long) -> Unit = {},
     /** Opens an album the photo is in, from a cover in the details panel's Albums box. */
     onOpenAlbum: (Album) -> Unit = {},
+    /** Opens a device folder by its name, from the cover in the details panel's Folder box. */
+    onOpenDeviceFolder: (String) -> Unit = {},
     /** Opened from a named person's page: make the photo on screen that person's cover, or take it off
      *  them. Null anywhere else, which leaves both out of the menu. */
     onSetPersonCover: ((GalleryItem) -> Unit)? = null,
@@ -1208,7 +1210,7 @@ fun PhotoViewerScreen(
     // the pager happens to sit by then.
     var pendingRemoval by remember { mutableStateOf<String?>(null) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
-    // Logged-out "Move to folder" for the single on-device photo the viewer is showing.
+    // "Move to folder" for the single on-device photo the viewer is showing.
     var showMoveSheet by remember { mutableStateOf(false) }
     // Set when "New album" is tapped in the add-to-album sheet: holds the photo to drop into the
     // album the create dialog makes.
@@ -3193,6 +3195,15 @@ fun PhotoViewerScreen(
         val albumMembers = remember(albums, detailsAlbums) {
             detailsMemberAlbums(albums, detailsAlbums.albumIds, detailsAlbums.queuedAlbumIds)
         }
+        // Without an account the albums' place holds the device folder the file is in.
+        val showFolderBox = detailsFolderBoxShown(item, isSignedIn, trashMode, detailsPrivate, isReadOnlyAlbum)
+        val folderUri = detailsDeviceUri(item)
+        LaunchedEffect(folderUri, showFolderBox) { viewModel.loadDetailsFolders(folderUri.takeIf { showFolderBox }) }
+        val detailsFolders by viewModel.detailsFolders.collectAsStateWithLifecycle()
+        val shownFolder = folderUri?.takeIf { showFolderBox }?.let { uri ->
+            detailsShownFolder(uri, detailsDeviceBucket(item), detailsFolders)
+        }
+        val canMoveFolder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
         AppModalSheet(
             onDismissRequest = { showMetadata = false; metadataPages = listOf(DetailsPage.Main) },
             sheetState = metadataSheetState,
@@ -3209,7 +3220,7 @@ fun PhotoViewerScreen(
                 exif = metadata,
                 place = placeLabel,
                 resolvedGps = detailsGps,
-                localFolder = detailsAlbums.localFolder,
+                localFolder = shownFolder?.name ?: detailsAlbums.localFolder,
                 cloudAlbums = detailsAlbums.cloudAlbums,
                 cloudVideoMeta = cloudVideoMeta,
                 isStripping = isStrippingMetadata,
@@ -3253,6 +3264,10 @@ fun PhotoViewerScreen(
                             onAdd = { showAddToAlbumSheet = true },
                         )
                     }
+                } else if (showFolderBox && (shownFolder != null || canMoveFolder)) {
+                    { onOpen ->
+                        DetailsFolderSection(shownFolder, onOpen = onOpen.takeIf { canMoveFolder }, onOpenFolder = onOpenDeviceFolder)
+                    }
                 } else null,
                 albumsPage = if (showAlbumsBox && item != null) {
                     { close ->
@@ -3262,6 +3277,16 @@ fun PhotoViewerScreen(
                             onBack = close,
                             onRemove = { album -> viewModel.removeFromAlbum(album.linkId, item) },
                             onAdd = { showAddToAlbumSheet = true },
+                        )
+                    }
+                } else if (showFolderBox && canMoveFolder && folderUri != null) {
+                    { close ->
+                        DetailsFolderPage(
+                            folders = detailsFolders?.takeIf { it.uri == folderUri }?.folders.orEmpty(),
+                            current = shownFolder?.name,
+                            onBack = close,
+                            onMove = { name -> viewModel.moveToFolder(folderUri, name) },
+                            onCreate = { name -> viewModel.createFolderWith(folderUri, name) },
                         )
                     }
                 } else null,
@@ -3423,11 +3448,10 @@ fun PhotoViewerScreen(
         )
     }
 
-    // ── Move to folder host (logged-out, single on-device photo) ──────────────────
+    // ── Move to folder host (single on-device photo) ──────────────────
     // The picker, the new-folder name dialog, the write-consent launcher a foreign-file move needs
-    // and the completion snackbar, all device-only. Mounts only while logged out and the settled
-    // photo has a device file, so a signed-in viewer subscribes none of it and relocates that one
-    // photo's uri.
+    // and the completion snackbar. Mounts only while the settled photo has a device file, and
+    // relocates that one photo's uri.
     run {
         val settledItem = items.getOrNull(pagerState.settledPage)
         val currentUri = when (settledItem) {

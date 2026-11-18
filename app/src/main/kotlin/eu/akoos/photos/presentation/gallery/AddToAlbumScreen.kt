@@ -321,6 +321,27 @@ private fun NewAlbumEntry(listView: Boolean, count: Int, onClick: () -> Unit, mo
 internal fun pickerTapRemoves(membership: AlbumMembership, allInCloud: Boolean, album: Album): Boolean =
     membership is AlbumMembership.All && allInCloud && album.canAddPhotos
 
+/** The mark on a choice the photo is already in: a filled accent circle with a check. */
+@Composable
+internal fun InAlbumMark(
+    modifier: Modifier = Modifier,
+    description: String? = stringResource(R.string.cd_status_all_selected_in_album),
+) {
+    Box(
+        modifier = modifier
+            .size(28.dp)
+            .background(Accent, RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.Check,
+            contentDescription = description,
+            tint = Color.White,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
 /**
  * One album as the Albums tab's card, with a lock for a hidden album and the selection's membership mark.
  * [waiting] dims the mark while a removal from the album runs.
@@ -379,22 +400,12 @@ private fun AlbumPickCard(
             )
         }
         when (membership) {
-            is AlbumMembership.All -> Box(
-                modifier = Modifier
+            is AlbumMembership.All -> InAlbumMark(
+                Modifier
                     .align(markEnd)
                     .padding(8.dp)
-                    .alpha(if (waiting) 0.45f else 1f)
-                    .size(28.dp)
-                    .background(Accent, RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = stringResource(R.string.cd_status_all_selected_in_album),
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
+                    .alpha(if (waiting) 0.45f else 1f),
+            )
             is AlbumMembership.Some -> {
                 // The visible "3 / 5" is digits only; the spoken form carries the meaning.
                 val fractionCd = stringResource(

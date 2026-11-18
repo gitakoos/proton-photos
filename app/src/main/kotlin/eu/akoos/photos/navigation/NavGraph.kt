@@ -41,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -1221,6 +1222,12 @@ fun NavGraph(
                     albumOpenAction = null
                     navController.navigate(Screen.AlbumDetail.route)
                 },
+                onOpenDeviceFolder = { bucketName ->
+                    selectedDeviceFolder = bucketName
+                    deviceFolderOpenAction = null
+                    deviceFolderFromVault = false
+                    navController.navigate(Screen.DeviceFolderDetail.route)
+                },
                 onSetPersonCover = if (viewerPerson != null && personActions != null) {
                     { item -> personActions.setCover(viewerPerson.personId, item.stableId) }
                 } else null,
@@ -1975,7 +1982,10 @@ fun NavGraph(
         }
 
         composable(Screen.DeviceFolderDetail.route) {
-            val bucketName = selectedDeviceFolder
+            // Each folder screen keeps the folder it was opened on, so a folder opened over it (from a
+            // viewer's Folder box) does not repoint it.
+            val bucketName = rememberSaveable { mutableStateOf(selectedDeviceFolder) }.value
+            val fromVault = rememberSaveable { deviceFolderFromVault }
             if (bucketName == null) {
                 navController.popBackStack()
             } else {
@@ -1983,7 +1993,7 @@ fun NavGraph(
                     bucketName = bucketName,
                     openAction = deviceFolderOpenAction,
                     onOpenActionConsumed = { deviceFolderOpenAction = null },
-                    fromVault = deviceFolderFromVault,
+                    fromVault = fromVault,
                     onPhotoClick = { items, index ->
                         selectedViewerItems = items
                         selectedViewerIndex = index
@@ -1994,7 +2004,7 @@ fun NavGraph(
                         // gets the same FLAG_SECURE window the vault grid's own viewer gets. The flag
                         // has to be set on both branches: it survives across navigations, so leaving
                         // it alone would hand a hidden photo whichever value the last viewer used.
-                        viewerSecure = deviceFolderFromVault
+                        viewerSecure = fromVault
                         navController.navigate(Screen.Viewer.route)
                     },
                     onEditMetadata = { selection ->
@@ -2013,7 +2023,7 @@ fun NavGraph(
                         viewerFromAlbum = false
                         viewerTrashMode = false
                         viewerAutoplay = true
-                        viewerSecure = deviceFolderFromVault
+                        viewerSecure = fromVault
                         navController.navigate(Screen.Viewer.route)
                     },
                     onBack = { navController.popBackStack() },
