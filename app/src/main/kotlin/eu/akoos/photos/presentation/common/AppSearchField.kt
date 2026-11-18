@@ -22,9 +22,11 @@
 
 package eu.akoos.photos.presentation.common
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +35,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -68,6 +71,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.gallery.PILL_FADE_MS
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -186,21 +190,43 @@ internal data class SearchFieldTerm(
 @Composable
 internal fun SearchTermRow(terms: List<SearchFieldTerm>, modifier: Modifier = Modifier) {
     if (terms.isEmpty()) return
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
+    val keys = termKeys(terms)
+    // A pill fades in or out while the others glide aside, like the timeline's filter pill.
+    LazyRow(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        terms.forEach { SearchTermPill(it, large = true) }
+        itemsIndexed(terms, key = { index, _ -> keys[index] }) { _, term ->
+            SearchTermPill(
+                term,
+                large = true,
+                modifier = Modifier.animateItem(
+                    fadeInSpec = tween(PILL_FADE_MS),
+                    placementSpec = spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow),
+                    fadeOutSpec = tween(PILL_FADE_MS),
+                ),
+            )
+        }
+    }
+}
+
+/** A stable key per pill; a scope and a label may share a name, so a repeat gets its count. */
+private fun termKeys(terms: List<SearchFieldTerm>): List<String> {
+    val seen = HashMap<String, Int>()
+    return terms.map { term ->
+        val base = (if (term.icon != null) "i:" else "t:") + term.label
+        val n = seen.merge(base, 1, Int::plus) ?: 1
+        if (n == 1) base else "$base#$n"
     }
 }
 
 /** A [SearchFieldTerm] as a pill; a tap anywhere on it removes it. Shared with the Add labels field. */
 @Composable
-internal fun SearchTermPill(term: SearchFieldTerm, large: Boolean = false) {
+internal fun SearchTermPill(term: SearchFieldTerm, modifier: Modifier = Modifier, large: Boolean = false) {
     val colors = AppColors.current
     Row(
-        modifier = Modifier
+        modifier = modifier
             .height(if (large) 34.dp else 24.dp)
             .clip(RoundedCornerShape(if (large) 14.dp else 8.dp))
             .background(

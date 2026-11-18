@@ -22,7 +22,9 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -74,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.LabelUsage
+import eu.akoos.photos.presentation.common.sheetPageTransition
 import eu.akoos.photos.presentation.search.DateSuggestions
 import eu.akoos.photos.presentation.search.RelativeDate
 import eu.akoos.photos.presentation.search.RelativeUnit
@@ -91,7 +94,7 @@ import java.util.Calendar
 
 private val filterChipShape = RoundedCornerShape(10.dp)
 
-private const val CALENDAR_EASE_MS = 240
+internal const val CALENDAR_EASE_MS = 240
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -148,256 +151,262 @@ internal fun ContentFilterSheet(
         applyNow()
     }
 
-    if (labelPage) {
-        LabelFilterPage(
-            usage = labels,
-            picked = labelKeys,
-            onBack = { onLabelPageChange(false) },
-            onShow = { keys ->
-                applyLabels(keys)
-                onLabelPageChange(false)
-            },
-        )
-        return
-    }
-
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
     val years = remember { (currentYear downTo currentYear - 10).toList() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        // Title row — the reset action sits on the right here, shown only when a filter is active,
-        // instead of a separate button at the bottom of the sheet.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.filter_title),
-                color = FgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            val hasActiveFilter = mediaType != MediaType.All || syncStatus != SyncStatusFilter.All ||
-                year != null || dateFrom != null || category != GalleryFilter.All || labelKeys.isNotEmpty()
-            if (hasActiveFilter) {
-                Text(
-                    text = "✕  ${stringResource(R.string.filter_reset)}",
-                    color = Accent,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable {
-                        mediaType = MediaType.All; syncStatus = SyncStatusFilter.All
-                        year = null; month = null; day = null; dayEnd = null; dateFrom = null; dateTo = null
-                        category = GalleryFilter.All
-                        labelKeys = emptySet(); labelsMatchAll = false
-                        onCategorySelected(GalleryFilter.All)
-                        applyNow(mt = MediaType.All, ss = SyncStatusFilter.All, y = null, m = null, d = null, de = null)
-                    },
-                )
-            }
-        }
-
-        // ── Categories (server-assigned PhotoTag) ────────────────────────────
-        // Matches the Drive web Photos page categories: Favorites, Screenshots, Videos,
-        // Live Photos, Motion Photos, Selfies, Portraits, Bursts, Panoramas, RAW.
-        // These are tag-id 0..9 — server populates them automatically; local-only items
-        // (not yet backed up) cannot be filtered by category.
-        if (showCategorySection) {
-            FilterSectionLabel(stringResource(R.string.gallery_filter_categories))
-            val categories = listOf(
-                GalleryFilter.All          to stringResource(R.string.gallery_filter_all),
-                GalleryFilter.Favorites    to stringResource(R.string.gallery_filter_favorites),
-                GalleryFilter.Screenshots  to stringResource(R.string.gallery_filter_screenshots),
-                GalleryFilter.Videos       to stringResource(R.string.filter_type_videos),
-                GalleryFilter.LivePhotos   to stringResource(R.string.gallery_filter_live_photos),
-                GalleryFilter.Selfies      to stringResource(R.string.gallery_filter_selfies),
-                GalleryFilter.Portraits    to stringResource(R.string.gallery_filter_portraits),
-                GalleryFilter.Bursts       to stringResource(R.string.gallery_filter_bursts),
-                GalleryFilter.Panoramas    to stringResource(R.string.gallery_filter_panoramas),
-                GalleryFilter.Raw          to stringResource(R.string.gallery_filter_raw),
-            )
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                categories.forEach { (cat, label) ->
-                    item(key = "cat_${cat.name}") {
-                        FilterChip(
-                            label = label,
-                            selected = category == cat,
-                            onClick = {
-                                category = cat
-                                onCategorySelected(cat)
-                            },
-                            leadingIcon = if (cat == GalleryFilter.All) null
-                                else { tint -> GalleryCategoryIcon(cat, tint) },
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── Labels ───────────────────────────────────────────────────────────
-        // After the categories on Search; the timeline hides those, so there it leads the sheet.
-        if (labels.isNotEmpty()) {
-            LabelFilterSection(
+    // The Labels page steps in and back out like the details sheet's pages.
+    AnimatedContent(
+        targetState = labelPage,
+        transitionSpec = { sheetPageTransition(forward = targetState) },
+        label = "filterSheetPage",
+    ) { onLabelPage ->
+        if (onLabelPage) {
+            LabelFilterPage(
                 usage = labels,
                 picked = labelKeys,
-                matchAll = labelsMatchAll,
-                onToggle = { key -> applyLabels(if (key in labelKeys) labelKeys - key else labelKeys + key) },
-                onMatchAllChange = { all -> applyLabels(labelKeys, all) },
-                onMore = { onLabelPageChange(true) },
+                onBack = { onLabelPageChange(false) },
+                onShow = { keys ->
+                    applyLabels(keys)
+                    onLabelPageChange(false)
+                },
             )
-        }
-
-        // ── Media type ───────────────────────────────────────────────────────
-        if (showMediaTypeSection) {
-            FilterSectionLabel(stringResource(R.string.filter_type_label))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    MediaType.All to stringResource(R.string.gallery_filter_all),
-                    MediaType.PhotosOnly to stringResource(R.string.gallery_tab_photos),
-                    MediaType.VideosOnly to stringResource(R.string.filter_type_videos),
-                ).forEach { (type, label) ->
-                    FilterChip(
-                        label = label,
-                        selected = mediaType == type,
-                        onClick = { mediaType = type; applyNow(mt = type) },
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 36.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Title row: the reset action sits on the right here, shown only when a filter is active,
+                // instead of a separate button at the bottom of the sheet.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.filter_title),
+                        color = FgPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
                     )
-                }
-            }
-        }
-
-        // ── Sync status ──────────────────────────────────────────────────────
-        // No "All" chip: the chips toggle and span the sheet width, edge to edge with the calendar.
-        // The active chip carries its own X, so tapping it (a second press) clears back to All.
-        if (showSyncStatusSection) {
-            FilterSectionLabel(stringResource(R.string.filter_sync_label))
-            val syncOptions = listOf(
-                SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
-                SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
-                SyncStatusFilter.CloudOnly to stringResource(R.string.filter_sync_cloud),
-                SyncStatusFilter.Offline to stringResource(R.string.filter_offline),
-            )
-            // Two by two, so four labels in any language keep a readable width.
-            syncOptions.chunked(2).forEachIndexed { rowIndex, rowOptions ->
-                if (rowIndex > 0) Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    rowOptions.forEach { (status, label) ->
-                        FilterChip(
-                            label = label,
-                            selected = syncStatus == status,
-                            accentWhenSelected = true,
-                            trailingClear = true,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
-                                syncStatus = newStatus
-                                applyNow(ss = newStatus)
+                    val hasActiveFilter = mediaType != MediaType.All || syncStatus != SyncStatusFilter.All ||
+                        year != null || dateFrom != null || category != GalleryFilter.All || labelKeys.isNotEmpty()
+                    if (hasActiveFilter) {
+                        Text(
+                            text = "✕  ${stringResource(R.string.filter_reset)}",
+                            color = Accent,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable {
+                                mediaType = MediaType.All; syncStatus = SyncStatusFilter.All
+                                year = null; month = null; day = null; dayEnd = null; dateFrom = null; dateTo = null
+                                category = GalleryFilter.All
+                                labelKeys = emptySet(); labelsMatchAll = false
+                                onCategorySelected(GalleryFilter.All)
+                                applyNow(mt = MediaType.All, ss = SyncStatusFilter.All, y = null, m = null, d = null, de = null)
                             },
                         )
                     }
                 }
-            }
-        }
 
-        // ── Quick dates ──────────────────────────────────────────────────────
-        // The same phrases the search field understands; the lit chip is the one the filter holds, and a
-        // second tap on it clears the date.
-        if (showRelativeDates) {
-            FilterSectionLabel(stringResource(R.string.filter_quick_dates))
-            val locale = appLocale()
-            val today = remember { Calendar.getInstance(locale) }
-            fun titled(text: String) = text.replaceFirstChar { it.titlecase(locale) }
-            val weeksAgo = stringResource(R.string.search_ago_weeks).split('|').first { '#' in it }.replace("#", "2")
-            val quickDates = listOf(
-                titled(stringResource(R.string.search_rel_today).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.Today, today, 1),
-                titled(stringResource(R.string.search_rel_yesterday).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.Yesterday, today, 1),
-                titled(stringResource(R.string.search_rel_this_week).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.ThisWeek, today, 1),
-                titled(stringResource(R.string.search_rel_last_week).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.LastWeek, today, 1),
-                titled(weeksAgo) to DateSuggestions.resolveCounted(RelativeUnit.Week, 2, today, 1),
-                titled(stringResource(R.string.search_rel_this_month).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.ThisMonth, today, 1),
-                titled(stringResource(R.string.search_rel_last_month).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.LastMonth, today, 1),
-                titled(stringResource(R.string.search_rel_this_year).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.ThisYear, today, 1),
-                titled(stringResource(R.string.search_rel_last_year).substringBefore('|')) to
-                    DateSuggestions.resolveRelative(RelativeDate.LastYear, today, 1),
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                quickDates.forEach { (label, term) ->
-                    val asFilter = term.applyTo(ContentFilter())
-                    val selected = asFilter.year == year && asFilter.month == month && asFilter.day == day &&
-                        asFilter.dayEnd == dayEnd && asFilter.dateFrom == dateFrom && asFilter.dateTo == dateTo
+                // ── Categories (server-assigned PhotoTag) ────────────────────────────
+                // Matches the Drive web Photos page categories: Favorites, Screenshots, Videos,
+                // Live Photos, Motion Photos, Selfies, Portraits, Bursts, Panoramas, RAW.
+                // These are tag-id 0..9; the server populates them automatically; local-only items
+                // (not yet backed up) cannot be filtered by category.
+                if (showCategorySection) {
+                    FilterSectionLabel(stringResource(R.string.gallery_filter_categories))
+                    val categories = listOf(
+                        GalleryFilter.All          to stringResource(R.string.gallery_filter_all),
+                        GalleryFilter.Favorites    to stringResource(R.string.gallery_filter_favorites),
+                        GalleryFilter.Screenshots  to stringResource(R.string.gallery_filter_screenshots),
+                        GalleryFilter.Videos       to stringResource(R.string.filter_type_videos),
+                        GalleryFilter.LivePhotos   to stringResource(R.string.gallery_filter_live_photos),
+                        GalleryFilter.Selfies      to stringResource(R.string.gallery_filter_selfies),
+                        GalleryFilter.Portraits    to stringResource(R.string.gallery_filter_portraits),
+                        GalleryFilter.Bursts       to stringResource(R.string.gallery_filter_bursts),
+                        GalleryFilter.Panoramas    to stringResource(R.string.gallery_filter_panoramas),
+                        GalleryFilter.Raw          to stringResource(R.string.gallery_filter_raw),
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        categories.forEach { (cat, label) ->
+                            item(key = "cat_${cat.name}") {
+                                FilterChip(
+                                    label = label,
+                                    selected = category == cat,
+                                    onClick = {
+                                        category = cat
+                                        onCategorySelected(cat)
+                                    },
+                                    leadingIcon = if (cat == GalleryFilter.All) null
+                                        else { tint -> GalleryCategoryIcon(cat, tint) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ── Labels ───────────────────────────────────────────────────────────
+                // After the categories on Search; the timeline hides those, so there it leads the sheet.
+                if (labels.isNotEmpty()) {
+                    LabelFilterSection(
+                        usage = labels,
+                        picked = labelKeys,
+                        matchAll = labelsMatchAll,
+                        onToggle = { key -> applyLabels(if (key in labelKeys) labelKeys - key else labelKeys + key) },
+                        onMatchAllChange = { all -> applyLabels(labelKeys, all) },
+                        onMore = { onLabelPageChange(true) },
+                    )
+                }
+
+                // ── Media type ───────────────────────────────────────────────────────
+                if (showMediaTypeSection) {
+                    FilterSectionLabel(stringResource(R.string.filter_type_label))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            MediaType.All to stringResource(R.string.gallery_filter_all),
+                            MediaType.PhotosOnly to stringResource(R.string.gallery_tab_photos),
+                            MediaType.VideosOnly to stringResource(R.string.filter_type_videos),
+                        ).forEach { (type, label) ->
+                            FilterChip(
+                                label = label,
+                                selected = mediaType == type,
+                                onClick = { mediaType = type; applyNow(mt = type) },
+                            )
+                        }
+                    }
+                }
+
+                // ── Sync status ──────────────────────────────────────────────────────
+                // No "All" chip: the chips toggle and span the sheet width, edge to edge with the calendar.
+                // The active chip carries its own X, so tapping it (a second press) clears back to All.
+                if (showSyncStatusSection) {
+                    FilterSectionLabel(stringResource(R.string.filter_sync_label))
+                    val syncOptions = listOf(
+                        SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
+                        SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
+                        SyncStatusFilter.CloudOnly to stringResource(R.string.filter_sync_cloud),
+                        SyncStatusFilter.Offline to stringResource(R.string.filter_offline),
+                    )
+                    // Two by two, so four labels in any language keep a readable width.
+                    syncOptions.chunked(2).forEachIndexed { rowIndex, rowOptions ->
+                        if (rowIndex > 0) Spacer(Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            rowOptions.forEach { (status, label) ->
+                                FilterChip(
+                                    label = label,
+                                    selected = syncStatus == status,
+                                    accentWhenSelected = true,
+                                    trailingClear = true,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
+                                        syncStatus = newStatus
+                                        applyNow(ss = newStatus)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ── Quick dates ──────────────────────────────────────────────────────
+                // The same phrases the search field understands; the lit chip is the one the filter holds, and a
+                // second tap on it clears the date.
+                if (showRelativeDates) {
+                    FilterSectionLabel(stringResource(R.string.filter_quick_dates))
+                    val locale = appLocale()
+                    val today = remember { Calendar.getInstance(locale) }
+                    fun titled(text: String) = text.replaceFirstChar { it.titlecase(locale) }
+                    val weeksAgo = stringResource(R.string.search_ago_weeks).split('|').first { '#' in it }.replace("#", "2")
+                    val quickDates = listOf(
+                        titled(stringResource(R.string.search_rel_today).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.Today, today, 1),
+                        titled(stringResource(R.string.search_rel_yesterday).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.Yesterday, today, 1),
+                        titled(stringResource(R.string.search_rel_this_week).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.ThisWeek, today, 1),
+                        titled(stringResource(R.string.search_rel_last_week).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.LastWeek, today, 1),
+                        titled(weeksAgo) to DateSuggestions.resolveCounted(RelativeUnit.Week, 2, today, 1),
+                        titled(stringResource(R.string.search_rel_this_month).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.ThisMonth, today, 1),
+                        titled(stringResource(R.string.search_rel_last_month).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.LastMonth, today, 1),
+                        titled(stringResource(R.string.search_rel_this_year).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.ThisYear, today, 1),
+                        titled(stringResource(R.string.search_rel_last_year).substringBefore('|')) to
+                            DateSuggestions.resolveRelative(RelativeDate.LastYear, today, 1),
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        quickDates.forEach { (label, term) ->
+                            val asFilter = term.applyTo(ContentFilter())
+                            val selected = asFilter.year == year && asFilter.month == month && asFilter.day == day &&
+                                asFilter.dayEnd == dayEnd && asFilter.dateFrom == dateFrom && asFilter.dateTo == dateTo
+                            FilterChip(
+                                label = label,
+                                selected = selected,
+                                onClick = {
+                                    val next = if (selected) ContentFilter() else asFilter
+                                    year = next.year; month = next.month; day = next.day; dayEnd = next.dayEnd
+                                    dateFrom = next.dateFrom; dateTo = next.dateTo
+                                    applyNow(y = next.year, m = next.month, d = next.day, de = next.dayEnd)
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // ── Date (calendar: year, optional month, optional day) ───────────────
+                if (showDateSection && showRelativeDates) {
                     FilterChip(
-                        label = label,
-                        selected = selected,
+                        label = stringResource(R.string.filter_pick_date),
+                        selected = calendarOpen,
+                        onClick = { calendarOpen = !calendarOpen },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = { tint -> Icon(Icons.Filled.CalendarMonth, null, tint = tint, modifier = Modifier.size(16.dp)) },
+                    )
+                }
+                // The calendar eases open and shut, so the sheet grows with it instead of jumping.
+                AnimatedVisibility(
+                    visible = showDateSection && calendarOpen,
+                    enter = expandVertically(tween(CALENDAR_EASE_MS)) + fadeIn(tween(CALENDAR_EASE_MS)),
+                    exit = shrinkVertically(tween(CALENDAR_EASE_MS)) + fadeOut(tween(CALENDAR_EASE_MS)),
+                ) {
+                    DateFilterCalendar(
+                        year = year,
+                        month = month,
+                        day = day,
+                        dayEnd = dayEnd,
+                        years = years,
+                        onPick = { y, m, d, de ->
+                            year = y; month = m; day = d; dayEnd = de; dateFrom = null; dateTo = null
+                            applyNow(y = y, m = m, d = d, de = de)
+                        },
+                    )
+                }
+
+                // ── Further settings ──────────────────────────────────────────────────
+                // The timeline drawer alone shows this row, a way into the full layout /
+                // categories / folders screen. Search leaves the callback null.
+                val openTimelineSettings = onOpenTimelineSettings
+                if (openTimelineSettings != null) {
+                    SheetSettingsPageRow(
+                        label = stringResource(R.string.timeline_filter_more_settings),
                         onClick = {
-                            val next = if (selected) ContentFilter() else asFilter
-                            year = next.year; month = next.month; day = next.day; dayEnd = next.dayEnd
-                            dateFrom = next.dateFrom; dateTo = next.dateTo
-                            applyNow(y = next.year, m = next.month, d = next.day, de = next.dayEnd)
+                            onDismiss()
+                            openTimelineSettings()
                         },
                     )
                 }
             }
-        }
-
-        // ── Date (calendar — year, optional month, optional day) ───────────────
-        if (showDateSection && showRelativeDates) {
-            FilterChip(
-                label = stringResource(R.string.filter_pick_date),
-                selected = calendarOpen,
-                onClick = { calendarOpen = !calendarOpen },
-                modifier = Modifier.fillMaxWidth(),
-                leadingIcon = { tint -> Icon(Icons.Filled.CalendarMonth, null, tint = tint, modifier = Modifier.size(16.dp)) },
-            )
-        }
-        // The calendar eases open and shut, so the sheet grows with it instead of jumping.
-        AnimatedVisibility(
-            visible = showDateSection && calendarOpen,
-            enter = expandVertically(tween(CALENDAR_EASE_MS)) + fadeIn(tween(CALENDAR_EASE_MS)),
-            exit = shrinkVertically(tween(CALENDAR_EASE_MS)) + fadeOut(tween(CALENDAR_EASE_MS)),
-        ) {
-            DateFilterCalendar(
-                year = year,
-                month = month,
-                day = day,
-                dayEnd = dayEnd,
-                years = years,
-                onPick = { y, m, d, de ->
-                    year = y; month = m; day = d; dayEnd = de; dateFrom = null; dateTo = null
-                    applyNow(y = y, m = m, d = d, de = de)
-                },
-            )
-        }
-
-        // ── Further settings ──────────────────────────────────────────────────
-        // The timeline drawer alone shows this row, a way into the full layout /
-        // categories / folders screen. Search leaves the callback null.
-        val openTimelineSettings = onOpenTimelineSettings
-        if (openTimelineSettings != null) {
-            SheetSettingsPageRow(
-                label = stringResource(R.string.timeline_filter_more_settings),
-                onClick = {
-                    onDismiss()
-                    openTimelineSettings()
-                },
-            )
         }
     }
 }
@@ -488,28 +497,35 @@ internal fun FilterChip(
 ) {
     val colors = AppColors.current
     val useAccent = accentWhenSelected && selected
-    val contentColor = when {
-        useAccent -> Accent
-        selected -> FgPrimary
-        else -> FgDim
-    }
+    // A pick eases its tint in and out like the category chips on the rail.
+    val contentColor by animateColorAsState(
+        when {
+            useAccent -> Accent
+            selected -> FgPrimary
+            else -> FgDim
+        },
+        label = "filterChipFg",
+    )
+    val background by animateColorAsState(
+        when {
+            useAccent -> Accent.copy(alpha = 0.15f)
+            selected -> colors.chipSelectedBg
+            else -> colors.chipUnselectedBg
+        },
+        label = "filterChipBg",
+    )
+    val borderColor by animateColorAsState(
+        when {
+            useAccent -> Accent
+            !selected -> PillBorder
+            else -> Color.Transparent
+        },
+        label = "filterChipBorder",
+    )
     Box(
         modifier = modifier
-            .background(
-                when {
-                    useAccent -> Accent.copy(alpha = 0.15f)
-                    selected -> colors.chipSelectedBg
-                    else -> colors.chipUnselectedBg
-                },
-                filterChipShape,
-            )
-            .then(
-                when {
-                    useAccent -> Modifier.border(1.dp, Accent, filterChipShape)
-                    !selected -> Modifier.border(0.5.dp, PillBorder, filterChipShape)
-                    else -> Modifier
-                }
-            )
+            .background(background, filterChipShape)
+            .border(if (useAccent) 1.dp else 0.5.dp, borderColor, filterChipShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,

@@ -513,11 +513,18 @@ fun SearchScreen(
                 }
             }
         }
-        // The label keyword typed into the field offers the user's labels, to pick one as a pill.
-        labelChips?.let { chips ->
-            if (labelUsage.isNotEmpty()) {
+        // The label keyword typed into the field offers the user's labels, to pick one as a pill. The row eases
+        // in and out like the pill row, keeping its last chips while it leaves.
+        val heldLabelChips = remember { object { var chips = labelChips.orEmpty() } }
+        labelChips?.let { heldLabelChips.chips = it }
+        AnimatedVisibility(
+            visible = labelChips != null && labelUsage.isNotEmpty(),
+            enter = expandVertically(tween(HEADER_EASE_MS)) + fadeIn(tween(HEADER_EASE_MS)),
+            exit = shrinkVertically(tween(HEADER_EASE_MS)) + fadeOut(tween(HEADER_EASE_MS)),
+        ) {
+            Column {
                 LabelSuggestionRow(
-                    labels = chips,
+                    labels = heldLabelChips.chips,
                     onPick = vm::pickLabel,
                     onMore = { labelPage = true; showFilterSheet = true },
                 )

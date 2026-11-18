@@ -704,7 +704,7 @@ internal fun FilterRail(
 private data class PillContent(val active: Boolean, val label: String)
 
 private const val PILL_TINT_MS = 240
-private const val PILL_FADE_MS = 200
+internal const val PILL_FADE_MS = 200
 
 /** The 0..1 amount a filter pill is tinted by, easing between idle and active as one step. */
 @Composable

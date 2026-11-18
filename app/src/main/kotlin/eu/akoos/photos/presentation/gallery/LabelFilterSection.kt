@@ -22,6 +22,13 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -106,7 +113,16 @@ internal fun LabelFilterSection(
             )
         }
         FilterChip(label = stringResource(R.string.filter_labels_more), selected = false, onClick = onMore)
-        if (picked.size >= 2) LabelMatchSwitch(matchAll = matchAll, onChange = onMatchAllChange)
+        // Keeps the last choice while the switch eases out, since dropping to one label resets it to Any.
+        val heldMatchAll = remember { object { var value = matchAll } }
+        if (picked.size >= 2) heldMatchAll.value = matchAll
+        AnimatedVisibility(
+            visible = picked.size >= 2,
+            enter = expandVertically(tween(CALENDAR_EASE_MS)) + fadeIn(tween(CALENDAR_EASE_MS)),
+            exit = shrinkVertically(tween(CALENDAR_EASE_MS)) + fadeOut(tween(CALENDAR_EASE_MS)),
+        ) {
+            LabelMatchSwitch(matchAll = heldMatchAll.value, onChange = onMatchAllChange)
+        }
     }
 }
 
@@ -125,10 +141,13 @@ private fun LabelMatchSwitch(matchAll: Boolean, onChange: (Boolean) -> Unit) {
     ) {
         listOf(false to R.string.filter_labels_any, true to R.string.filter_labels_all).forEach { (all, text) ->
             val on = all == matchAll
+            val segmentBg by animateColorAsState(
+                if (on) colors.accent.copy(alpha = 0.22f) else Color.Transparent, label = "matchSegmentBg")
+            val segmentFg by animateColorAsState(if (on) colors.accent else colors.fgDim, label = "matchSegmentFg")
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) colors.accent.copy(alpha = 0.22f) else Color.Transparent)
+                    .background(segmentBg)
                     .clickable { if (!on) onChange(all) }
                     .padding(horizontal = 12.dp)
                     .height(30.dp),
@@ -136,7 +155,7 @@ private fun LabelMatchSwitch(matchAll: Boolean, onChange: (Boolean) -> Unit) {
             ) {
                 Text(
                     stringResource(text),
-                    color = if (on) colors.accent else colors.fgDim,
+                    color = segmentFg,
                     fontSize = 13.sp,
                     fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
                 )
@@ -167,7 +186,7 @@ internal fun LabelFilterPage(
             .navigationBarsPadding()
             .padding(bottom = 20.dp),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+        Column(modifier = Modifier.padding(horizontal = labelPageGutter)) {
             DetailsPageHeader(title = stringResource(R.string.label_section_title), onBack = onBack)
             Spacer(Modifier.height(8.dp))
             AppSearchField(
@@ -186,6 +205,7 @@ internal fun LabelFilterPage(
                     selecting = true,
                     selected = label.labelKey in chosen,
                     onClick = { chosen = if (label.labelKey in chosen) chosen - label.labelKey else chosen + label.labelKey },
+                    horizontalPadding = labelPageGutter,
                 )
             }
         }
@@ -193,7 +213,7 @@ internal fun LabelFilterPage(
             label = if (chosen.isEmpty()) stringResource(R.string.filter_labels_show_all)
                 else pluralStringResource(R.plurals.filter_labels_show, chosen.size, chosen.size),
             onClick = { onShow(chosen) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = labelPageGutter).padding(top = 12.dp),
         )
     }
 }
@@ -223,6 +243,9 @@ internal fun LabelSuggestionRow(labels: List<LabelUsage>, onPick: (String) -> Un
         }
     }
 }
+
+/** The Labels page's side margin, the filter sheet's own, shared by the search field, the rows and the button. */
+private val labelPageGutter = 20.dp
 
 /** How many labels the typed keyword's row offers before its More chip. */
 private const val SUGGESTED_LABELS = 12

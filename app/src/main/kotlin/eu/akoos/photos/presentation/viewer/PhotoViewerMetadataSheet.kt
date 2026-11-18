@@ -25,7 +25,6 @@ package eu.akoos.photos.presentation.viewer
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -34,9 +33,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -97,13 +93,13 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.cardFill
+import eu.akoos.photos.presentation.common.sheetPageTransition
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -228,13 +224,7 @@ internal fun PhotoMetadataSheet(
 
     AnimatedContent(
         targetState = page,
-        transitionSpec = {
-            val forward = targetState.depth > initialState.depth
-            val spec = spring<IntOffset>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
-            (slideInHorizontally(spec) { if (forward) it else -it / 3 } + fadeIn())
-                .togetherWith(slideOutHorizontally(spec) { if (forward) -it / 3 else it } + fadeOut())
-                .using(SizeTransform(clip = false) { _, _ -> spring(stiffness = Spring.StiffnessMediumLow) })
-        },
+        transitionSpec = { sheetPageTransition(forward = targetState.depth > initialState.depth) },
         label = "detailsPage",
     ) { shownPage ->
         when (shownPage) {
