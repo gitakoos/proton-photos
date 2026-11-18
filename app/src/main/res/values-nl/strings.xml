@@ -2754,8 +2754,8 @@
     <string name="whats_new_260_videoedit_title">Video-editor in hetzelfde ontwerp</string>
     <string name="whats_new_260_videoedit_body">“Aanpassen” gebruikt ronde pictogrammen boven een liniaal, bijsnijden en draaien delen één tabblad met een lijst van beeldverhoudingen, en het uitsnedekader verander je met twee vingers van formaat. Het beeld flikkert niet meer als je van gereedschap wisselt.</string>
     <string name="whats_new_260_more">Daarnaast bewerkbare datums voor HEIC, GIF en RAW, groepen met duplicaten die je kunt negeren, een plaatskiezer op de kaart, Turks en nog veel meer fixes en stabiliteitsverbeteringen.</string>
-    <string name="whats_new_260_encrypt_title">Je gegevens op de telefoon zijn versleuteld</string>
-    <string name="whats_new_260_encrypt_body">De bibliotheek van de app, verborgen foto\'s, instellingen, de activiteitsgeschiedenis en de miniaturen en foto\'s die vanuit Proton Drive zijn geopend, zijn nu versleuteld op deze telefoon. Android versleutelt de opslag van apps al; dit voegt een tweede laag toe voor de eigen bestanden van de app. De sleutel blijft in de beveiligde opslag van de telefoon. Een reservekopie ervan is gekoppeld aan je Proton-account zolang je bent ingelogd, en aan het wachtwoord voor verborgen foto\'s als je er een instelt. De eerste start na de update versleutelt alles één keer en meldt dat kort.</string>
+    <string name="whats_new_260_encrypt_title">Extra versleuteling op deze telefoon</string>
+    <string name="whats_new_260_encrypt_body">Android bewaart de gegevens van de app al in privéopslag waar andere apps niet bij kunnen. Nu legt de app daar een eigen versleuteling overheen, voor de bibliotheek, verborgen foto\'s, instellingen, de activiteitsgeschiedenis en de miniaturen en foto\'s die vanuit Proton Drive zijn geopend. Een kopie van deze bestanden gaat niet open zonder deze telefoon of je wachtwoord. De sleutel blijft in de beveiligde opslag van de telefoon. Een reservekopie ervan is gekoppeld aan je Proton-account zolang je bent ingelogd, en aan het wachtwoord voor verborgen foto\'s als je er een instelt. De eerste start na de update versleutelt alles één keer en meldt dat kort.</string>
     <string name="whats_new_260_arrange_title">Foto\'s in een album ordenen</string>
     <string name="whats_new_260_arrange_body">Kies “Foto\'s ordenen” in het menu van een album en sleep foto\'s, of verplaats een selectie naar het begin, het einde of naast een andere foto. Met de back-up naar Drive aan verschijnt de volgorde ook op je andere apparaten.</string>
     <string name="whats_new_260_folderorder_title">Foto\'s in een apparaatmap ordenen</string>
@@ -2976,8 +2976,9 @@
     <string name="local_encryption_state_on">Aan</string>
     <string name="local_encryption_state_encrypting">Versleutelen…</string>
     <string name="local_encryption_state_locked">Vergrendeld</string>
-    <string name="local_encryption_sheet_title">Je gegevens op deze telefoon zijn versleuteld</string>
-    <string name="local_encryption_sheet_lead">De app versleutelt wat hij op deze telefoon bewaart:</string>
+    <string name="local_encryption_sheet_title">Extra versleuteling op deze telefoon</string>
+    <string name="local_encryption_sheet_lead">Android bewaart de gegevens van de app al in privéopslag waar andere apps niet bij kunnen. Daarbovenop versleutelt de app:</string>
+    <string name="local_encryption_sheet_note">Dit is een extra, geen reparatie: ook de officiële Proton Drive-app versleutelt zijn miniaturen, instellingen en offline bestanden op de telefoon niet. De extra laag telt alleen in zeldzame gevallen, bijvoorbeeld als iemand de bestanden van de app van de telefoon kopieert. Zo\'n kopie gaat niet open zonder deze telefoon of je wachtwoord.</string>
     <string name="local_encryption_item_library">Bibliotheekdatabase</string>
     <string name="local_encryption_item_hidden">Verborgen foto\'s</string>
     <string name="local_encryption_item_settings">Instellingen en activiteitsgeschiedenis</string>

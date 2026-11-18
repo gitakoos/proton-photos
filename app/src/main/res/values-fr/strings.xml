@@ -2732,8 +2732,8 @@
     <string name="whats_new_260_videoedit_title">Éditeur vidéo au même design</string>
     <string name="whats_new_260_videoedit_body">« Ajuster » utilise des icônes rondes au-dessus d\'une règle, recadrer et pivoter partagent un onglet avec une liste de formats, et le cadre de recadrage se redimensionne à deux doigts. L\'image ne scintille plus quand on change d\'outil.</string>
     <string name="whats_new_260_more">Et aussi des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
-    <string name="whats_new_260_encrypt_title">Vos données sur le téléphone sont chiffrées</string>
-    <string name="whats_new_260_encrypt_body">La bibliothèque de l\'app, les photos masquées, les paramètres, l\'historique d\'activité ainsi que les miniatures et les photos ouvertes depuis Proton Drive sont désormais chiffrés sur ce téléphone. Android chiffre déjà le stockage des apps ; ceci ajoute une seconde couche pour les fichiers propres à l\'app. La clé reste dans le stockage sécurisé du téléphone. Une copie de secours est liée à votre compte Proton tant que vous êtes connecté, et au mot de passe des photos masquées lorsque vous en définissez un. Le premier démarrage après la mise à jour chiffre tout une fois et l\'indique dans un court message.</string>
+    <string name="whats_new_260_encrypt_title">Un chiffrement en plus sur ce téléphone</string>
+    <string name="whats_new_260_encrypt_body">Android garde déjà les données de l\'app dans un stockage privé auquel les autres apps n\'ont pas accès. L\'app ajoute désormais son propre chiffrement par-dessus, pour la bibliothèque, les photos masquées, les paramètres, l\'historique d\'activité ainsi que les miniatures et les photos ouvertes depuis Proton Drive. Une copie de ces fichiers ne peut pas être ouverte sans ce téléphone ou votre mot de passe. La clé reste dans le stockage sécurisé du téléphone. Une copie de secours est liée à votre compte Proton tant que vous êtes connecté, et au mot de passe des photos masquées lorsque vous en définissez un. Le premier démarrage après la mise à jour chiffre tout une fois et l\'indique dans un court message.</string>
     <string name="whats_new_260_arrange_title">Organisez les photos d\'un album</string>
     <string name="whats_new_260_arrange_body">Choisissez « Organiser les photos » dans le menu d\'un album et faites glisser des photos, ou déplacez une sélection au début, à la fin ou à côté d\'une autre photo. Avec la sauvegarde sur Drive activée, l\'ordre apparaît aussi sur vos autres appareils.</string>
     <string name="whats_new_260_folderorder_title">Organisez les photos d\'un dossier de l\'appareil</string>
@@ -2954,8 +2954,9 @@
     <string name="local_encryption_state_on">Activé</string>
     <string name="local_encryption_state_encrypting">Chiffrement…</string>
     <string name="local_encryption_state_locked">Verrouillé</string>
-    <string name="local_encryption_sheet_title">Vos données sur ce téléphone sont chiffrées</string>
-    <string name="local_encryption_sheet_lead">L\'app chiffre ce qu\'elle garde sur ce téléphone :</string>
+    <string name="local_encryption_sheet_title">Un chiffrement en plus sur ce téléphone</string>
+    <string name="local_encryption_sheet_lead">Android garde déjà les données de l\'app dans un stockage privé auquel les autres apps n\'ont pas accès. En plus, l\'app chiffre :</string>
+    <string name="local_encryption_sheet_note">C\'est un plus, pas une correction : l\'app officielle Proton Drive ne chiffre pas non plus ses miniatures, ses paramètres ni ses fichiers hors ligne sur le téléphone. Cette couche en plus ne compte que dans de rares cas, par exemple si quelqu\'un copie les fichiers de l\'app hors du téléphone. Une telle copie ne peut pas être ouverte sans ce téléphone ou votre mot de passe.</string>
     <string name="local_encryption_item_library">Base de données de la bibliothèque</string>
     <string name="local_encryption_item_hidden">Photos masquées</string>
     <string name="local_encryption_item_settings">Réglages et historique d\'activité</string>

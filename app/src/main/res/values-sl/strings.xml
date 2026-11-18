@@ -2867,8 +2867,8 @@
     <string name="whats_new_260_videoedit_title">Urejevalnik videa v enaki zasnovi</string>
     <string name="whats_new_260_videoedit_body">„Prilagodi“ uporablja okrogle ikone nad ravnilom, obrezovanje in vrtenje si delita zavihek s seznamom razmerij, velikost okvirja za obrezovanje pa spremenite z dvema prstoma. Slika med menjavo orodij ne utripa več.</string>
     <string name="whats_new_260_more">Poleg tega urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
-    <string name="whats_new_260_encrypt_title">Vaši podatki v telefonu so šifrirani</string>
-    <string name="whats_new_260_encrypt_body">Knjižnica aplikacije, skrite fotografije, nastavitve, zgodovina dejavnosti ter sličice in fotografije, odprte iz Proton Drive, so zdaj šifrirane na tem telefonu. Android že šifrira shrambo aplikacij; to doda drugo plast za lastne datoteke aplikacije. Ključ ostane v varni shrambi telefona. Njegova varnostna kopija je vezana na vaš račun Proton, dokler ste prijavljeni, in na geslo za skrite fotografije, ko ga nastavite. Prvi zagon po posodobitvi vse enkrat šifrira in to pove v kratkem obvestilu.</string>
+    <string name="whats_new_260_encrypt_title">Dodatno šifriranje v tem telefonu</string>
+    <string name="whats_new_260_encrypt_body">Android že hrani podatke aplikacije v zasebni shrambi, do katere druge aplikacije nimajo dostopa. Zdaj aplikacija doda še lastno šifriranje, ki zajema knjižnico, skrite fotografije, nastavitve, zgodovino dejavnosti ter sličice in fotografije, odprte iz Proton Drive. Kopije teh datotek ni mogoče odpreti brez tega telefona ali vašega gesla. Ključ ostane v varni shrambi telefona. Njegova varnostna kopija je vezana na vaš račun Proton, dokler ste prijavljeni, in na geslo za skrite fotografije, ko ga nastavite. Prvi zagon po posodobitvi vse enkrat šifrira in to pove v kratkem obvestilu.</string>
     <string name="whats_new_260_arrange_title">Razporedite fotografije v albumu</string>
     <string name="whats_new_260_arrange_body">V meniju albuma izberite „Razporedi fotografije“ in povlecite fotografije ali premaknite izbor na začetek, na konec ali poleg druge fotografije. Ko je varnostno kopiranje v Drive vklopljeno, se vrstni red pokaže tudi na vaših drugih napravah.</string>
     <string name="whats_new_260_folderorder_title">Razporedite fotografije v mapi naprave</string>
@@ -3089,8 +3089,9 @@
     <string name="local_encryption_state_on">Vklopljeno</string>
     <string name="local_encryption_state_encrypting">Šifriranje…</string>
     <string name="local_encryption_state_locked">Zaklenjeno</string>
-    <string name="local_encryption_sheet_title">Vaši podatki v tem telefonu so šifrirani</string>
-    <string name="local_encryption_sheet_lead">Aplikacija šifrira vse, kar hrani v tem telefonu:</string>
+    <string name="local_encryption_sheet_title">Dodatno šifriranje v tem telefonu</string>
+    <string name="local_encryption_sheet_lead">Android že hrani podatke aplikacije v zasebni shrambi, do katere druge aplikacije nimajo dostopa. Poleg tega aplikacija šifrira:</string>
+    <string name="local_encryption_sheet_note">To je dodatek, ne popravek: tudi uradna aplikacija Proton Drive v telefonu ne šifrira svojih sličic, nastavitev in datotek brez povezave. Dodatna plast šteje le v redkih primerih, na primer če nekdo kopira datoteke aplikacije s telefona. Takšne kopije ni mogoče odpreti brez tega telefona ali vašega gesla.</string>
     <string name="local_encryption_item_library">Zbirka podatkov knjižnice</string>
     <string name="local_encryption_item_hidden">Skrite fotografije</string>
     <string name="local_encryption_item_settings">Nastavitve in zgodovina dejavnosti</string>

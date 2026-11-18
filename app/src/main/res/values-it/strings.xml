@@ -2772,8 +2772,8 @@
     <string name="whats_new_260_videoedit_title">Editor video con lo stesso design</string>
     <string name="whats_new_260_videoedit_body">“Regola” usa icone rotonde sopra un righello, ritaglia e ruota condividono una scheda con un elenco di proporzioni, e il riquadro di ritaglio si ridimensiona con due dita. L\'immagine non sfarfalla più quando cambi strumento.</string>
     <string name="whats_new_260_more">Inoltre date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
-    <string name="whats_new_260_encrypt_title">I tuoi dati sul telefono sono cifrati</string>
-    <string name="whats_new_260_encrypt_body">La libreria dell\'app, le foto nascoste, le impostazioni, la cronologia attività e le miniature e le foto aperte da Proton Drive ora sono cifrate su questo telefono. Android cifra già lo spazio delle app; questo aggiunge un secondo livello per i file dell\'app stessa. La chiave resta nell\'archivio sicuro del telefono. Una sua copia di riserva è legata al tuo account Proton finché hai effettuato l\'accesso, e alla password delle foto nascoste quando ne imposti una. Il primo avvio dopo l\'aggiornamento cifra tutto una volta e lo dice in un breve avviso.</string>
+    <string name="whats_new_260_encrypt_title">Cifratura in più su questo telefono</string>
+    <string name="whats_new_260_encrypt_body">Android conserva già i dati dell\'app in uno spazio privato a cui le altre app non possono accedere. Ora l\'app aggiunge sopra la sua cifratura, per la libreria, le foto nascoste, le impostazioni, la cronologia attività e le miniature e le foto aperte da Proton Drive. Una copia di questi file non si apre senza questo telefono o la tua password. La chiave resta nell\'archivio sicuro del telefono. Una sua copia di riserva è legata al tuo account Proton finché hai effettuato l\'accesso, e alla password delle foto nascoste quando ne imposti una. Il primo avvio dopo l\'aggiornamento cifra tutto una volta e lo dice in un breve avviso.</string>
     <string name="whats_new_260_arrange_title">Disponi le foto in un album</string>
     <string name="whats_new_260_arrange_body">Scegli “Disponi foto” nel menu di un album e trascina le foto, o sposta una selezione all\'inizio, alla fine o accanto a un\'altra foto. Con il backup su Drive attivo, l\'ordine compare anche sugli altri tuoi dispositivi.</string>
     <string name="whats_new_260_folderorder_title">Disponi le foto in una cartella del dispositivo</string>
@@ -2994,8 +2994,9 @@
     <string name="local_encryption_state_on">Attiva</string>
     <string name="local_encryption_state_encrypting">Crittografia in corso…</string>
     <string name="local_encryption_state_locked">Bloccata</string>
-    <string name="local_encryption_sheet_title">I tuoi dati su questo telefono sono crittografati</string>
-    <string name="local_encryption_sheet_lead">L\'app crittografa ciò che conserva su questo telefono:</string>
+    <string name="local_encryption_sheet_title">Cifratura in più su questo telefono</string>
+    <string name="local_encryption_sheet_lead">Android conserva già i dati dell\'app in uno spazio privato a cui le altre app non possono accedere. In più, l\'app cifra:</string>
+    <string name="local_encryption_sheet_note">È un extra, non una correzione: anche l\'app ufficiale di Proton Drive non cifra sul telefono le sue miniature, le impostazioni e i file offline. Il livello in più conta solo in rari casi, per esempio se qualcuno copia i file dell\'app fuori dal telefono. Una copia del genere non si apre senza questo telefono o la tua password.</string>
     <string name="local_encryption_item_library">Database della libreria</string>
     <string name="local_encryption_item_hidden">Foto nascoste</string>
     <string name="local_encryption_item_settings">Impostazioni e cronologia attività</string>

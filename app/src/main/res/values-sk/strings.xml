@@ -2874,8 +2874,8 @@
     <string name="whats_new_260_videoedit_title">Editor videa v rovnakom štýle</string>
     <string name="whats_new_260_videoedit_body">„Upraviť“ používa okrúhle ikony nad pravítkom, orezanie a otočenie zdieľajú jednu kartu so zoznamom pomerov strán a veľkosť orezového rámčeka možno meniť dvoma prstami. Obraz už pri prepínaní nástrojov nebliká.</string>
     <string name="whats_new_260_more">Navyše upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
-    <string name="whats_new_260_encrypt_title">Vaše dáta v telefóne sú šifrované</string>
-    <string name="whats_new_260_encrypt_body">Knižnica aplikácie, skryté fotky, nastavenia, história aktivít a tiež náhľady a fotky otvorené z Proton Drive sú teraz na tomto telefóne šifrované. Android už úložisko aplikácií šifruje; toto pridáva druhú vrstvu pre vlastné súbory aplikácie. Kľúč zostáva v zabezpečenom úložisku telefónu. Jeho záložná kópia je zamknutá k vášmu účtu Proton, kým ste prihlásení, a k heslu pre skryté fotky, keď ho nastavíte. Prvé spustenie po aktualizácii všetko raz zašifruje a povie to v krátkom upozornení.</string>
+    <string name="whats_new_260_encrypt_title">Šifrovanie navyše v tomto telefóne</string>
+    <string name="whats_new_260_encrypt_body">Android už ukladá dáta aplikácie do súkromného úložiska, ku ktorému iné aplikácie nemajú prístup. Teraz k tomu aplikácia pridáva vlastné šifrovanie, ktoré pokrýva knižnicu, skryté fotky, nastavenia, históriu aktivít a tiež náhľady a fotky otvorené z Proton Drive. Kópiu týchto súborov nemožno otvoriť bez tohto telefónu alebo vášho hesla. Kľúč zostáva v zabezpečenom úložisku telefónu. Jeho záložná kópia je zamknutá k vášmu účtu Proton, kým ste prihlásení, a k heslu pre skryté fotky, keď ho nastavíte. Prvé spustenie po aktualizácii všetko raz zašifruje a povie to v krátkom upozornení.</string>
     <string name="whats_new_260_arrange_title">Usporiadajte fotky v albume</string>
     <string name="whats_new_260_arrange_body">V ponuke albumu zvoľte „Usporiadať fotky“ a presúvajte fotky, alebo presuňte výber na začiatok, na koniec či vedľa inej fotky. So zapnutou zálohou na Drive sa poradie ukáže aj na vašich ďalších zariadeniach.</string>
     <string name="whats_new_260_folderorder_title">Usporiadajte fotky v priečinku zariadenia</string>
@@ -3096,8 +3096,9 @@
     <string name="local_encryption_state_on">Zapnuté</string>
     <string name="local_encryption_state_encrypting">Šifruje sa…</string>
     <string name="local_encryption_state_locked">Zamknuté</string>
-    <string name="local_encryption_sheet_title">Vaše údaje v tomto telefóne sú zašifrované</string>
-    <string name="local_encryption_sheet_lead">Aplikácia šifruje všetko, čo ukladá v tomto telefóne:</string>
+    <string name="local_encryption_sheet_title">Šifrovanie navyše v tomto telefóne</string>
+    <string name="local_encryption_sheet_lead">Android už ukladá dáta aplikácie do súkromného úložiska, ku ktorému iné aplikácie nemajú prístup. Navyše aplikácia šifruje:</string>
+    <string name="local_encryption_sheet_note">Je to niečo navyše, nie oprava: ani oficiálna aplikácia Proton Drive v telefóne nešifruje svoje náhľady, nastavenia a offline súbory. Ďalšia vrstva má význam len v zriedkavých prípadoch, napríklad keď niekto skopíruje súbory aplikácie z telefónu. Takúto kópiu nemožno otvoriť bez tohto telefónu alebo vášho hesla.</string>
     <string name="local_encryption_item_library">Databáza knižnice</string>
     <string name="local_encryption_item_hidden">Skryté fotky</string>
     <string name="local_encryption_item_settings">Nastavenia a história aktivít</string>

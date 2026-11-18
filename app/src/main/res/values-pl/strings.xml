@@ -2867,8 +2867,8 @@
     <string name="whats_new_260_videoedit_title">Edytor wideo w tym samym stylu</string>
     <string name="whats_new_260_videoedit_body">„Dostosuj” używa okrągłych ikon nad linijką, kadrowanie i obracanie dzielą jedną kartę z listą proporcji, a ramkę kadru zmienisz dwoma palcami. Obraz nie migocze już przy zmianie narzędzia.</string>
     <string name="whats_new_260_more">Do tego edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
-    <string name="whats_new_260_encrypt_title">Twoje dane w telefonie są zaszyfrowane</string>
-    <string name="whats_new_260_encrypt_body">Biblioteka aplikacji, ukryte zdjęcia, ustawienia, historia aktywności oraz miniatury i zdjęcia otwarte z Proton Drive są teraz zaszyfrowane na tym telefonie. Android już szyfruje pamięć aplikacji; to dodaje drugą warstwę dla własnych plików aplikacji. Klucz zostaje w bezpiecznym magazynie telefonu. Jego kopia zapasowa jest powiązana z twoim kontem Proton, dopóki jesteś zalogowany, oraz z hasłem do ukrytych zdjęć, gdy je ustawisz. Pierwsze uruchomienie po aktualizacji szyfruje wszystko raz i mówi o tym w krótkim komunikacie.</string>
+    <string name="whats_new_260_encrypt_title">Dodatkowe szyfrowanie na tym telefonie</string>
+    <string name="whats_new_260_encrypt_body">Android już trzyma dane aplikacji w prywatnej pamięci, do której inne aplikacje nie mają dostępu. Teraz aplikacja dodaje własne szyfrowanie, które obejmuje bibliotekę, ukryte zdjęcia, ustawienia, historię aktywności oraz miniatury i zdjęcia otwarte z Proton Drive. Kopii tych plików nie da się otworzyć bez tego telefonu lub twojego hasła. Klucz zostaje w bezpiecznym magazynie telefonu. Jego kopia zapasowa jest powiązana z twoim kontem Proton, dopóki jesteś zalogowany, oraz z hasłem do ukrytych zdjęć, gdy je ustawisz. Pierwsze uruchomienie po aktualizacji szyfruje wszystko raz i mówi o tym w krótkim komunikacie.</string>
     <string name="whats_new_260_arrange_title">Uporządkuj zdjęcia w albumie</string>
     <string name="whats_new_260_arrange_body">Wybierz „Uporządkuj zdjęcia” w menu albumu i przeciągaj zdjęcia albo przenieś zaznaczenie na początek, na koniec lub obok innego zdjęcia. Przy włączonej kopii w Drive kolejność pojawia się też na innych twoich urządzeniach.</string>
     <string name="whats_new_260_folderorder_title">Uporządkuj zdjęcia w folderze urządzenia</string>
@@ -3089,8 +3089,9 @@
     <string name="local_encryption_state_on">Wł.</string>
     <string name="local_encryption_state_encrypting">Szyfrowanie…</string>
     <string name="local_encryption_state_locked">Zablokowane</string>
-    <string name="local_encryption_sheet_title">Twoje dane na tym telefonie są zaszyfrowane</string>
-    <string name="local_encryption_sheet_lead">Aplikacja szyfruje to, co przechowuje na tym telefonie:</string>
+    <string name="local_encryption_sheet_title">Dodatkowe szyfrowanie na tym telefonie</string>
+    <string name="local_encryption_sheet_lead">Android już trzyma dane aplikacji w prywatnej pamięci, do której inne aplikacje nie mają dostępu. Dodatkowo aplikacja szyfruje:</string>
+    <string name="local_encryption_sheet_note">To dodatek, a nie poprawka: oficjalna aplikacja Proton Drive też nie szyfruje na telefonie swoich miniatur, ustawień ani plików offline. Dodatkowa warstwa ma znaczenie tylko w rzadkich przypadkach, na przykład gdy ktoś skopiuje pliki aplikacji z telefonu. Takiej kopii nie da się otworzyć bez tego telefonu lub twojego hasła.</string>
     <string name="local_encryption_item_library">Baza danych biblioteki</string>
     <string name="local_encryption_item_hidden">Ukryte zdjęcia</string>
     <string name="local_encryption_item_settings">Ustawienia i historia aktywności</string>

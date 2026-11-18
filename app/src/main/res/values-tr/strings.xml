@@ -2647,8 +2647,8 @@
     <string name="whats_new_260_videoedit_title">Aynı tasarımda video düzenleyici</string>
     <string name="whats_new_260_videoedit_body">“Ayarla” bir cetvelin üstünde yuvarlak simgeler kullanır, kırpma ve döndürme bir sekmeyi en boy oranı listesiyle paylaşır ve kırpma çerçevesi iki parmakla yeniden boyutlandırılır. Araç değiştirirken görüntü artık titremez.</string>
     <string name="whats_new_260_more">Ayrıca HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
-    <string name="whats_new_260_encrypt_title">Telefondaki verilerin şifreli</string>
-    <string name="whats_new_260_encrypt_body">Uygulamanın kitaplığı, gizli fotoğraflar, ayarlar, etkinlik geçmişi ile küçük resimler ve Proton Drive\'dan açılan fotoğraflar artık bu telefonda şifreleniyor. Android uygulama depolamasını zaten şifreler; bu, uygulamanın kendi dosyaları için ikinci bir katman ekler. Anahtar telefonun güvenli depolamasında kalır. Bir yedek kopyası, oturum açık olduğu sürece Proton hesabına, bir parola belirlediğinde de gizli fotoğraf parolasına bağlanır. Güncellemeden sonraki ilk açılış her şeyi bir kez şifreler ve bunu kısa bir bildirimle söyler.</string>
+    <string name="whats_new_260_encrypt_title">Bu telefonda ek şifreleme</string>
+    <string name="whats_new_260_encrypt_body">Android, uygulamanın verilerini zaten diğer uygulamaların erişemediği özel bir depolama alanında tutar. Artık uygulama bunun üstüne kendi şifrelemesini ekliyor: kitaplık, gizli fotoğraflar, ayarlar, etkinlik geçmişi ile küçük resimler ve Proton Drive\'dan açılan fotoğraflar. Bu dosyaların bir kopyası bu telefon ya da parolan olmadan açılamaz. Anahtar telefonun güvenli depolamasında kalır. Bir yedek kopyası, oturum açık olduğu sürece Proton hesabına, bir parola belirlediğinde de gizli fotoğraf parolasına bağlanır. Güncellemeden sonraki ilk açılış her şeyi bir kez şifreler ve bunu kısa bir bildirimle söyler.</string>
     <string name="whats_new_260_arrange_title">Bir albümdeki fotoğrafları düzenle</string>
     <string name="whats_new_260_arrange_body">Bir albümün menüsünde “Fotoğrafları düzenle”yi seç; fotoğrafları sürükle ya da bir seçimi başa, sona veya başka bir fotoğrafın yanına taşı. Drive yedeklemesi açıkken sıra diğer cihazlarında da görünür.</string>
     <string name="whats_new_260_folderorder_title">Bir cihaz klasöründeki fotoğrafları düzenle</string>
@@ -2869,8 +2869,9 @@
     <string name="local_encryption_state_on">Açık</string>
     <string name="local_encryption_state_encrypting">Şifreleniyor…</string>
     <string name="local_encryption_state_locked">Kilitli</string>
-    <string name="local_encryption_sheet_title">Bu telefondaki verilerin şifreli</string>
-    <string name="local_encryption_sheet_lead">Uygulama bu telefonda tuttuklarını şifreler:</string>
+    <string name="local_encryption_sheet_title">Bu telefonda ek şifreleme</string>
+    <string name="local_encryption_sheet_lead">Android, uygulamanın verilerini zaten diğer uygulamaların erişemediği özel bir depolama alanında tutar. Bunun üstüne uygulama şunları şifreler:</string>
+    <string name="local_encryption_sheet_note">Bu bir düzeltme değil, ek bir önlem: resmi Proton Drive uygulaması da telefonda küçük resimlerini, ayarlarını ve çevrimdışı dosyalarını şifrelemiyor. Ek katman yalnızca nadir durumlarda, örneğin biri uygulamanın dosyalarını telefondan kopyaladığında işe yarar. Böyle bir kopya bu telefon ya da parolan olmadan açılamaz.</string>
     <string name="local_encryption_item_library">Kitaplık veritabanı</string>
     <string name="local_encryption_item_hidden">Gizli fotoğraflar</string>
     <string name="local_encryption_item_settings">Ayarlar ve etkinlik geçmişi</string>

@@ -2729,8 +2729,8 @@
     <string name="whats_new_260_videoedit_title">Videószerkesztő, ugyanazzal a kialakítással</string>
     <string name="whats_new_260_videoedit_body">Az „Igazítás” kerek ikonokat használ egy vonalzó fölött, a vágás és a forgatás egy fülön van a képarányok listájával, a vágókeret pedig két ujjal átméretezhető. A kép már nem villog eszközváltáskor.</string>
     <string name="whats_new_260_more">Ráadásul szerkeszthető dátum HEIC, GIF és RAW fájloknál, figyelmen kívül hagyható duplikátumcsoportok, helyválasztó a térképen, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
-    <string name="whats_new_260_encrypt_title">A telefonon tárolt adataid titkosítva vannak</string>
-    <string name="whats_new_260_encrypt_body">Az app könyvtára, a rejtett fotók, a beállítások, a tevékenységnapló, valamint a bélyegképek és a Proton Drive-ból megnyitott fotók mostantól titkosítva vannak ezen a telefonon. Az Android már most is titkosítja az appok tárhelyét; ez egy második réteget ad az app saját fájljaihoz. A kulcs a telefon biztonságos tárolójában marad. Egy biztonsági másolata a Proton-fiókodhoz van zárva, amíg be vagy jelentkezve, és a rejtett fotók jelszavához, ha beállítasz egyet. A frissítés utáni első indítás egyszer mindent titkosít, és ezt egy rövid értesítésben jelzi.</string>
+    <string name="whats_new_260_encrypt_title">Extra titkosítás ezen a telefonon</string>
+    <string name="whats_new_260_encrypt_body">Az Android eleve az app saját, privát tárhelyén tartja az adatokat, amelyhez más appok nem férnek hozzá. Most az app erre saját titkosítást tesz, amely a könyvtárra, a rejtett fotókra, a beállításokra, a tevékenységnaplóra, valamint a bélyegképekre és a Proton Drive-ból megnyitott fotókra terjed ki. Ezeknek a fájloknak a másolatát nem lehet megnyitni a telefon vagy a jelszavad nélkül. A kulcs a telefon biztonságos tárolójában marad. Egy biztonsági másolata a Proton-fiókodhoz van zárva, amíg be vagy jelentkezve, és a rejtett fotók jelszavához, ha beállítasz egyet. A frissítés utáni első indítás egyszer mindent titkosít, és ezt egy rövid értesítésben jelzi.</string>
     <string name="whats_new_260_arrange_title">Fotók elrendezése egy albumban</string>
     <string name="whats_new_260_arrange_body">Egy album menüjében válaszd a „Fotók elrendezése” lehetőséget, és húzd a fotókat, vagy tegyél egy kijelölést az elejére, a végére vagy egy másik fotó mellé. Ha be van kapcsolva a Drive-mentés, a sorrend a többi eszközödön is megjelenik.</string>
     <string name="whats_new_260_folderorder_title">Fotók elrendezése egy eszközmappában</string>
@@ -2951,8 +2951,9 @@
     <string name="local_encryption_state_on">Be</string>
     <string name="local_encryption_state_encrypting">Titkosítás…</string>
     <string name="local_encryption_state_locked">Zárolva</string>
-    <string name="local_encryption_sheet_title">Az adataid titkosítva vannak ezen a telefonon</string>
-    <string name="local_encryption_sheet_lead">Az app titkosítja, amit ezen a telefonon tárol:</string>
+    <string name="local_encryption_sheet_title">Extra titkosítás ezen a telefonon</string>
+    <string name="local_encryption_sheet_lead">Az Android eleve az app saját, privát tárhelyén tartja az adatokat, amelyhez más appok nem férnek hozzá. Ezen felül az app titkosítja:</string>
+    <string name="local_encryption_sheet_note">Ez ráadás, nem hibajavítás: a hivatalos Proton Drive app sem titkosítja a telefonon a bélyegképeit, a beállításait és az offline fájljait. Az extra réteg csak ritka esetben számít, például ha valaki lemásolja az app fájljait a telefonról. Egy ilyen másolatot nem lehet megnyitni a telefon vagy a jelszavad nélkül.</string>
     <string name="local_encryption_item_library">Könyvtár-adatbázis</string>
     <string name="local_encryption_item_hidden">Rejtett fotók</string>
     <string name="local_encryption_item_settings">Beállítások és tevékenységnapló</string>

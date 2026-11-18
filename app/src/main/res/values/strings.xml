@@ -2767,8 +2767,8 @@
     <string name="whats_new_260_videoedit_title">Video editor, same design</string>
     <string name="whats_new_260_videoedit_body">“Adjust” uses round icons over a ruler, crop and rotate are now one tab with a list of aspect ratios, and the crop frame resizes with a two-finger pinch. The picture no longer flickers when you switch tools.</string>
     <string name="whats_new_260_more">Plus editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
-    <string name="whats_new_260_encrypt_title">Your data on this phone is encrypted</string>
-    <string name="whats_new_260_encrypt_body">The app\'s library, hidden photos, settings, activity history, and the thumbnails and photos opened from Proton Drive are now encrypted on this phone. Android already encrypts app storage; this adds a second layer for the app\'s own files. The key stays in the phone\'s secure storage. A backup copy of it is locked to your Proton account while you are signed in, and to the password for hidden photos when you set one. The first start after the update encrypts everything once and says so in a short notice.</string>
+    <string name="whats_new_260_encrypt_title">Extra encryption on this phone</string>
+    <string name="whats_new_260_encrypt_body">Android already keeps the app\'s data in private storage that other apps cannot reach. Now the app adds its own encryption on top, covering the library, hidden photos, settings, activity history, and the thumbnails and photos opened from Proton Drive. A copy of these files taken off the phone cannot be opened without this phone or your password. The key stays in the phone\'s secure storage. A backup copy of it is locked to your Proton account while you are signed in, and to the password for hidden photos when you set one. The first start after the update encrypts everything once and says so in a short notice.</string>
     <string name="whats_new_260_arrange_title">Arrange photos in an album</string>
     <string name="whats_new_260_arrange_body">Choose “Arrange photos” in an album\'s menu and drag photos, or move a selection to the start, the end or next to another photo. With the Drive backup on, the order shows on your other devices too.</string>
     <string name="whats_new_260_folderorder_title">Arrange photos in a device folder</string>
@@ -2989,8 +2989,9 @@
     <string name="local_encryption_state_on">On</string>
     <string name="local_encryption_state_encrypting">Encrypting…</string>
     <string name="local_encryption_state_locked">Locked</string>
-    <string name="local_encryption_sheet_title">Your data on this phone is encrypted</string>
-    <string name="local_encryption_sheet_lead">The app encrypts what it keeps on this phone:</string>
+    <string name="local_encryption_sheet_title">Extra encryption on this phone</string>
+    <string name="local_encryption_sheet_lead">Android already keeps the app\'s data in private storage that other apps cannot reach. On top of that, the app encrypts:</string>
+    <string name="local_encryption_sheet_note">This is an extra, not a fix: the official Proton Drive app does not encrypt its thumbnails, settings or offline files on the phone either. The extra layer only matters in rare cases, such as someone copying the app\'s files off the phone. A copy like that cannot be opened without this phone or your password.</string>
     <string name="local_encryption_item_library">Library database</string>
     <string name="local_encryption_item_hidden">Hidden photos</string>
     <string name="local_encryption_item_settings">Settings and activity history</string>

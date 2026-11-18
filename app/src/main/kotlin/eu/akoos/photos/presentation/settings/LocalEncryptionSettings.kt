@@ -200,6 +200,7 @@ internal fun LocalEncryptionSheet(
                     Text("•  " + stringResource(item), color = colors.fgPrimary, fontSize = 14.sp)
                 }
             }
+            Text(stringResource(R.string.local_encryption_sheet_note), color = colors.fgDim, fontSize = 14.sp)
             when {
                 state.signedIn -> {
                     Text(stringResource(R.string.local_encryption_account_note), color = colors.fgDim, fontSize = 14.sp)
