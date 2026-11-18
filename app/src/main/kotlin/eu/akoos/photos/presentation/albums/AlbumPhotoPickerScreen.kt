@@ -90,6 +90,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.BottomDock
@@ -730,8 +731,8 @@ private fun PickerAlbumsGrid(
                     coverModel = entry.folder.coverUri?.let(android.net.Uri::parse),
                     coverIsGif = entry.folder.coverIsGif,
                     title = entry.folder.name,
-                    metaText = androidx.compose.ui.res.pluralStringResource(
-                        R.plurals.count_photos_plural, entry.folder.itemCount, entry.folder.itemCount,
+                    metaText = photoVideoCountText(
+                        entry.folder.itemCount - entry.folder.videoCount, entry.folder.videoCount,
                     ),
                     isDeviceFolder = true,
                     onClick = { onOpen(entry) },

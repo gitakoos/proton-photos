@@ -68,6 +68,7 @@ class TimelineFilterViewModel @Inject constructor(
         val name: String,
         val coverUri: String?,
         val itemCount: Int,
+        val videoCount: Int = 0,
         /** True = hidden from the timeline. False = shown (default). */
         val isExcluded: Boolean,
     )
@@ -151,6 +152,7 @@ class TimelineFilterViewModel @Inject constructor(
                         name       = bucket.name,
                         coverUri   = bucket.coverUri,
                         itemCount  = bucket.itemCount,
+                        videoCount = bucket.videoCount,
                         isExcluded = bucket.name in excludedNames,
                     )
                 }

@@ -976,8 +976,9 @@ private fun HiddenFolderCard(
         UnifiedAlbumCard(
             coverModel = folder.coverUri?.let(android.net.Uri::parse),
             title = folder.name,
+            // The vault keeps no file type per photo, so the count stays neutral.
             metaText = pluralStringResource(
-                R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+                R.plurals.count_items_plural, folder.itemCount, folder.itemCount,
             ),
             isDeviceFolder = true,
             onClick = onOpen,

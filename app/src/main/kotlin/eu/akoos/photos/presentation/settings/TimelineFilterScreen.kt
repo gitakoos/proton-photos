@@ -71,6 +71,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.gallery.CategoryReorderList
 import eu.akoos.photos.presentation.gallery.GridZoom
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
@@ -484,7 +485,7 @@ private fun TimelineFolderRow(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
+                photoVideoCountText(folder.itemCount - folder.videoCount, folder.videoCount),
                 color    = FgMute,
                 fontSize = 12.sp,
             )
@@ -557,7 +558,7 @@ private fun AlbumFilterRow(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                pluralStringResource(R.plurals.count_photos_plural, album.itemCount, album.itemCount),
+                pluralStringResource(R.plurals.count_items_plural, album.itemCount, album.itemCount),
                 color    = FgMute,
                 fontSize = 12.sp,
             )

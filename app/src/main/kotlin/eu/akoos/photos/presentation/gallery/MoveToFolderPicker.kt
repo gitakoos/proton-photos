@@ -51,7 +51,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +60,7 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -188,7 +188,7 @@ private fun FolderRow(folder: DeviceFolderChoice, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                pluralStringResource(R.plurals.count_photos_plural, folder.count, folder.count),
+                photoVideoCountText(folder.count - folder.videoCount, folder.videoCount),
                 color = colors.fgMute,
                 fontSize = 12.sp,
             )

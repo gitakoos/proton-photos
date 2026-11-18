@@ -93,7 +93,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -127,6 +126,7 @@ import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.photoDateSections
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.common.rememberGroupingPinchModifier
 import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
@@ -349,14 +349,7 @@ fun DeviceFolderDetailScreen(
             mime.startsWith("video/")
         }
     }
-    val photoCount = items.size - videoCount
-    val photosText = pluralStringResource(R.plurals.count_photos_plural, photoCount, photoCount)
-    val videosText = pluralStringResource(R.plurals.count_videos_plural, videoCount, videoCount)
-    val countLabel = when {
-        photoCount > 0 && videoCount > 0 -> "$photosText, $videosText"
-        videoCount > 0 -> videosText
-        else -> photosText
-    }
+    val countLabel = photoVideoCountText(items.size - videoCount, videoCount)
 
     // The grid as the selection drawer frosts it, when the frosted pills are on.
     val glass = rememberGlassBackdrop(Bg0)

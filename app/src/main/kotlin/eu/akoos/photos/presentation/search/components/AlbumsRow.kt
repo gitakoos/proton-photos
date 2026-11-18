@@ -48,6 +48,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.albums.AlbumCloudBadge
 import eu.akoos.photos.presentation.albums.AlbumShareBadge
 import eu.akoos.photos.presentation.albums.UnifiedAlbumCard
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.search.SearchAlbum
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.LocalGifAutoplayCovers
@@ -125,7 +126,7 @@ private fun SearchAlbumCard(entry: SearchAlbum, onClick: () -> Unit) {
                 coverModel = folder.coverUri?.let(Uri::parse),
                 coverIsGif = folder.coverIsGif,
                 title = folder.name,
-                metaText = pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
+                metaText = photoVideoCountText(folder.itemCount - folder.videoCount, folder.videoCount),
                 isDeviceFolder = true,
                 onClick = onClick,
                 modifier = cardModifier,

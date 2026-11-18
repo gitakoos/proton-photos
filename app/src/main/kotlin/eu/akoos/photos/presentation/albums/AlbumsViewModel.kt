@@ -84,6 +84,8 @@ data class DeviceFolder(
     val name: String,
     val coverUri: String?,
     val itemCount: Int,
+    /** How many of the [itemCount] files are videos, so the card counts photos and videos apart. */
+    val videoCount: Int = 0,
     /** True when the cover file is a GIF, so its card can animate it when cover autoplay is on. The
      *  cover uri is a MediaStore `content://` id that never reveals the extension, so gif-ness is
      *  resolved from the cover item's mime type / display name when the card is built. */

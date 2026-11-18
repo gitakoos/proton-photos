@@ -119,6 +119,7 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ScrollScrubber
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -909,8 +910,8 @@ fun AlbumsScreen(
                                 gridContent.deviceFolders,
                                 key = { "devfolder_${it.name}" },
                             ) { folder ->
-                                val metaText = pluralStringResource(
-                                    R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+                                val metaText = photoVideoCountText(
+                                    folder.itemCount - folder.videoCount, folder.videoCount,
                                 )
                                 if (listView) {
                                     UnifiedAlbumRow(

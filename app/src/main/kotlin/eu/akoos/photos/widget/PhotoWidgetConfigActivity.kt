@@ -96,6 +96,7 @@ import eu.akoos.photos.data.preferences.resolveThemeModeKey
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.presentation.common.SelectionCheckPop
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.lock.AppLockGate
 import eu.akoos.photos.presentation.lock.AppLockGateState
@@ -922,8 +923,9 @@ private fun AlbumRow(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(album.name, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            val videoCount = remember(album.items) { album.items.count { it.mimeType.startsWith("video/") } }
             Text(
-                stringResource(R.string.sync_photo_count, album.itemCount),
+                photoVideoCountText(album.itemCount - videoCount, videoCount),
                 color = colors.fgMute,
                 fontSize = 12.sp,
             )
@@ -1001,7 +1003,7 @@ private fun CloudAlbumRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(album.name, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
-                stringResource(R.string.sync_photo_count, album.photoCount),
+                pluralStringResource(R.plurals.count_items_plural, album.photoCount, album.photoCount),
                 color = colors.fgMute,
                 fontSize = 12.sp,
             )
