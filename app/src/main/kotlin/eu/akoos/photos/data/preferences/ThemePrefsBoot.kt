@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.preferences
 
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
 
 /**
  * Synchronous mirror of `SettingsKeys.THEME_MODE` backed by SharedPreferences so
@@ -37,18 +38,13 @@ object ThemePrefsBoot {
     private const val KEY_MODE = "theme_mode"
 
     /**
-     * Returns the cached mode key, or `"dark"` if never written.
-     *
-     * Default changed from "system" to "dark" because the welcome + ProtonCore login
-     * activities (LoginActivity, LoginTwoStepActivity, etc.) follow AppCompatDelegate's
-     * night-mode setting — and the app's color resources are designed for dark surfaces.
-     * Falling back to system mode meant the login flow appeared in light theme when the
-     * device's system theme was light, even though the rest of the app forces dark on
-     * Compose. Users can switch to system or light from Settings → Appearance.
+     * Returns the cached mode key, or `"system"` if never written, the same default Settings and
+     * the setup wizard show. The ProtonCore login activities stay dark regardless: App maps every
+     * key except "light" to night mode for them.
      */
     fun read(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_MODE, null) ?: "dark"
+        return prefs.getString(KEY_MODE, null) ?: "system"
     }
 
     /**
@@ -59,4 +55,39 @@ object ThemePrefsBoot {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_MODE, mode).apply()
     }
+
+    /** Whether a mode was ever written here. Earlier versions always wrote one on their first start. */
+    fun isWritten(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).contains(KEY_MODE)
+}
+
+/**
+ * The theme mode key the in-app screens follow: the saved [themeMode], else the legacy [legacyDark]
+ * switch, else "system", matching what Settings and the setup wizard show for a fresh install.
+ */
+fun resolveThemeModeKey(themeMode: String?, legacyDark: Boolean?): String =
+    themeMode ?: when (legacyDark) {
+        true -> "dark"
+        false -> "light"
+        null -> "system"
+    }
+
+/**
+ * Runs once per install. Earlier versions drew an install with no saved theme dark, so such an install
+ * gets "dark" saved and keeps its look, and Settings shows what it sees. A fresh install keeps no saved
+ * theme and follows the system. An earlier run shows as a written boot mirror ([mirrorWritten]), or as
+ * other settings already saved on an install that was updated rather than freshly installed
+ * ([installUpdated]). Returns true when "dark" was saved.
+ */
+fun settleThemeDefault(prefs: MutablePreferences, mirrorWritten: Boolean, installUpdated: Boolean): Boolean {
+    if (prefs[SettingsKeys.THEME_DEFAULT_SETTLED] == true) return false
+    val hasTheme = prefs[SettingsKeys.THEME_MODE] != null || prefs[SettingsKeys.DARK_MODE] != null
+    val otherSettings = prefs.asMap().keys.any {
+        it != SettingsKeys.THEME_MODE && it != SettingsKeys.DARK_MODE && it != SettingsKeys.THEME_DEFAULT_SETTLED
+    }
+    val earlierRun = mirrorWritten || (installUpdated && otherSettings)
+    val keepDark = !hasTheme && earlierRun
+    if (keepDark) prefs[SettingsKeys.THEME_MODE] = "dark"
+    prefs[SettingsKeys.THEME_DEFAULT_SETTLED] = true
+    return keepDark
 }

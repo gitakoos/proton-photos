@@ -211,6 +211,8 @@ object SettingsKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     /** Legacy — kept only so old installs migrate cleanly to [THEME_MODE]. */
     val DARK_MODE = booleanPreferencesKey("dark_mode")
+    /** One-shot flag for [settleThemeDefault]: set on the first start that knows the "system" default. */
+    val THEME_DEFAULT_SETTLED = booleanPreferencesKey("theme_default_settled")
     /**
      * Accent-color palette selection. Independent of [THEME_MODE] — palette only swaps
      * the accent/accent2 tokens, never the light/dark base surfaces. Default value is

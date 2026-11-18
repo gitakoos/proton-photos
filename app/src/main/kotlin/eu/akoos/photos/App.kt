@@ -57,6 +57,7 @@ import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.settleThemeDefault
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.CachePruneWorker
@@ -506,8 +507,17 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 else    -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
+        // Read before anything below can write the mirror.
+        val mirrorWritten = ThemePrefsBoot.isWritten(this)
         // Background drift-sync of the mirror from DataStore (e.g. first boot before any theme write).
         appScope.launch {
+            runCatching {
+                val installUpdated = packageManager.getPackageInfo(packageName, 0)
+                    .let { it.lastUpdateTime > it.firstInstallTime }
+                var keptDark = false
+                settingsDataStore.edit { keptDark = settleThemeDefault(it, mirrorWritten, installUpdated) }
+                if (keptDark) ThemePrefsBoot.write(this@App, "dark")
+            }
             val fromDataStore = runCatching {
                 settingsDataStore.data.map { prefs ->
                     prefs[SettingsKeys.THEME_MODE] ?: when (prefs[SettingsKeys.DARK_MODE]) {

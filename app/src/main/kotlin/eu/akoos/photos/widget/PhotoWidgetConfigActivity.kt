@@ -91,6 +91,8 @@ import coil.compose.AsyncImage
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.ThemePrefsBoot
+import eu.akoos.photos.data.preferences.resolveThemeModeKey
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.presentation.common.SelectionCheckPop
@@ -146,15 +148,10 @@ class PhotoWidgetConfigActivity : FragmentActivity() {
             // widget config screen renders in the same theme/accent as the rest of the app.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->
-                    prefs[SettingsKeys.THEME_MODE]
-                        ?: when (prefs[SettingsKeys.DARK_MODE]) {
-                            true  -> "dark"
-                            false -> "light"
-                            null  -> "dark"
-                        }
+                    resolveThemeModeKey(prefs[SettingsKeys.THEME_MODE], prefs[SettingsKeys.DARK_MODE])
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = "dark")
+            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@PhotoWidgetConfigActivity))
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {

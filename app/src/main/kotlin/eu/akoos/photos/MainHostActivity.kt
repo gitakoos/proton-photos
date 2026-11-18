@@ -90,6 +90,7 @@ import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.continueWithoutAccount
+import eu.akoos.photos.data.preferences.resolveThemeModeKey
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
@@ -484,12 +485,7 @@ class MainHostActivity : AppCompatActivity() {
             // Theme mode lives in DataStore - re-collect so a change re-themes without a restart.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->
-                    prefs[SettingsKeys.THEME_MODE]
-                        ?: when (prefs[SettingsKeys.DARK_MODE]) {
-                            true  -> "dark"
-                            false -> "light"
-                            null  -> "dark"  // first-launch default - matches ThemePrefsBoot
-                        }
+                    resolveThemeModeKey(prefs[SettingsKeys.THEME_MODE], prefs[SettingsKeys.DARK_MODE])
                 }
             }
             val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainHostActivity))
