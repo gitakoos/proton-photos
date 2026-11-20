@@ -235,17 +235,24 @@ fun DuplicateFinderScreen(
             state.similarDeviceGroups.isNotEmpty() || state.similarCloudGroups.isNotEmpty() ||
             state.scanningSimilar
 
-        // The groups the list shows under BOTH filters (sync status and match type). Select all but the
-        // first and the shared delete bar act on exactly these, so neither reaches a hidden group.
+        // The groups the list shows under BOTH filters (sync status and match type). Select all and the
+        // shared delete bar act only on these, so neither reaches a hidden group.
         // Remembered with each group's key, so a redraw (every progress tick of the similar-photo scan)
         // does not join the member ids of every listed group again, two or three times over.
-        val listedGroups = remember(
+        val listed = remember(
             showExact, showSim, deviceGroups, cloudGroups, similarDeviceGroups, similarCloudGroups,
         ) {
-            (if (showExact) deviceGroups + cloudGroups else emptyList()) +
-                (if (showSim) similarDeviceGroups + similarCloudGroups else emptyList())
+            listedDuplicateGroups(
+                identical = deviceGroups + cloudGroups,
+                similar = similarDeviceGroups + similarCloudGroups,
+                showIdentical = showExact,
+                showSimilar = showSim,
+            )
         }
+        val listedGroups = listed.all
         val listedKeys = remember(listedGroups) { listedGroups.map(::duplicateGroupKey) }
+        val bulkGroups = listed.selectable
+        val bulkKeys = remember(bulkGroups) { bulkGroups.map(::duplicateGroupKey) }
 
         // Every VISIBLE group the user has ticked copies in, as (group, removeIds). Aggregating from the
         // visible lists (not by iterating groupSelections, which keeps stale entries for groups the
@@ -280,11 +287,11 @@ fun DuplicateFinderScreen(
         }
         // The ticked copies across every visible group, flattened for the shared selection drawer.
         val selectedItems = batchSelections.flatMap { (g, remove) -> g.items.filter { it.stableId in remove } }
-        // Ticks every copy but the first of each listed group that has nothing ticked yet, identical and
-        // similar alike. A group the user already ticked copies in keeps exactly those picks, so Select all
-        // never undoes a choice of keeper, and never adds to a pick, which could tick the whole group.
+        // Ticks every copy but the first of each listed identical group that has nothing ticked yet. A group
+        // the user already ticked copies in keeps exactly those picks, so Select all never undoes a choice of
+        // keeper, and never adds to a pick, which could tick the whole group.
         val selectAllButFirstListed: () -> Unit = {
-            groupSelections.putAll(selectAllButFirstInUnpicked(listedGroups, groupSelections))
+            groupSelections.putAll(selectAllButFirstInUnpicked(bulkGroups, groupSelections))
         }
         // Ignoring a group drops any ticks in it; restoring one from the Ignored list needs none.
         val toggleIgnore: (DuplicateGroup) -> Unit = { group ->
@@ -296,10 +303,9 @@ fun DuplicateFinderScreen(
                 viewModel.ignoreGroup(group)
             }
         }
-        // Whether Select all has anything left to tick: a listed group of two or more copies with no pick.
-        val canSelectMore = listedGroups.indices.any { i ->
-            listedGroups[i].items.size > 1 && groupSelections[listedKeys[i]].isNullOrEmpty()
-        }
+        // The header bubble and the drawer both offer Select all only while it would tick something. Ticking
+        // all but the first of groups the user chose to leave alone would work against that choice.
+        val showSelectAll = !showIgnored && selectAllWouldTick(bulkGroups, bulkKeys, groupSelections)
         var showBatchConfirm by remember { mutableStateOf(false) }
         // A selection lives only on this screen, so leaving the overview would silently drop the ticked
         // copies. Guard both exits (system back and the header arrow) whenever anything is ticked. The
@@ -471,12 +477,9 @@ fun DuplicateFinderScreen(
         )
 
         // Floating pill header (matches Search / Map). The trailing filter bubble opens the sync-status
-        // and match-type sheet; it carries the accent outline when a non-default filter is active. While
-        // any group is listed, the bubble before it ticks every copy but the first of each group with no
-        // pick yet.
+        // and match-type sheet; it carries the accent outline when a non-default filter is active. The
+        // bubble before it is Select all.
         val filtersActive = scope != DupScope.ALL || filter != DupFilter.ALL || showIgnored
-        // Ticking all but the first of groups the user chose to leave alone would work against that choice.
-        val showSelectAllButFirst = listedGroups.isNotEmpty() && !showIgnored
         FloatingHeader(
             backdrop = glass,
             title = stringResource(R.string.duplicates_title),
@@ -487,13 +490,13 @@ fun DuplicateFinderScreen(
                 // one being squashed.
                 BoxWithConstraints(modifier = Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                     val bubbleGap = 8.dp
-                    val bubbles = if (showSelectAllButFirst) 2 else 1
+                    val bubbles = if (showSelectAll) 2 else 1
                     val diameter = ((maxWidth - bubbleGap * (bubbles - 1)) / bubbles).coerceIn(0.dp, 40.dp)
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(bubbleGap),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (showSelectAllButFirst) {
+                        if (showSelectAll) {
                             IconBubble(
                                 icon = Icons.Default.SelectAll,
                                 contentDescription = stringResource(R.string.duplicates_select_all_but_first),
@@ -532,9 +535,9 @@ fun DuplicateFinderScreen(
             ),
             onDismiss = { groupSelections.clear() },
             modifier = Modifier.align(Alignment.BottomCenter),
-            // Select all runs the header button's rule on the groups with no pick yet. No count is handed
-            // in, so it selects at once exactly as that button does; the delete keeps its own confirmation.
-            onSelectAll = if (canSelectMore && !showIgnored) selectAllButFirstListed else null,
+            // No count is handed in, so it selects at once exactly as the header bubble does; the delete keeps
+            // its own confirmation.
+            onSelectAll = if (showSelectAll) selectAllButFirstListed else null,
         )
         if (showBatchConfirm) {
             // A backed-up (Synced) copy carries its device file with it, so the message says so, exactly
@@ -686,6 +689,26 @@ internal fun selectAllButFirstInUnpicked(
     current: Map<String, Set<String>>,
 ): Map<String, Set<String>> =
     selectAllButFirst(groups.filter { current[duplicateGroupKey(it)].isNullOrEmpty() })
+
+/** The listed groups, and the identical ones among them, the only ones Select all ticks: a similar group holds different shots. */
+internal class ListedDuplicateGroups(val all: List<DuplicateGroup>, val selectable: List<DuplicateGroup>)
+
+internal fun listedDuplicateGroups(
+    identical: List<DuplicateGroup>,
+    similar: List<DuplicateGroup>,
+    showIdentical: Boolean,
+    showSimilar: Boolean,
+): ListedDuplicateGroups {
+    val shownIdentical = if (showIdentical) identical else emptyList()
+    return ListedDuplicateGroups(shownIdentical + (if (showSimilar) similar else emptyList()), shownIdentical)
+}
+
+/** Whether Select all would tick anything: a group of two or more copies with no pick, [keys] in [groups] order. */
+internal fun selectAllWouldTick(
+    groups: List<DuplicateGroup>,
+    keys: List<String>,
+    current: Map<String, Set<String>>,
+): Boolean = groups.indices.any { i -> groups[i].items.size > 1 && current[keys[i]].isNullOrEmpty() }
 
 /** Device bytes reclaimed by deleting [items], matching the regular delete confirmation: a device or
  *  synced copy frees its device file, and a cloud-only copy counts as zero, since deleting it moves the

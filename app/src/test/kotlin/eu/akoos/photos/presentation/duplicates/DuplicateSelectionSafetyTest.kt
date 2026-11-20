@@ -28,6 +28,7 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase.DuplicateGroup
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase.GroupType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -153,15 +154,15 @@ class DuplicateSelectionSafetyTest {
     }
 
     @Test
-    fun select_all_but_the_first_ticks_every_copy_but_the_first_in_identical_and_similar_groups() {
+    fun select_all_but_the_first_ticks_every_copy_but_the_first_of_each_group() {
         // The keeper is the copy listed first, not the lowest id: nothing ranks the copies.
-        val identical = deviceGroup("z", "a", "m")
-        val similar = cloudGroup("c2", "c1")
-        val picked = selectAllButFirst(listOf(identical, similar))
+        val device = deviceGroup("z", "a", "m")
+        val cloud = cloudGroup("c2", "c1")
+        val picked = selectAllButFirst(listOf(device, cloud))
         assertEquals(
             mapOf(
-                duplicateGroupKey(identical) to setOf("a", "m"),
-                duplicateGroupKey(similar) to setOf("c1"),
+                duplicateGroupKey(device) to setOf("a", "m"),
+                duplicateGroupKey(cloud) to setOf("c1"),
             ),
             picked,
         )
@@ -258,6 +259,60 @@ class DuplicateSelectionSafetyTest {
                 assertTrue("$pick then Select all left nothing of ${g.ids()}", keepIdsForRemoval(g.ids(), remove).isNotEmpty())
             }
         }
+    }
+
+    @Test
+    fun select_all_ticks_the_identical_groups_and_never_a_listed_similar_group() {
+        val identical = deviceGroup("a", "b")
+        val similar = cloudGroup("s1", "s2")
+        val listed = listedDuplicateGroups(listOf(identical), listOf(similar), showIdentical = true, showSimilar = true)
+        assertEquals(listOf(identical, similar), listed.all)
+        assertEquals(mapOf("a|b" to setOf("b")), selectAllButFirstInUnpicked(listed.selectable, emptyMap()))
+    }
+
+    @Test
+    fun select_all_has_nothing_to_tick_when_only_similar_groups_are_listed() {
+        val similar = cloudGroup("s1", "s2")
+        val listed = listedDuplicateGroups(listOf(deviceGroup("a", "b")), listOf(similar), showIdentical = false, showSimilar = true)
+        assertEquals(listOf(similar), listed.all)
+        assertFalse(selectAllWouldTick(listed.selectable, emptyList(), emptyMap()))
+    }
+
+    @Test
+    fun select_all_is_offered_while_an_identical_group_has_no_pick() {
+        val groups = listOf(deviceGroup("a", "b"), deviceGroup("c", "d"))
+        assertTrue(selectAllWouldTick(groups, listOf("a|b", "c|d"), mapOf("a|b" to setOf("b"))))
+    }
+
+    @Test
+    fun select_all_is_hidden_once_every_identical_group_has_a_pick() {
+        val groups = listOf(deviceGroup("a", "b"), cloudGroup("c", "d", "e"))
+        val current = mapOf("a|b" to setOf("b"), "c|d|e" to setOf("c"))
+        assertFalse(selectAllWouldTick(groups, listOf("a|b", "c|d|e"), current))
+    }
+
+    @Test
+    fun select_all_is_hidden_after_it_ran_even_with_an_untouched_similar_group_listed() {
+        val listed = listedDuplicateGroups(
+            listOf(deviceGroup("a", "b")), listOf(cloudGroup("s1", "s2")), showIdentical = true, showSimilar = true,
+        )
+        val current = selectAllButFirstInUnpicked(listed.selectable, emptyMap())
+        assertFalse(selectAllWouldTick(listed.selectable, listOf("a|b"), current))
+    }
+
+    @Test
+    fun select_all_counts_a_cleared_pick_as_no_pick() {
+        assertTrue(selectAllWouldTick(listOf(deviceGroup("a", "b")), listOf("a|b"), mapOf("a|b" to emptySet())))
+    }
+
+    @Test
+    fun select_all_is_hidden_when_only_one_copy_groups_are_left() {
+        assertFalse(selectAllWouldTick(listOf(deviceGroup("a")), listOf("a"), emptyMap()))
+    }
+
+    @Test
+    fun select_all_is_hidden_with_no_groups() {
+        assertFalse(selectAllWouldTick(emptyList(), emptyList(), emptyMap()))
     }
 
     /** Every subset of this set, so a test can sweep all reachable selections of a small group. */

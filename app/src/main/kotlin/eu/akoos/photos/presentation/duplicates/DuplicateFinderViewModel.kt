@@ -88,6 +88,44 @@ private data class Prepared(
     val srcLocalHashes: Map<String, String>,
 )
 
+/** The groups without the copies in [ids], matched by member id; a group left with one copy is dropped,
+ *  an untouched one is returned as it is. */
+internal fun List<FindDuplicatesUseCase.DuplicateGroup>.withoutIds(
+    ids: Set<String>,
+): List<FindDuplicatesUseCase.DuplicateGroup> =
+    if (ids.isEmpty()) this
+    else mapNotNull { g ->
+        if (g.items.none { it.stableId in ids }) g
+        else g.items.filter { it.stableId !in ids }.takeIf { it.size > 1 }?.let { g.copy(items = it) }
+    }
+
+/** A fresh identical grouping less [deleted]: a regroup that started before a delete still holds those copies. */
+internal fun DuplicateFinderViewModel.UiState.withIdenticalGroups(
+    device: List<FindDuplicatesUseCase.DuplicateGroup>,
+    cloud: List<FindDuplicatesUseCase.DuplicateGroup>,
+    deleted: Set<String>,
+) = copy(isLoading = false, deviceGroups = device.withoutIds(deleted), cloudGroups = cloud.withoutIds(deleted))
+
+/** A fresh similar grouping less [deleted], for the same reason as [withIdenticalGroups]. */
+internal fun DuplicateFinderViewModel.UiState.withSimilarGroups(
+    device: List<FindDuplicatesUseCase.DuplicateGroup>,
+    cloud: List<FindDuplicatesUseCase.DuplicateGroup>,
+    deleted: Set<String>,
+    scanning: Boolean,
+) = copy(
+    similarDeviceGroups = device.withoutIds(deleted),
+    similarCloudGroups = cloud.withoutIds(deleted),
+    scanningSimilar = scanning,
+)
+
+/** Every listed group less [ids], matched by member id, since the background fill rebuilds the group objects. */
+internal fun DuplicateFinderViewModel.UiState.withoutDeleted(ids: Set<String>) = copy(
+    deviceGroups = deviceGroups.withoutIds(ids),
+    cloudGroups = cloudGroups.withoutIds(ids),
+    similarDeviceGroups = similarDeviceGroups.withoutIds(ids),
+    similarCloudGroups = similarCloudGroups.withoutIds(ids),
+)
+
 /**
  * Whether the similar-photo grouping must re-run its O(n²) clustering. It re-clusters only when a
  * candidate is NEW or its hash CHANGED versus [last]; a pass whose candidates are all present in
@@ -290,11 +328,7 @@ class DuplicateFinderViewModel @Inject constructor(
                     .flatMapTo(HashSet<String>()) { g -> g.items.map { it.stableId } }
                 groupSimilarFromStored(items, p.freshHashes, exactIds)
                 _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        deviceGroups = result.deviceGroups,
-                        cloudGroups = result.cloudGroups,
-                    )
+                    it.withIdenticalGroups(result.deviceGroups, result.cloudGroups, recentlyDeleted.value)
                 }
                 if (items !== lastScheduledItems) {
                     lastScheduledItems = items
@@ -410,11 +444,7 @@ class DuplicateFinderViewModel @Inject constructor(
         lastClusteredFingerprint = prepared.fingerprint
         lastSimilarExactIds = exactIds
         _uiState.update {
-            it.copy(
-                similarDeviceGroups = clustered.first,
-                similarCloudGroups = clustered.second,
-                scanningSimilar = prepared.anyMissing,
-            )
+            it.withSimilarGroups(clustered.first, clustered.second, recentlyDeleted.value, prepared.anyMissing)
         }
     }
 
@@ -553,9 +583,7 @@ class DuplicateFinderViewModel @Inject constructor(
                 when (result) {
                     is DeletePhotoUseCase.Result.Success -> {
                         // A copy Android 10 refused to remove is still there, so it stays in its group.
-                        val landed = result.landed(toDelete)
-                        removeFromGroup(group, landed.map { it.stableId }.toSet())
-                        markDeleted(landed)
+                        markDeleted(result.landed(toDelete))
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
@@ -624,9 +652,6 @@ class DuplicateFinderViewModel @Inject constructor(
                 when (result) {
                     is DeletePhotoUseCase.Result.Success -> {
                         // A copy Android 10 refused to remove is still there, so it stays in its group.
-                        perGroup.forEach { (group, items) ->
-                            removeFromGroup(group, result.landed(items).map { it.stableId }.toSet())
-                        }
                         markDeleted(result.landed(toDelete))
                         if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
@@ -710,31 +735,15 @@ class DuplicateFinderViewModel @Inject constructor(
 
     fun consumeError() = _uiState.update { it.copy(errorMessage = null) }
 
-    /** Drop the just-deleted ids from the matching group; remove the group if ≤ 1 copy remains. */
-    private fun removeFromGroup(group: FindDuplicatesUseCase.DuplicateGroup, deletedIds: Set<String>) {
-        fun List<FindDuplicatesUseCase.DuplicateGroup>.prune() = mapNotNull { g ->
-            if (g !== group) g
-            else {
-                val remaining = g.items.filter { it.stableId !in deletedIds }
-                if (remaining.size > 1) g.copy(items = remaining) else null
-            }
-        }
-        _uiState.update {
-            it.copy(
-                deviceGroups = it.deviceGroups.prune(),
-                cloudGroups = it.cloudGroups.prune(),
-                similarDeviceGroups = it.similarDeviceGroups.prune(),
-                similarCloudGroups = it.similarCloudGroups.prune(),
-            )
-        }
-    }
-
     /** Record [items] as deleted this session: keeps them out of future groups (via [recentlyDeleted])
      *  and evicts their perceptual-hash rows so a stale fingerprint can't cluster them back into a
      *  similar group. Synced/LocalOnly hash under the local uri, CloudOnly under the linkId. */
     private suspend fun markDeleted(items: List<GalleryItem>) {
         if (items.isEmpty()) return
-        recentlyDeleted.update { set -> set + items.map { it.stableId } }
+        val ids = items.mapTo(HashSet(items.size)) { it.stableId }
+        // Recorded before the prune, so a regroup still running drops the same copies when it lands.
+        recentlyDeleted.update { set -> set + ids }
+        _uiState.update { it.withoutDeleted(ids) }
         val keys = items.map { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> item.local.uri
