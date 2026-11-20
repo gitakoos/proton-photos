@@ -384,10 +384,19 @@ object PhotoWidgetUpdater {
             inSampleSize       = sample
             inPreferredConfig  = Bitmap.Config.RGB_565
         }
-        context.contentResolver.openInputStream(uri)?.use {
+        val decoded = context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, opts2)
         }
+        // BitmapFactory ignores the EXIF orientation, so a portrait photo stored sideways is turned upright here.
+        decoded?.let { uprightBitmap(it, eu.akoos.photos.util.ExifHelper.readOrientation(context, uriString)) }
     } catch (_: Exception) { null }
+
+    /** [bitmap] turned to match the EXIF [orientation]; the sideways decode is freed at once, so only one copy stays. */
+    internal fun uprightBitmap(bitmap: Bitmap, orientation: Int): Bitmap {
+        val upright = eu.akoos.photos.util.ExifHelper.applyOrientation(bitmap, orientation)
+        if (upright !== bitmap) bitmap.recycle()
+        return upright
+    }
 
     /** Kept encrypted like the other image caches; [PhotoWidget.loadCachedBitmap] decrypts it. */
     private fun saveBitmapToCache(context: Context, id: Int, bitmap: Bitmap): String {
