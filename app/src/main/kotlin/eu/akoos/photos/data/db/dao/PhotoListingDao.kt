@@ -46,6 +46,20 @@ data class PhotoPairingRow(
     val sizeBytes: Long,
 )
 
+/** What a full refresh compares a listed photo against to tell whether its stored row is still current,
+ *  without the row's crypto material. */
+data class ListingRefreshStamp(
+    val linkId: String,
+    val revisionId: String,
+    val contentHash: String?,
+    val captureTime: Long,
+    val tagsCsv: String,
+    val thumbnailUrl: String?,
+    val nameFingerprint: String?,
+    /** The row carries everything the lazy thumbnail decrypt needs: its URL, content key packet and node key. */
+    val lazyThumbnailReady: Boolean,
+)
+
 /** One user's own stream as the backup figures Settings shows: its photos, its videos, and their total
  *  size in bytes. */
 data class OwnStreamTotals(
@@ -293,6 +307,15 @@ interface PhotoListingDao {
      *  Callers chunk [linkIds]: one host variable per element, against a per-statement cap. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds)")
     suspend fun getByLinkIds(linkIds: List<String>): List<PhotoListingEntity>
+
+    /** [getByLinkIds] narrowed to the columns a full refresh weighs a row's freshness on. Callers chunk
+     *  [linkIds]. */
+    @Query(
+        "SELECT linkId, revisionId, contentHash, captureTime, tagsCsv, thumbnailUrl, nameFingerprint, " +
+            "(serverThumbnailUrl IS NOT NULL AND contentKeyPacket IS NOT NULL AND encNodeKey IS NOT NULL) " +
+            "AS lazyThumbnailReady FROM photo_listing WHERE linkId IN (:linkIds)"
+    )
+    suspend fun getRefreshStamps(linkIds: List<String>): List<ListingRefreshStamp>
 
     /**
      * Which of [contentHashes] this user's library already holds.

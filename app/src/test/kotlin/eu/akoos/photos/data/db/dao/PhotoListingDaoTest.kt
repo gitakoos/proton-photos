@@ -109,6 +109,28 @@ class PhotoListingDaoTest {
     private fun video(linkId: String) = entity(linkId).copy(mimeType = "video/mp4")
 
     @Test
+    fun `a refresh stamp says whether a row carries everything the lazy thumbnail decrypt needs`() = runTest {
+        dao.upsertAll(
+            listOf(
+                entity("ready").copy(
+                    contentHash = "h1", tagsCsv = "0", nameFingerprint = "f1",
+                    serverThumbnailUrl = "https://t", contentKeyPacket = "ckp", encNodeKey = "key",
+                ),
+                entity("bare").copy(serverThumbnailUrl = "https://t", contentKeyPacket = null, encNodeKey = "key"),
+            ),
+        )
+
+        val stamps = dao.getRefreshStamps(listOf("ready", "bare", "absent")).associateBy { it.linkId }
+
+        assertEquals(
+            ListingRefreshStamp("ready", "rev1", "h1", 1000L, "0", null, "f1", lazyThumbnailReady = true),
+            stamps["ready"],
+        )
+        assertEquals(false, stamps["bare"]?.lazyThumbnailReady)
+        assertNull(stamps["absent"])
+    }
+
+    @Test
     fun `the favourite rows a tag listing speaks for are the own stream photos holding that tag`() = runTest {
         dao.upsertAll(
             listOf(
