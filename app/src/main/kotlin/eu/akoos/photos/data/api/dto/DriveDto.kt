@@ -498,6 +498,9 @@ data class LinkPhotoDto(
     @SerialName("CaptureTime") val captureTime: Long? = null,
     @SerialName("ContentHash") val contentHash: String? = null,
     @SerialName("Tags") val tags: List<Int> = emptyList(),
+    // The photos kept with this one, such as the video of a Live Photo. The library listing holds no row
+    // for them, so this is where their links are read from.
+    @SerialName("RelatedPhotosLinkIDs") val relatedPhotosLinkIds: List<String>? = null,
     @SerialName("ActiveRevision") val activeRevision: PhotoActiveRevisionDto? = null,
     // Primary CKP location for photos — FileProperties is null for photo links.
     @SerialName("ContentKeyPacket") val contentKeyPacket: String? = null,
