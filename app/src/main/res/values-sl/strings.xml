@@ -820,7 +820,7 @@
     <string name="metadata_edit_notification_progress">%1$d od %2$d</string>
     <!-- Google Takeout import notification. -->
     <string name="import_channel_name">Uvoz fotografij</string>
-    <string name="import_channel_desc">Prikazuje potek uvoza datoteke Google Takeout v Proton Drive.</string>
+    <string name="import_channel_desc">Prikazuje potek uvoza fotografij v Proton Drive.</string>
     <string name="import_notification_title">Uvažanje fotografij…</string>
     <string name="import_notification_progress">%1$d od %2$d</string>
     <string name="import_notification_done_title">Uvoz končan</string>
@@ -830,9 +830,9 @@
     <string name="import_stage_progress">%1$d od %2$d</string>
     <!-- Google Takeout import screen. -->
     <string name="import_title">Uvoz fotografij</string>
-    <string name="import_row_desc">Prenesite izvoz Google Photos ali Ente v Proton Drive</string>
-    <string name="import_explainer">Uvozite izvoz Google Takeout ali Ente kot .zip ali kot mapo. Deluje tudi mapa z navadnimi fotografijami. Vaše fotografije se naložijo v Proton Drive z izvirnim datumom in lokacijo.</string>
-    <string name="import_choose_zip">Izberite .zip iz Takeout</string>
+    <string name="import_row_desc">Prenesite izvoz Google Photos ali Ente ali katerikoli zip s fotografijami v Proton Drive</string>
+    <string name="import_explainer">Uvozite izvoz Google Takeout ali Ente ali katerikoli .zip ali mapo s fotografijami, na primer prenos iz Dropboxa. Vaše fotografije se naložijo neposredno v Proton Drive z izvirnim datumom in lokacijo, v galerijo pa se ne shranijo.</string>
+    <string name="import_choose_zip">Izberite .zip</string>
     <string name="import_choose_folder">Izberite mapo</string>
     <string name="import_scanning">Branje izvoza…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -871,7 +871,7 @@
     <string name="import_review_detail_description">Opis</string>
     <string name="import_review_detail_filename">Ime datoteke</string>
     <string name="import_review_detail_source">Vir</string>
-    <string name="import_review_source">Izvoz Google Photos ali Ente</string>
+    <string name="import_review_source">Uvoz iz datoteke .zip ali mape</string>
     <!-- Recent imports history. -->
     <string name="import_history_title">Nedavni uvozi</string>
     <string name="import_history_row">%1$d uvoženih</string>

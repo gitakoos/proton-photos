@@ -819,7 +819,7 @@
     <string name="metadata_edit_notification_progress">%1$d z %2$d</string>
     <!-- Google Takeout import notification. -->
     <string name="import_channel_name">Import fotek</string>
-    <string name="import_channel_desc">Zobrazuje průběh importu souboru Google Takeout na Proton Drive.</string>
+    <string name="import_channel_desc">Zobrazuje průběh importu fotek na Proton Drive.</string>
     <string name="import_notification_title">Importování fotek…</string>
     <string name="import_notification_progress">%1$d z %2$d</string>
     <string name="import_notification_done_title">Import dokončen</string>
@@ -829,9 +829,9 @@
     <string name="import_stage_progress">%1$d z %2$d</string>
     <!-- Google Takeout import screen. -->
     <string name="import_title">Import fotek</string>
-    <string name="import_row_desc">Přeneste export Google Photos nebo Ente na Proton Drive</string>
-    <string name="import_explainer">Importujte export Google Takeout nebo Ente jako .zip nebo složku. Funguje i složka s běžnými fotkami. Vaše fotky se nahrají na Proton Drive s původním datem a místem.</string>
-    <string name="import_choose_zip">Vybrat .zip z Takeout</string>
+    <string name="import_row_desc">Přeneste export Google Photos nebo Ente nebo jakýkoli zip s fotkami na Proton Drive</string>
+    <string name="import_explainer">Importujte export Google Takeout nebo Ente, nebo jakýkoli .zip či složku s fotkami, například soubor stažený z Dropboxu. Vaše fotky se nahrají přímo na Proton Drive s původním datem a místem a do galerie se neukládají.</string>
+    <string name="import_choose_zip">Vybrat .zip</string>
     <string name="import_choose_folder">Vybrat složku</string>
     <string name="import_scanning">Čtení exportu…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -870,7 +870,7 @@
     <string name="import_review_detail_description">Popis</string>
     <string name="import_review_detail_filename">Název souboru</string>
     <string name="import_review_detail_source">Zdroj</string>
-    <string name="import_review_source">Export Google Photos nebo Ente</string>
+    <string name="import_review_source">Import ze zipu nebo složky</string>
     <!-- Recent imports history. -->
     <string name="import_history_title">Nedávné importy</string>
     <string name="import_history_row">%1$d importováno</string>

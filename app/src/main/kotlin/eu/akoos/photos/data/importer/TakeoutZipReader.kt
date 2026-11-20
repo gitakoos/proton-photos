@@ -154,32 +154,34 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
         var damaged = 0
         var entries = 0
         var endedBy: Throwable? = null
-        ZipInputStream(counting).use { zip ->
-            val guard = EntryStream(zip)
-            while (true) {
-                var entry: ZipEntry? = null
-                try {
-                    entry = zip.nextEntry
-                } catch (e: Exception) {
-                    if (e is CancellationException || !isZipFault(e)) throw e
-                    endedBy = e
+        ZipEntryNames.lenient {
+            ZipInputStream(counting).use { zip ->
+                val guard = EntryStream(zip)
+                while (true) {
+                    var entry: ZipEntry? = null
+                    try {
+                        entry = zip.nextEntry
+                    } catch (e: Exception) {
+                        if (e is CancellationException || !isZipFault(e)) throw e
+                        endedBy = e
+                    }
+                    if (entry == null) break
+                    entries++
+                    try {
+                        if (!entry.isDirectory && !ZipEntryNames.climbsOut(entry.name)) onEntry(entry, guard)
+                    } catch (e: Exception) {
+                        if (e is CancellationException || !ImportFailure.isArchiveFault(e)) throw e
+                        damaged++
+                    }
+                    try {
+                        zip.closeEntry()
+                    } catch (e: Exception) {
+                        if (e is CancellationException || !isZipFault(e)) throw e
+                        endedBy = e
+                        break
+                    }
+                    onBytes?.invoke(counting.count)
                 }
-                if (entry == null) break
-                entries++
-                try {
-                    if (!entry.isDirectory) onEntry(entry, guard)
-                } catch (e: Exception) {
-                    if (e is CancellationException || !ImportFailure.isArchiveFault(e)) throw e
-                    damaged++
-                }
-                try {
-                    zip.closeEntry()
-                } catch (e: Exception) {
-                    if (e is CancellationException || !isZipFault(e)) throw e
-                    endedBy = e
-                    break
-                }
-                onBytes?.invoke(counting.count)
             }
         }
         return WalkResult(damaged, endedBy != null, endedBy, counting.count, entries)

@@ -657,7 +657,7 @@
     <string name="metadata_edit_notification_progress">%1$d van %2$d</string>
     <!-- Google Takeout import notification. -->
     <string name="import_channel_name">Foto-import</string>
-    <string name="import_channel_desc">Toont de voortgang tijdens het importeren van een Google Takeout-export naar Proton Drive.</string>
+    <string name="import_channel_desc">Toont de voortgang tijdens het importeren van foto\'s naar Proton Drive.</string>
     <string name="import_notification_title">Foto\'s worden geïmporteerd…</string>
     <string name="import_notification_progress">%1$d van %2$d</string>
     <string name="import_notification_done_title">Import voltooid</string>
@@ -667,9 +667,9 @@
     <string name="import_stage_progress">%1$d van %2$d</string>
     <!-- Google Takeout import screen. -->
     <string name="import_title">Foto\'s importeren</string>
-    <string name="import_row_desc">Breng een Google Photos- of Ente-export naar Proton Drive</string>
-    <string name="import_explainer">Importeer een Google Takeout- of Ente-export als .zip of als map. Een map met gewone foto\'s kan ook. Je foto\'s worden met hun oorspronkelijke datum en locatie geüpload naar Proton Drive.</string>
-    <string name="import_choose_zip">Takeout-.zip kiezen</string>
+    <string name="import_row_desc">Breng een Google Photos- of Ente-export, of elke zip met foto\'s, naar Proton Drive</string>
+    <string name="import_explainer">Importeer een Google Takeout- of Ente-export, of elke .zip of map met foto\'s, zoals een Dropbox-download. Je foto\'s worden met hun oorspronkelijke datum en locatie direct naar Proton Drive geüpload, zonder dat ze in je galerij komen.</string>
+    <string name="import_choose_zip">.zip kiezen</string>
     <string name="import_choose_folder">Map kiezen</string>
     <string name="import_scanning">De export wordt gelezen…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -708,7 +708,7 @@
     <string name="import_review_detail_description">Beschrijving</string>
     <string name="import_review_detail_filename">Bestandsnaam</string>
     <string name="import_review_detail_source">Bron</string>
-    <string name="import_review_source">Google Photos- of Ente-export</string>
+    <string name="import_review_source">Import uit .zip of map</string>
     <!-- Recent imports history. -->
     <string name="import_history_title">Recente imports</string>
     <string name="import_history_row">%1$d geïmporteerd</string>

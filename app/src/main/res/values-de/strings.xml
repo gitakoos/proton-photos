@@ -610,7 +610,7 @@
     <string name="metadata_edit_notification_progress">%1$d von %2$d</string>
     <!-- Google Takeout import notification. -->
     <string name="import_channel_name">Fotoimport</string>
-    <string name="import_channel_desc">Zeigt den Fortschritt beim Importieren eines Google Takeout-Exports zu Proton Drive.</string>
+    <string name="import_channel_desc">Zeigt den Fortschritt beim Importieren von Fotos zu Proton Drive.</string>
     <string name="import_notification_title">Fotos werden importiert…</string>
     <string name="import_notification_progress">%1$d von %2$d</string>
     <string name="import_notification_done_title">Import abgeschlossen</string>
@@ -620,9 +620,9 @@
     <string name="import_stage_progress">%1$d von %2$d</string>
     <!-- Google Takeout import screen. -->
     <string name="import_title">Fotos importieren</string>
-    <string name="import_row_desc">Einen Google Photos- oder Ente-Export in Proton Drive übertragen</string>
-    <string name="import_explainer">Importiere einen Google Takeout- oder Ente-Export als .zip oder als Ordner. Ein Ordner mit normalen Fotos geht auch. Deine Fotos werden mit ihrem ursprünglichen Datum und Ort zu Proton Drive hochgeladen.</string>
-    <string name="import_choose_zip">Takeout .zip auswählen</string>
+    <string name="import_row_desc">Einen Google Photos- oder Ente-Export oder ein beliebiges Zip mit Fotos in Proton Drive übertragen</string>
+    <string name="import_explainer">Importiere einen Google Takeout- oder Ente-Export oder ein beliebiges .zip oder einen Ordner mit Fotos, zum Beispiel einen Dropbox-Download. Deine Fotos werden mit ihrem ursprünglichen Datum und Ort direkt zu Proton Drive hochgeladen, ohne in deiner Galerie zu landen.</string>
+    <string name="import_choose_zip">.zip auswählen</string>
     <string name="import_choose_folder">Ordner auswählen</string>
     <string name="import_scanning">Export wird gelesen…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -661,7 +661,7 @@
     <string name="import_review_detail_description">Beschreibung</string>
     <string name="import_review_detail_filename">Dateiname</string>
     <string name="import_review_detail_source">Quelle</string>
-    <string name="import_review_source">Google Photos- oder Ente-Export</string>
+    <string name="import_review_source">Import aus Zip oder Ordner</string>
     <!-- Recent imports history. -->
     <string name="import_history_title">Letzte Importe</string>
     <string name="import_history_row">%1$d importiert</string>

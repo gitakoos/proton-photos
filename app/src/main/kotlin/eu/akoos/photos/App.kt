@@ -137,6 +137,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // The :crypto process shares this Application but must skip the main-process init below
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
+        if (Build.VERSION.SDK_INT >= 34) eu.akoos.photos.data.importer.ZipEntryNames.install()
         // Before any screen reads the settings: whether they are held back, so the lock and the cover fail closed.
         eu.akoos.photos.data.localcrypto.SettingsLock.attach(this)
         // A settings change that could not be saved encrypted is not saved at all; the user is told so.

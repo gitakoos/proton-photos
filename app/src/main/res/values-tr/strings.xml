@@ -1210,7 +1210,7 @@
     <string name="metadata_edit_notification_title">Fotoğraf ayrıntıları kaydediliyor…</string>
     <string name="metadata_edit_notification_progress">%1$d / %2$d</string>
     <string name="import_channel_name">Fotoğraf içe aktarma</string>
-    <string name="import_channel_desc">Bir Google Takeout dışa aktarımı Proton Drive\'a içe aktarılırken ilerlemeyi gösterir.</string>
+    <string name="import_channel_desc">Fotoğraflar Proton Drive\'a içe aktarılırken ilerlemeyi gösterir.</string>
     <string name="import_notification_title">Fotoğraflar içe aktarılıyor…</string>
     <string name="import_notification_progress">%1$d / %2$d</string>
     <string name="import_notification_done_title">İçe aktarma tamamlandı</string>
@@ -1218,9 +1218,9 @@
     <string name="import_stage_notification_title">İçe aktarma hazırlanıyor…</string>
     <string name="import_stage_progress">%1$d / %2$d</string>
     <string name="import_title">Fotoğrafları içe aktar</string>
-    <string name="import_row_desc">Bir Google Photos veya Ente dışa aktarımını Proton Drive\'a getir</string>
-    <string name="import_explainer">Bir Google Takeout veya Ente dışa aktarımını .zip ya da klasör olarak içe aktar. Sıradan fotoğraflardan oluşan bir klasör de olur. Fotoğrafların özgün tarihi ve konumuyla Proton Drive\'a yüklenir.</string>
-    <string name="import_choose_zip">Takeout .zip seç</string>
+    <string name="import_row_desc">Bir Google Photos veya Ente dışa aktarımını ya da herhangi bir fotoğraf zip\'ini Proton Drive\'a getir</string>
+    <string name="import_explainer">Bir Google Takeout veya Ente dışa aktarımını ya da Dropbox indirmesi gibi herhangi bir fotoğraf .zip\'ini veya klasörünü içe aktar. Fotoğrafların özgün tarihi ve konumuyla doğrudan Proton Drive\'a yüklenir, galerine eklenmez.</string>
+    <string name="import_choose_zip">.zip seç</string>
     <string name="import_choose_folder">Klasör seç</string>
     <string name="import_scanning">Dışa aktarım okunuyor…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -1259,7 +1259,7 @@
     <string name="import_review_detail_description">Açıklama</string>
     <string name="import_review_detail_filename">Dosya adı</string>
     <string name="import_review_detail_source">Kaynak</string>
-    <string name="import_review_source">Google Photos veya Ente dışa aktarımı</string>
+    <string name="import_review_source">.zip veya klasör içe aktarımı</string>
     <string name="import_history_title">Son içe aktarmalar</string>
     <string name="import_history_row">%1$d içe aktarıldı</string>
     <string name="import_history_row_extra">%1$d atlandı, %2$d başarısız oldu</string>

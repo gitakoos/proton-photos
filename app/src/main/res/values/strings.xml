@@ -1268,9 +1268,9 @@
     <string name="metadata_edit_channel_desc">Shows progress while saving photo detail changes to Proton Drive.</string>
     <string name="metadata_edit_notification_title">Saving photo details…</string>
     <string name="metadata_edit_notification_progress">%1$d of %2$d</string>
-    <!-- Google Takeout import notification. -->
+    <!-- Photo import notification. -->
     <string name="import_channel_name">Photo import</string>
-    <string name="import_channel_desc">Shows progress while importing a Google Takeout export to Proton Drive.</string>
+    <string name="import_channel_desc">Shows progress while importing photos to Proton Drive.</string>
     <string name="import_notification_title">Importing photos…</string>
     <string name="import_notification_progress">%1$d of %2$d</string>
     <string name="import_notification_done_title">Import complete</string>
@@ -1278,11 +1278,11 @@
     <!-- Import staging (review-queue prep) notification. English only for now; other locales follow in a later pass. -->
     <string name="import_stage_notification_title">Preparing import…</string>
     <string name="import_stage_progress">%1$d of %2$d</string>
-    <!-- Google Takeout import screen (English only for now; other locales follow in a later pass). -->
+    <!-- Photo import screen. -->
     <string name="import_title">Import photos</string>
-    <string name="import_row_desc">Bring a Google Photos or Ente export into Proton Drive</string>
-    <string name="import_explainer">Import a Google Takeout or Ente export as a .zip or a folder. A folder of plain photos works too. Your photos upload to Proton Drive with their original date and location.</string>
-    <string name="import_choose_zip">Choose Takeout .zip</string>
+    <string name="import_row_desc">Bring a Google Photos or Ente export, or any zip of photos, into Proton Drive</string>
+    <string name="import_explainer">Import a Google Takeout or Ente export, or any .zip or folder of photos, such as a Dropbox download. Your photos upload straight to Proton Drive with their original date and location, without being added to your gallery.</string>
+    <string name="import_choose_zip">Choose .zip</string>
     <string name="import_choose_folder">Choose folder</string>
     <string name="import_scanning">Reading the export…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -1323,7 +1323,7 @@
     <string name="import_review_detail_description">Description</string>
     <string name="import_review_detail_filename">File name</string>
     <string name="import_review_detail_source">Source</string>
-    <string name="import_review_source">Google Photos or Ente export</string>
+    <string name="import_review_source">Zip or folder import</string>
     <!-- Recent imports history (English only for now; other locales follow in a later pass). -->
     <string name="import_history_title">Recent imports</string>
     <string name="import_history_row">%1$d imported</string>

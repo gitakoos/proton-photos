@@ -633,7 +633,7 @@
     <string name="metadata_edit_notification_progress">%1$d / %2$d</string>
     <!-- Google Takeout import notification. -->
     <string name="import_channel_name">Fotóimportálás</string>
-    <string name="import_channel_desc">Egy Google Takeout-export Proton Drive-ra importálásának állapotát mutatja.</string>
+    <string name="import_channel_desc">A fotók Proton Drive-ra importálásának állapotát mutatja.</string>
     <string name="import_notification_title">Fotók importálása…</string>
     <string name="import_notification_progress">%1$d / %2$d</string>
     <string name="import_notification_done_title">Az importálás kész</string>
@@ -643,9 +643,9 @@
     <string name="import_stage_progress">%1$d / %2$d</string>
     <!-- Google Takeout import screen. -->
     <string name="import_title">Fotók importálása</string>
-    <string name="import_row_desc">Egy Google Photos- vagy Ente-export áthozása a Proton Drive-ra</string>
-    <string name="import_explainer">Importálj egy Google Takeout- vagy Ente-exportot .zip-ként vagy mappaként. Egyszerű fotókat tartalmazó mappa is jó. A fotóid az eredeti dátumukkal és helyükkel töltődnek fel a Proton Drive-ra.</string>
-    <string name="import_choose_zip">Takeout .zip kiválasztása</string>
+    <string name="import_row_desc">Egy Google Photos- vagy Ente-export vagy bármilyen fotós zip áthozása a Proton Drive-ra</string>
+    <string name="import_explainer">Importálj egy Google Takeout- vagy Ente-exportot, vagy bármilyen fotókat tartalmazó .zip-et vagy mappát, például egy Dropbox-letöltést. A fotóid az eredeti dátumukkal és helyükkel egyenesen a Proton Drive-ra töltődnek fel, a galériádba nem kerülnek be.</string>
+    <string name="import_choose_zip">.zip kiválasztása</string>
     <string name="import_choose_folder">Mappa kiválasztása</string>
     <string name="import_scanning">Az export beolvasása…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
@@ -684,7 +684,7 @@
     <string name="import_review_detail_description">Leírás</string>
     <string name="import_review_detail_filename">Fájlnév</string>
     <string name="import_review_detail_source">Forrás</string>
-    <string name="import_review_source">Google Photos- vagy Ente-export</string>
+    <string name="import_review_source">Zip- vagy mappaimport</string>
     <!-- Recent imports history. -->
     <string name="import_history_title">Legutóbbi importálások</string>
     <string name="import_history_row">%1$d importálva</string>
