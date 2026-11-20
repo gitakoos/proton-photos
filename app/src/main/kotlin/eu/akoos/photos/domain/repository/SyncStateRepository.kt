@@ -210,6 +210,9 @@ interface SyncStateRepository {
 
     /** The device photo's Drive copy is gone: keep the folder backup from uploading it again. */
     suspend fun markRemovedFromDrive(localUri: String)
+    /** The device file cannot be backed up as it stands: off the queue until it changes, found at [at]
+     *  (see `QueueSource.UNUPLOADABLE`). Only a LOCAL_ONLY row. */
+    suspend fun markUnuploadable(localUri: String, at: Long) {}
     /** [clearQueuedForSynced] for every one of [localUris], in as few writes as the SQL limit allows. */
     suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
         for (uri in localUris) clearQueuedForSynced(uri)

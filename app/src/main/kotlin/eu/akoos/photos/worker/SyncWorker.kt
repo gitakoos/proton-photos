@@ -152,15 +152,16 @@ class SyncWorker @AssistedInject constructor(
             val pass = runSyncPass(userId, firstPass = true)
             val uploadFailed = pass.failed
 
-            // Only stamp a successful sync time. A fully-failed batch that still wrote LAST_SYNC_MS made
-            // Settings show "synced just now" over a broken backup (and reset the resume-refresh gate),
-            // contradicting the allFailed contract in UploadPendingUseCase.
-            if (!uploadFailed) {
+            // A batch that failed in a way a retry can fix leaves LAST_SYNC_MS alone, so Settings never shows
+            // "synced just now" over a broken backup; files Drive refused stay queued and counted as pending.
+            if (syncRunStampsLastSync(uploadFailed, pass.retryWorthwhile)) {
                 context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
             }
-            return@coroutineScope if (uploadFailed && runAttemptCount < 3) Result.retry()
-            else if (uploadFailed) Result.failure()
-            else Result.success()
+            return@coroutineScope when (syncRunVerdict(uploadFailed, pass.retryWorthwhile, runAttemptCount)) {
+                SyncRunVerdict.RETRY -> Result.retry()
+                SyncRunVerdict.FAILURE -> Result.failure()
+                SyncRunVerdict.SUCCESS -> Result.success()
+            }
         } catch (e: IOException) {
             Log.w(TAG, "sync IO error — will retry", e)
             return@coroutineScope if (runAttemptCount < 3) Result.retry() else Result.failure()
@@ -202,7 +203,7 @@ class SyncWorker @AssistedInject constructor(
      */
     /** Outcome of a single sync pass. `attempted = 0` means reconcile saw no pending items —
      *  trailing passes can skip in that case to avoid the "0 of 0 uploaded" notification loop. */
-    private data class PassResult(val failed: Boolean, val attempted: Int)
+    private data class PassResult(val failed: Boolean, val attempted: Int, val retryWorthwhile: Boolean = failed)
 
     private suspend fun runSyncPass(userId: UserId, firstPass: Boolean): PassResult {
         try {
@@ -222,6 +223,7 @@ class SyncWorker @AssistedInject constructor(
             // verdict even when nothing was uploaded, leaving a stale "last sync time" with no
             // indication the backup is broken.
             var uploadFailed = false
+            var retryWorthwhile = false
             var attempted = 0
             try {
                 val uploadResult = upload(userId)
@@ -229,12 +231,14 @@ class SyncWorker @AssistedInject constructor(
                 // Stale-success guard: UploadPendingUseCase catches per-item exceptions and
                 // keeps looping, so an "all N items threw" run reaches us with no exception.
                 if (uploadResult.allFailed) {
-                    Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded — retrying")
+                    Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded")
                     uploadFailed = true
+                    retryWorthwhile = uploadResult.retryWorthwhile
                 }
             } catch (e: IOException) {
                 Log.w(TAG, "upload IO error — will retry", e)
                 uploadFailed = true
+                retryWorthwhile = true
             } catch (e: Exception) {
                 // CancellationException must propagate so structured concurrency cancels the
                 // surrounding coroutineScope correctly; downgrading it to "upload failed"
@@ -242,8 +246,9 @@ class SyncWorker @AssistedInject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "upload failed — sync verdict downgraded", e)
                 uploadFailed = true
+                retryWorthwhile = true
             }
-            return PassResult(uploadFailed, attempted)
+            return PassResult(uploadFailed, attempted, retryWorthwhile)
         } catch (e: IOException) {
             // Re-throw on first pass so the outer catch handles retries; on trailing passes,
             // a transient network blip shouldn't abort the whole worker — log and move on.
@@ -605,3 +610,22 @@ class SyncWorker @AssistedInject constructor(
         }
     }
 }
+
+/** What a sync run reports to WorkManager, decided by [syncRunVerdict]. */
+internal enum class SyncRunVerdict { SUCCESS, RETRY, FAILURE }
+
+/**
+ * A run whose upload did not fail succeeds. A failed one is retried, at most three runs in all, only when
+ * a retry can help ([retryWorthwhile]): a batch whose every failure was Drive refusing the file meets the
+ * same refusal minutes later, so it ends the run instead of feeding WorkManager's backoff loop.
+ */
+internal fun syncRunVerdict(uploadFailed: Boolean, retryWorthwhile: Boolean, runAttemptCount: Int): SyncRunVerdict =
+    when {
+        !uploadFailed -> SyncRunVerdict.SUCCESS
+        retryWorthwhile && runAttemptCount < 3 -> SyncRunVerdict.RETRY
+        else -> SyncRunVerdict.FAILURE
+    }
+
+/** Whether a sync run records the last sync time: unless its upload failed in a way a retry can fix. */
+internal fun syncRunStampsLastSync(uploadFailed: Boolean, retryWorthwhile: Boolean): Boolean =
+    !uploadFailed || !retryWorthwhile

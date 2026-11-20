@@ -97,6 +97,53 @@ private const val UPLOAD_PARALLELISM = 3
 /** Passes a queued add to an album shared with this user may miss before the pair is let go. */
 internal const val FOREIGN_ALBUM_JOIN_ATTEMPTS = 5
 
+/** Batches in a row, each with another photo uploading, in which Drive refused one file before it leaves the queue. */
+internal const val REFUSAL_STRIKES = 3
+
+/** How a failed upload leaves its photo, decided by [uploadFailureKind]. */
+internal enum class UploadFailureKind {
+    /** Queued as before: the next pass tries again. */
+    RETRY,
+
+    /** The file fails the same way every time as it stands: off the queue until it changes. */
+    UNUPLOADABLE,
+
+    /** Drive refused this file as invalid: queued, and struck against (see [REFUSAL_STRIKES]). */
+    REFUSED,
+}
+
+/** Proton body codes that refuse the request as built from this one file: its requirements or a value in it. */
+private val PER_FILE_REFUSAL_CODES = setOf(2000, 2001)
+
+/**
+ * Sorts an upload failure. An empty file, and a file holding this app's own encrypted bytes, are
+ * [UploadFailureKind.UNUPLOADABLE]. A 400 or 422 carrying a body code from [PER_FILE_REFUSAL_CODES] is
+ * [UploadFailureKind.REFUSED]: an allow-list, so a quota, permission, missing-folder, app-version or
+ * verification answer, which would meet every file alike, never counts against one. Anything else
+ * retries.
+ */
+internal fun uploadFailureKind(e: Throwable): UploadFailureKind {
+    val chain = generateSequence(e) { it.cause?.takeIf { cause -> cause !== it } }.take(6).toList()
+    if (chain.any {
+            it is eu.akoos.photos.data.repository.drive.EmptySourceFileException ||
+                it is eu.akoos.photos.data.localcrypto.EncryptedBytesException
+        }
+    ) {
+        return UploadFailureKind.UNUPLOADABLE
+    }
+    val refused = chain.any { cause ->
+        val (status, code) = when (cause) {
+            is me.proton.core.network.domain.ApiException ->
+                (cause.error as? me.proton.core.network.domain.ApiResult.Error.Http)
+                    ?.let { it.httpCode to it.proton?.code } ?: return@any false
+            is me.proton.drive.sdk.SdkHttpClientException.Http -> cause.statusCode to cause.protonCode
+            else -> return@any false
+        }
+        (status == 400 || status == 422) && code != null && code in PER_FILE_REFUSAL_CODES
+    }
+    return if (refused) UploadFailureKind.REFUSED else UploadFailureKind.RETRY
+}
+
 @Singleton
 class UploadPendingUseCase @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
@@ -146,6 +193,9 @@ class UploadPendingUseCase @Inject constructor(
      * running when the user tapped stop, never a later auto-backup trigger.
      */
     private val stopRequested = AtomicBoolean(false)
+
+    /** Batches in a row in which Drive refused each photo while another uploaded, see [strikeRefusedFiles]. */
+    private val serverRefusalStrikes = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** The single uploads the user stopped from their Activity row, see [cancelItem]. */
     private val itemCancels = eu.akoos.photos.data.transfer.ItemCancels()
@@ -336,9 +386,15 @@ class UploadPendingUseCase @Inject constructor(
      * 0 succeeded" (the latter must not silently mark sync as done when every item failed).
      * [SyncWorker] downgrades the verdict when [successCount] is 0 but [attempted] is
      * non-zero so WorkManager retries instead of writing LAST_SYNC_MS.
+     *
+     * A photo taken off the queue as [QueueSource.UNUPLOADABLE] was not attempted, like a cancelled
+     * one. [refusedCount] is how many of the attempted photos Drive refused as files
+     * ([UploadFailureKind.REFUSED]): a retry minutes later meets the same refusal, so an all-failed
+     * batch made only of those is not worth retrying ([retryWorthwhile]).
      */
-    data class Result(val attempted: Int, val successCount: Int) {
+    data class Result(val attempted: Int, val successCount: Int, val refusedCount: Int = 0) {
         val allFailed: Boolean get() = attempted > 0 && successCount == 0
+        val retryWorthwhile: Boolean get() = allFailed && attempted > refusedCount
     }
 
     /**
@@ -650,6 +706,9 @@ class UploadPendingUseCase @Inject constructor(
         val successCount = AtomicInteger(0)
         val finishedCount = AtomicInteger(0)
         val cancelledCount = AtomicInteger(0)
+        val unuploadableCount = AtomicInteger(0)
+        // Photos Drive refused as files this batch; struck against once the batch shows uploads work.
+        val refusedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
         val totalCount = pending.size
 
         // The batch's upload slots. At most UPLOAD_PARALLELISM uploads are on the wire at once, matching the
@@ -703,6 +762,8 @@ class UploadPendingUseCase @Inject constructor(
                     onStorageFull = { storageFullHit.set(true) },
                     uploadSlot = uploadSemaphore,
                     savedBytes = savedBytes,
+                    unuploadableCount = unuploadableCount,
+                    refusedUris = refusedUris,
                 ) }
                 if (cancelled) {
                     settleCancelledItem(
@@ -730,6 +791,7 @@ class UploadPendingUseCase @Inject constructor(
 
         val finalSuccess = successCount.get()
         Log.d(UPLOAD_TAG, "Upload complete: $finalSuccess/${pending.size} succeeded")
+        strikeRefusedFiles(refusedUris.toList(), batchHadSuccess = finalSuccess > 0)
         transferCenter.log(
             eu.akoos.photos.data.transfer.TransferCenter.Kind.UPLOAD, finalSuccess,
             uris = successUris.toList(),
@@ -749,9 +811,34 @@ class UploadPendingUseCase @Inject constructor(
         val closingStatus = if (storageFullHit.get()) UploadStatus.StorageFull else UploadStatus.Idle
         _progress.tryEmit(UploadProgress("", "", closingStatus, totalCount, totalCount))
         PerfDiagnostics.mark("upload:end", pending.size)
-        // A photo the user cancelled was not attempted: counting it would read an all-cancelled batch
-        // as all-failed, and the worker would retry it.
-        Result(attempted = pending.size - cancelledCount.get(), successCount = finalSuccess)
+        // A photo the user cancelled, or one that cannot be backed up as it stands, was not attempted:
+        // counting it would read such a batch as all-failed, and the worker would retry it.
+        Result(
+            attempted = pending.size - cancelledCount.get() - unuploadableCount.get(),
+            successCount = finalSuccess,
+            refusedCount = refusedUris.size,
+        )
+    }
+
+    /**
+     * Counts a strike against each photo Drive refused as a file this batch, and takes one refused
+     * [REFUSAL_STRIKES] times in a row off the queue as [QueueSource.UNUPLOADABLE]. Strikes are only
+     * counted in a batch where another photo uploaded: a refusal that every photo meets says something
+     * about the account or the app, not about one file, and must never empty the queue.
+     */
+    private suspend fun strikeRefusedFiles(refused: List<String>, batchHadSuccess: Boolean) {
+        if (!batchHadSuccess) return
+        for (uri in refused) {
+            val strikes = serverRefusalStrikes.merge(uri, 1, Int::plus) ?: 1
+            if (strikes < REFUSAL_STRIKES) continue
+            serverRefusalStrikes.remove(uri)
+            withContext(NonCancellable) {
+                runCatching { syncStateRepo.markUnuploadable(uri, System.currentTimeMillis()) }
+            }
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload ${eu.akoos.photos.util.uploadLogRef(uri)} refused by Drive $strikes times, kept off the queue until it changes",
+            )
+        }
     }
 
     /**
@@ -827,6 +914,8 @@ class UploadPendingUseCase @Inject constructor(
         /** The batch's upload slots; this item holds one and hands it back while it transcodes. */
         uploadSlot: Semaphore,
         savedBytes: AtomicLong,
+        unuploadableCount: AtomicInteger,
+        refusedUris: MutableCollection<String>,
     ) {
         val temps = UploadTemps()
         try {
@@ -1292,6 +1381,7 @@ class UploadPendingUseCase @Inject constructor(
 
             successCount.incrementAndGet()
             successUris.add(state.localUri)
+            serverRefusalStrikes.remove(state.localUri)
             if (compressedSize > 0L) savedBytes.addAndGet((localItem.sizeBytes - compressedSize).coerceAtLeast(0L))
             val doneNow = finishedCount.incrementAndGet()
             Log.d(UPLOAD_TAG, "Upload OK: ${localItem.displayName} → cloudId=$cloudId")
@@ -1359,12 +1449,25 @@ class UploadPendingUseCase @Inject constructor(
             // Reset the claim: the upload failed before the SYNCED upsert, so return the row to
             // LOCAL_ONLY for the next pass instead of leaving it stranded at UPLOADING (which the
             // selector and reconcile both skip). NonCancellable so it lands during a batch teardown.
+            val failureKind = uploadFailureKind(e)
             withContext(NonCancellable) {
                 releaseUploadClaim(state.localUri, userId)
-                // Local encrypted bytes are never retried: the row stays, off the queue.
-                if (generateSequence<Throwable>(e) { it.cause }.take(4).any { it is eu.akoos.photos.data.localcrypto.EncryptedBytesException }) {
-                    runCatching { syncStateRepo.clearQueued(state.localUri) }
+                // An empty file or local encrypted bytes fail the same way every time: the row stays,
+                // off the queue, until the file changes.
+                if (failureKind == UploadFailureKind.UNUPLOADABLE) {
+                    runCatching { syncStateRepo.markUnuploadable(state.localUri, System.currentTimeMillis()) }
                 }
+            }
+            when (failureKind) {
+                UploadFailureKind.UNUPLOADABLE -> {
+                    unuploadableCount.incrementAndGet()
+                    serverRefusalStrikes.remove(state.localUri)
+                    eu.akoos.photos.util.SyncDiagnostics.log(
+                        "upload ${eu.akoos.photos.util.uploadLogRef(state.localUri)} kept off the queue until the file changes",
+                    )
+                }
+                UploadFailureKind.REFUSED -> refusedUris.add(state.localUri)
+                UploadFailureKind.RETRY -> serverRefusalStrikes.remove(state.localUri)
             }
             _progress.tryEmit(
                 UploadProgress(

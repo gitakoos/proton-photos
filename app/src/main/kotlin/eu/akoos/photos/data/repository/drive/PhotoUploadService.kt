@@ -1366,9 +1366,10 @@ class PhotoUploadService @Inject constructor(
      * along with an empty descriptor. Null when the source cannot be sized at all, which leaves the
      * caller on the item's own figure.
      */
+    // UNKNOWN_LENGTH (-1) is no measurement; zero is one, so an empty file is told apart from an unreadable one.
     private fun sourceSizeBytes(uri: Uri): Long? = runCatching {
         context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
-    }.getOrNull()?.takeIf { it > 0L }
+    }.getOrNull()?.takeIf { it >= 0L }
 
     /** Hex SHA-1 of every byte [uri] holds, read start to end; stops when its coroutine is cancelled. */
     private suspend fun sha1HexCancellable(uri: String): String? {

@@ -70,6 +70,11 @@ enum class SyncStatus {
  * - [CANCELLED]: not a reason to upload either: the user cancelled this photo's "back up now" from the
  *   Activity screen. Kept with the row, so neither a restart's claim recovery nor reconcile's stranded
  *   intent recovery nor the folder backup uploads it again; asking for it again replaces the mark.
+ * - [UNUPLOADABLE]: not a reason to upload either: the file cannot be backed up as it stands (it is empty,
+ *   it holds this app's own encrypted bytes, or Drive refused this one file repeatedly while other photos
+ *   uploaded). [SyncState.queuedAt] holds when that was found; the folder backup queues it again once the
+ *   file's size or modified time moves past that, or the app is updated, and an explicit back-up replaces
+ *   the mark.
  */
 object QueueSource {
     const val MANUAL = "MANUAL"
@@ -78,6 +83,7 @@ object QueueSource {
     const val EDITOR = "EDITOR"
     const val REMOVED_FROM_DRIVE = "REMOVED_FROM_DRIVE"
     const val CANCELLED = "CANCELLED"
+    const val UNUPLOADABLE = "UNUPLOADABLE"
 
     /**
      * True when the row is up for upload because the automatic folder backup put it there, rather

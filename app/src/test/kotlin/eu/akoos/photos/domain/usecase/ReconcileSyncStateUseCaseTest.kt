@@ -1044,6 +1044,52 @@ class ReconcileSyncStateUseCaseTest {
         }
     }
 
+    @Test
+    fun `a file set aside as unuploadable is not queued again while it is unchanged`() = runTest {
+        val local = localItem("uri://empty", size = 0L)
+        val setAside = syncState("uri://empty", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queueSource = eu.akoos.photos.domain.entity.QueueSource.UNUPLOADABLE)
+            .copy(sizeBytes = 0L, queuedAt = SET_ASIDE_AT)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(setAside))
+        coEvery { syncStateRepo.getByUri(any()) } returns setAside
+        coEvery {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(match { it.localUri == "uri://empty" }, userId)
+        } returns 1
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 0) {
+            syncStateRepo.markQueuedAll(match { "uri://empty" in it }, any(), any())
+        }
+    }
+
+    @Test
+    fun `a file set aside as unuploadable is queued again once its size changed`() = runTest {
+        val local = localItem("uri://empty", size = 2_048L)
+        val setAside = syncState("uri://empty", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queueSource = eu.akoos.photos.domain.entity.QueueSource.UNUPLOADABLE)
+            .copy(sizeBytes = 0L, queuedAt = SET_ASIDE_AT)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(setAside))
+        coEvery { syncStateRepo.getByUri(any()) } returns setAside
+        coEvery {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(match { it.localUri == "uri://empty" }, userId)
+        } returns 1
+
+        useCase(userId).toList()
+
+        coVerify {
+            syncStateRepo.markQueuedAll(
+                match { "uri://empty" in it },
+                eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
+                any(),
+            )
+        }
+    }
+
     // ─── explicit-intent queue robustness (piece 5a) ──────────────────────────
 
     @Test
@@ -1361,3 +1407,6 @@ class ReconcileSyncStateUseCaseTest {
         assertEquals(1, merger().merge(listOf(stamped), listOf(photo), listOf(row)).size)
     }
 }
+
+/** When the unuploadable rows in these tests were set aside: after the app's install time. */
+private const val SET_ASIDE_AT = 4_000_000_000_000L

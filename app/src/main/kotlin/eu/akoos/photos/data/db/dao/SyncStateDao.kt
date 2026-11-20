@@ -420,6 +420,14 @@ interface SyncStateDao {
     )
     suspend fun markRemovedFromDrive(localUri: String)
 
+    /** Takes a device file that cannot be backed up as it stands off the queue (see
+     *  `QueueSource.UNUPLOADABLE`), recording [at] as when that was found. Only a LOCAL_ONLY row. */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = 'UNUPLOADABLE', queuedAt = :at " +
+            "WHERE localUri = :localUri AND status = 'LOCAL_ONLY'"
+    )
+    suspend fun markUnuploadable(localUri: String, at: Long): Int
+
     /** [clearQueuedForSynced] for every uri in [localUris] in one statement, writing only a row that still
      *  carries some intent. The caller keeps the list within the host-variable limit. */
     @Query(

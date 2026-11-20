@@ -50,6 +50,11 @@ class UploadSourceCheckTest {
     }
 
     @Test
+    fun `a file measured and recorded at zero bytes is refused as empty`() {
+        assertThrows(EmptySourceFileException::class.java) { uploadLength(measuredBytes = 0L, claimedBytes = 0L) }
+    }
+
+    @Test
     fun `blocks that read fewer or more bytes than the upload set out to send are refused`() {
         requireAllBytesRead(10_484L, 10_484L)
         assertThrows(UploadSourceChangedException::class.java) { requireAllBytesRead(10_000L, 10_484L) }

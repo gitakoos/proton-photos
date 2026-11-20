@@ -123,6 +123,35 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `an unuploadable device file leaves the queue with the moment it was set aside`() = runTest {
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://local", "AUTO_FOLDER", 1L)
+        dao.upsert(entity("uri://synced", status = SyncStatus.SYNCED, cloudFileId = "c"))
+
+        assertEquals(1, dao.markUnuploadable("uri://local", 5_000L))
+        assertEquals(0, dao.markUnuploadable("uri://synced", 5_000L))
+
+        val row = dao.getByUri("uri://local")!!
+        assertEquals("UNUPLOADABLE", row.queueSource)
+        assertEquals(false, row.queued)
+        assertEquals(5_000L, row.queuedAt)
+        assertEquals(null, dao.getByUri("uri://synced")?.queueSource)
+    }
+
+    @Test
+    fun `a reconcile write over a file set aside as unuploadable keeps it set aside`() = runTest {
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+        dao.markUnuploadable("uri://local", 5_000L)
+
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+
+        val row = dao.getByUri("uri://local")!!
+        assertEquals("UNUPLOADABLE", row.queueSource)
+        assertEquals(false, row.queued)
+        assertEquals(5_000L, row.queuedAt)
+    }
+
+    @Test
     fun `only a device-only row is marked removed from Drive`() = runTest {
         dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
         dao.upsert(entity("uri://synced", status = SyncStatus.SYNCED, cloudFileId = "c"))

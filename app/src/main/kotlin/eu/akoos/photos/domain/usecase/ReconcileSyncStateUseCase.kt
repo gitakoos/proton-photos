@@ -456,6 +456,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // Avoid calling refreshCloudPhotosIncremental here: it can replay old "add" events
         // and re-insert photos the caller just deleted from the cloud DB.
         val cloudItems = cloudPairingRows(userId)
+        val appUpdatedAtMs = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
 
         val total = localItems.size + cloudItems.size
 
@@ -736,10 +739,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // source is null or already AUTO_FOLDER, re-queuing a folder-backup row once its folder is
             // re-selected. Any other source (MANUAL / ALBUM_ADD / EDITOR) is left untouched so
             // an explicit or editor intent is never relabelled AUTO_FOLDER (those rows are already
-            // queued, so the selector still picks them up).
+            // queued, so the selector still picks them up). A file kept off the queue as unuploadable
+            // is stamped again once it changed since (see [unuploadableRetryDue]).
             if (status == SyncStatus.LOCAL_ONLY) {
                 val src = existingSync?.queueSource
-                val stampable = src == null || src == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER
+                val stampable = src == null || src == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER ||
+                    (src == eu.akoos.photos.domain.entity.QueueSource.UNUPLOADABLE &&
+                        unuploadableRetryDue(existingSync, local, appUpdatedAtMs))
                 if (stampable) freshAutoFolderUris += local.uri
             }
             // RULE 1: every row that lands SYNCED has its queued flag cleared (after the upsert below),
@@ -924,6 +930,19 @@ internal fun uploadRewritesBytes(
     compressVideosOnUpload: Boolean,
 ): Boolean = stripOnUpload ||
     if (mimeType.startsWith("video/")) compressVideosOnUpload else compressPhotosOnUpload
+
+/**
+ * Whether a device file kept off the queue as `QueueSource.UNUPLOADABLE` is worth another try: its size
+ * moved from the one its row recorded, its modified time (seconds) passed the moment it was set aside
+ * ([SyncState.queuedAt]), or the app was updated since ([appUpdatedAtMs]). A row with no such moment
+ * recorded is tried again.
+ */
+internal fun unuploadableRetryDue(state: SyncState, local: LocalMediaItem, appUpdatedAtMs: Long): Boolean {
+    val setAsideAt = state.queuedAt ?: return true
+    return local.sizeBytes != state.sizeBytes ||
+        local.dateModified * 1000L > setAsideAt ||
+        appUpdatedAtMs > setAsideAt
+}
 
 /**
  * Whether [state], a backed-up row, names a device file whose size is no longer the one recorded for it,

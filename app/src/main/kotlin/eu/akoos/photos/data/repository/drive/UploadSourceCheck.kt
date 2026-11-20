@@ -31,16 +31,24 @@ import java.security.MessageDigest
  * what the caller recorded, or it changed while it was read. Nothing is committed for it, and it is never
  * retried as it stands: the caller measures and hashes the file again on its next pass.
  */
-class UploadSourceChangedException(message: String) : IllegalStateException(message)
+open class UploadSourceChangedException(message: String) : IllegalStateException(message)
+
+/**
+ * The file holds no bytes at all. Drive takes no file without a block or a thumbnail, so it can only be
+ * backed up once its bytes change; trying again as it stands fails the same way every time.
+ */
+class EmptySourceFileException : UploadSourceChangedException("the file is empty")
 
 /**
  * The byte count an upload sends: the length the file has now ([measuredBytes]), whatever the caller
  * recorded ([claimedBytes]). A file whose length cannot be read falls back to the recorded one; with
- * neither, the upload is refused, since reading "up to one block" would cut anything larger short.
+ * neither, the upload is refused, since reading "up to one block" would cut anything larger short. A file
+ * measured and recorded at zero bytes is refused as empty.
  */
 internal fun uploadLength(measuredBytes: Long?, claimedBytes: Long): Long = when {
     measuredBytes != null && measuredBytes > 0L -> measuredBytes
     claimedBytes > 0L -> claimedBytes
+    measuredBytes == 0L -> throw EmptySourceFileException()
     else -> throw UploadSourceChangedException("the file's length cannot be read")
 }
 

@@ -230,6 +230,10 @@ class SyncStateRepositoryImpl @Inject constructor(
 
     override suspend fun clearManualQueueFor(localUri: String): Int = dao.cancelManualFor(localUri)
 
+    override suspend fun markUnuploadable(localUri: String, at: Long) {
+        dao.markUnuploadable(localUri, at)
+    }
+
     override suspend fun keepCancelled(localUri: String) {
         dao.keepCancelled(localUri)
     }

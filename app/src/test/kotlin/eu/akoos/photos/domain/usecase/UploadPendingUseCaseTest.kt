@@ -79,6 +79,7 @@ import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.StripResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -525,6 +526,73 @@ class UploadPendingUseCaseTest {
             )
         }
     }
+
+    @Test
+    fun `an empty file leaves the queue and the batch does not count it as attempted`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://empty", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://empty") } returns localItem("uri://empty")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } throws
+            eu.akoos.photos.data.repository.drive.EmptySourceFileException()
+
+        val result = useCase(userId)
+
+        coVerify(exactly = 1) { syncStateRepo.markUnuploadable("uri://empty", any()) }
+        assertEquals(0, result.attempted)
+        assertFalse(result.allFailed)
+    }
+
+    @Test
+    fun `a file Drive refuses in three batches where another photo uploads leaves the queue`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(
+            listOf(syncState("uri://bad", SyncStatus.LOCAL_ONLY), syncState("uri://good", SyncStatus.LOCAL_ONLY)),
+        )
+        coEvery { localRepo.queryByUri("uri://bad") } returns localItem("uri://bad")
+        coEvery { localRepo.queryByUri("uri://good") } returns localItem("uri://good")
+        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://bad" }, any(), any(), any(), any()) } throws
+            perFileRefusal()
+        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://good" }, any(), any(), any(), any()) } returns "cloud-good"
+
+        useCase(userId)
+        useCase(userId)
+        coVerify(exactly = 0) { syncStateRepo.markUnuploadable("uri://bad", any()) }
+        useCase(userId)
+
+        coVerify(exactly = 1) { syncStateRepo.markUnuploadable("uri://bad", any()) }
+    }
+
+    @Test
+    fun `a refusal no photo of the batch gets past never takes a file off the queue`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://bad", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://bad") } returns localItem("uri://bad")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } throws perFileRefusal()
+
+        repeat(4) { useCase(userId) }
+        val result = useCase(userId)
+
+        coVerify(exactly = 0) { syncStateRepo.markUnuploadable(any(), any()) }
+        assertTrue(result.allFailed)
+        assertFalse(result.retryWorthwhile)
+    }
+
+    @Test
+    fun `a batch that failed for any other reason is worth retrying`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://1", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } throws RuntimeException("network error")
+
+        val result = useCase(userId)
+
+        coVerify(exactly = 0) { syncStateRepo.markUnuploadable(any(), any()) }
+        assertTrue(result.retryWorthwhile)
+    }
+
+    private fun perFileRefusal() = me.proton.core.network.domain.ApiException(
+        me.proton.core.network.domain.ApiResult.Error.Http(
+            httpCode = 422,
+            message = "http 422",
+            proton = me.proton.core.network.domain.ApiResult.Error.ProtonData(code = 2001, error = "refused"),
+        ),
+    )
 
     @Test
     fun `item with no local file is silently skipped`() = runTest {
