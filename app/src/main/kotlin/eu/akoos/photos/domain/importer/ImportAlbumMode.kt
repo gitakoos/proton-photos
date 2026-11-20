@@ -28,10 +28,15 @@ package eu.akoos.photos.domain.importer
  *
  * [NONE] sends every kept photo to the timeline and creates no albums. [SHELLS_ONLY] recreates the
  * export's albums in Drive as empty albums, without adding any photo to them. [WITH_PHOTOS] recreates the
- * albums and adds each photo to the album it came from.
+ * albums and adds each photo to the album it came from. A new review starts in [DEFAULT].
  */
 enum class ImportAlbumMode {
     NONE,
     SHELLS_ONLY,
     WITH_PHOTOS,
+    ;
+
+    companion object {
+        val DEFAULT = WITH_PHOTOS
+    }
 }

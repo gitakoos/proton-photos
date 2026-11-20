@@ -239,8 +239,8 @@ class ImportViewModel @Inject constructor(
     private var observeJob: Job? = null
 
     // The album-reconstruction choice for the run under review, carried into the upload worker on
-    // confirm. Reset to NONE whenever a fresh run starts so a previous run's choice never leaks in.
-    val albumMode = MutableStateFlow(ImportAlbumMode.NONE)
+    // confirm. Back to the default whenever a fresh run starts so a previous run's choice never leaks in.
+    val albumMode = MutableStateFlow(ImportAlbumMode.DEFAULT)
 
     /** Sets which of the three album modes the confirmed run uploads under. */
     fun setAlbumMode(mode: ImportAlbumMode) {
@@ -381,7 +381,7 @@ class ImportViewModel @Inject constructor(
         observeJob = null
         currentZipId.value = null
         activeRunId = null
-        albumMode.value = ImportAlbumMode.NONE
+        albumMode.value = ImportAlbumMode.DEFAULT
         _detailRunId.value = null
         _undoResult.value = null
         _undoInFlight.value = false
@@ -410,9 +410,9 @@ class ImportViewModel @Inject constructor(
         // Optimistic scanning state so the picker button does not flash back before the worker's first
         // progress publish lands.
         _uiState.value = ImportUiState.Staging(done = 0, total = 0)
-        // A fresh pick is a new import: drop the default album mode and any prior run id so a later confirm
-        // mints its own rather than reusing a finished run's.
-        albumMode.value = ImportAlbumMode.NONE
+        // A fresh pick is a new import: back to the default album mode, and drop any prior run id so a later
+        // confirm mints its own rather than reusing a finished run's.
+        albumMode.value = ImportAlbumMode.DEFAULT
         activeRunId = null
         StageImportWorker.enqueue(context, zipUri)
         observe(zipUri)
@@ -447,7 +447,7 @@ class ImportViewModel @Inject constructor(
         observeJob?.cancel()
         currentZipId.value = null
         activeRunId = null
-        albumMode.value = ImportAlbumMode.NONE
+        albumMode.value = ImportAlbumMode.DEFAULT
         _uiState.value = ImportUiState.Idle
         viewModelScope.launch(Dispatchers.IO) {
             importStagedDao.thumbPaths(zipId).forEach { path ->
