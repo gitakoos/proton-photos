@@ -123,6 +123,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -466,12 +467,20 @@ fun PhotoViewerScreen(
     val vaultMoves by viewModel.vaultMoves.collectAsStateWithLifecycle()
     // A Drive photo replaced by an edited copy while the viewer is open: the page moves to the copy.
     val cloudReplacements by viewModel.cloudReplacements.collectAsStateWithLifecycle()
+    // Copies the editor saved from a photo in this list go in right after it. See [insertSavedCopies].
+    val savedEditCopies by viewModel.savedEditCopies.collectAsStateWithLifecycle()
     // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
     // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
     // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
     var matched by remember(items) { mutableStateOf(items) }
-    LaunchedEffect(items, liveItems, cloudReplacements) {
-        matched = withContext(Dispatchers.Default) { reconcileViewerItems(items, liveItems, cloudReplacements) }
+    var insertedCopies by remember(items) { mutableIntStateOf(0) }
+    LaunchedEffect(items, liveItems, cloudReplacements, savedEditCopies) {
+        val (list, inserted) = withContext(Dispatchers.Default) {
+            val withCopies = insertSavedCopies(items, savedEditCopies, liveItems)
+            reconcileViewerItems(withCopies, liveItems, cloudReplacements) to (withCopies.size - items.size)
+        }
+        matched = list
+        insertedCopies = inserted
     }
     // The vault's moves are applied on the spot, not with the matching: a moved file's page effects start in the
     // composition that sees the move, and they must find the new path in the list they read.
@@ -492,13 +501,14 @@ fun PhotoViewerScreen(
     }
     // Render off the reconciled list; every per-page lookup below reads from `items` so alias it.
     @Suppress("NAME_SHADOWING") val items = visible
-    // Changes whenever the set of dropped photos does, or a vaulted photo moves to a new path. Each
-    // per-page effect below keys on the page INDEX, and neither event changes that index: a removal
+    // Changes whenever the set of dropped photos does, a vaulted photo moves to a new path, or an editor
+    // copy is put in (which shifts the photos after it). Each
+    // per-page effect below keys on the page INDEX, which a removal or a move leaves as it is: a removal
     // deliberately leaves the next photo in the deleted one's slot, and a move leaves the same photo in
     // its own. So on their own neither changes anything those effects can see, and the viewer would
     // keep the state it built for a file that is no longer there: the photo would be drawn, but never
     // loaded at full resolution, never zoomable, and a video would never start.
-    val pageGeneration = removedIds.size + vaultMoves.size
+    val pageGeneration = removedIds.size + vaultMoves.size + insertedCopies
     // An undone delete or album removal puts its photo back where it was. Drop exactly the ids that
     // undo restored, so a photo deleted earlier in this session, whose own undo window has since
     // been taken over, stays gone.
@@ -541,6 +551,16 @@ fun PhotoViewerScreen(
         if (newIndex >= 0 && newIndex != pagerState.currentPage) {
             pagerState.scrollToPage(newIndex)
         }
+    }
+    // An editor save lands on its copy, as long as the user is still on the photo it was made from.
+    LaunchedEffect(items, savedEditCopies) {
+        if (pagerState.isScrollInProgress) return@LaunchedEffect
+        val landing = savedCopyLanding(items, savedEditCopies, viewModel.seenCopySeqs, pagerState.settledPage)
+            ?: return@LaunchedEffect
+        viewModel.seenCopySeqs += landing.seen
+        val goTo = landing.goTo ?: return@LaunchedEffect
+        anchorKey = items[goTo].stableId
+        pagerState.scrollToPage(goTo)
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Master AI-features gate, still required by the people-in-this-photo action alongside the
@@ -813,6 +833,8 @@ fun PhotoViewerScreen(
     // Per-page full-res image cache: keeps the last loaded image so non-settled pages
     // don't visually drop quality to thumbnail while the exit animation is still playing.
     val pageImageCache = remember { mutableMapOf<Int, Any>() }
+    // An inserted copy moves every later photo one page on, so the cached images no longer match their pages.
+    LaunchedEffect(insertedCopies) { pageImageCache.clear() }
     // When the editor pops back after a save, drop everything we cached for the touched
     // page — otherwise the bitmap held in this map is the stale one rendered by Coil
     // BEFORE the cache wipe and the user sees the pre-edit version until they page away.

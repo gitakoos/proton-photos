@@ -2525,12 +2525,16 @@ class PhotoEditorViewModel @Inject constructor(
                         val thumbUri = "file://" + File(context.cacheDir, "thumbnails/thumb_${source.photo.linkId}.jpg").absolutePath
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(thumbUri))
                         try {
-                            val failure = runCatching {
+                            val upload = runCatching {
                                 saveCloud(bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs)
-                            }.exceptionOrNull()
+                            }
+                            val failure = upload.exceptionOrNull()
                             if (failure is kotlinx.coroutines.CancellationException) throw failure
                             transferCenter.progress(tid, 1)
                             if (failure == null) {
+                                upload.getOrNull()?.lastPathSegment?.let { newLinkId ->
+                                    EditorSavedCopies.record(setOf(source.photo.linkId), newLinkId, copyIsLocal = false)
+                                }
                                 transferCenter.log(
                                     TransferCenter.Kind.UPLOAD, count = 1,
                                     name = context.getString(R.string.activity_hist_edited), uris = listOf(thumbUri),
@@ -2578,6 +2582,7 @@ class PhotoEditorViewModel @Inject constructor(
                 if (uri != null && (source is EditorSource.Local || source is EditorSource.External)) {
                     mirrorStripLocalCopyIfEnabled(uri)
                 }
+                if (uri != null && source is EditorSource.Local) recordSavedCopy(localSourceKeys(source), uri)
                 // Invalidate Coil caches on every local save — Overwrite reuses the URI (stale bytes),
                 // Copy's notifyChange wakes MediaStore observers. Cloud uploads have no existing key.
                 if (uri != null && source is EditorSource.Local) {
@@ -2720,6 +2725,7 @@ class PhotoEditorViewModel @Inject constructor(
                             // Same mirror-to-local strip as the normal Copy path: the overwrite fell back to
                             // a fresh device copy (written with full EXIF), so strip it in place when enabled.
                             uri?.let { mirrorStripLocalCopyIfEnabled(it) }
+                            uri?.let { recordSavedCopy(localSourceKeys(source), it) }
                             // Synced Overwrite that fell back to Copy strands the original next to the edit.
                             // Quiet delete works for app-owned files; foreign URIs need OS consent
                             // (createDeleteRequest, launched by the screen). Sync re-pairs by hash afterwards.
@@ -3181,10 +3187,8 @@ class PhotoEditorViewModel @Inject constructor(
             val newLinkId = cloudRepo.uploadFile(userId, item, finished.sha1, tempUri.toString(), xAttr)
 
             // Re-attach the new linkId to the source album (when there is one) so the edited
-            // copy lives in the same album as the source did. Best-effort — never fails the save.
-            sourceAlbumLinkId?.let { albumId ->
-                runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-            }
+            // copy lives in the same album as the source did. Never fails the save; a refusal is told.
+            sourceAlbumLinkId?.let { albumId -> addCopyToSourceAlbum(userId, albumId, newLinkId) }
 
             if (mode == SaveMode.Overwrite) {
                 runCatching { cloudRepo.deleteFiles(userId, listOf(source.photo.linkId)) }
@@ -3194,6 +3198,20 @@ class PhotoEditorViewModel @Inject constructor(
             tempFile.delete()
         }
     }
+
+    /** Puts the edited copy into the album the photo was edited from, and tells the user when it stays out. */
+    private suspend fun addCopyToSourceAlbum(userId: me.proton.core.domain.entity.UserId, albumId: String, linkId: String) {
+        val outcome = runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(linkId)) }
+        if (outcome.exceptionOrNull() is kotlinx.coroutines.CancellationException) return
+        if (!albumAddSucceeded(outcome, linkId)) editUploadNotifier.notifyAlbumAddFailed()
+    }
+
+    /** The device uri and, for a backed-up photo, the Drive link the edited photo is listed under. */
+    private fun localSourceKeys(source: EditorSource.Local): Set<String> =
+        setOfNotNull(source.uri, cloudCounterpart?.linkId)
+
+    private fun recordSavedCopy(sourceKeys: Set<String>, copyUri: Uri) =
+        recordDeviceEditCopy(context.contentResolver, sourceKeys, copyUri)
 
     /**
      * The upload of a cloud-only edit failed after the editor reported it saved, and the edit exists nowhere
@@ -3207,7 +3225,7 @@ class PhotoEditorViewModel @Inject constructor(
         editTimestampMs: Long,
         originalCaptureMs: Long,
     ) {
-        val kept = runCatching {
+        val keptUri = runCatching {
             withContext(Dispatchers.IO) {
                 // The cached original, when it is still there, lends its EXIF to the copy.
                 val exifSource = cloudOriginalFilePath?.let { Uri.fromFile(File(it)).toString() }.orEmpty()
@@ -3217,10 +3235,11 @@ class PhotoEditorViewModel @Inject constructor(
                     quality = quality,
                     editTimestampMs = editTimestampMs,
                     dateTakenMs = originalCaptureMs,
-                ) != null
+                )
             }
-        }.getOrDefault(false)
-        editUploadNotifier.notifyFailed(kept)
+        }.getOrNull()
+        keptUri?.let { recordSavedCopy(setOf(source.photo.linkId), it) }
+        editUploadNotifier.notifyFailed(keptUri != null)
     }
 
     /**
@@ -3315,9 +3334,7 @@ class PhotoEditorViewModel @Inject constructor(
             // derived from this same digest, unchanged.
             val hash = finished.sha1
             val newLinkId = cloudRepo.uploadFile(userId, item, hash, tempUri.toString(), xAttr)
-            sourceAlbumLinkId?.let { albumId ->
-                runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-            }
+            sourceAlbumLinkId?.let { albumId -> addCopyToSourceAlbum(userId, albumId, newLinkId) }
             if (mode == SaveMode.Overwrite) {
                 runCatching { cloudRepo.deleteFiles(userId, listOf(cloud.linkId)) }
             }

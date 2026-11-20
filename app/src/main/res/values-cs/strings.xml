@@ -2695,6 +2695,8 @@
     <string name="edit_upload_failed_title">Vaše úprava nebyla nahrána</string>
     <string name="edit_upload_failed_text_kept">Drive nebyl dostupný, upravená kopie se proto uložila do vaší galerie.</string>
     <string name="edit_upload_failed_text_lost">Drive nebyl dostupný a upravenou kopii se nepodařilo uložit. Otevřete originál a upravte ho znovu.</string>
+    <string name="edit_album_add_failed_title">Upravená kopie nebyla přidána do alba</string>
+    <string name="edit_album_add_failed_text">Upravená kopie byla uložena, ale nepodařilo se ji přidat do alba. Otevřete ji a zvolte Přidat do alba.</string>
     <string name="upload_status_compressing_percent">Komprimace %1$d %%</string>
     <string name="sync_worker_notification_compressing">Komprimace videa (%1$d %%)</string>
     <string name="compression_badge_hardware">Hardwarový</string>

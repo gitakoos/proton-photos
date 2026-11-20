@@ -2585,6 +2585,8 @@
     <string name="edit_upload_failed_title">Your edit was not uploaded</string>
     <string name="edit_upload_failed_text_kept">Drive could not be reached, so the edited copy was saved to your gallery instead.</string>
     <string name="edit_upload_failed_text_lost">Drive could not be reached and the edited copy could not be saved. Open the original and edit it again.</string>
+    <string name="edit_album_add_failed_title">Edited copy not added to the album</string>
+    <string name="edit_album_add_failed_text">The edited copy was saved, but it could not be added to the album. Open it and choose Add to album.</string>
     <string name="codec_name_avc" translatable="false">H.264</string>
     <string name="codec_name_hevc" translatable="false">H.265</string>
     <string name="codec_name_av1" translatable="false">AV1</string>

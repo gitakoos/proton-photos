@@ -1858,7 +1858,8 @@ class VideoEditorViewModel @Inject constructor(
                         val uploadUri = Uri.fromFile(cloudTempFile).toString()
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(uploadUri))
                         try {
-                            uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudCaptureMs, cloudTempFile, userId)
+                            val newLinkId = uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudCaptureMs, cloudTempFile, userId)
+                            EditorSavedCopies.record(setOf(cloudPhoto.linkId), newLinkId, copyIsLocal = false)
                             transferCenter.progress(tid, 1)
                             transferCenter.log(
                                 TransferCenter.Kind.UPLOAD, count = 1,
@@ -1870,12 +1871,13 @@ class VideoEditorViewModel @Inject constructor(
                             if (t is kotlinx.coroutines.CancellationException) throw t
                             // The edit exists nowhere else, so the muxed copy goes into the gallery, where
                             // the normal backup uploads it, and the user is told either way.
-                            val kept = runCatching {
+                            val keptUri = runCatching {
                                 withContext(Dispatchers.IO) {
-                                    insertReencodedCopy(cloudTempFile, cloudPhoto.displayName, s.mimeType, editTimestampMs) != null
+                                    insertReencodedCopy(cloudTempFile, cloudPhoto.displayName, s.mimeType, editTimestampMs)
                                 }
-                            }.getOrDefault(false)
-                            editUploadNotifier.notifyFailed(kept)
+                            }.getOrNull()
+                            keptUri?.let { recordDeviceEditCopy(context.contentResolver, setOf(cloudPhoto.linkId), it) }
+                            editUploadNotifier.notifyFailed(keptUri != null)
                         } finally {
                             transferCenter.finish(tid)
                             cloudTempFile.delete()
@@ -2010,6 +2012,9 @@ class VideoEditorViewModel @Inject constructor(
                 // returned above, so anything here is a device-backed save with a real URI.
                 if (savedUri != null) {
                     invalidateImageCache(savedUri)
+                    if (s.source !is VideoEditorSource.External) {
+                        recordDeviceEditCopy(context.contentResolver, setOfNotNull(s.sourceUri, counterpart?.linkId), savedUri)
+                    }
                 }
                 result
             } catch (e: Exception) {
@@ -2215,9 +2220,7 @@ class VideoEditorViewModel @Inject constructor(
             // The stripped copy is throwaway; the caller-owned [tempFile] must survive for the device row.
             if (uploadFile !== tempFile) uploadFile.delete()
         }
-        sourceCloudAlbumLinkId?.let { albumId ->
-            runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-        }
+        sourceCloudAlbumLinkId?.let { albumId -> addCopyToSourceAlbum(userId, albumId, newLinkId) }
         newLinkId
     }
 
@@ -2302,6 +2305,13 @@ class VideoEditorViewModel @Inject constructor(
         tempFile
     }
 
+    /** Puts the edited copy into the album the video was edited from, and tells the user when it stays out. */
+    private suspend fun addCopyToSourceAlbum(userId: me.proton.core.domain.entity.UserId, albumId: String, linkId: String) {
+        val outcome = runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(linkId)) }
+        if (outcome.exceptionOrNull() is kotlinx.coroutines.CancellationException) return
+        if (!albumAddSucceeded(outcome, linkId)) editUploadNotifier.notifyAlbumAddFailed()
+    }
+
     /**
      * Cloud video save, network leg: upload the pre-muxed [tempFile] as a new Drive linkId and
      * re-attach it to the source album (best-effort), leaving the original in place. Runs in
@@ -2343,9 +2353,7 @@ class VideoEditorViewModel @Inject constructor(
             // The stripped copy is throwaway; the caller-owned [tempFile] must survive for its own cleanup.
             if (uploadFile !== tempFile) uploadFile.delete()
         }
-        sourceCloudAlbumLinkId?.let { albumId ->
-            runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-        }
+        sourceCloudAlbumLinkId?.let { albumId -> addCopyToSourceAlbum(userId, albumId, newLinkId) }
         newLinkId
     }
 

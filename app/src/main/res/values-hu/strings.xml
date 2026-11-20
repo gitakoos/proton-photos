@@ -2551,6 +2551,8 @@
     <string name="edit_upload_failed_title">A szerkesztés nem lett feltöltve</string>
     <string name="edit_upload_failed_text_kept">A Drive nem volt elérhető, ezért a szerkesztett másolat a galériádba lett mentve.</string>
     <string name="edit_upload_failed_text_lost">A Drive nem volt elérhető, és a szerkesztett másolatot sem sikerült elmenteni. Nyisd meg az eredetit, és szerkeszd újra.</string>
+    <string name="edit_album_add_failed_title">A szerkesztett másolat nem került az albumba</string>
+    <string name="edit_album_add_failed_text">A szerkesztett másolat elkészült, de nem sikerült az albumhoz adni. Nyisd meg, és válaszd az Albumhoz adás lehetőséget.</string>
     <string name="upload_status_compressing_percent">Tömörítés %1$d%%</string>
     <string name="sync_worker_notification_compressing">Videó tömörítése (%1$d%%)</string>
     <string name="compression_badge_hardware">Hardveres</string>

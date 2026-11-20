@@ -2689,6 +2689,8 @@
     <string name="edit_upload_failed_title">Twoja edycja nie została przesłana</string>
     <string name="edit_upload_failed_text_kept">Drive był niedostępny, więc edytowaną kopię zapisano w galerii.</string>
     <string name="edit_upload_failed_text_lost">Drive był niedostępny i nie udało się zapisać edytowanej kopii. Otwórz oryginał i edytuj go ponownie.</string>
+    <string name="edit_album_add_failed_title">Edytowana kopia nie została dodana do albumu</string>
+    <string name="edit_album_add_failed_text">Edytowana kopia została zapisana, ale nie udało się dodać jej do albumu. Otwórz ją i wybierz Dodaj do albumu.</string>
     <string name="upload_status_compressing_percent">Kompresowanie %1$d%%</string>
     <string name="sync_worker_notification_compressing">Kompresowanie wideo (%1$d%%)</string>
     <string name="compression_badge_hardware">Sprzętowy</string>

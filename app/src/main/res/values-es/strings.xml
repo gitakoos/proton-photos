@@ -2592,6 +2592,8 @@
     <string name="edit_upload_failed_title">Tu edición no se subió</string>
     <string name="edit_upload_failed_text_kept">No se pudo acceder a Drive, así que la copia editada se guardó en tu galería.</string>
     <string name="edit_upload_failed_text_lost">No se pudo acceder a Drive y tampoco se pudo guardar la copia editada. Abre el original y edítalo de nuevo.</string>
+    <string name="edit_album_add_failed_title">La copia editada no se añadió al álbum</string>
+    <string name="edit_album_add_failed_text">La copia editada se guardó, pero no se pudo añadir al álbum. Ábrela y elige Añadir al álbum.</string>
     <string name="upload_status_compressing_percent">Comprimiendo %1$d %%</string>
     <string name="sync_worker_notification_compressing">Comprimiendo vídeo (%1$d %%)</string>
     <string name="compression_badge_hardware">Hardware</string>

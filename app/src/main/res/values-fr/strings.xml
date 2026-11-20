@@ -2554,6 +2554,8 @@
     <string name="edit_upload_failed_title">Votre modification n\'a pas été envoyée</string>
     <string name="edit_upload_failed_text_kept">Drive était injoignable, la copie modifiée a donc été enregistrée dans votre galerie.</string>
     <string name="edit_upload_failed_text_lost">Drive était injoignable et la copie modifiée n\'a pas pu être enregistrée. Ouvrez l\'original et modifiez-le à nouveau.</string>
+    <string name="edit_album_add_failed_title">Copie modifiée non ajoutée à l\'album</string>
+    <string name="edit_album_add_failed_text">La copie modifiée a été enregistrée, mais n\'a pas pu être ajoutée à l\'album. Ouvrez-la et choisissez Ajouter à l\'album.</string>
     <string name="upload_status_compressing_percent">Compression %1$d %%</string>
     <string name="sync_worker_notification_compressing">Compression de la vidéo (%1$d %%)</string>
     <string name="compression_badge_hardware">Matériel</string>

@@ -2469,6 +2469,8 @@
     <string name="edit_upload_failed_title">Düzenlemen yüklenmedi</string>
     <string name="edit_upload_failed_text_kept">Drive\'a ulaşılamadı, bu yüzden düzenlenen kopya bunun yerine galerine kaydedildi.</string>
     <string name="edit_upload_failed_text_lost">Drive\'a ulaşılamadı ve düzenlenen kopya kaydedilemedi. Orijinali açıp tekrar düzenle.</string>
+    <string name="edit_album_add_failed_title">Düzenlenen kopya albüme eklenmedi</string>
+    <string name="edit_album_add_failed_text">Düzenlenen kopya kaydedildi ancak albüme eklenemedi. Kopyayı aç ve Albüme ekle\'yi seç.</string>
     <string name="upload_status_compressing_percent">Sıkıştırılıyor %1$d%%</string>
     <string name="sync_worker_notification_compressing">Video sıkıştırılıyor (%1$d%%)</string>
     <string name="compression_badge_hardware">Donanım</string>

@@ -2552,6 +2552,8 @@
     <string name="edit_upload_failed_title">Deine Bearbeitung wurde nicht hochgeladen</string>
     <string name="edit_upload_failed_text_kept">Drive war nicht erreichbar, deshalb wurde die bearbeitete Kopie stattdessen in deiner Galerie gespeichert.</string>
     <string name="edit_upload_failed_text_lost">Drive war nicht erreichbar und die bearbeitete Kopie konnte nicht gespeichert werden. Öffne das Original und bearbeite es erneut.</string>
+    <string name="edit_album_add_failed_title">Bearbeitete Kopie nicht zum Album hinzugefügt</string>
+    <string name="edit_album_add_failed_text">Die bearbeitete Kopie wurde gespeichert, konnte aber nicht zum Album hinzugefügt werden. Öffne sie und wähle Zum Album hinzufügen.</string>
     <string name="upload_status_compressing_percent">Komprimieren %1$d %%</string>
     <string name="sync_worker_notification_compressing">Video wird komprimiert (%1$d %%)</string>
     <string name="compression_badge_hardware">Hardware</string>

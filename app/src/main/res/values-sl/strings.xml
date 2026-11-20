@@ -2689,6 +2689,8 @@
     <string name="edit_upload_failed_title">Vaše urejanje ni bilo naloženo</string>
     <string name="edit_upload_failed_text_kept">Drive ni bil dosegljiv, zato je bila urejena kopija shranjena v vašo galerijo.</string>
     <string name="edit_upload_failed_text_lost">Drive ni bil dosegljiv in urejene kopije ni bilo mogoče shraniti. Odprite izvirnik in ga uredite znova.</string>
+    <string name="edit_album_add_failed_title">Urejena kopija ni bila dodana v album</string>
+    <string name="edit_album_add_failed_text">Urejena kopija je bila shranjena, vendar je ni bilo mogoče dodati v album. Odprite jo in izberite Dodaj v album.</string>
     <string name="upload_status_compressing_percent">Stiskanje %1$d %%</string>
     <string name="sync_worker_notification_compressing">Stiskanje videoposnetka (%1$d %%)</string>
     <string name="compression_badge_hardware">Strojni</string>

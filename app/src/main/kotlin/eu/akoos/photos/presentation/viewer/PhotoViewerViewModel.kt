@@ -682,6 +682,18 @@ class PhotoViewerViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    private val openedAtCopySeq: Long = eu.akoos.photos.presentation.editor.EditorSavedCopies.latestSeq()
+
+    /** The copies editor saves made since this viewer opened, so it can page to an edit made from it. */
+    val savedEditCopies: StateFlow<List<eu.akoos.photos.presentation.editor.SavedEditCopy>> =
+        eu.akoos.photos.presentation.editor.EditorSavedCopies.all
+            .map { copies -> copies.filter { it.seq > openedAtCopySeq } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Copies the viewer has already seen in its list. Held here because the screen's own state is dropped
+     *  while the editor is on top, and a copy must be paged to once, not every time the viewer returns. */
+    val seenCopySeqs: MutableSet<Long> = mutableSetOf()
+
     /** Live gallery list backing the viewer's reconciliation. The screen re-resolves each item in
      *  its passed-in static `items` snapshot against this by identity so a photo finishing upload
      *  (LocalOnly → Synced) or any metadata refresh reflects in the open viewer instead of staying
@@ -864,7 +876,7 @@ class PhotoViewerViewModel @Inject constructor(
     )
 
     fun deleteItem(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean) {
-        viewModelScope.launch {
+        appScope.launchViewerDelete {
             _deleteState.value = DeleteState.Working
             // A local (device) delete needs no account; the use case only requires a signed-in user
             // for a cloud trash, which local-only mode never produces. Pass the nullable userId
@@ -1090,7 +1102,7 @@ class PhotoViewerViewModel @Inject constructor(
     fun onDeletePermissionGranted() {
         val pending = pendingPermissionResult
         pendingPermissionResult = null
-        viewModelScope.launch {
+        appScope.launchViewerDelete {
             // First commit the deferred cloud delete, if any. Doing this in a coroutine so a
             // network hiccup surfaces as Failed rather than crashing the UI.
             val cloudResult = if (pending != null) {
@@ -1109,7 +1121,7 @@ class PhotoViewerViewModel @Inject constructor(
 
             if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
                 _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))
-                return@launch
+                return@launchViewerDelete
             }
             // If the user just confirmed a HIDE-triggered delete, register the private copy now.
             // Snapshot the vault URI first: commitPendingHide() clears it.
@@ -1568,7 +1580,7 @@ class PhotoViewerViewModel @Inject constructor(
     private fun commitPendingHide() {
         val privateUri = pendingHidePrivateUri ?: return
         pendingHidePrivateUri = null
-        viewModelScope.launch {
+        appScope.launchViewerDelete {
             hiddenVaultJournal.confirm(listOf(privateUri))
             _isHidden.value = true
         }
@@ -1579,7 +1591,7 @@ class PhotoViewerViewModel @Inject constructor(
     private fun cancelPendingHide() {
         val privateUri = pendingHidePrivateUri ?: return
         pendingHidePrivateUri = null
-        viewModelScope.launch { hiddenVaultJournal.discard(listOf(privateUri)) }
+        appScope.launchViewerDelete { hiddenVaultJournal.discard(listOf(privateUri)) }
     }
 
     /**

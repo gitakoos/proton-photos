@@ -2576,6 +2576,8 @@
     <string name="edit_upload_failed_title">Je bewerking is niet geüpload</string>
     <string name="edit_upload_failed_text_kept">Drive was niet bereikbaar, dus de bewerkte kopie is in plaats daarvan in je galerij opgeslagen.</string>
     <string name="edit_upload_failed_text_lost">Drive was niet bereikbaar en de bewerkte kopie kon niet worden opgeslagen. Open het origineel en bewerk het opnieuw.</string>
+    <string name="edit_album_add_failed_title">Bewerkte kopie niet aan het album toegevoegd</string>
+    <string name="edit_album_add_failed_text">De bewerkte kopie is opgeslagen, maar kon niet aan het album worden toegevoegd. Open de kopie en kies Aan album toevoegen.</string>
     <string name="upload_status_compressing_percent">Comprimeren %1$d%%</string>
     <string name="sync_worker_notification_compressing">Video comprimeren (%1$d%%)</string>
     <string name="compression_badge_hardware">Hardware</string>
