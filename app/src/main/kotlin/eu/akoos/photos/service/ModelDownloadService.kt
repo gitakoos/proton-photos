@@ -43,6 +43,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
 import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
+import eu.akoos.photos.data.sharedbackup.FirstScanDriveGate
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
@@ -98,6 +100,7 @@ class ModelDownloadService : Service() {
 
     @Inject lateinit var downloadState: ModelDownloadState
     @Inject lateinit var faceIndexingScheduler: FaceIndexingScheduler
+    @Inject lateinit var firstScanGate: FirstScanDriveGate
     @Inject lateinit var semanticIndexingScheduler: SemanticIndexingScheduler
     @Inject lateinit var accountManager: AccountManager
 
@@ -259,16 +262,18 @@ class ModelDownloadService : Service() {
         when (kind) {
             ModelDownloadKind.FACE -> {
                 runCatching { settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true } }
-                faceIndexingScheduler.requestIndex(userId)
+                val scheduler = faceIndexingScheduler
+                firstScanGate.startFirstScan(MlDriveFileKind.FACES, userId) { scheduler.requestIndex(userId) }
             }
             ModelDownloadKind.OCR ->
                 runCatching { settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = true } }
             ModelDownloadKind.SEMANTIC -> {
                 runCatching { settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = true } }
-                // Fire-and-forget on the scheduler's own scope (like the face branch), so marking the
-                // download done and tearing the notification down does not wait out the whole first
-                // indexing pass. requestIndex clears any pause and starts the walk.
-                semanticIndexingScheduler.requestIndex(userId)
+                // Fire-and-forget on the app's scope (like the face branch), so marking the download done
+                // and tearing the notification down waits out neither the Drive copies nor the first pass.
+                // requestIndex clears any pause and starts the walk.
+                val scheduler = semanticIndexingScheduler
+                firstScanGate.startFirstScan(MlDriveFileKind.SEARCH, userId) { scheduler.requestIndex(userId) }
             }
             // Only the query side of search: no switch is turned on and nothing is indexed.
             ModelDownloadKind.SEMANTIC_TEXT -> Unit

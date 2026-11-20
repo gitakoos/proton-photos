@@ -82,6 +82,7 @@ import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlSyncFacePause
 import eu.akoos.photos.data.mlsync.MlSyncSignOut
 import eu.akoos.photos.data.ocr.OcrModelComponent
@@ -213,6 +214,7 @@ class SettingsViewModel @Inject constructor(
     private val mlSyncSignOut: MlSyncSignOut,
     private val videoEncoderCapabilities: VideoEncoderCapabilities,
     private val faceDataDelete: FaceDataDelete,
+    private val firstScanGate: eu.akoos.photos.data.sharedbackup.FirstScanDriveGate,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) : ViewModel() {
 
@@ -1395,7 +1397,7 @@ class SettingsViewModel @Inject constructor(
             if (enabled) {
                 // Opt-in begins indexing straight away, so there is no separate manual start step: new
                 // photos are then picked up automatically by the library's own indexing trigger.
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+                startFirstFaceScan()
             } else {
                 // Turning AI off stands any running scan down promptly rather than waiting for its next
                 // per-photo check to notice the flag.
@@ -1497,6 +1499,13 @@ class SettingsViewModel @Inject constructor(
         if (enabled) enableFace() else disableFace()
     }
 
+    /** Starts the face scan once the faces other devices saved on Drive are in, so they are not scanned again. */
+    private suspend fun startFirstFaceScan() {
+        val userId = accountManager.getPrimaryUserId().first()
+        val scheduler = faceIndexingScheduler
+        firstScanGate.startFirstScan(MlDriveFileKind.FACES, userId) { scheduler.requestIndex(userId) }
+    }
+
     /** Both models on disk already: flip face recognition on and start a scan. Otherwise hold it off and
      *  ask to fetch the models first, so the switch never turns on against models that are not there. */
     private fun enableFace() {
@@ -1514,7 +1523,7 @@ class SettingsViewModel @Inject constructor(
                         faceModelDownloadFailed = false,
                     )
                 }
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+                startFirstFaceScan()
             } else {
                 // Note the connection now so the drawer can say the fetch will use mobile data when
                 // Wi-Fi is not there, the same gate sync applies before it moves large data.
@@ -1646,7 +1655,9 @@ class SettingsViewModel @Inject constructor(
                         semanticModelDownloadFailed = false,
                     )
                 }
-                cloudRepo.backfillSemantic(accountManager.getPrimaryUserId().first())
+                val userId = accountManager.getPrimaryUserId().first()
+                val repo = cloudRepo
+                firstScanGate.startFirstScan(MlDriveFileKind.SEARCH, userId) { repo.backfillSemantic(userId) }
             } else {
                 // Note the connection now so the drawer can say the fetch will use mobile data when
                 // Wi-Fi is not there, the same gate sync applies before it moves large data.

@@ -96,6 +96,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val semanticIndexingScheduler: eu.akoos.photos.data.semantic.SemanticIndexingScheduler,
+    private val firstScanGate: dagger.Lazy<eu.akoos.photos.data.sharedbackup.FirstScanDriveGate>,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
     private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
@@ -714,10 +715,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     }
 
     override suspend fun backfillFaces(userId: UserId?) {
+        // A first scan waiting for the faces other devices saved starts the walk itself once they are in.
+        if (firstScanGate.get().holds(eu.akoos.photos.data.mlsync.MlDriveFileKind.FACES)) return
         faceIndexingScheduler.indexAll(userId)
     }
 
     override suspend fun backfillSemantic(userId: UserId?) {
+        if (firstScanGate.get().holds(eu.akoos.photos.data.mlsync.MlDriveFileKind.SEARCH)) return
         semanticIndexingScheduler.indexAll(userId)
     }
 }

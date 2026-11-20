@@ -1006,7 +1006,7 @@ class MlSyncWorker @AssistedInject constructor(
         private const val READ_FAILURE = "ReadFailed"
 
         /** The install id a round reads as while it takes this install's own copies in: no copy carries it. */
-        private const val EARLIER_INSTALL = ""
+        internal const val EARLIER_INSTALL = ""
 
         /** How long a restore waits for a stood-down walk to put its model session away before importing
          *  anyway; the import's single transaction still holds the walk's writes back until it commits. */
