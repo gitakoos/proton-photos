@@ -381,6 +381,7 @@ fun LocationPhotosContent(
             val fmt = monthYearFormat()
             locationGridRows(photos, TimeZone.getDefault()) { fmt.format(Date(it)) }
         }
+        eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, photos) { locationCellKey(it) }
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,

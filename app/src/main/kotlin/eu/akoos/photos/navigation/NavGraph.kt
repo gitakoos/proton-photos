@@ -85,7 +85,9 @@ import eu.akoos.photos.presentation.common.LocalViewerReturnKey
 import eu.akoos.photos.presentation.common.ViewerReturnTarget
 import eu.akoos.photos.presentation.common.resolve
 import eu.akoos.photos.presentation.common.MapStyleChooserDialog
+import eu.akoos.photos.presentation.gallery.GridThumbnailRequester
 import eu.akoos.photos.presentation.gallery.LocalCoverThumbnailRequester
+import eu.akoos.photos.presentation.gallery.LocalGridThumbnailRequester
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import androidx.compose.runtime.CompositionLocalProvider
 import eu.akoos.photos.domain.entity.Album
@@ -361,8 +363,18 @@ class ThumbnailUrlsViewModel @Inject constructor(
     store: ThumbnailUrlStore,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val accountManager: AccountManager,
+    private val drivePhotoRepository: eu.akoos.photos.domain.repository.DrivePhotoRepository,
 ) : ViewModel() {
     val urls: StateFlow<Map<String, String>> = store.urls
+
+    private val signedInUser: StateFlow<me.proton.core.domain.entity.UserId?> =
+        accountManager.getPrimaryUserId().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The timeline's own request path, for the grids that have no view model wired to it. Nothing for a guest. */
+    val gridRequester = GridThumbnailRequester(
+        request = { linkId -> signedInUser.value?.let { drivePhotoRepository.requestThumbnailDecrypt(it, linkId) } },
+        cancel = { linkId -> drivePhotoRepository.cancelThumbnailDecrypt(linkId) },
+    )
 
     /** Decrypt and keep a face cover's thumbnail. A guest has no cloud photos, so nothing to ask for. */
     fun requestCover(linkId: String) {
@@ -713,6 +725,7 @@ fun NavGraph(
     CompositionLocalProvider(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalCoverThumbnailRequester provides coverThumbnailRequester,
+        LocalGridThumbnailRequester provides thumbnailUrlsViewModel.gridRequester,
         LocalViewerReturnKey provides viewerReturnKey,
         LocalSnackbarClearance provides snackbarClearance,
     ) {

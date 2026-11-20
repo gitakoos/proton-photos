@@ -683,6 +683,7 @@ private fun DeviceFolderPhotoGrid(
             }
         }
     }
+    eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, items, selectableKeys)
     val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
     // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
     // cell back off (otherwise a stationary long-press would select then immediately deselect).

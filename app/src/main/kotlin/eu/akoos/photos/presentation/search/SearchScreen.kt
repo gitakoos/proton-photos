@@ -108,6 +108,7 @@ import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import androidx.compose.material3.SnackbarHostState
@@ -1091,6 +1092,7 @@ private fun SearchResultsGrid(
         val selectableKeys = remember(results) { results.map { keyOf(it) } }
         val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
         // Armed at the long-press anchor so the release-tap skips toggling the just-anchored cell.
+        RequestVisibleThumbnails(gridState, results) { keyOf(it) }
         val tapGuard = remember { mutableStateOf(false) }
         val dragSelectModifier = rememberDragMultiSelectModifier(
             gridState = gridState,

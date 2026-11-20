@@ -234,15 +234,7 @@ internal fun PhotoGrid(
     // projection no longer carries thumbnailUrl on the row, so "needs decrypt" is now "the store has no
     // URL for this linkId (and the item carries none)". Rows already in the store return null so the
     // driver below neither requests nor cancels them; the scheduler also short-circuits warm rows.
-    val pendingCloudLinkIdOf: (GalleryItem) -> String? = { item ->
-        when (item) {
-            is GalleryItem.CloudOnly -> item.cloud.linkId
-                .takeIf { thumbnailUrls.value[it] == null && item.cloud.thumbnailUrl == null }
-            is GalleryItem.Synced    -> item.cloud.linkId
-                .takeIf { thumbnailUrls.value[it] == null && item.cloud.thumbnailUrl == null }
-            is GalleryItem.LocalOnly -> null
-        }
-    }
+    val pendingCloudLinkIdOf: (GalleryItem) -> String? = { item -> pendingCloudThumbnailLinkId(item, thumbnailUrls.value) }
 
     // ── Visible-range thumbnail decrypt driver ────────────────────────────────
     // Requests decrypts for the cloud cells actually in the viewport, in viewport order, plus a
@@ -255,23 +247,23 @@ internal fun PhotoGrid(
     if (mosaicGrid) {
         LaunchedEffect(staggeredState, orderedItems) {
             visibleRangeDecrypt(
-                orderedItems = orderedItems,
-                indexByKey = indexByKey,
-                pendingCloudLinkIdOf = pendingCloudLinkIdOf,
+                items = orderedItems,
+                indexOfKey = { key -> (key as? String)?.let { indexByKey[it] } },
+                pendingLinkIdOf = pendingCloudLinkIdOf,
                 onRequestThumbnail = onRequestThumbnail,
                 onCancelThumbnail = onCancelThumbnail,
-                visibleKeys = { staggeredState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } },
+                visibleKeys = { staggeredState.layoutInfo.visibleItemsInfo.map { it.key } },
             )
         }
     } else {
         LaunchedEffect(gridState, orderedItems) {
             visibleRangeDecrypt(
-                orderedItems = orderedItems,
-                indexByKey = indexByKey,
-                pendingCloudLinkIdOf = pendingCloudLinkIdOf,
+                items = orderedItems,
+                indexOfKey = { key -> (key as? String)?.let { indexByKey[it] } },
+                pendingLinkIdOf = pendingCloudLinkIdOf,
                 onRequestThumbnail = onRequestThumbnail,
                 onCancelThumbnail = onCancelThumbnail,
-                visibleKeys = { gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } },
+                visibleKeys = { gridState.layoutInfo.visibleItemsInfo.map { it.key } },
             )
         }
     }
@@ -694,36 +686,6 @@ internal fun PhotoGrid(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
-    }
-}
-
-/**
- * Shared visible-range decrypt loop for both grid layouts. The fixed and staggered grids expose
- * the visible cell keys through different layout-info types, so the caller passes a snapshot
- * [visibleKeys] lambda; everything downstream (the leading-margin range walk + cancel of cells that
- * left the window) is identical. Suspends for the lifetime of the owning LaunchedEffect.
- */
-private suspend fun visibleRangeDecrypt(
-    orderedItems: List<GalleryItem>,
-    indexByKey: Map<String, Int>,
-    pendingCloudLinkIdOf: (GalleryItem) -> String?,
-    onRequestThumbnail: (String) -> Unit,
-    onCancelThumbnail: (String) -> Unit,
-    visibleKeys: () -> List<String>,
-) {
-    var requested = emptySet<String>()
-    snapshotFlow { visibleKeys() }.distinctUntilChanged().collect { keys ->
-        val firstIdx = keys.firstNotNullOfOrNull { indexByKey[it] }
-        val lastIdx = keys.asReversed().firstNotNullOfOrNull { indexByKey[it] }
-        val nowRequested = LinkedHashSet<String>()
-        if (firstIdx != null && lastIdx != null) {
-            val to = (lastIdx + 1 + 12).coerceAtMost(orderedItems.size)
-            for (i in firstIdx until to) pendingCloudLinkIdOf(orderedItems[i])?.let {
-                if (nowRequested.add(it)) onRequestThumbnail(it)
-            }
-        }
-        requested.forEach { if (it !in nowRequested) onCancelThumbnail(it) }
-        requested = nowRequested
     }
 }
 

@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -107,8 +108,13 @@ fun FindMorePhotosScreen(
             } else {
                 val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
                 val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
+                val gridState = rememberLazyGridState()
+                val foundItems = remember(state.found) { state.found.map { it.item } }
+                val foundKeys = remember(state.found) { state.found.map { it.faceId } }
+                eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, foundItems, foundKeys)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(cols),
+                    state = gridState,
                     contentPadding = PaddingValues(
                         start = if (seamless) 0.dp else 20.dp,
                         end = if (seamless) 0.dp else 20.dp,

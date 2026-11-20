@@ -76,6 +76,7 @@ import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
@@ -153,6 +154,7 @@ fun DayDetailScreen(
                 leadingSlots = 2,
                 keyOf = { it.stableId },
             )
+            RequestVisibleThumbnails(gridState, state.items) { itemKey(it) }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(cols),
                 state = gridState,

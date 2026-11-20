@@ -405,6 +405,7 @@ fun PersonDetailScreen(
                     locationGridRows(state.items, TimeZone.getDefault(), keyOf = { it.stableId }) { fmt.format(Date(it)) }
                 }
                 val idToIndex = remember(selectableIds) { selectableIds.withIndex().associate { (i, id) -> id to i } }
+                eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, state.items) { it.stableId }
                 // Armed at the long-press anchor so the cell's release-tap does not toggle it straight back off.
                 val tapGuard = remember { mutableStateOf(false) }
                 val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
