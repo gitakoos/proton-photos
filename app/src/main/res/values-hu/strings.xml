@@ -2829,8 +2829,8 @@
     <string name="whats_new_260_trash999_body">Egy 999-nél több fotót tartalmazó kuka ürítése a helyadataikat és a hasonló fotók adatait is törli.</string>
     <string name="whats_new_260_hidealbumsync_title">Albumfotó-kapcsoló összhangban</string>
     <string name="whats_new_260_hidealbumsync_body">Az albumok fotóit az idővonalon elrejtő kapcsoló bekapcsolva marad, amíg minden album ki van zárva, és követi a többi eszközödet.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK alapból bekapcsolva</string>
-    <string name="whats_new_260_sdkdefault_body">A Drive-műveletek a Proton Drive SDK-n át futnak, hacsak ki nem kapcsolsz egy kapcsolót; a kikapcsolt kapcsoló kikapcsolva marad.</string>
+    <string name="whats_new_260_sdkdefault_title">Drive SDK kapcsolók</string>
+    <string name="whats_new_260_sdkdefault_body">A Drive-műveletek a Proton Drive SDK-n át futnak, amíg a kapcsolójuk be van kapcsolva. Az Általad megosztott fotók és a Bélyegképek kikapcsolva indulnak, a többi kapcsoló bekapcsolva, és a kikapcsolt kapcsoló kikapcsolva marad.</string>
     <string name="whats_new_260_searchdownload_title">A keresőmodell letöltési mérete</string>
     <string name="whats_new_260_searchdownload_body">A keresőmodell letöltése csak a telefonon még nem lévő modellek méretét mutatja.</string>
     <string name="whats_new_260_sharedpage_title">Megosztott oldal és üres oldalak</string>
@@ -2915,6 +2915,8 @@
     <string name="whats_new_260_sentcopy_body">Ha a Tömörítés a Drive-on vagy egy dátum- vagy helymódosítás feladja, a már feltöltött másolat a Drive kukájába kerül, és nem marad az eredeti mellett. Kijelentkezéskor ugyanez történik a befejezetlen dátum- és helymódosításokkal.</string>
     <string name="whats_new_260_signoutfail_title">Sikertelen kijelentkezés</string>
     <string name="whats_new_260_signoutfail_body">Ha a kijelentkezés nem tud befejeződni, az app bejelentkezve marad, újraindítja a mentéseket, és szól, így újra megpróbálhatod.</string>
+    <string name="whats_new_260_albumcount_title">Albumszámok</string>
+    <string name="whats_new_260_albumcount_body">Egy album elemszáma az Albumok fülön azonnal változik, amikor a fotói a kukába kerülnek vagy a Visszavonással visszajönnek, lehúzásos frissítés nélkül.</string>
     <string name="whats_new_260_compressnote_title">Megjegyzés a tömörítésről és a helyfelszabadításról</string>
     <string name="whats_new_260_compressnote_body">Bekapcsolt feltöltéskori tömörítésnél a Beállítások jelzi, hogy a Drive-on csak a tömörített másolat marad, amint az eredeti lekerül a telefonról hely felszabadításával vagy mentés utáni törléssel.</string>
     <string name="whats_new_260_mirrorcheck_title">Az eredeti csak ellenőrzés után cserélődik</string>

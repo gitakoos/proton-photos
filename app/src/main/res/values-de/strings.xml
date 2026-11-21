@@ -2830,8 +2830,8 @@
     <string name="whats_new_260_trash999_body">Das Leeren eines Papierkorbs mit mehr als 999 Fotos entfernt auch ihre Orts- und Ähnlichkeitsdaten.</string>
     <string name="whats_new_260_hidealbumsync_title">Albumfoto-Schalter im Gleichklang</string>
     <string name="whats_new_260_hidealbumsync_body">Der Schalter, der Albumfotos in der Zeitleiste ausblendet, bleibt an, während alle Alben ausgeschlossen sind, und folgt deinen anderen Geräten.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK standardmäßig an</string>
-    <string name="whats_new_260_sdkdefault_body">Die Drive-Arbeit läuft über das Proton Drive SDK, sofern du keinen Schalter ausschaltest; ein ausgeschalteter Schalter bleibt aus.</string>
+    <string name="whats_new_260_sdkdefault_title">Drive-SDK-Schalter</string>
+    <string name="whats_new_260_sdkdefault_body">Die Drive-Arbeit läuft über das Proton Drive SDK, solange der jeweilige Schalter an ist. Von dir geteilte Fotos und Miniaturansichten starten aus, die anderen Schalter an, und ein ausgeschalteter Schalter bleibt aus.</string>
     <string name="whats_new_260_searchdownload_title">Downloadgröße des Suchmodells</string>
     <string name="whats_new_260_searchdownload_body">Der Download des Suchmodells zeigt nur die Größe der Modelle, die noch nicht auf dem Telefon sind.</string>
     <string name="whats_new_260_sharedpage_title">Seite Geteilt und leere Seiten</string>
@@ -2916,6 +2916,8 @@
     <string name="whats_new_260_sentcopy_body">Gibt Auf Drive komprimieren oder eine Datums- oder Ortsänderung auf, kommt die bereits hochgeladene Kopie in den Drive-Papierkorb, statt neben dem Original zu bleiben. Beim Abmelden passiert dasselbe mit nicht beendeten Datums- und Ortsänderungen.</string>
     <string name="whats_new_260_signoutfail_title">Fehlgeschlagenes Abmelden</string>
     <string name="whats_new_260_signoutfail_body">Kann ein Abmelden nicht abgeschlossen werden, bleibt die App angemeldet, startet ihre Sicherungen wieder und sagt es dir, damit du es noch einmal versuchen kannst.</string>
+    <string name="whats_new_260_albumcount_title">Albumzähler</string>
+    <string name="whats_new_260_albumcount_body">Die Anzahl der Elemente eines Albums im Tab Alben ändert sich sofort, wenn seine Fotos in den Papierkorb gehen oder mit Rückgängig zurückkommen, ohne Herunterziehen zum Aktualisieren.</string>
     <string name="whats_new_260_compressnote_title">Hinweis zu Komprimierung und Freigeben</string>
     <string name="whats_new_260_compressnote_body">Ist die Komprimierung beim Hochladen an, sagen die Einstellungen, dass in Drive nur die komprimierte Kopie bleibt, sobald das Original durch Speicher freigeben oder Löschen nach der Sicherung vom Telefon entfernt wird.</string>
     <string name="whats_new_260_mirrorcheck_title">Originale erst nach einer Prüfung ersetzt</string>

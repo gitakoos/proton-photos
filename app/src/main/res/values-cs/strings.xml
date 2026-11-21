@@ -2973,8 +2973,8 @@
     <string name="whats_new_260_trash999_body">Vysypání koše s více než 999 fotkami vymaže i jejich údaje o místech a podobných fotkách.</string>
     <string name="whats_new_260_hidealbumsync_title">Přepínač fotek z alb ve shodě</string>
     <string name="whats_new_260_hidealbumsync_body">Přepínač, který skrývá fotky z alb na časové ose, zůstane zapnutý, i když jsou vyloučena všechna alba, a řídí se vašimi dalšími zařízeními.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK zapnuté jako výchozí</string>
-    <string name="whats_new_260_sdkdefault_body">Práce s Drive běží přes Proton Drive SDK, pokud přepínač nevypnete; vypnutý přepínač zůstane vypnutý.</string>
+    <string name="whats_new_260_sdkdefault_title">Přepínače Drive SDK</string>
+    <string name="whats_new_260_sdkdefault_body">Práce s Drive běží přes Proton Drive SDK, dokud je její přepínač zapnutý. Fotky, které sdílíte, a Miniatury začínají vypnuté, ostatní přepínače zapnuté a vypnutý přepínač zůstane vypnutý.</string>
     <string name="whats_new_260_searchdownload_title">Velikost stahování modelu pro vyhledávání</string>
     <string name="whats_new_260_searchdownload_body">Stahování modelu pro vyhledávání ukazuje jen velikost modelů, které v telefonu ještě nejsou.</string>
     <string name="whats_new_260_sharedpage_title">Stránka Sdílené a prázdné stránky</string>
@@ -3059,6 +3059,8 @@
     <string name="whats_new_260_sentcopy_body">Když Komprimovat na Drive nebo změna data či polohy skončí neúspěchem, už nahraná kopie se přesune do koše na Drive a nezůstane vedle originálu. Odhlášení udělá totéž s nedokončenými změnami data a polohy.</string>
     <string name="whats_new_260_signoutfail_title">Nezdařené odhlášení</string>
     <string name="whats_new_260_signoutfail_body">Když se odhlášení nedokončí, aplikace zůstane přihlášená, znovu spustí zálohování a oznámí to, takže to můžete zkusit znovu.</string>
+    <string name="whats_new_260_albumcount_title">Počty v albech</string>
+    <string name="whats_new_260_albumcount_body">Počet položek alba na kartě Alba se změní hned, jakmile jeho fotky jdou do koše nebo se vrátí přes Zpět, bez stažení pro obnovení.</string>
     <string name="whats_new_260_compressnote_title">Poznámka ke kompresi a uvolnění místa</string>
     <string name="whats_new_260_compressnote_body">Se zapnutou kompresí při nahrávání Nastavení uvádí, že jakmile originál zmizí z telefonu uvolněním místa nebo smazáním po záloze, zůstane na Drive jen komprimovaná kopie.</string>
     <string name="whats_new_260_mirrorcheck_title">Originály se nahrazují až po kontrole</string>

@@ -2854,8 +2854,8 @@
     <string name="whats_new_260_trash999_body">Een prullenbak met meer dan 999 foto\'s legen wist ook hun plaats- en vergelijkbare-fotogegevens.</string>
     <string name="whats_new_260_hidealbumsync_title">Schakelaar voor albumfoto\'s gelijk</string>
     <string name="whats_new_260_hidealbumsync_body">De schakelaar die albumfoto\'s in de tijdlijn verbergt, blijft aan terwijl alle albums zijn uitgesloten, en volgt je andere apparaten.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK standaard aan</string>
-    <string name="whats_new_260_sdkdefault_body">Het Drive-werk loopt via de Proton Drive SDK, tenzij je een schakelaar uitzet; een schakelaar die je uitzette blijft uit.</string>
+    <string name="whats_new_260_sdkdefault_title">Drive SDK-schakelaars</string>
+    <string name="whats_new_260_sdkdefault_body">Het Drive-werk loopt via de Proton Drive SDK zolang de schakelaar ervan aan staat. Foto\'s die je deelt en Miniaturen beginnen uit, de andere schakelaars aan, en een schakelaar die je uitzette blijft uit.</string>
     <string name="whats_new_260_searchdownload_title">Downloadgrootte van het zoekmodel</string>
     <string name="whats_new_260_searchdownload_body">De download van het zoekmodel toont alleen de grootte van de modellen die nog niet op de telefoon staan.</string>
     <string name="whats_new_260_sharedpage_title">Pagina Gedeeld en lege pagina\'s</string>
@@ -2940,6 +2940,8 @@
     <string name="whats_new_260_sentcopy_body">Als Comprimeren op Drive of een datum- of locatiewijziging het opgeeft, gaat de al geüploade kopie naar de prullenbak van Drive in plaats van naast het origineel te blijven staan. Afmelden doet hetzelfde met datum- en locatiewijzigingen die nog niet klaar zijn.</string>
     <string name="whats_new_260_signoutfail_title">Mislukt afmelden</string>
     <string name="whats_new_260_signoutfail_body">Als afmelden niet kan worden afgerond, blijft de app aangemeld, start hij de back-ups opnieuw en meldt hij dat, zodat je het opnieuw kunt proberen.</string>
+    <string name="whats_new_260_albumcount_title">Albumtellingen</string>
+    <string name="whats_new_260_albumcount_body">Het aantal items van een album op het tabblad Albums verandert meteen wanneer de foto\'s naar de prullenbak gaan of terugkomen met Ongedaan maken, zonder omlaag te trekken om te vernieuwen.</string>
     <string name="whats_new_260_compressnote_title">Opmerking over comprimeren en ruimte vrijmaken</string>
     <string name="whats_new_260_compressnote_body">Staat comprimeren bij uploaden aan, dan zeggen de Instellingen dat in Drive alleen de gecomprimeerde kopie overblijft zodra het origineel van de telefoon gaat door ruimte vrij te maken of na de back-up te verwijderen.</string>
     <string name="whats_new_260_mirrorcheck_title">Originelen pas vervangen na een controle</string>

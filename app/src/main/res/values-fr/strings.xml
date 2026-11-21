@@ -2832,8 +2832,8 @@
     <string name="whats_new_260_trash999_body">Vider une corbeille de plus de 999 photos efface aussi leurs données de lieu et de photos similaires.</string>
     <string name="whats_new_260_hidealbumsync_title">Interrupteur des photos d\'albums en phase</string>
     <string name="whats_new_260_hidealbumsync_body">L\'interrupteur qui masque les photos d\'albums de la chronologie reste activé tant que tous les albums sont exclus, et suit vos autres appareils.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK activé par défaut</string>
-    <string name="whats_new_260_sdkdefault_body">Le travail avec Drive passe par le Proton Drive SDK sauf si vous désactivez un interrupteur ; un interrupteur désactivé le reste.</string>
+    <string name="whats_new_260_sdkdefault_title">Interrupteurs du Drive SDK</string>
+    <string name="whats_new_260_sdkdefault_body">Le travail avec Drive passe par le Proton Drive SDK tant que son interrupteur est activé. Photos que vous partagez et Miniatures démarrent désactivés, les autres interrupteurs activés, et un interrupteur désactivé le reste.</string>
     <string name="whats_new_260_searchdownload_title">Taille du téléchargement du modèle de recherche</string>
     <string name="whats_new_260_searchdownload_body">Le téléchargement du modèle de recherche n\'indique que la taille des modèles pas encore sur le téléphone.</string>
     <string name="whats_new_260_sharedpage_title">Page Partagés et pages vides</string>
@@ -2918,6 +2918,8 @@
     <string name="whats_new_260_sentcopy_body">Quand Compresser sur Drive ou un changement de date ou de lieu abandonne, la copie déjà envoyée va dans la corbeille de Drive au lieu de rester à côté de l\'original. La déconnexion fait de même pour les changements de date et de lieu non terminés.</string>
     <string name="whats_new_260_signoutfail_title">Déconnexion échouée</string>
     <string name="whats_new_260_signoutfail_body">Si une déconnexion ne peut pas aller au bout, l\'app reste connectée, relance ses sauvegardes et vous le dit, pour que vous puissiez réessayer.</string>
+    <string name="whats_new_260_albumcount_title">Compteurs des albums</string>
+    <string name="whats_new_260_albumcount_body">Le nombre d\'éléments d\'un album dans l\'onglet Albums change aussitôt quand ses photos vont à la corbeille ou reviennent avec Annuler, sans tirer pour actualiser.</string>
     <string name="whats_new_260_compressnote_title">Note sur la compression et la libération d\'espace</string>
     <string name="whats_new_260_compressnote_body">Si la compression à l\'envoi est activée, les réglages indiquent que Drive ne garde que la copie compressée une fois l\'original retiré du téléphone en libérant de l\'espace ou en le supprimant après la sauvegarde.</string>
     <string name="whats_new_260_mirrorcheck_title">Originaux remplacés seulement après vérification</string>

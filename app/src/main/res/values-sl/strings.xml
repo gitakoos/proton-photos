@@ -2967,8 +2967,8 @@
     <string name="whats_new_260_trash999_body">Praznjenje koša z več kot 999 fotografijami izbriše tudi njihove podatke o krajih in podobnih fotografijah.</string>
     <string name="whats_new_260_hidealbumsync_title">Stikalo za fotografije albumov usklajeno</string>
     <string name="whats_new_260_hidealbumsync_body">Stikalo, ki fotografije albumov skrije s časovnice, ostane vklopljeno, ko so izključeni vsi albumi, in sledi vašim drugim napravam.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK privzeto vklopljen</string>
-    <string name="whats_new_260_sdkdefault_body">Delo z Drive teče prek Proton Drive SDK, razen če stikalo izklopite; izklopljeno stikalo ostane izklopljeno.</string>
+    <string name="whats_new_260_sdkdefault_title">Stikala Drive SDK</string>
+    <string name="whats_new_260_sdkdefault_body">Delo z Drive teče prek Proton Drive SDK, dokler je njegovo stikalo vklopljeno. Fotografije, ki jih delite, in Sličice se začnejo izklopljene, druga stikala vklopljena, izklopljeno stikalo pa ostane izklopljeno.</string>
     <string name="whats_new_260_searchdownload_title">Velikost prenosa modela za iskanje</string>
     <string name="whats_new_260_searchdownload_body">Prenos modela za iskanje pokaže le velikost modelov, ki jih v telefonu še ni.</string>
     <string name="whats_new_260_sharedpage_title">Stran V skupni rabi in prazne strani</string>
@@ -3053,6 +3053,8 @@
     <string name="whats_new_260_sentcopy_body">Ko Stisni na Drive ali sprememba datuma ali lokacije odneha, gre že naložena kopija v koš na Drive, namesto da bi ostala ob izvirniku. Odjava naredi enako z nedokončanimi spremembami datuma in lokacije.</string>
     <string name="whats_new_260_signoutfail_title">Neuspela odjava</string>
     <string name="whats_new_260_signoutfail_body">Če se odjava ne more dokončati, aplikacija ostane prijavljena, znova zažene varnostne kopije in vas o tem obvesti, da lahko poskusite znova.</string>
+    <string name="whats_new_260_albumcount_title">Števci albumov</string>
+    <string name="whats_new_260_albumcount_body">Število elementov albuma na zavihku Albumi se spremeni takoj, ko njegove fotografije gredo v koš ali se vrnejo z Razveljavi, brez vlečenja za osvežitev.</string>
     <string name="whats_new_260_compressnote_title">Opomba o stiskanju in sproščanju prostora</string>
     <string name="whats_new_260_compressnote_body">Ko je stiskanje ob nalaganju vklopljeno, Nastavitve povedo, da v Drive ostane samo stisnjena kopija, ko izvirnik zapusti telefon s sproščanjem prostora ali brisanjem po varnostnem kopiranju.</string>
     <string name="whats_new_260_mirrorcheck_title">Izvirniki zamenjani šele po preverjanju</string>

@@ -2867,8 +2867,8 @@
     <string name="whats_new_260_trash999_body">Emptying the trash of more than 999 photos also clears their place and similar-photo data.</string>
     <string name="whats_new_260_hidealbumsync_title">Album photos switch in step</string>
     <string name="whats_new_260_hidealbumsync_body">The switch that hides album photos from the timeline stays on while every album is excluded, and follows your other devices.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK on by default</string>
-    <string name="whats_new_260_sdkdefault_body">Drive work runs through the Proton Drive SDK unless you turn a switch off; a switch you turned off stays off.</string>
+    <string name="whats_new_260_sdkdefault_title">Drive SDK switches</string>
+    <string name="whats_new_260_sdkdefault_body">Drive work runs through the Proton Drive SDK while its switch is on. Photos you share and Thumbnails start off, the other switches start on, and a switch you turned off stays off.</string>
     <string name="whats_new_260_searchdownload_title">Search model download size</string>
     <string name="whats_new_260_searchdownload_body">The search model download shows only the size of the models not yet on the phone.</string>
     <string name="whats_new_260_sharedpage_title">Shared page and empty pages</string>
@@ -2953,6 +2953,8 @@
     <string name="whats_new_260_sentcopy_body">When Compress on Drive or a date or location change gives up, the copy it already uploaded goes to the Drive trash instead of staying next to the original. Signing out does the same for date and location changes that have not finished.</string>
     <string name="whats_new_260_signoutfail_title">Failed sign-out</string>
     <string name="whats_new_260_signoutfail_body">If a sign-out cannot finish, the app stays signed in, starts its backups again and says so, so you can try again.</string>
+    <string name="whats_new_260_albumcount_title">Album counts</string>
+    <string name="whats_new_260_albumcount_body">An album\'s item count on the Albums tab changes at once when its photos go to the trash or come back with Undo, without a pull to refresh.</string>
     <string name="whats_new_260_compressnote_title">Compression and free-up note</string>
     <string name="whats_new_260_compressnote_body">With upload compression on, Settings says that only the compressed copy is left in Drive once the original leaves the phone by freeing up space or deleting after backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originals replaced only after a check</string>

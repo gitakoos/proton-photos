@@ -2872,8 +2872,8 @@
     <string name="whats_new_260_trash999_body">Svuotare un cestino di oltre 999 foto cancella anche i loro dati di luogo e di foto simili.</string>
     <string name="whats_new_260_hidealbumsync_title">Interruttore delle foto degli album allineato</string>
     <string name="whats_new_260_hidealbumsync_body">L\'interruttore che nasconde le foto degli album dalla cronologia resta attivo mentre tutti gli album sono esclusi, e segue gli altri tuoi dispositivi.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK attivo di base</string>
-    <string name="whats_new_260_sdkdefault_body">Il lavoro con Drive passa dal Proton Drive SDK a meno che tu non spenga un interruttore; uno che hai spento resta spento.</string>
+    <string name="whats_new_260_sdkdefault_title">Interruttori del Drive SDK</string>
+    <string name="whats_new_260_sdkdefault_body">Il lavoro con Drive passa dal Proton Drive SDK finché il suo interruttore è acceso. Foto che condividi e Miniature partono spenti, gli altri interruttori accesi, e uno che hai spento resta spento.</string>
     <string name="whats_new_260_searchdownload_title">Dimensione del download del modello di ricerca</string>
     <string name="whats_new_260_searchdownload_body">Il download del modello di ricerca mostra solo la dimensione dei modelli non ancora sul telefono.</string>
     <string name="whats_new_260_sharedpage_title">Pagina Condivisi e pagine vuote</string>
@@ -2958,6 +2958,8 @@
     <string name="whats_new_260_sentcopy_body">Quando Comprimi su Drive o una modifica di data o posizione rinuncia, la copia già caricata va nel cestino di Drive invece di restare accanto all\'originale. All\'uscita succede lo stesso con le modifiche di data e posizione non finite.</string>
     <string name="whats_new_260_signoutfail_title">Uscita non riuscita</string>
     <string name="whats_new_260_signoutfail_body">Se un\'uscita non può terminare, l\'app resta connessa, riavvia i backup e te lo dice, così puoi riprovare.</string>
+    <string name="whats_new_260_albumcount_title">Conteggi degli album</string>
+    <string name="whats_new_260_albumcount_body">Il numero di elementi di un album nella scheda Album cambia subito quando le sue foto vanno nel cestino o tornano con Annulla, senza trascinare per aggiornare.</string>
     <string name="whats_new_260_compressnote_title">Nota su compressione e spazio liberato</string>
     <string name="whats_new_260_compressnote_body">Con la compressione al caricamento attiva, le Impostazioni indicano che su Drive resta solo la copia compressa quando l\'originale lascia il telefono liberando spazio o eliminandolo dopo il backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originali sostituiti solo dopo un controllo</string>

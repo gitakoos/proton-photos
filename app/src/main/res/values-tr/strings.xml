@@ -2747,8 +2747,8 @@
     <string name="whats_new_260_trash999_body">999\'dan fazla fotoğraflık bir çöp kutusunu boşaltmak onların yer ve benzer fotoğraf verilerini de siler.</string>
     <string name="whats_new_260_hidealbumsync_title">Albüm fotoğrafları anahtarı uyumlu</string>
     <string name="whats_new_260_hidealbumsync_body">Albüm fotoğraflarını zaman çizelgesinden gizleyen anahtar, tüm albümler hariç tutulduğunda açık kalır ve diğer cihazlarını izler.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK varsayılan olarak açık</string>
-    <string name="whats_new_260_sdkdefault_body">Drive işleri, bir anahtarı kapatmadıkça Proton Drive SDK üzerinden yürür; kapattığın bir anahtar kapalı kalır.</string>
+    <string name="whats_new_260_sdkdefault_title">Drive SDK anahtarları</string>
+    <string name="whats_new_260_sdkdefault_body">Drive işleri, anahtarı açık olduğu sürece Proton Drive SDK üzerinden yürür. Paylaştığınız fotoğraflar ve Küçük resimler kapalı başlar, diğer anahtarlar açık başlar ve kapattığın bir anahtar kapalı kalır.</string>
     <string name="whats_new_260_searchdownload_title">Arama modeli indirme boyutu</string>
     <string name="whats_new_260_searchdownload_body">Arama modeli indirmesi yalnızca telefonda henüz olmayan modellerin boyutunu gösterir.</string>
     <string name="whats_new_260_sharedpage_title">Paylaşılanlar sayfası ve boş sayfalar</string>
@@ -2833,6 +2833,8 @@
     <string name="whats_new_260_sentcopy_body">Drive\'da sıkıştır veya bir tarih ya da konum değişikliği vazgeçtiğinde, önceden yüklenen kopya orijinalin yanında kalmak yerine Drive çöp kutusuna gider. Oturumu kapatmak, bitmemiş tarih ve konum değişikliklerinde de aynısını yapar.</string>
     <string name="whats_new_260_signoutfail_title">Başarısız oturum kapatma</string>
     <string name="whats_new_260_signoutfail_body">Oturum kapatma tamamlanamazsa uygulama oturumu açık tutar, yedeklemeleri yeniden başlatır ve bunu size söyler; böylece yeniden deneyebilirsiniz.</string>
+    <string name="whats_new_260_albumcount_title">Albüm sayıları</string>
+    <string name="whats_new_260_albumcount_body">Albümler sekmesinde bir albümün öğe sayısı, fotoğrafları çöp kutusuna gittiğinde veya Geri al ile geri geldiğinde hemen değişir; yenilemek için çekmeye gerek kalmaz.</string>
     <string name="whats_new_260_compressnote_title">Sıkıştırma ve yer açma notu</string>
     <string name="whats_new_260_compressnote_body">Yüklemede sıkıştırma açıksa Ayarlar, orijinal yer açarak ya da yedeklemeden sonra silerek telefondan kalktığında Drive\'da yalnızca sıkıştırılmış kopyanın kalacağını söyler.</string>
     <string name="whats_new_260_mirrorcheck_title">Orijinaller ancak bir denetimden sonra değişir</string>

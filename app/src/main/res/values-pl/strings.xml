@@ -2967,8 +2967,8 @@
     <string name="whats_new_260_trash999_body">Opróżnienie kosza z ponad 999 zdjęciami usuwa też ich dane o miejscach i podobnych zdjęciach.</string>
     <string name="whats_new_260_hidealbumsync_title">Przełącznik zdjęć z albumów w zgodzie</string>
     <string name="whats_new_260_hidealbumsync_body">Przełącznik, który ukrywa zdjęcia z albumów na osi czasu, zostaje włączony, gdy wszystkie albumy są wykluczone, i podąża za innymi twoimi urządzeniami.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK domyślnie włączone</string>
-    <string name="whats_new_260_sdkdefault_body">Praca z Drive idzie przez Proton Drive SDK, chyba że wyłączysz przełącznik; wyłączony przełącznik zostaje wyłączony.</string>
+    <string name="whats_new_260_sdkdefault_title">Przełączniki Drive SDK</string>
+    <string name="whats_new_260_sdkdefault_body">Praca z Drive idzie przez Proton Drive SDK, gdy jej przełącznik jest włączony. Zdjęcia, które udostępniasz, i Miniatury startują wyłączone, pozostałe przełączniki włączone, a wyłączony przełącznik zostaje wyłączony.</string>
     <string name="whats_new_260_searchdownload_title">Rozmiar pobierania modelu wyszukiwania</string>
     <string name="whats_new_260_searchdownload_body">Pobieranie modelu wyszukiwania pokazuje tylko rozmiar modeli, których jeszcze nie ma w telefonie.</string>
     <string name="whats_new_260_sharedpage_title">Strona Udostępnione i puste strony</string>
@@ -3053,6 +3053,8 @@
     <string name="whats_new_260_sentcopy_body">Gdy Kompresuj na Drive albo zmiana daty lub lokalizacji się poddaje, już wysłana kopia trafia do kosza na Drive zamiast zostać obok oryginału. Wylogowanie robi to samo z niedokończonymi zmianami daty i lokalizacji.</string>
     <string name="whats_new_260_signoutfail_title">Nieudane wylogowanie</string>
     <string name="whats_new_260_signoutfail_body">Gdy wylogowanie nie może się zakończyć, aplikacja zostaje zalogowana, ponownie uruchamia kopie zapasowe i o tym informuje, więc możesz spróbować jeszcze raz.</string>
+    <string name="whats_new_260_albumcount_title">Liczniki albumów</string>
+    <string name="whats_new_260_albumcount_body">Liczba elementów albumu na karcie Albumy zmienia się od razu, gdy jego zdjęcia trafiają do kosza lub wracają przez Cofnij, bez przeciągania w celu odświeżenia.</string>
     <string name="whats_new_260_compressnote_title">Uwaga o kompresji i zwalnianiu miejsca</string>
     <string name="whats_new_260_compressnote_body">Przy włączonej kompresji wysyłanych plików Ustawienia informują, że w Drive zostaje tylko skompresowana kopia, gdy oryginał zniknie z telefonu przez zwolnienie miejsca lub usunięcie po kopii.</string>
     <string name="whats_new_260_mirrorcheck_title">Oryginały zastępowane dopiero po sprawdzeniu</string>

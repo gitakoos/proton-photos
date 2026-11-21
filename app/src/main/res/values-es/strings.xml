@@ -2870,8 +2870,8 @@
     <string name="whats_new_260_trash999_body">Vaciar una papelera de más de 999 fotos también borra sus datos de lugar y de fotos parecidas.</string>
     <string name="whats_new_260_hidealbumsync_title">Interruptor de fotos de álbumes a la par</string>
     <string name="whats_new_260_hidealbumsync_body">El interruptor que oculta las fotos de álbumes en la cronología sigue activado mientras todos los álbumes están excluidos, y sigue a tus otros dispositivos.</string>
-    <string name="whats_new_260_sdkdefault_title">Drive SDK activado de serie</string>
-    <string name="whats_new_260_sdkdefault_body">El trabajo con Drive pasa por el Proton Drive SDK salvo que desactives un interruptor; uno que desactivaste sigue desactivado.</string>
+    <string name="whats_new_260_sdkdefault_title">Interruptores del Drive SDK</string>
+    <string name="whats_new_260_sdkdefault_body">El trabajo con Drive pasa por el Proton Drive SDK mientras su interruptor está activado. Fotos que compartes y Miniaturas empiezan desactivados, los demás interruptores activados, y uno que desactivaste sigue desactivado.</string>
     <string name="whats_new_260_searchdownload_title">Tamaño de descarga del modelo de búsqueda</string>
     <string name="whats_new_260_searchdownload_body">La descarga del modelo de búsqueda solo muestra el tamaño de los modelos que aún no están en el teléfono.</string>
     <string name="whats_new_260_sharedpage_title">Página Compartidos y páginas vacías</string>
@@ -2956,6 +2956,8 @@
     <string name="whats_new_260_sentcopy_body">Cuando Comprimir en Drive o un cambio de fecha o ubicación se da por vencido, la copia ya subida va a la papelera de Drive en lugar de quedarse junto al original. Al cerrar la sesión pasa lo mismo con los cambios de fecha y ubicación sin terminar.</string>
     <string name="whats_new_260_signoutfail_title">Cierre de sesión fallido</string>
     <string name="whats_new_260_signoutfail_body">Si no se puede terminar de cerrar la sesión, la app sigue con la sesión iniciada, vuelve a iniciar sus copias de seguridad y te lo dice, para que lo intentes de nuevo.</string>
+    <string name="whats_new_260_albumcount_title">Recuento de álbumes</string>
+    <string name="whats_new_260_albumcount_body">El número de elementos de un álbum en la pestaña Álbumes cambia al momento cuando sus fotos van a la papelera o vuelven con Deshacer, sin deslizar para actualizar.</string>
     <string name="whats_new_260_compressnote_title">Nota sobre compresión y liberar espacio</string>
     <string name="whats_new_260_compressnote_body">Con la compresión al subir activada, Ajustes indica que en Drive solo queda la copia comprimida cuando el original sale del teléfono al liberar espacio o al eliminarlo tras la copia.</string>
     <string name="whats_new_260_mirrorcheck_title">Originales sustituidos solo tras una comprobación</string>
