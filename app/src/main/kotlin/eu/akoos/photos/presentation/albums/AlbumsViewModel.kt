@@ -172,6 +172,7 @@ class AlbumsViewModel @Inject constructor(
     private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
     private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
     private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
+    private val cloudTrash: eu.akoos.photos.data.repository.drive.CloudTrashService,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
@@ -223,9 +224,9 @@ class AlbumsViewModel @Inject constructor(
         loadAlbums()
         observeDeviceFolders()
         observeExcludedFromGrid()
-        // Re-fetch on share-state changes so the grid badge updates without a manual pull-to-refresh.
+        // Share changes and trash moves both re-fetch, so badges and counts follow without a pull.
         viewModelScope.launch {
-            albumListEvents.changes.collect { loadAlbums() }
+            albumGridReloads(albumListEvents.changes, cloudTrash.trashCountChanges).collect { loadAlbums() }
         }
         // A rename made inside an album patches that card's name, so the grid never shows the old one.
         viewModelScope.launch {
