@@ -3062,4 +3062,5 @@
     <string name="settings_held_back_confirm_action">Continue</string>
     <string name="settings_change_not_saved">A settings change could not be saved. Try again in a moment.</string>
     <string name="sign_out_not_started">Signing out could not be started. Try again in a moment.</string>
+    <string name="sign_out_failed">Could not sign out. You are still signed in. Try again.</string>
 </resources>

@@ -31,7 +31,9 @@ import coil.imageLoader
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.data.localcrypto.VaultFiles
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.settingsDataStoreStrict
+import eu.akoos.photos.domain.usecase.wifiOnlySetting
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.data.transfer.SaveBatchStore
@@ -86,6 +88,37 @@ object SignOutCleanup {
             workManager.cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)
             workManager.cancelUniqueWork(CloudCompressWorker.UNIQUE_NAME)
             BackgroundSyncService.stop(context)
+        }
+    }
+
+    /** Puts back what [stopBackgroundWork] stopped, for a sign-out that did not let the account go. */
+    suspend fun restartBackgroundWork(context: Context) {
+        runCatching { SyncWorker.reconcileBackgroundWork(context) }
+        runCatching { MetadataEditWorker.enqueue(context) }
+        runCatching {
+            CloudCompressWorker.enqueue(context, wifiOnlySetting(context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY]))
+        }
+    }
+
+    /**
+     * The closing [steps] of a sign-out from Settings, then [letGo] of the account. A step that fails does not
+     * stop the ones after it, since the cleanup every sign-out reaches runs again once the account is let go, so
+     * the sign-out never stops half way. Answers whether the account was let go.
+     */
+    suspend fun closeUserSignOut(steps: List<suspend () -> Unit>, letGo: suspend () -> Unit): Boolean {
+        for (step in steps) {
+            try {
+                step()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
+        }
+        return try {
+            letGo()
+            true
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            false
         }
     }
 

@@ -3162,4 +3162,5 @@
     <string name="settings_held_back_confirm_action">Nadaljuj</string>
     <string name="settings_change_not_saved">Spremembe nastavitev ni bilo mogoče shraniti. Poskusite znova čez trenutek.</string>
     <string name="sign_out_not_started">Odjave ni bilo mogoče začeti. Poskusite znova čez trenutek.</string>
+    <string name="sign_out_failed">Odjava ni uspela, račun ostaja prijavljen. Poskusite znova.</string>
 </resources>

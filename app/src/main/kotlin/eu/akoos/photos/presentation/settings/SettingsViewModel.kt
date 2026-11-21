@@ -2214,6 +2214,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Posted to the main thread, as [showSignOutNotStarted] is. */
+    private fun showSignOutFailed() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, R.string.sign_out_failed, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     /** One step of the sign-out that may fail on its own without stopping the rest; a cancellation still stops it. */
     private inline fun <T> attempt(block: () -> T): T? = try {
         block()
@@ -2291,7 +2298,7 @@ class SettingsViewModel @Inject constructor(
                     eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued, busy)
                 }
             }
-            cloudRepo.clearCacheForSignOut(userId, vaultWipe)
+            attempt { cloudRepo.clearCacheForSignOut(userId, vaultWipe) }
             // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
             //    thumbnail of the signed-out user stays readable, and drop the diagnostics
             //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
@@ -2315,15 +2322,26 @@ class SettingsViewModel @Inject constructor(
                 else withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
                 AccountScopedPreferences.clear(context, userId, keptVaultUris = kept)
             }
-            // The line goes in after the buffers were emptied above, so it opens the next session's log.
-            eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote")
-            // The handler every sign-out reaches must know this one was asked for.
-            eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id)
-            // End the app lock's post-unlock grace in AppLockSession, which holds the lock
-            // timestamps, BEFORE disableAccount triggers the route change, so the stop and
-            // start of the sign-in flow is judged by the lock timeout alone.
-            appLockManager.notifyResetLockTimestamps()
-            accountManager.disableAccount(userId)
+            val left = SignOutCleanup.closeUserSignOut(
+                steps = listOf(
+                    // The line goes in after the buffers were emptied above, so it opens the next session's log.
+                    { eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote") },
+                    // The handler every sign-out reaches must know this one was asked for.
+                    { eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id) },
+                    // End the app lock's post-unlock grace in AppLockSession, which holds the lock
+                    // timestamps, BEFORE disableAccount triggers the route change, so the stop and
+                    // start of the sign-in flow is judged by the lock timeout alone.
+                    { appLockManager.notifyResetLockTimestamps() },
+                ),
+                letGo = { accountManager.disableAccount(userId) },
+            )
+            if (!left) {
+                // Still signed in: the work stopped above starts again, and the user is told to try again.
+                attempt { eu.akoos.photos.data.hidden.UserSignOut.consume(userId.id) }
+                attempt { eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, account not let go, still signed in") }
+                attempt { SignOutCleanup.restartBackgroundWork(context) }
+                showSignOutFailed()
+            }
         } finally {
             hiddenVaultJournal.endSignOut()
         }

@@ -3027,4 +3027,5 @@
     <string name="settings_held_back_confirm_action">Continuer</string>
     <string name="settings_change_not_saved">Une modification des réglages n\'a pas pu être enregistrée. Réessayez dans un instant.</string>
     <string name="sign_out_not_started">La déconnexion n\'a pas pu démarrer. Réessayez dans un instant.</string>
+    <string name="sign_out_failed">Déconnexion impossible, la session reste ouverte. Réessayez.</string>
 </resources>

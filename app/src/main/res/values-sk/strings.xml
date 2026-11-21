@@ -3169,4 +3169,5 @@
     <string name="settings_held_back_confirm_action">Pokračovať</string>
     <string name="settings_change_not_saved">Zmenu nastavení sa nepodarilo uložiť. Skúste to o chvíľu znova.</string>
     <string name="sign_out_not_started">Odhlásenie sa nepodarilo spustiť. Skúste to o chvíľu znova.</string>
+    <string name="sign_out_failed">Odhlásenie sa nepodarilo, účet zostáva prihlásený. Skúste to znova.</string>
 </resources>

@@ -2942,4 +2942,5 @@
     <string name="settings_held_back_confirm_action">Devam et</string>
     <string name="settings_change_not_saved">Bir ayar değişikliği kaydedilemedi. Biraz sonra yeniden deneyin.</string>
     <string name="sign_out_not_started">Oturum kapatma başlatılamadı. Biraz sonra yeniden deneyin.</string>
+    <string name="sign_out_failed">Oturum kapatılamadı. Hâlâ oturumunuz açık. Yeniden deneyin.</string>
 </resources>

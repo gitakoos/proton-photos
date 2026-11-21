@@ -3065,4 +3065,5 @@
     <string name="settings_held_back_confirm_action">Continuar</string>
     <string name="settings_change_not_saved">No se ha podido guardar un cambio de los ajustes. Vuelve a intentarlo en un momento.</string>
     <string name="sign_out_not_started">No se ha podido iniciar el cierre de sesión. Vuelve a intentarlo en un momento.</string>
+    <string name="sign_out_failed">No se ha podido cerrar la sesión. Sigues con la sesión iniciada. Vuelve a intentarlo.</string>
 </resources>

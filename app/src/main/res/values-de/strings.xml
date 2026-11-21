@@ -3025,4 +3025,5 @@
     <string name="settings_held_back_confirm_action">Fortfahren</string>
     <string name="settings_change_not_saved">Eine Änderung der Einstellungen konnte nicht gespeichert werden. Versuche es gleich noch einmal.</string>
     <string name="sign_out_not_started">Die Abmeldung konnte nicht gestartet werden. Versuche es gleich noch einmal.</string>
+    <string name="sign_out_failed">Abmelden fehlgeschlagen. Du bist weiterhin angemeldet. Versuche es noch einmal.</string>
 </resources>

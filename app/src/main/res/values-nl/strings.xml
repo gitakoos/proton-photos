@@ -3049,4 +3049,5 @@
     <string name="settings_held_back_confirm_action">Doorgaan</string>
     <string name="settings_change_not_saved">Een wijziging in de instellingen kon niet worden opgeslagen. Probeer het zo meteen opnieuw.</string>
     <string name="sign_out_not_started">Het afmelden kon niet worden gestart. Probeer het zo meteen opnieuw.</string>
+    <string name="sign_out_failed">Afmelden mislukt. Je bent nog steeds aangemeld. Probeer het opnieuw.</string>
 </resources>
