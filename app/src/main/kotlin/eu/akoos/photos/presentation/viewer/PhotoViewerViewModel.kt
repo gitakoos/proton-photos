@@ -1154,6 +1154,10 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** The viewer closes because its last photo was just deleted or taken out of the album: the Undo bar
+     *  for that stays up on the screen underneath. */
+    fun keepUndoThroughClose() = undoController.keepThroughScreenClose()
+
     fun resetDeleteState() {
         // Drop the deferred cloud-delete work — the user backed out of the system trash dialog.
         pendingPermissionResult = null

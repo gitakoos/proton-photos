@@ -186,6 +186,27 @@ internal class PullRefreshTracker {
     fun isLatest(ticket: Int): Boolean = ticket == latest
 }
 
+/** Every photo one album screen has listed, kept across reloads so an undone delete still refreshes it. */
+internal class SeenAlbumMembers {
+    private var albumLinkId: String? = null
+    private val seen = HashSet<String>()
+
+    @Synchronized
+    fun startAlbum(albumLinkId: String) {
+        if (albumLinkId == this.albumLinkId) return
+        this.albumLinkId = albumLinkId
+        seen.clear()
+    }
+
+    @Synchronized
+    fun add(linkIds: Collection<String>) {
+        seen += linkIds
+    }
+
+    @Synchronized
+    fun containsAny(linkIds: Collection<String>): Boolean = linkIds.any { it in seen }
+}
+
 data class AlbumDetailUiState(
     val albumName: String = "",
     val albumLinkId: String = "",
@@ -431,6 +452,7 @@ class AlbumDetailViewModel @Inject constructor(
     // would otherwise fight the optimistic filter and make the removed tiles flicker.
     private var observeJob: Job? = null
     private var observedLinkIds: List<String> = emptyList()
+    private val seenMembers = SeenAlbumMembers()
 
     // True only for the duration of a local remove so the albumListEvents collector skips a racing
     // full reload while we re-bind the observe to the surviving ids. Cleared in a finally so a later
@@ -620,9 +642,10 @@ class AlbumDetailViewModel @Inject constructor(
                         if (action.albumLinkId == _uiState.value.albumLinkId) refresh()
                     // A delete undone elsewhere restores the cloud copy server-side; refresh so a photo
                     // that belongs to this album reappears in the grid. The observe is bound to a fixed
-                    // linkId set, so it would not otherwise repaint.
+                    // linkId set, so it would not otherwise repaint, and a reload after the delete has
+                    // already dropped the photo from that set.
                     is eu.akoos.photos.presentation.common.UndoAction.Delete ->
-                        if (action.cloudLinkIds.any { it in observedLinkIds }) refresh()
+                        if (seenMembers.containsAny(action.cloudLinkIds)) refresh()
                     else -> Unit
                 }
             }
@@ -633,6 +656,7 @@ class AlbumDetailViewModel @Inject constructor(
         albumJob?.cancel()
         observeJob?.cancel()
         observedLinkIds = emptyList()
+        seenMembers.startAlbum(albumLinkId)
         _uiState.update { it.copy(
             isLoading = true, albumName = albumNameOnLoad(it.albumLinkId, it.albumName, albumLinkId, albumName),
             albumLinkId = albumLinkId,
@@ -649,6 +673,7 @@ class AlbumDetailViewModel @Inject constructor(
             }
             // Phase 1: instant cache read so re-opening feels free. Pre-migration rows (parentLinkId == null) miss here.
             val cached = runCatching { driveRepo.loadAlbumPhotosCached(albumLinkId) }.getOrNull().orEmpty()
+            seenMembers.add(cached.map { it.linkId })
             if (cached.isNotEmpty()) {
                 // Drop individually-hidden members from the instant cache read too: without this a
                 // hidden cloud photo flashes back into the album until the reactive observe re-filters.
@@ -754,6 +779,7 @@ class AlbumDetailViewModel @Inject constructor(
     private fun startPhotoObserve(linkIds: List<String>) {
         observeJob?.cancel()
         observedLinkIds = linkIds
+        seenMembers.add(linkIds)
         observeJob = viewModelScope.launch {
             // A large album's full-row read can land mid-chunk-upsert (the album load upserts photos
             // in batches while this observe is live) and throw a transient CursorWindow error, so

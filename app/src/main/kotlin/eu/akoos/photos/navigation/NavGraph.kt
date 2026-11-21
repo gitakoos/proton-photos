@@ -2411,7 +2411,7 @@ private fun UndoSnackbarHost(
     // A destination change consumes the pending action so a stale bar cannot reappear on another
     // screen when the user comes back.
     DisposableEffect(navController) {
-        val listener = NavController.OnDestinationChangedListener { _, _, _ -> undoBarViewModel.dismiss() }
+        val listener = NavController.OnDestinationChangedListener { _, _, _ -> undoBarViewModel.onNavigated() }
         navController.addOnDestinationChangedListener(listener)
         onDispose { navController.removeOnDestinationChangedListener(listener) }
     }

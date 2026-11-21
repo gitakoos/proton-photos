@@ -1304,7 +1304,10 @@ fun PhotoViewerScreen(
                 when {
                     // Nothing left to look at, and the photo that was on screen is the one just
                     // deleted, so there is nowhere to send the grid back to.
-                    removed != null && items.size <= 1 -> onBack(null)
+                    removed != null && items.size <= 1 -> {
+                        viewModel.keepUndoThroughClose()
+                        onBack(null)
+                    }
                     removed != null -> {
                         // Cached full-res images are keyed by page index, and every index past the
                         // deleted one is about to shift down, so a stale entry would paint the
@@ -1360,6 +1363,7 @@ fun PhotoViewerScreen(
             if (currentItems.size <= 1) {
                 // Nothing left to look at, and the photo on screen is the one just taken out, so
                 // there is nowhere to send the grid back to.
+                viewModel.keepUndoThroughClose()
                 onBack(null)
             } else {
                 // Cached full-res images are keyed by page index, and every index past the removed

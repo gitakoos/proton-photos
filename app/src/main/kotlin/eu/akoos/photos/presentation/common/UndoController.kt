@@ -98,14 +98,30 @@ class UndoController @Inject constructor(
      *  told; without it a photo stays hidden while the screen reads as restored. */
     val undoFailed: SharedFlow<Int> = _undoFailed.asSharedFlow()
 
+    private var keepThroughNextNavigation = false
+
     /** Offer a fresh undoable action. Replaces any earlier pending one (only the latest is undoable). */
     fun offer(action: UndoAction) {
+        keepThroughNextNavigation = false
         _pending.value = action
     }
 
     /** Drop the pending action without restoring (snackbar timed out, dismissed, or navigated away). */
     fun dismiss() {
+        keepThroughNextNavigation = false
         _pending.value = null
+    }
+
+    /** The screen that offered the pending action is closing because of it (the viewer's last photo was
+     *  deleted), so the navigation that follows must not take the bar away. */
+    fun keepThroughScreenClose() {
+        if (_pending.value != null) keepThroughNextNavigation = true
+    }
+
+    /** A destination change: the pending action stays only when [keepThroughScreenClose] asked for it,
+     *  and then for that one change. */
+    fun onNavigated() {
+        if (keepThroughNextNavigation) keepThroughNextNavigation = false else dismiss()
     }
 
     /** Reverse the pending action on the controller's own scope. No-op when nothing is pending. */
@@ -291,4 +307,5 @@ class UndoBarViewModel @Inject constructor(
     val undoFailed: SharedFlow<Int> = undoController.undoFailed
     fun undo() = undoController.undo()
     fun dismiss() = undoController.dismiss()
+    fun onNavigated() = undoController.onNavigated()
 }
