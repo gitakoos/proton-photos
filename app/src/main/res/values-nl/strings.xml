@@ -2921,7 +2921,7 @@
     <string name="whats_new_260_highlights_title">Schuifregelaar Hooglichten</string>
     <string name="whats_new_260_highlights_body">De schuifregelaar Hooglichten naar rechts maakt de lichte delen van de foto lichter in plaats van de foto donkerder.</string>
     <string name="whats_new_260_viewerdelete_title">Verwijderen wordt afgemaakt</string>
-    <string name="whats_new_260_viewerdelete_body">Een verwijdering die in de viewer is gestart, wordt afgemaakt, ook als je de viewer meteen sluit.</string>
+    <string name="whats_new_260_viewerdelete_body">Een verwijdering die in de viewer is gestart, wordt afgemaakt, ook als je de viewer meteen sluit. Verwijder je de laatste foto in de viewer, dan blijft de balk Ongedaan maken staan op het scherm waar je naar teruggaat.</string>
     <string name="whats_new_260_widgetupright_title">Rechtopstaande foto\'s in de widget</string>
     <string name="whats_new_260_widgetupright_body">De widget op het startscherm toont foto\'s van de telefoon rechtop in plaats van op hun zij.</string>
     <string name="whats_new_260_albumnames_title">Albumnamen op twee regels</string>
@@ -2936,6 +2936,10 @@
     <string name="whats_new_260_anyzip_body">Importeren leest ook een zip van Dropbox, en het importscherm noemt elke zip of map met foto\'s, niet alleen Google Takeout en Ente.</string>
     <string name="whats_new_260_importalbums_title">Imports maken albums</string>
     <string name="whats_new_260_importalbums_body">Het importoverzicht begint bij Foto\'s in albums, dus een import maakt albums van zijn mappen, tenzij je Alleen foto\'s kiest.</string>
+    <string name="whats_new_260_sentcopy_title">Geen overgebleven kopieën</string>
+    <string name="whats_new_260_sentcopy_body">Als Comprimeren op Drive of een datum- of locatiewijziging het opgeeft, gaat de al geüploade kopie naar de prullenbak van Drive in plaats van naast het origineel te blijven staan. Afmelden doet hetzelfde met datum- en locatiewijzigingen die nog niet klaar zijn.</string>
+    <string name="whats_new_260_signoutfail_title">Mislukt afmelden</string>
+    <string name="whats_new_260_signoutfail_body">Als afmelden niet kan worden afgerond, blijft de app aangemeld, start hij de back-ups opnieuw en meldt hij dat, zodat je het opnieuw kunt proberen.</string>
     <string name="whats_new_260_compressnote_title">Opmerking over comprimeren en ruimte vrijmaken</string>
     <string name="whats_new_260_compressnote_body">Staat comprimeren bij uploaden aan, dan zeggen de Instellingen dat in Drive alleen de gecomprimeerde kopie overblijft zodra het origineel van de telefoon gaat door ruimte vrij te maken of na de back-up te verwijderen.</string>
     <string name="whats_new_260_mirrorcheck_title">Originelen pas vervangen na een controle</string>

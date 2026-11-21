@@ -2814,7 +2814,7 @@
     <string name="whats_new_260_highlights_title">Açık tonlar kaydırıcısı</string>
     <string name="whats_new_260_highlights_body">Açık tonlar kaydırıcısını sağa çekmek fotoğrafı karartmak yerine açık kısımlarını aydınlatır.</string>
     <string name="whats_new_260_viewerdelete_title">Silme işlemi tamamlanır</string>
-    <string name="whats_new_260_viewerdelete_body">Görüntüleyicide başlatılan bir silme, görüntüleyiciyi hemen kapatsanız bile tamamlanır.</string>
+    <string name="whats_new_260_viewerdelete_body">Görüntüleyicide başlatılan bir silme, görüntüleyiciyi hemen kapatsanız bile tamamlanır. Görüntüleyicideki son fotoğrafı sildiğinizde Geri al çubuğu döndüğünüz ekranda kalır.</string>
     <string name="whats_new_260_widgetupright_title">Widget\'ta dik fotoğraflar</string>
     <string name="whats_new_260_widgetupright_body">Ana ekran widget\'ı telefondaki fotoğrafları yan değil dik gösterir.</string>
     <string name="whats_new_260_albumnames_title">İki satırda albüm adları</string>
@@ -2829,6 +2829,10 @@
     <string name="whats_new_260_anyzip_body">İçe aktarma Dropbox\'tan gelen bir zip\'i de okur ve içe aktarma ekranı yalnızca Google Takeout ile Ente\'yi değil, herhangi bir zip\'i veya fotoğraf klasörünü adlandırır.</string>
     <string name="whats_new_260_importalbums_title">İçe aktarma albüm oluşturur</string>
     <string name="whats_new_260_importalbums_body">İçe aktarma incelemesi Fotoğraflar albümlerde ile başlar; böylece Yalnızca fotoğraflar\'ı seçmedikçe içe aktarma klasörlerinden albümler oluşturur.</string>
+    <string name="whats_new_260_sentcopy_title">Artık fazla kopya yok</string>
+    <string name="whats_new_260_sentcopy_body">Drive\'da sıkıştır veya bir tarih ya da konum değişikliği vazgeçtiğinde, önceden yüklenen kopya orijinalin yanında kalmak yerine Drive çöp kutusuna gider. Oturumu kapatmak, bitmemiş tarih ve konum değişikliklerinde de aynısını yapar.</string>
+    <string name="whats_new_260_signoutfail_title">Başarısız oturum kapatma</string>
+    <string name="whats_new_260_signoutfail_body">Oturum kapatma tamamlanamazsa uygulama oturumu açık tutar, yedeklemeleri yeniden başlatır ve bunu size söyler; böylece yeniden deneyebilirsiniz.</string>
     <string name="whats_new_260_compressnote_title">Sıkıştırma ve yer açma notu</string>
     <string name="whats_new_260_compressnote_body">Yüklemede sıkıştırma açıksa Ayarlar, orijinal yer açarak ya da yedeklemeden sonra silerek telefondan kalktığında Drive\'da yalnızca sıkıştırılmış kopyanın kalacağını söyler.</string>
     <string name="whats_new_260_mirrorcheck_title">Orijinaller ancak bir denetimden sonra değişir</string>

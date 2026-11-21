@@ -3034,7 +3034,7 @@
     <string name="whats_new_260_highlights_title">Drsnik Svetli toni</string>
     <string name="whats_new_260_highlights_body">Premik drsnika Svetli toni v desno posvetli svetle dele fotografije, namesto da bi jo potemnil.</string>
     <string name="whats_new_260_viewerdelete_title">Brisanje se dokonča</string>
-    <string name="whats_new_260_viewerdelete_body">Brisanje, začeto v pregledovalniku, se dokonča, tudi če pregledovalnik takoj zaprete.</string>
+    <string name="whats_new_260_viewerdelete_body">Brisanje, začeto v pregledovalniku, se dokonča, tudi če pregledovalnik takoj zaprete. Ko v pregledovalniku izbrišete zadnjo fotografijo, ostane vrstica Razveljavi na zaslonu, na katerega se vrnete.</string>
     <string name="whats_new_260_widgetupright_title">Pokončne fotografije v pripomočku</string>
     <string name="whats_new_260_widgetupright_body">Pripomoček na začetnem zaslonu prikazuje fotografije iz telefona pokončno namesto postrani.</string>
     <string name="whats_new_260_albumnames_title">Imena albumov v dveh vrsticah</string>
@@ -3049,6 +3049,10 @@
     <string name="whats_new_260_anyzip_body">Uvoz prebere tudi datoteko zip iz Dropboxa, zaslon za uvoz pa navaja katero koli datoteko zip ali mapo fotografij, ne le Google Takeout in Ente.</string>
     <string name="whats_new_260_importalbums_title">Uvoz ustvari albume</string>
     <string name="whats_new_260_importalbums_body">Pregled uvoza se začne z možnostjo Fotografije v albumih, zato uvoz iz svojih map ustvari albume, razen če izberete Samo fotografije.</string>
+    <string name="whats_new_260_sentcopy_title">Brez odvečnih kopij</string>
+    <string name="whats_new_260_sentcopy_body">Ko Stisni na Drive ali sprememba datuma ali lokacije odneha, gre že naložena kopija v koš na Drive, namesto da bi ostala ob izvirniku. Odjava naredi enako z nedokončanimi spremembami datuma in lokacije.</string>
+    <string name="whats_new_260_signoutfail_title">Neuspela odjava</string>
+    <string name="whats_new_260_signoutfail_body">Če se odjava ne more dokončati, aplikacija ostane prijavljena, znova zažene varnostne kopije in vas o tem obvesti, da lahko poskusite znova.</string>
     <string name="whats_new_260_compressnote_title">Opomba o stiskanju in sproščanju prostora</string>
     <string name="whats_new_260_compressnote_body">Ko je stiskanje ob nalaganju vklopljeno, Nastavitve povedo, da v Drive ostane samo stisnjena kopija, ko izvirnik zapusti telefon s sproščanjem prostora ali brisanjem po varnostnem kopiranju.</string>
     <string name="whats_new_260_mirrorcheck_title">Izvirniki zamenjani šele po preverjanju</string>

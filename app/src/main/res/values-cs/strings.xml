@@ -3040,7 +3040,7 @@
     <string name="whats_new_260_highlights_title">Posuvník Světla</string>
     <string name="whats_new_260_highlights_body">Posun posuvníku Světla doprava zesvětlí světlé části fotky, místo aby fotku ztmavil.</string>
     <string name="whats_new_260_viewerdelete_title">Mazání se dokončí</string>
-    <string name="whats_new_260_viewerdelete_body">Mazání spuštěné v prohlížeči se dokončí, i když prohlížeč hned zavřete.</string>
+    <string name="whats_new_260_viewerdelete_body">Mazání spuštěné v prohlížeči se dokončí, i když prohlížeč hned zavřete. Po smazání poslední fotky v prohlížeči zůstane lišta Zpět na obrazovce, na kterou se vrátíte.</string>
     <string name="whats_new_260_widgetupright_title">Fotky ve widgetu na výšku</string>
     <string name="whats_new_260_widgetupright_body">Widget na domovské obrazovce ukazuje fotky z telefonu správně natočené, ne bokem.</string>
     <string name="whats_new_260_albumnames_title">Názvy alb na dva řádky</string>
@@ -3055,6 +3055,10 @@
     <string name="whats_new_260_anyzip_body">Import načte i zip z Dropboxu a obrazovka importu jmenuje jakýkoli zip nebo složku fotek, nejen Google Takeout a Ente.</string>
     <string name="whats_new_260_importalbums_title">Import vytváří alba</string>
     <string name="whats_new_260_importalbums_body">Přehled importu začíná volbou Fotky v albech, takže import vytvoří alba ze svých složek, pokud nezvolíte Pouze fotky.</string>
+    <string name="whats_new_260_sentcopy_title">Žádné zbylé kopie</string>
+    <string name="whats_new_260_sentcopy_body">Když Komprimovat na Drive nebo změna data či polohy skončí neúspěchem, už nahraná kopie se přesune do koše na Drive a nezůstane vedle originálu. Odhlášení udělá totéž s nedokončenými změnami data a polohy.</string>
+    <string name="whats_new_260_signoutfail_title">Nezdařené odhlášení</string>
+    <string name="whats_new_260_signoutfail_body">Když se odhlášení nedokončí, aplikace zůstane přihlášená, znovu spustí zálohování a oznámí to, takže to můžete zkusit znovu.</string>
     <string name="whats_new_260_compressnote_title">Poznámka ke kompresi a uvolnění místa</string>
     <string name="whats_new_260_compressnote_body">Se zapnutou kompresí při nahrávání Nastavení uvádí, že jakmile originál zmizí z telefonu uvolněním místa nebo smazáním po záloze, zůstane na Drive jen komprimovaná kopie.</string>
     <string name="whats_new_260_mirrorcheck_title">Originály se nahrazují až po kontrole</string>

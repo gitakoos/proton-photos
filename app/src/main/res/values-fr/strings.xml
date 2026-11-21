@@ -2899,7 +2899,7 @@
     <string name="whats_new_260_highlights_title">Curseur Hautes lumières</string>
     <string name="whats_new_260_highlights_body">Déplacer le curseur Hautes lumières vers la droite éclaircit les parties claires de la photo au lieu de l\'assombrir.</string>
     <string name="whats_new_260_viewerdelete_title">Les suppressions vont au bout</string>
-    <string name="whats_new_260_viewerdelete_body">Une suppression lancée dans la visionneuse va jusqu\'au bout même si vous fermez la visionneuse aussitôt.</string>
+    <string name="whats_new_260_viewerdelete_body">Une suppression lancée dans la visionneuse va jusqu\'au bout même si vous fermez la visionneuse aussitôt. Après la suppression de la dernière photo dans la visionneuse, la barre Annuler reste sur l\'écran où vous revenez.</string>
     <string name="whats_new_260_widgetupright_title">Photos droites dans le widget</string>
     <string name="whats_new_260_widgetupright_body">Le widget de l\'écran d\'accueil affiche les photos du téléphone à l\'endroit au lieu de les afficher de côté.</string>
     <string name="whats_new_260_albumnames_title">Noms d\'albums sur deux lignes</string>
@@ -2914,6 +2914,10 @@
     <string name="whats_new_260_anyzip_body">L\'import lit aussi un zip de Dropbox, et l\'écran d\'import nomme n\'importe quel zip ou dossier de photos, pas seulement Google Takeout et Ente.</string>
     <string name="whats_new_260_importalbums_title">Les imports créent des albums</string>
     <string name="whats_new_260_importalbums_body">La revue de l\'import commence sur Photos dans les albums, donc un import crée des albums à partir de ses dossiers, sauf si vous choisissez Photos uniquement.</string>
+    <string name="whats_new_260_sentcopy_title">Plus de copies en trop</string>
+    <string name="whats_new_260_sentcopy_body">Quand Compresser sur Drive ou un changement de date ou de lieu abandonne, la copie déjà envoyée va dans la corbeille de Drive au lieu de rester à côté de l\'original. La déconnexion fait de même pour les changements de date et de lieu non terminés.</string>
+    <string name="whats_new_260_signoutfail_title">Déconnexion échouée</string>
+    <string name="whats_new_260_signoutfail_body">Si une déconnexion ne peut pas aller au bout, l\'app reste connectée, relance ses sauvegardes et vous le dit, pour que vous puissiez réessayer.</string>
     <string name="whats_new_260_compressnote_title">Note sur la compression et la libération d\'espace</string>
     <string name="whats_new_260_compressnote_body">Si la compression à l\'envoi est activée, les réglages indiquent que Drive ne garde que la copie compressée une fois l\'original retiré du téléphone en libérant de l\'espace ou en le supprimant après la sauvegarde.</string>
     <string name="whats_new_260_mirrorcheck_title">Originaux remplacés seulement après vérification</string>

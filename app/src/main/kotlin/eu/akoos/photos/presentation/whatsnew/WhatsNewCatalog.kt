@@ -401,6 +401,8 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Sync, R.string.whats_new_260_emptyfile_title, R.string.whats_new_260_emptyfile_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_260_anyzip_title, R.string.whats_new_260_anyzip_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_importalbums_title, R.string.whats_new_260_importalbums_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_260_sentcopy_title, R.string.whats_new_260_sentcopy_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_260_signoutfail_title, R.string.whats_new_260_signoutfail_body, WhatsNewCategory.Improved),
         ),
     ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone

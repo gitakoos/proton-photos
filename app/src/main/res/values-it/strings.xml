@@ -2939,7 +2939,7 @@
     <string name="whats_new_260_highlights_title">Cursore Alte luci</string>
     <string name="whats_new_260_highlights_body">Spostare il cursore Alte luci verso destra schiarisce le parti chiare della foto invece di scurirla.</string>
     <string name="whats_new_260_viewerdelete_title">Le eliminazioni si completano</string>
-    <string name="whats_new_260_viewerdelete_body">Un\'eliminazione avviata nel visualizzatore si completa anche se chiudi subito il visualizzatore.</string>
+    <string name="whats_new_260_viewerdelete_body">Un\'eliminazione avviata nel visualizzatore si completa anche se chiudi subito il visualizzatore. Se elimini l\'ultima foto nel visualizzatore, la barra Annulla resta sulla schermata a cui torni.</string>
     <string name="whats_new_260_widgetupright_title">Foto dritte nel widget</string>
     <string name="whats_new_260_widgetupright_body">Il widget della schermata Home mostra le foto del telefono dritte invece che di lato.</string>
     <string name="whats_new_260_albumnames_title">Nomi degli album su due righe</string>
@@ -2954,6 +2954,10 @@
     <string name="whats_new_260_anyzip_body">L\'importazione legge anche uno zip di Dropbox, e la schermata di importazione nomina qualsiasi zip o cartella di foto, non solo Google Takeout ed Ente.</string>
     <string name="whats_new_260_importalbums_title">Le importazioni creano album</string>
     <string name="whats_new_260_importalbums_body">La revisione dell\'importazione parte da Foto negli album, quindi un\'importazione crea album dalle sue cartelle a meno che tu non scelga Solo foto.</string>
+    <string name="whats_new_260_sentcopy_title">Nessuna copia in più</string>
+    <string name="whats_new_260_sentcopy_body">Quando Comprimi su Drive o una modifica di data o posizione rinuncia, la copia già caricata va nel cestino di Drive invece di restare accanto all\'originale. All\'uscita succede lo stesso con le modifiche di data e posizione non finite.</string>
+    <string name="whats_new_260_signoutfail_title">Uscita non riuscita</string>
+    <string name="whats_new_260_signoutfail_body">Se un\'uscita non può terminare, l\'app resta connessa, riavvia i backup e te lo dice, così puoi riprovare.</string>
     <string name="whats_new_260_compressnote_title">Nota su compressione e spazio liberato</string>
     <string name="whats_new_260_compressnote_body">Con la compressione al caricamento attiva, le Impostazioni indicano che su Drive resta solo la copia compressa quando l\'originale lascia il telefono liberando spazio o eliminandolo dopo il backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originali sostituiti solo dopo un controllo</string>

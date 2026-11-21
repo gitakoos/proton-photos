@@ -3034,7 +3034,7 @@
     <string name="whats_new_260_highlights_title">Suwak Światła</string>
     <string name="whats_new_260_highlights_body">Przesunięcie suwaka Światła w prawo rozjaśnia jasne części zdjęcia zamiast je przyciemniać.</string>
     <string name="whats_new_260_viewerdelete_title">Usuwanie się kończy</string>
-    <string name="whats_new_260_viewerdelete_body">Usuwanie rozpoczęte w przeglądarce kończy się, nawet jeśli od razu ją zamkniesz.</string>
+    <string name="whats_new_260_viewerdelete_body">Usuwanie rozpoczęte w przeglądarce kończy się, nawet jeśli od razu ją zamkniesz. Po usunięciu ostatniego zdjęcia w przeglądarce pasek Cofnij zostaje na ekranie, do którego wracasz.</string>
     <string name="whats_new_260_widgetupright_title">Zdjęcia w widżecie w pionie</string>
     <string name="whats_new_260_widgetupright_body">Widżet na ekranie głównym pokazuje zdjęcia z telefonu prawidłowo obrócone, a nie bokiem.</string>
     <string name="whats_new_260_albumnames_title">Nazwy albumów w dwóch wierszach</string>
@@ -3049,6 +3049,10 @@
     <string name="whats_new_260_anyzip_body">Import odczytuje także plik zip z Dropboxa, a ekran importu wymienia dowolny plik zip lub folder zdjęć, nie tylko Google Takeout i Ente.</string>
     <string name="whats_new_260_importalbums_title">Import tworzy albumy</string>
     <string name="whats_new_260_importalbums_body">Przegląd importu zaczyna się od opcji Zdjęcia w albumach, więc import tworzy albumy ze swoich folderów, chyba że wybierzesz Tylko zdjęcia.</string>
+    <string name="whats_new_260_sentcopy_title">Bez zbędnych kopii</string>
+    <string name="whats_new_260_sentcopy_body">Gdy Kompresuj na Drive albo zmiana daty lub lokalizacji się poddaje, już wysłana kopia trafia do kosza na Drive zamiast zostać obok oryginału. Wylogowanie robi to samo z niedokończonymi zmianami daty i lokalizacji.</string>
+    <string name="whats_new_260_signoutfail_title">Nieudane wylogowanie</string>
+    <string name="whats_new_260_signoutfail_body">Gdy wylogowanie nie może się zakończyć, aplikacja zostaje zalogowana, ponownie uruchamia kopie zapasowe i o tym informuje, więc możesz spróbować jeszcze raz.</string>
     <string name="whats_new_260_compressnote_title">Uwaga o kompresji i zwalnianiu miejsca</string>
     <string name="whats_new_260_compressnote_body">Przy włączonej kompresji wysyłanych plików Ustawienia informują, że w Drive zostaje tylko skompresowana kopia, gdy oryginał zniknie z telefonu przez zwolnienie miejsca lub usunięcie po kopii.</string>
     <string name="whats_new_260_mirrorcheck_title">Oryginały zastępowane dopiero po sprawdzeniu</string>

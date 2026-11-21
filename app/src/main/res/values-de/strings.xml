@@ -2897,7 +2897,7 @@
     <string name="whats_new_260_highlights_title">Lichter-Regler</string>
     <string name="whats_new_260_highlights_body">Der Lichter-Regler nach rechts hellt die hellen Bereiche des Fotos auf, statt das Foto abzudunkeln.</string>
     <string name="whats_new_260_viewerdelete_title">Löschen wird beendet</string>
-    <string name="whats_new_260_viewerdelete_body">Ein im Betrachter gestartetes Löschen wird beendet, auch wenn du den Betrachter sofort schließt.</string>
+    <string name="whats_new_260_viewerdelete_body">Ein im Betrachter gestartetes Löschen wird beendet, auch wenn du den Betrachter sofort schließt. Löschst du das letzte Foto im Betrachter, bleibt die Leiste Rückgängig auf dem Bildschirm, zu dem du zurückkehrst.</string>
     <string name="whats_new_260_widgetupright_title">Aufrechte Fotos im Widget</string>
     <string name="whats_new_260_widgetupright_body">Das Startbildschirm-Widget zeigt Fotos vom Telefon aufrecht statt seitlich.</string>
     <string name="whats_new_260_albumnames_title">Albumnamen in zwei Zeilen</string>
@@ -2912,6 +2912,10 @@
     <string name="whats_new_260_anyzip_body">Der Import liest auch eine Zip-Datei von Dropbox, und der Importbildschirm nennt jede Zip-Datei oder jeden Fotoordner, nicht nur Google Takeout und Ente.</string>
     <string name="whats_new_260_importalbums_title">Importe legen Alben an</string>
     <string name="whats_new_260_importalbums_body">Die Importübersicht beginnt mit Fotos in Alben, sodass ein Import aus seinen Ordnern Alben anlegt, außer du wählst Nur Fotos.</string>
+    <string name="whats_new_260_sentcopy_title">Keine übrigen Kopien</string>
+    <string name="whats_new_260_sentcopy_body">Gibt Auf Drive komprimieren oder eine Datums- oder Ortsänderung auf, kommt die bereits hochgeladene Kopie in den Drive-Papierkorb, statt neben dem Original zu bleiben. Beim Abmelden passiert dasselbe mit nicht beendeten Datums- und Ortsänderungen.</string>
+    <string name="whats_new_260_signoutfail_title">Fehlgeschlagenes Abmelden</string>
+    <string name="whats_new_260_signoutfail_body">Kann ein Abmelden nicht abgeschlossen werden, bleibt die App angemeldet, startet ihre Sicherungen wieder und sagt es dir, damit du es noch einmal versuchen kannst.</string>
     <string name="whats_new_260_compressnote_title">Hinweis zu Komprimierung und Freigeben</string>
     <string name="whats_new_260_compressnote_body">Ist die Komprimierung beim Hochladen an, sagen die Einstellungen, dass in Drive nur die komprimierte Kopie bleibt, sobald das Original durch Speicher freigeben oder Löschen nach der Sicherung vom Telefon entfernt wird.</string>
     <string name="whats_new_260_mirrorcheck_title">Originale erst nach einer Prüfung ersetzt</string>

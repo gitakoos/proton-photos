@@ -2934,7 +2934,7 @@
     <string name="whats_new_260_highlights_title">Highlights slider</string>
     <string name="whats_new_260_highlights_body">Moving the Highlights slider to the right brightens the bright parts of the photo instead of darkening it.</string>
     <string name="whats_new_260_viewerdelete_title">Deletes finish</string>
-    <string name="whats_new_260_viewerdelete_body">A delete started in the viewer finishes even if you close the viewer right away.</string>
+    <string name="whats_new_260_viewerdelete_body">A delete started in the viewer finishes even if you close the viewer right away. Deleting the last photo in the viewer keeps the Undo bar on the screen you return to.</string>
     <string name="whats_new_260_widgetupright_title">Upright widget photos</string>
     <string name="whats_new_260_widgetupright_body">The home screen widget shows phone photos upright instead of sideways.</string>
     <string name="whats_new_260_albumnames_title">Album names on two lines</string>
@@ -2949,6 +2949,10 @@
     <string name="whats_new_260_anyzip_body">Import reads a zip from Dropbox too, and the import screen names any zip or folder of photos, not only Google Takeout and Ente.</string>
     <string name="whats_new_260_importalbums_title">Imports make albums</string>
     <string name="whats_new_260_importalbums_body">The import review starts on Photos in albums, so an import makes albums from its folders unless you pick Photos only.</string>
+    <string name="whats_new_260_sentcopy_title">No leftover copies</string>
+    <string name="whats_new_260_sentcopy_body">When Compress on Drive or a date or location change gives up, the copy it already uploaded goes to the Drive trash instead of staying next to the original. Signing out does the same for date and location changes that have not finished.</string>
+    <string name="whats_new_260_signoutfail_title">Failed sign-out</string>
+    <string name="whats_new_260_signoutfail_body">If a sign-out cannot finish, the app stays signed in, starts its backups again and says so, so you can try again.</string>
     <string name="whats_new_260_compressnote_title">Compression and free-up note</string>
     <string name="whats_new_260_compressnote_body">With upload compression on, Settings says that only the compressed copy is left in Drive once the original leaves the phone by freeing up space or deleting after backup.</string>
     <string name="whats_new_260_mirrorcheck_title">Originals replaced only after a check</string>
