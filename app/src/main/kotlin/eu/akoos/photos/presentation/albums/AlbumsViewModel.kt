@@ -547,6 +547,7 @@ class AlbumsViewModel @Inject constructor(
             _uiState.update { it.copy(error = null) }
             // Phase 1: instant cache read so the grid paints on cold/airplane-mode launch.
             val cached = runCatching { driveRepo.loadAlbumsCached() }.getOrNull().orEmpty()
+            ensureActive()
             if (cached.isNotEmpty()) {
                 _uiState.update { it.copy(isLoading = false, albums = applySort(cached)) }
             }
@@ -561,6 +562,7 @@ class AlbumsViewModel @Inject constructor(
             // left sitting in the add-to-album picker. A failure inside the read also surfaces as
             // empty and briefly clears the picker, which the next successful read restores.
             val sharedAddable = runCatching { driveRepo.loadSharedAddableAlbumsCached() }.getOrDefault(emptyList())
+            ensureActive()
             _uiState.update { it.copy(sharedAddableAlbums = sharedAddable) }
 
             // Phase 2: network refresh, online only — else keep the painted cache.
@@ -589,7 +591,6 @@ class AlbumsViewModel @Inject constructor(
                     }
                 },
                 onFailure = { e ->
-                    if (e is kotlinx.coroutines.CancellationException) throw e
                     ensureActive()
                     val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                     _uiState.update {
