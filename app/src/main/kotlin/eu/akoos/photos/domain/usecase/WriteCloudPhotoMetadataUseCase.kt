@@ -138,8 +138,14 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
 
         /** [transient] marks a failure a retry could plausibly clear (network blip, 429/5xx) so the
          *  caller can hold the edit for another attempt rather than discard it. False by default: a
-         *  failure not built from a classified network error stays permanent. */
-        data class Failed(val reason: String, val transient: Boolean = false) : Result
+         *  failure not built from a classified network error stays permanent. [copyLinkId] and
+         *  [carriedOver] are as in [CloudPhotoReplacement.Result.Failed]. */
+        data class Failed(
+            val reason: String,
+            val transient: Boolean = false,
+            val copyLinkId: String? = null,
+            val carriedOver: Boolean = false,
+        ) : Result
     }
 
     suspend operator fun invoke(
@@ -197,7 +203,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
         when (val r = replacement.replace(userId, photo, prepare, onPhase, resumeUploadedLinkId, onUploaded)) {
             is CloudPhotoReplacement.Result.Success -> Result.Success
             CloudPhotoReplacement.Result.Skipped -> Result.NothingToDo
-            is CloudPhotoReplacement.Result.Failed -> Result.Failed(r.reason, r.transient)
+            is CloudPhotoReplacement.Result.Failed -> Result.Failed(r.reason, r.transient, r.copyLinkId, r.carriedOver)
         }
     }
 }

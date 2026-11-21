@@ -66,6 +66,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.CloudSavePhase
 import eu.akoos.photos.domain.usecase.WriteCloudPhotoMetadataUseCase
 import eu.akoos.photos.domain.usecase.WriteSyncedPhotoMetadataUseCase
+import me.proton.core.domain.entity.UserId
 
 /** What the drain should do with a row whose use case reported a failure. */
 enum class MetadataDrainDecision { DELETE_PERMANENT, KEEP_AND_RETRY, GIVE_UP_AFTER_MAX }
@@ -92,7 +93,7 @@ internal fun metadataDrainDecision(
 private sealed interface RowResult {
     data object Updated : RowResult
     data object Nothing : RowResult
-    data class Failed(val transient: Boolean) : RowResult
+    data class Failed(val transient: Boolean, val copyLinkId: String? = null, val carriedOver: Boolean = false) : RowResult
 }
 
 /**
@@ -243,7 +244,7 @@ class MetadataEditWorker @AssistedInject constructor(
                 ) {
                     WriteSyncedPhotoMetadataUseCase.Result.Success -> RowResult.Updated
                     WriteSyncedPhotoMetadataUseCase.Result.NothingToDo -> RowResult.Nothing
-                    is WriteSyncedPhotoMetadataUseCase.Result.Failed -> RowResult.Failed(r.transient)
+                    is WriteSyncedPhotoMetadataUseCase.Result.Failed -> RowResult.Failed(r.transient, r.copyLinkId)
                 }
             } else {
                 when (
@@ -256,7 +257,7 @@ class MetadataEditWorker @AssistedInject constructor(
                 ) {
                     WriteCloudPhotoMetadataUseCase.Result.Success -> RowResult.Updated
                     WriteCloudPhotoMetadataUseCase.Result.NothingToDo -> RowResult.Nothing
-                    is WriteCloudPhotoMetadataUseCase.Result.Failed -> RowResult.Failed(r.transient)
+                    is WriteCloudPhotoMetadataUseCase.Result.Failed -> RowResult.Failed(r.transient, r.copyLinkId, r.carriedOver)
                 }
             }
 
@@ -276,6 +277,12 @@ class MetadataEditWorker @AssistedInject constructor(
                     MetadataDrainDecision.DELETE_PERMANENT,
                     MetadataDrainDecision.GIVE_UP_AFTER_MAX -> {
                         failed.incrementAndGet()
+                        // Given up: the corrected copy already sent goes to the trash, so no second copy
+                        // stays beside the original.
+                        copyToTrashOnDrop(result.copyLinkId, result.carriedOver)?.let { copy ->
+                            runCatching { driveRepo.deleteFiles(UserId(row.userId), listOf(copy)) }
+                                .onFailure { Log.w(TAG, "trash of the dropped copy $copy failed: ${it.message}") }
+                        }
                         true
                     }
                     MetadataDrainDecision.KEEP_AND_RETRY -> {

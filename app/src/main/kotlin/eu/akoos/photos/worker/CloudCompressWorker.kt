@@ -156,12 +156,24 @@ class CloudCompressWorker @AssistedInject constructor(
             dao.markTried(row.linkId, runId, if (failedTry) row.attempts + 1 else row.attempts)
         }
 
+        /** Given up on [row]: a copy it sent that nothing moved to yet goes to the trash, so the photo is left
+         *  with its original alone and no second copy stays beside it. */
+        suspend fun dropWithCopy(row: PendingCloudCompressEntity, copyLinkId: String?, carriedOver: Boolean) {
+            val copy = copyToTrashOnDrop(copyLinkId, carriedOver)
+            if (copy != null) {
+                runCatching { driveRepo.deleteFiles(UserId(row.userId), listOf(copy)) }
+                    .onFailure { Log.w(TAG, "rollback of copy $copy failed: ${it.message}") }
+            }
+            dao.delete(row.linkId)
+        }
+
         suspend fun compressClaimed(row: PendingCloudCompressEntity) {
             val photo = driveRepo.observePhotosByLinkIds(listOf(row.linkId)).first().firstOrNull()
             if (photo == null) {
                 // Trashed or deleted elsewhere, another account's, or already replaced by a run stopped just
-                // before it dropped the row: nothing left to compress.
-                dao.delete(row.linkId)
+                // before it dropped the row: nothing left to compress. A copy that holds the photo's labels
+                // and faces is that replacement and stays.
+                dropWithCopy(row, row.newLinkId, row.carriedOver)
                 skipped.incrementAndGet()
                 advance()
                 return
@@ -197,16 +209,14 @@ class CloudCompressWorker @AssistedInject constructor(
                     when (action) {
                         CompressFailureAction.KEEP -> keep(row, failedTry = true)
                         CompressFailureAction.ROLL_BACK_AND_DROP, CompressFailureAction.DROP -> {
-                            // Given up. A copy on Drive that nothing moved to yet goes to the trash, so the
-                            // photo is back to just its original; one that holds the original's labels and
-                            // faces stays beside it, where nothing is lost.
-                            val copy = result.copyLinkId
-                            if (action == CompressFailureAction.ROLL_BACK_AND_DROP && copy != null) {
-                                runCatching { driveRepo.deleteFiles(UserId(row.userId), listOf(copy)) }
-                                    .onFailure { Log.w(TAG, "rollback of copy $copy failed: ${it.message}") }
-                            }
+                            // A copy that holds the original's labels and faces stays beside it, where
+                            // nothing is lost.
                             failed.incrementAndGet()
-                            dao.delete(row.linkId)
+                            dropWithCopy(
+                                row,
+                                result.copyLinkId.takeIf { action == CompressFailureAction.ROLL_BACK_AND_DROP },
+                                carriedOver = false,
+                            )
                         }
                     }
                 }
@@ -233,7 +243,7 @@ class CloudCompressWorker @AssistedInject constructor(
                     val stale = heldTooLong(row.enqueuedAt, System.currentTimeMillis())
                     if (stale && row.attempts + 1 >= MAX_PHOTO_ATTEMPTS) {
                         failed.incrementAndGet()
-                        dao.delete(row.linkId)
+                        dropWithCopy(row, row.newLinkId, row.carriedOver)
                     } else {
                         keep(row, failedTry = stale)
                     }
@@ -435,6 +445,11 @@ internal const val HELD_LIMIT_MS = 24 * 60 * 60 * 1000L
 
 /** Whether a compression queued at [enqueuedAt] has waited on another replacement of its photo for too long. */
 internal fun heldTooLong(enqueuedAt: Long, now: Long): Boolean = now - enqueuedAt > HELD_LIMIT_MS
+
+/** The copy a dropped compression sends to the trash: one already on Drive that nothing moved to yet. A
+ *  copy holding the original's labels and faces ([carriedOver]) has taken the photo's place and stays. Pure. */
+internal fun copyToTrashOnDrop(copyLinkId: String?, carriedOver: Boolean): String? =
+    copyLinkId?.takeUnless { carriedOver }
 
 /** What the drain does with a photo whose compression failed. */
 internal enum class CompressFailureAction { KEEP, ROLL_BACK_AND_DROP, DROP }

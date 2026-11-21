@@ -40,6 +40,7 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
+import eu.akoos.photos.data.db.entity.sentCopiesBesideOriginals
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.AlbumService
@@ -539,6 +540,15 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun acceptInvitation(userId: UserId, invitationId: String) =
         albumSharingService.acceptInvitation(userId, invitationId)
 
+    /** Sends the corrected copies of edits still queued, whose originals are still on Drive, to the trash. */
+    private suspend fun trashSentEditCopies(userId: UserId) {
+        val rows = pendingMetadataEditDao.getAll().filter { it.userId == userId.id && it.newLinkId != null }
+        if (rows.isEmpty()) return
+        val listed = rows.map { it.linkId }.flatMapSqlChunks { photoListingDao.listedLinkIds(userId.id, it) }.toSet()
+        val copies = sentCopiesBesideOriginals(rows, userId.id, listed)
+        if (copies.isNotEmpty()) deleteFiles(userId, copies)
+    }
+
     override suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe) {
         // FIRST, and awaited, on every sign-out route: an ML sync save or restore calls into this
         // account's Drive SDK client and writes its face data, both of which go below. Its client is
@@ -581,6 +591,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { driveFolderMemory.clearUser(userId.id) }
         // What the account queued and imported is free text and coordinates (descriptions, places, file
         // and album names) about a library the next person on this phone does not own.
+        runCatching { trashSentEditCopies(userId) }
         runCatching { pendingMetadataEditDao.clear() }
         runCatching { importStagedDao.deleteAll() }
         runCatching { importHistoryDao.deleteAll() }

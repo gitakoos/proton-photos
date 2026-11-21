@@ -77,8 +77,9 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
 
         /** [transient] marks a failure a retry could plausibly clear (network blip, 429/5xx) so the
          *  caller can hold the edit for another attempt rather than discard it. False by default: a
-         *  failure not built from a classified network error stays permanent. */
-        data class Failed(val reason: String, val transient: Boolean = false) : Result
+         *  failure not built from a classified network error stays permanent. [copyLinkId] is the
+         *  corrected copy already on Drive that the device file is not paired with, null when there is none. */
+        data class Failed(val reason: String, val transient: Boolean = false, val copyLinkId: String? = null) : Result
     }
 
     suspend operator fun invoke(
@@ -156,6 +157,8 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
                     transient = anyTransientAlbumMiss,
+                    // A run stopped after the re-pair left the device file on the copy, which must then stay.
+                    copyLinkId = resumeUploadedLinkId.takeIf { resumeExisting.cloudFileId != it },
                 )
             }
 
@@ -337,6 +340,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
                     transient = anyTransientAlbumMiss,
+                    copyLinkId = newLinkId,
                 )
             }
 

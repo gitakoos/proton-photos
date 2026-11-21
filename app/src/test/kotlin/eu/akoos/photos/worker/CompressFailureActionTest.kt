@@ -43,6 +43,21 @@ class CompressFailureActionTest {
     }
 
     @Test
+    fun `a dropped photo's copy that nothing moved to goes to the trash`() {
+        assertEquals("copy", copyToTrashOnDrop("copy", carriedOver = false))
+    }
+
+    @Test
+    fun `a dropped photo's copy holding its labels and faces stays`() {
+        assertEquals(null, copyToTrashOnDrop("copy", carriedOver = true))
+    }
+
+    @Test
+    fun `a dropped photo with no copy sent has nothing to trash`() {
+        assertEquals(null, copyToTrashOnDrop(null, carriedOver = false))
+    }
+
+    @Test
     fun `a failure before any upload is dropped with nothing to take back`() {
         assertEquals(CompressFailureAction.DROP, compressFailureAction(false, 0, null, false))
     }
