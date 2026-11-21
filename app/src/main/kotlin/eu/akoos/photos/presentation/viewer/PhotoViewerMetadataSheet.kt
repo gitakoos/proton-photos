@@ -1020,6 +1020,11 @@ internal fun shownCoordinates(resolved: DetailsGps?, exif: PhotoMetadata?): Show
     if (resolved != null) ShownCoordinates(resolved.latitude, resolved.longitude)
     else ShownCoordinates(exif?.gpsLatitude, exif?.gpsLongitude)
 
+/** A cloud file's [meta] with its place left out unless [mayFillPlace] allows it; asked only when it has one. */
+internal suspend fun placeShownFromFile(meta: PhotoMetadata, mayFillPlace: suspend () -> Boolean): PhotoMetadata =
+    if (meta.gpsLatitude == null || meta.gpsLongitude == null || mayFillPlace()) meta
+    else meta.copy(gpsLatitude = null, gpsLongitude = null, gpsAltitude = null)
+
 /**
  * The length to show for a video, in milliseconds, or null to keep the row's dash.
  *

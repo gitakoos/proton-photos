@@ -153,11 +153,16 @@ internal class UploadBytePreparer(
                 temps.strippedFile = motionTemp
                 Log.d(UPLOAD_TAG, "Motion Photo primary stripped, trailer preserved for ${localItem.displayName}")
                 // A JPEG motion photo whose primary strip failed comes back byte-exact, fix included:
-                // it waits like any other photo whose strip left its location. A HEIF one whose layout
-                // the in-place GPS patch refused uploads as it is, which the stripper has logged.
-                val motionKeepsLocation = stripConfig.stripGps &&
-                    !eu.akoos.photos.util.HeifExifStrip.isHeif(motionTemp) &&
-                    photoHasLocation(android.net.Uri.fromFile(motionTemp).toString())
+                // it waits like any other photo whose strip left its location, as does one whose clip still
+                // holds a place. A HEIF one whose layout the in-place GPS patch refused uploads its own EXIF
+                // as it is, which the stripper has logged.
+                val motionKeepsLocation = stripConfig.stripGps && (
+                    (
+                        !eu.akoos.photos.util.HeifExifStrip.isHeif(motionTemp) &&
+                            photoHasLocation(android.net.Uri.fromFile(motionTemp).toString())
+                        ) ||
+                        structuralStripper.placeLeftInUpload(motionTemp)
+                    )
                 if (motionKeepsLocation) temps.locationStripOwed = true
                 // Mirror: a motion photo can't be wiped in place (an EXIF rewrite drops its
                 // trailer), so overwrite the on-device original with the whole motion-preserving
@@ -176,10 +181,13 @@ internal class UploadBytePreparer(
             } else if (gainMapTemp != null) {
                 temps.strippedFile = gainMapTemp
                 Log.d(UPLOAD_TAG, "Ultra HDR primary stripped, gain map preserved for ${localItem.displayName}")
+                val gainMapKeepsLocation = stripConfig.stripGps && structuralStripper.placeLeftInUpload(gainMapTemp)
+                if (gainMapKeepsLocation) temps.locationStripOwed = true
                 // Mirror: same reasoning as the motion photo. An in-place EXIF rewrite would drop the
                 // appended gain map, so the on-device original is replaced with the whole verified
                 // file instead. Silent with all-files; a refused write leaves the original intact.
-                val gainMapMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, gainMapTemp, MirrorSourceCheck.Kind.IMAGE)
+                val gainMapMirrorLanded = !gainMapKeepsLocation && mirrorStripToLocal &&
+                    deviceFiles.overwriteLocalInPlace(state.localUri, gainMapTemp, MirrorSourceCheck.Kind.IMAGE)
                 if (gainMapMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
@@ -211,6 +219,7 @@ internal class UploadBytePreparer(
                 temps.strippedFile = stripped
                 if (stripped != null) {
                     Log.d(UPLOAD_TAG, "Metadata stripped for ${localItem.displayName}")
+                    if (stripConfig.stripGps && structuralStripper.placeLeftInUpload(stripped)) temps.locationStripOwed = true
                     android.net.Uri.fromFile(stripped).toString()
                 } else if (eu.akoos.photos.data.upload.UploadImageCompressor
                         .needsStripTranscode(

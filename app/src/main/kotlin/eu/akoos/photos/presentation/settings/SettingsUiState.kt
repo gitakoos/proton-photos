@@ -190,6 +190,9 @@ data class SettingsUiState(
      *  diagnostics chooser opens, since the vault classes are injected singletons the screen itself
      *  cannot reach. Blank until then, which leaves the section out of the bundle. */
     val vaultDiagnostics: String = "",
+    /** The signed-in account's cloud photo and map place counts for the shared diagnostics, refreshed with
+     *  [vaultDiagnostics]. Blank for a guest or before the chooser opens, which leaves the section out. */
+    val mapDiagnostics: String = "",
     val language: String = "system",
     // Metadata stripping. Defaults match the engine readers (which use `?: false`) so the toggles
     // never render ON for a frame while the upload pipeline actually treats them as OFF.

@@ -333,6 +333,7 @@ fun SettingsScreen(
             // when this chooser opened. Counts and byte totals only, like every section beside it, so
             // it answers "is this vault consistent" without naming a single photo or folder.
             val vault = state.vaultDiagnostics
+            val map = state.mapDiagnostics
             val body = buildString {
                 append("Performance:\n").append(perfSnapshot)
                 if (perfBuffer.isNotBlank()) append('\n').append(perfBuffer)
@@ -343,6 +344,10 @@ fun SettingsScreen(
                 if (sync.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")
                     append("Sync:\n").append(sync)
+                }
+                if (map.isNotBlank()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Map:\n").append(map)
                 }
                 run {
                     if (isNotEmpty()) append("\n\n")

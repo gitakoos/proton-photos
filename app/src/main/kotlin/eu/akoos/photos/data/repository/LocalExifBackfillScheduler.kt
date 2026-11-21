@@ -30,7 +30,13 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -90,7 +96,8 @@ private const val TAG = "LocalExifBackfill"
  * the file has outgrown is dropped instead, which is what lets an EXIF edit made in another app
  * reach a file the walk has already recorded.
  *
- * A read error on one file skips that file and never aborts the walk.
+ * A read error on one file skips that file without recording a check, so a later walk reads it again,
+ * and never aborts the walk.
  */
 @Singleton
 class LocalExifBackfillScheduler @Inject constructor(
@@ -109,6 +116,10 @@ class LocalExifBackfillScheduler @Inject constructor(
 
     /** Serialises the skip-set read + enqueue so two concurrent walks compute the remainder once. */
     private val walkLock = Mutex()
+
+    /** Counts the walks the user asked for. A walk waiting on the health gate goes on once it moves,
+     *  since the files the user's walk wants may be the ones that waiting walk has reserved. */
+    private val userRequests = MutableStateFlow(0)
 
     /**
      * One file the walk will open, with the legs it still owes, so nothing is read twice. It keeps
@@ -134,6 +145,8 @@ class LocalExifBackfillScheduler @Inject constructor(
      * both skip sets are complete (the reads leave nothing to do). Safe to call repeatedly.
      */
     suspend fun backfillAll(userId: UserId?, respectHealthGate: Boolean = true) {
+        val requestsSeen = userRequests.value
+        if (!respectHealthGate) userRequests.update { it + 1 }
         val canReadLocation = hasMediaLocationGrant(context)
         if (!canReadLocation) {
             Log.i(TAG, "ACCESS_MEDIA_LOCATION not granted; GPS leg skipped, date leg still runs")
@@ -236,7 +249,7 @@ class LocalExifBackfillScheduler @Inject constructor(
             // the wait still reaches the finally that clears the inFlight reservations. A user-initiated
             // call (the map, opened by the user) skips this: they asked to see their places now, so the
             // walk runs even on a low battery rather than leaving the map empty until the phone charges.
-            if (respectHealthGate) deviceHealth.awaitBackgroundWorkAllowed()
+            if (respectHealthGate) awaitHealthGate(requestsSeen)
             forEachPooled(
                 pending,
                 workers = WORKER_COUNT,
@@ -266,6 +279,14 @@ class LocalExifBackfillScheduler @Inject constructor(
         }
     }
 
+    /** Wait until the phone allows background work, or until the user asks for a walk after [requestsSeen]. */
+    private suspend fun awaitHealthGate(requestsSeen: Int) {
+        merge(
+            flow { deviceHealth.awaitBackgroundWorkAllowed(); emit(Unit) },
+            userRequests.filter { it != requestsSeen }.map { },
+        ).first()
+    }
+
     /** Write the checks the walk has gathered so far. A write failure is logged, and a later walk
      *  reads those files again. */
     private suspend fun flushChecks() {
@@ -290,7 +311,8 @@ class LocalExifBackfillScheduler @Inject constructor(
     }
 
     /** Run the legs [entry] still owes, off ONE read of the file where the two share a source, and
-     *  store what each produced. Returns whether a GPS fix was found. */
+     *  store what each produced. Returns whether a GPS fix was found. Throws when the file cannot be
+     *  read, so no check is recorded for it and a later walk reads it again. */
     private suspend fun readAndStore(
         entry: Pending,
         userId: UserId?,
@@ -303,7 +325,7 @@ class LocalExifBackfillScheduler @Inject constructor(
             // original-tagged URI, so Android 10+ hands back a stream with the location left in
             // (the caller already holds the grant).
             if (entry.needsGps) {
-                PhotoGpsResolver.videoGps(context, originalUriForExif(context, entry.uri))?.let {
+                PhotoGpsResolver.videoGpsOrThrow(context, originalUriForExif(context, entry.uri))?.let {
                     gpsFound = true
                     storeLocation(entry.uri, userId, it)
                 }
@@ -328,7 +350,8 @@ class LocalExifBackfillScheduler @Inject constructor(
         // The original-tagged URI is what the GPS leg needs; the date leg reads the plain URI,
         // because Android redacts location, not timestamps.
         val source = if (entry.needsGps) originalUriForExif(context, entry.uri) else entry.uri
-        val meta = ExifHelper.readMetadata(context, source)
+        val meta = ExifHelper.readMetadataOrNull(context, source)
+            ?: throw java.io.IOException("EXIF of ${entry.uri} could not be read")
         if (entry.needsGps) {
             val la = meta.gpsLatitude
             val lo = meta.gpsLongitude
@@ -398,17 +421,12 @@ class LocalExifBackfillScheduler @Inject constructor(
     /** The capture instant a video records in its own mvhd box, or null when it records none. Read
      *  through the descriptor the resolver hands out, because under scoped storage that is the only
      *  route to a MediaStore item's bytes. The plain URI is enough: Android redacts location, not
-     *  timestamps. A file that cannot be opened reads as null, which leaves the stored date standing. */
-    private fun mvhdCaptureDate(uri: String): Long? =
-        try {
-            context.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use {
-                Mp4CreationTime.read(it.fileDescriptor)
-            }
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(TAG, "mvhd read $uri failed: ${e.message}")
-            null
-        }
+     *  timestamps. Throws when the file cannot be opened, so the date leg is not marked as read. */
+    private fun mvhdCaptureDate(uri: String): Long? {
+        val pfd = context.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")
+            ?: throw java.io.IOException("$uri could not be opened")
+        return pfd.use { Mp4CreationTime.read(it.fileDescriptor) }
+    }
 
     private companion object {
         /** EXIF reads are light; a small pool clears a large library without disturbing scroll. */

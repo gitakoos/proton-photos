@@ -280,6 +280,14 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         userId, photo, preResolvedLinkDetail, onProgress,
     )
 
+    override suspend fun recordFileLocation(userId: UserId, photo: CloudPhoto, fileUri: String) =
+        downloadService.recordFileFix(userId, photo, fileUri)
+
+    override suspend fun fileMayFillPlace(userId: UserId, photo: CloudPhoto): Boolean =
+        runCatching { downloadService.fileMayFillPlaceOf(userId, photo) }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            .getOrDefault(false)
+
     override suspend fun uploadFile(
         userId: UserId,
         item: LocalMediaItem,
@@ -563,6 +571,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // sign-out route reaches this method (explicit sign-out, force-logout, 2FA and key-check
         // failures all converge on onAccountDisabled), so this is the one place that covers them.
         runCatching { streamService.cancelRefreshFor(userId) }
+        // The map's GPS walk runs on its own scope too and would write fixes for the leaving account.
+        runCatching { cloudGpsBackfillScheduler.stop() }
         // Stop the background face-indexing walk and drop its in-session state BEFORE the rows below
         // are wiped, so it is already standing down when the wipe lands and writes no face for the
         // account that is leaving. Face embeddings are biometric data, so the rows go with the session.
@@ -713,8 +723,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         thumbnailScheduler.backfillAll(userId)
     }
 
-    override suspend fun backfillCloudGps(userId: UserId) {
-        cloudGpsBackfillScheduler.backfillAll(userId)
+    override fun startCloudGpsBackfill(userId: UserId, respectHealthGate: Boolean) {
+        cloudGpsBackfillScheduler.start(userId, respectHealthGate)
     }
 
     override suspend fun backfillVideoDurations(userId: UserId) {

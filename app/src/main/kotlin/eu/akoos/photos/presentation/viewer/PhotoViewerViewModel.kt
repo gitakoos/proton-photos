@@ -1189,6 +1189,15 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** [loadMetadata] for a cloud photo's downloaded or pinned file, leaving out a place its Drive attributes
+     *  were saved without on purpose, the same rule the map follows. */
+    private fun loadCloudMetadata(userId: me.proton.core.domain.entity.UserId, photo: CloudPhoto, uri: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val meta = ExifHelper.readMetadata(context, uri)
+            _metadata.value = placeShownFromFile(meta) { cloudRepo.fileMayFillPlace(userId, photo) }
+        }
+    }
+
     private fun clearMetadata() {
         _metadata.value = null
         _detailsPlace.value = null
@@ -2609,8 +2618,10 @@ class PhotoViewerViewModel @Inject constructor(
                     ViewerState.ShowVideo(pinnedUri, itemKey = itemKey, isFullRes = true)
                 else
                     ViewerState.ShowImage(pinnedUri, itemKey = itemKey, isFullRes = true)
-                if (!isVideo) loadMetadata(pinnedUri.toString())
+                if (!isVideo) loadCloudMetadata(userId, photo, pinnedUri.toString())
                 else _cloudVideoMeta.value = readVideoMeta(pinnedUri)
+                // A pinned copy is a downloaded file too, so its own GPS reaches the map like a download's.
+                withContext(Dispatchers.IO) { cloudRepo.recordFileLocation(userId, photo, pinnedUri.toString()) }
                 return@launch
             }
             // Wi-Fi-only-for-fullres gate: on a metered network hold the auto-download and let the
@@ -2654,7 +2665,7 @@ class PhotoViewerViewModel @Inject constructor(
                         ViewerState.ShowImage(fileUri, itemKey = itemKey, isFullRes = true)
                     // Read EXIF from the decrypted full-res so the details sheet matches a local
                     // photo's. Videos have none; stripped-on-upload simply shows nothing.
-                    if (!isVideo) loadMetadata(fileUri.toString())
+                    if (!isVideo) loadCloudMetadata(userId, photo, fileUri.toString())
                     // A video's resolution + length live in the container, not EXIF — read them off
                     // the decrypted blob so a cloud-only video's details fill in like a local one's.
                     else _cloudVideoMeta.value = readVideoMeta(fileUri)

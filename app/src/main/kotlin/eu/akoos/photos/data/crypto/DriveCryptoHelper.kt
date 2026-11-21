@@ -73,6 +73,27 @@ fun parsePhotoLocation(xAttrJson: String): Pair<Double, Double>? = runCatching {
 }.getOrNull()
 
 /**
+ * Whether a plaintext XAttr JSON blob carries a Camera block. This app writes one for every image upload
+ * and for the metadata editor's replacement copy, with a Location whenever it means the photo to have a
+ * place. Pure and main-process safe.
+ */
+fun xAttrRecordsCamera(xAttrJson: String): Boolean =
+    runCatching { JSONObject(xAttrJson).optJSONObject("Camera") != null }.getOrDefault(false)
+
+/**
+ * Whether a cloud photo's own file may give the map a place its XAttr does not hold. Not for an image whose
+ * XAttr records a Camera block without a Location: a fix still in its file may be one the user removed, or
+ * stripped at upload, where the file itself could not be rewritten, and a removed place always wins. Nor
+ * for an image whose XAttr exists but could not be decrypted ([hasXAttr] with a null [xAttrJson]). Pure.
+ */
+fun fileMayFillPlace(mimeType: String, hasXAttr: Boolean, xAttrJson: String?): Boolean = when {
+    !mimeType.startsWith("image/") -> true
+    !hasXAttr -> true
+    xAttrJson == null -> false
+    else -> !xAttrRecordsCamera(xAttrJson)
+}
+
+/**
  * Extracts a video's duration, in MILLISECONDS, from the Media block of a plaintext XAttr JSON blob
  * produced by [DriveCryptoHelper]. Drive stores Media.Duration in SECONDS (see the upload path, which
  * divides the source milliseconds by 1000 and writes a trimmed decimal), so the value is read as a

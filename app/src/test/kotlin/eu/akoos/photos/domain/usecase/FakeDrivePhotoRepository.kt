@@ -401,7 +401,10 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun clearCachedThumbnailUrls() {}
     override fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>) {}
     override fun backfillThumbnails(userId: UserId) {}
-    override suspend fun backfillCloudGps(userId: UserId) {}
+    override fun startCloudGpsBackfill(userId: UserId, respectHealthGate: Boolean) {}
+    override suspend fun recordFileLocation(userId: UserId, photo: CloudPhoto, fileUri: String) {}
+
+    override suspend fun fileMayFillPlace(userId: UserId, photo: CloudPhoto): Boolean = true
     override suspend fun backfillVideoDurations(userId: UserId) {}
     override suspend fun backfillLocalExif(userId: UserId) {}
     override suspend fun backfillFaces(userId: UserId?) {}

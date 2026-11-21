@@ -1580,6 +1580,8 @@ class GalleryViewModel @Inject constructor(
                     viewModelScope.launch(Dispatchers.IO) {
                         runCatching { cloudRepo.backfillLocalExif(userId) }
                     }
+                    // The cloud photos' places for the map, on the walk's own scope and behind the health gate.
+                    cloudRepo.startCloudGpsBackfill(userId, respectHealthGate = true)
                     // Index faces for the People grouping. The scheduler no-ops when the AI features
                     // are off, paused, or the models are absent; gate on the master and face switches
                     // here so the common (faces-off) path never even launches a coroutine that returns

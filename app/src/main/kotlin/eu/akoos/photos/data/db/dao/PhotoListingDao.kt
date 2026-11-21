@@ -28,6 +28,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import eu.akoos.photos.data.db.entity.CloudPlaceCounts
 import eu.akoos.photos.data.db.entity.LinkIdName
 import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
@@ -424,6 +425,36 @@ interface PhotoListingDao {
     /** Marks rows as GPS-processed so the backfill never revisits them, whether or not a fix was found. */
     @Query("UPDATE photo_listing SET gpsChecked = 1 WHERE linkId IN (:linkIds)")
     suspend fun markGpsChecked(linkIds: List<String>)
+
+    /** Puts rows into GPS backfill state [state], one of [eu.akoos.photos.data.db.entity.GpsCheck]. */
+    @Query("UPDATE photo_listing SET gpsChecked = :state WHERE linkId IN (:linkIds)")
+    suspend fun setGpsCheck(linkIds: List<String>, state: Int)
+
+    /** The user's rows the GPS backfill passed over while they were hidden (state 3). */
+    @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND gpsChecked = 3")
+    suspend fun gpsSkippedHiddenLinkIds(userId: String): List<String>
+
+    /** The user's own-volume rows whose XAttr was read (state 1, or 5 and 6 with failed file reads counted)
+     *  without leaving a location, in linkId order after [afterLinkId], so a walk that passes some over
+     *  still moves on. */
+    @Query(
+        "SELECT * FROM photo_listing WHERE userId = :userId AND volumeId = :volumeId AND gpsChecked IN (1, 5, 6) " +
+            "AND revisionId != '' AND linkId > :afterLinkId " +
+            "AND NOT EXISTS (SELECT 1 FROM photo_location WHERE photo_location.id = photo_listing.linkId) " +
+            "ORDER BY linkId LIMIT :limit",
+    )
+    suspend fun getXAttrReadWithoutLocation(userId: String, volumeId: String, afterLinkId: String, limit: Int): List<PhotoListingEntity>
+
+    /** The user's built cloud rows, those the map has a place for, and those the GPS walk checked (states
+     *  1, 2 and 4 to 7) without finding one, for the diagnostics report. */
+    @Query(
+        "SELECT COUNT(*) AS total, " +
+            "COALESCE(SUM(EXISTS (SELECT 1 FROM photo_location WHERE photo_location.id = photo_listing.linkId)), 0) AS located, " +
+            "COALESCE(SUM(gpsChecked IN (1, 2, 4, 5, 6, 7) AND NOT EXISTS " +
+            "(SELECT 1 FROM photo_location WHERE photo_location.id = photo_listing.linkId)), 0) AS checkedWithout " +
+            "FROM photo_listing WHERE userId = :userId AND revisionId != ''",
+    )
+    suspend fun cloudPlaceCounts(userId: String): CloudPlaceCounts
 
     /** Page of VIDEO rows whose duration hasn't been recovered yet, newest first, which bounds the
      *  duration backfill so it never re-walks a photo whose duration is already known. Matches only

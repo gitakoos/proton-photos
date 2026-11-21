@@ -43,6 +43,7 @@ import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.RevisionBlockDto
 import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.crypto.fileMayFillPlace
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.sdk.SdkDownloadException
 import eu.akoos.photos.data.sdk.SdkRoute
@@ -99,6 +100,7 @@ class PhotoDownloadService @Inject constructor(
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
     private val sdkPhotoDownloadOps: eu.akoos.photos.data.sdk.SdkPhotoDownloadOps,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
+    private val photoLocationResolver: eu.akoos.photos.data.repository.PhotoLocationResolver,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -180,7 +182,7 @@ class PhotoDownloadService @Inject constructor(
         try {
             val file = CachedOriginal(doDownload(userId, photo, preResolvedLinkDetail, onProgress))
             deferred.complete(file)
-            recordFileFix(userId, photo, file)
+            recordFileFix(userId, photo, file.fileUri.toString())
             return file
         } catch (t: Throwable) {
             // CancellationException also lands here; completeExceptionally + the finally
@@ -210,17 +212,18 @@ class PhotoDownloadService @Inject constructor(
 
     /**
      * The map reads a cloud photo's place from its Drive attributes, which some uploaders leave without a
-     * Location. Once the file is here its own GPS fills that gap, so the photo is plotted like the rest.
-     * Never fails the download.
+     * Location. Once the file is here ([fileUri], a downloaded or pinned copy) its own GPS fills that gap,
+     * so the photo is plotted like the rest, unless [fileMayFillPlace] says the place was left out on
+     * purpose. Never throws.
      */
-    private suspend fun recordFileFix(userId: UserId, photo: CloudPhoto, file: CachedOriginal) {
+    suspend fun recordFileFix(userId: UserId, photo: CloudPhoto, fileUri: String) {
         try {
             val existing = photoLocationDao.getById(userId.id, photo.linkId)
             if (existing != null) return
-            val uri = file.fileUri.toString()
-            val fix = eu.akoos.photos.util.PhotoGpsResolver.localGps(context, uri, photo.mimeType)
+            val fix = eu.akoos.photos.util.PhotoGpsResolver.localGps(context, fileUri, photo.mimeType)
             val row = eu.akoos.photos.util.PhotoGpsResolver.fileFixToStore(existing, fix, userId.id, photo.linkId)
                 ?: return
+            if (!fileMayFillPlaceOf(userId, photo)) return
             photoLocationDao.upsert(listOf(row))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -228,6 +231,20 @@ class PhotoDownloadService @Inject constructor(
             Log.w(TAG, "file GPS for ${photo.linkId} not recorded: ${e.message}")
         }
     }
+
+    /** [fileMayFillPlace] for [photo], its XAttr taken from its listing row or its revision; false when no row
+     *  is stored, and throws when the revision fetch fails. */
+    suspend fun fileMayFillPlaceOf(userId: UserId, photo: CloudPhoto): Boolean {
+        if (!photo.mimeType.startsWith("image/")) return true
+        val row = photoListingDao.getByLinkId(photo.linkId) ?: return false
+        val armored = row.encXAttr
+            ?: linkDetailHelpers.fetchRevisionXAttrOrThrow(userId, row.volumeId, row.shareId, row.linkId, row.revisionId)
+        val json = armored?.let { photoLocationResolver.decryptXAttr(userId, row, it) }
+        return fileMayFillPlace(photo.mimeType, armored != null, json)
+    }
+
+    /** Whether a full download of [linkId] is running right now. */
+    fun isDownloading(linkId: String): Boolean = inFlight[linkId]?.isCompleted == false
 
     private suspend fun doDownload(
         userId: UserId,

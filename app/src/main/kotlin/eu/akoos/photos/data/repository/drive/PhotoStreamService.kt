@@ -67,6 +67,7 @@ import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
+import eu.akoos.photos.data.db.entity.keepingGpsCheckOf
 import eu.akoos.photos.data.db.entity.toCloudPhotos
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -1453,7 +1454,8 @@ class PhotoStreamService @Inject constructor(
                             // into view.
                             val cachedThumb = cached?.thumbnailUrl
                                 ?.takeIf { thumbnailHelpers.isCachedValid(it) }
-                            val merged = if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cachedThumb) else built
+                            val merged = (if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cachedThumb) else built)
+                                .keepingGpsCheckOf(cached)
                             // Skip photos the user just trashed. The server photo stream can keep
                             // returning a trashed photo for up to ~a minute (eventual consistency);
                             // without this guard the refresh re-adds the row we already removed on
@@ -2181,9 +2183,10 @@ class PhotoStreamService @Inject constructor(
                     // so an event for one most likely cannot arrive at all. If one ever did, the
                     // server's raw values would clear the pin and land someone else's photo on this
                     // user's timeline, so an existing pin outranks whatever the event carries.
-                    if (existing != null && existing.isChildOfAlbum && !carried.isChildOfAlbum) {
+                    val pinned = if (existing != null && existing.isChildOfAlbum && !carried.isChildOfAlbum) {
                         carried.copy(isChildOfAlbum = true, parentLinkId = existing.parentLinkId)
                     } else carried
+                    pinned.keepingGpsCheckOf(existing)
                 }
                 photoListingDao.upsertAll(entitiesToSave)
                 Log.d(TAG, "incremental: upserted ${entities.size} photos")

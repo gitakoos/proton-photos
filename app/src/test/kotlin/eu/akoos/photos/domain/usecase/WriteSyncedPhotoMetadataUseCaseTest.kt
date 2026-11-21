@@ -231,6 +231,23 @@ class WriteSyncedPhotoMetadataUseCaseTest {
     }
 
     @Test
+    fun `a removed place left in the device file fails the edit before anything is uploaded`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        val deviceUri = "content://media/7"
+        registerContent(deviceUri, "x".toByteArray())
+        sync.seed(syncedRow(deviceUri, "orig", localHash = "old-hash"))
+        rewriter.failWith = PlaceLeftInFileException("the removed place could not be taken out of the file")
+
+        val result = useCase(original, deviceUri, newCaptureMs = null, location = LocationEdit.Clear)
+
+        assertTrue("must report failure", result is WriteSyncedPhotoMetadataUseCase.Result.Failed)
+        assertTrue("nothing may be uploaded", cloud.uploadedLinkIds.isEmpty())
+        assertTrue("original must survive", cloud.photos.value.any { it.linkId == "orig" })
+        assertEquals(SyncStatus.SYNCED, sync.getByUri(deviceUri)!!.status)
+    }
+
+    @Test
     fun `a cancellation mid-upload restores the row to synced on the original link and never trashes`() = runTest {
         val original = cloudPhoto("orig")
         cloud.add(original)
@@ -556,6 +573,7 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         data class Call(val uri: String, val mimeType: String, val xAttrCaptureMs: Long, val location: LocationEdit)
 
         val calls = mutableListOf<Call>()
+        var failWith: Exception? = null
 
         override fun rewrite(
             file: File,
@@ -575,6 +593,7 @@ class WriteSyncedPhotoMetadataUseCaseTest {
             location: LocationEdit,
         ): UploadXAttrMetadata {
             calls += Call(uri, mimeType, xAttrCaptureMs, location)
+            failWith?.let { throw it }
             return result
         }
     }

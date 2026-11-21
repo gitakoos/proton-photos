@@ -584,6 +584,56 @@ class UploadBytePreparationTest {
     }
 
     @Test
+    fun `a motion photo whose clip keeps a place is held back and the device file kept`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(40) { 4 }
+        val (file, item) = deviceFile("MVIMG_2.jpg", "image/jpeg", original)
+        every { stripper.stripImagePreservingMotion(item.uri, any()) } returns temp("motion_", ".jpg", ByteArray(30) { 6 })
+        every { stripper.placeLeftInUpload(any()) } returns true
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+        assertArrayEquals(original, file.readBytes())
+    }
+
+    @Test
+    fun `an Ultra HDR photo whose gain map keeps a place is held back and the device file kept`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(40) { 4 }
+        val (file, item) = deviceFile("PXL_1.jpg", "image/jpeg", original)
+        every { stripper.hasGainMapUpload(item.uri) } returns true
+        every { stripper.stripImagePreservingGainMap(item.uri, any()) } returns temp("stripped_", ".jpg", ByteArray(30) { 6 })
+        every { stripper.placeLeftInUpload(any()) } returns true
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+        assertArrayEquals(original, file.readBytes())
+    }
+
+    @Test
+    fun `a stripped photo that still holds a place outside its main EXIF is held back`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("IMG_25.jpg", "image/jpeg", ByteArray(30) { 1 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns temp("stripped_", ".jpg", ByteArray(20) { 3 })
+        every { stripper.placeLeftInUpload(any()) } returns true
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
     fun `a compressed image that does not read back is never mirrored onto the device original`() = runTest {
         prefs {
             it[SettingsKeys.COMPRESS_ON_UPLOAD] = true

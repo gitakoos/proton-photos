@@ -25,6 +25,7 @@ package eu.akoos.photos.util
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import kotlinx.coroutines.CancellationException
 
@@ -73,14 +74,30 @@ object PhotoGpsResolver {
 
     /**
      * GPS from a video container. ExifInterface cannot read it, so the ISO 6709 location tag is
-     * pulled through [MediaMetadataRetriever] and parsed by [parseIso6709]. A [CancellationException]
-     * propagates so a cancelled coroutine unwinds; any other read failure yields null, and the
-     * retriever is always released.
+     * pulled through [MediaMetadataRetriever] and parsed by [parseIso6709], and when the platform finds
+     * none the container's own atoms are read ([Mp4LocationAtoms.readIso6709], which knows `loci` too).
+     * A [CancellationException] propagates so a cancelled coroutine unwinds; any other read failure
+     * yields null, and the retriever is always released.
      */
     fun videoGps(context: Context, uri: String): Pair<Double, Double>? {
+        val readable = eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))
+        return platformVideoGps(context, readable) ?: containerVideoGps(context, readable)
+    }
+
+    private fun containerVideoGps(context: Context, readable: Uri): Pair<Double, Double>? = try {
+        context.contentResolver.openFileDescriptor(readable, "r")
+            ?.let { pfd -> ParcelFileDescriptor.AutoCloseInputStream(pfd).use { Mp4LocationAtoms.readIso6709(it.channel) } }
+            ?.let { parseIso6709(it) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun platformVideoGps(context: Context, readable: Uri): Pair<Double, Double>? {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
+            retriever.setDataSource(context, readable)
             val loc = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION) ?: return null
             parseIso6709(loc)
         } catch (e: CancellationException) {
@@ -90,6 +107,15 @@ object PhotoGpsResolver {
         } finally {
             runCatching { retriever.release() }
         }
+    }
+
+    /** [videoGps] that throws when the file cannot be opened, so a caller can tell that apart from a file
+     *  that opens but holds no location or is not a video the platform reads. */
+    fun videoGpsOrThrow(context: Context, uri: String): Pair<Double, Double>? {
+        val readable = eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))
+        context.contentResolver.openFileDescriptor(readable, "r")?.close()
+            ?: throw java.io.IOException("$uri could not be opened")
+        return videoGps(context, uri)
     }
 
     /**

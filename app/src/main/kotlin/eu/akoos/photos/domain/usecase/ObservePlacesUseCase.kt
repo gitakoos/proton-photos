@@ -91,9 +91,11 @@ class ObservePlacesUseCase @Inject constructor(
                     labelLocale = locale
                 }
                 val itemByKey = itemsByKey(library)
-                val located = locations.filterNot { it.isNullIsland() }.mapNotNull { loc ->
-                    itemByKey[loc.id]?.let { LocatedItem(loc.id, loc.latitude, loc.longitude, it) }
-                }
+                val located = onePerPhoto(
+                    locations.filterNot { it.isNullIsland() }.mapNotNull { loc ->
+                        itemByKey[loc.id]?.let { LocatedItem(loc.id, loc.latitude, loc.longitude, it) }
+                    },
+                )
                 val labels = HashMap<String, PlaceLabelParts?>(located.size)
                 for (item in located) labels[item.id] = labelFor(item)
                 groupPlaces(located) { labels[it.id] }
@@ -151,4 +153,17 @@ private fun GalleryItem.withStoreUrl(urls: Map<String, String>): GalleryItem {
     if (this !is GalleryItem.CloudOnly) return this
     val url = urls[cloud.linkId] ?: cloud.thumbnailUrl
     return if (url == cloud.thumbnailUrl) this else GalleryItem.CloudOnly(cloud.copy(thumbnailUrl = url))
+}
+
+/** A synced photo has a row under its device uri and one under its linkId; it is counted once, by
+ *  the device row, the file the viewer shows. */
+internal fun onePerPhoto(located: List<LocatedItem>): List<LocatedItem> {
+    val byPhoto = LinkedHashMap<String, LocatedItem>(located.size)
+    for (row in located) {
+        val kept = byPhoto[row.item.stableId]
+        if (kept == null || (row.item is GalleryItem.Synced && row.id == row.item.local.uri)) {
+            byPhoto[row.item.stableId] = row
+        }
+    }
+    return byPhoto.values.toList()
 }

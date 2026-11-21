@@ -23,15 +23,23 @@
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
+import eu.akoos.photos.util.ImagePlaceParts
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.PlaceFixtures
+import eu.akoos.photos.util.PlaceLeftovers
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -215,5 +223,122 @@ class CloudPhotoExifRewriterImplTest {
             xAttr.cameraCaptureTimeIso,
         )
         assertNull("an image xAttr never carries a video duration", xAttr.durationMillis)
+    }
+
+    private val xmpWithPlace = """<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">""" +
+        """<rdf:Description xmlns:exif="http://ns.adobe.com/exif/1.0/" exif:GPSLatitude="38,54.402N"/></rdf:RDF></x:xmpmeta>"""
+
+    private fun jpegWithPlace(): File {
+        val file = File.createTempFile("pfp_rewriter_", ".jpg", context.cacheDir)
+        file.outputStream().use { Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        ExifInterface(file.absolutePath).apply { setLatLong(38.9067, 1.4206); saveAttributes() }
+        return file
+    }
+
+    private fun rewrite(file: File, mimeType: String, location: LocationEdit) =
+        rewriter.rewrite(file, mimeType, null, captureMs, location, null, null, null)
+
+    @Test
+    fun `a removed place is taken out of a JPEG file and the copy carries none`() {
+        val file = jpegWithPlace()
+
+        val xAttr = rewrite(file, "image/jpeg", LocationEdit.Clear)
+
+        assertNull(ExifInterface(file.absolutePath).latLong)
+        assertNull(xAttr.latitude)
+    }
+
+    @Test
+    fun `a removed place the file still holds fails the edit`() {
+        val file = jpegWithPlace()
+
+        assertThrows(PlaceLeftInFileException::class.java) { rewrite(file, "image/heic", LocationEdit.Clear) }
+    }
+
+    @Test
+    fun `a new place that leaves the old one in the file fails the edit`() {
+        val file = jpegWithPlace()
+
+        assertThrows(PlaceLeftInFileException::class.java) { rewrite(file, "image/heic", LocationEdit.Set(10.0, 20.0)) }
+    }
+
+    private val fixtures by lazy { PlaceFixtures(context) }
+
+    private fun fileOf(bytes: ByteArray): File =
+        File.createTempFile("pfp_rewriter_", ".jpg", context.cacheDir).apply { writeBytes(bytes) }
+
+    @Test
+    fun `a removed place held in the XMP is taken out of it`() {
+        val file = jpegWithPlace()
+        ExifInterface(file.absolutePath).apply {
+            setAttribute(ExifInterface.TAG_XMP, xmpWithPlace)
+            saveAttributes()
+        }
+
+        rewrite(file, "image/jpeg", LocationEdit.Clear)
+
+        assertFalse(String(file.readBytes(), Charsets.ISO_8859_1).contains("GPSLatitude"))
+    }
+
+    @Test
+    fun `a removed place held by a picture appended after the main one is taken out of it`() {
+        val file = fileOf(fixtures.jpeg() + fixtures.jpeg(withPlace = true))
+
+        rewrite(file, "image/jpeg", LocationEdit.Clear)
+
+        assertFalse(PlaceLeftovers.holdsPlace(file.readBytes()))
+    }
+
+    @Test
+    fun `a removed place is taken out of an Ultra HDR photo and its gain map stays reachable`() {
+        val file = fileOf(fixtures.ultraHdr())
+
+        rewrite(file, "image/jpeg", LocationEdit.Clear)
+
+        val bytes = file.readBytes()
+        val gainMap = fixtures.mpfSecondPicture(bytes)
+        assertTrue(ImagePlaceParts.isJpeg(bytes, gainMap))
+        assertNull(fixtures.exifPlaceAt(bytes, gainMap))
+        assertTrue(String(bytes, Charsets.ISO_8859_1).contains(PlaceFixtures.GAIN_MAP_XMP))
+    }
+
+    @Test
+    fun `a new place on an Ultra HDR photo replaces the old one in the gain map too`() {
+        val file = fileOf(fixtures.ultraHdr())
+
+        rewrite(file, "image/jpeg", LocationEdit.Set(10.0, 20.0))
+
+        val bytes = file.readBytes()
+        assertEquals(10.0, fixtures.exifPlaceAt(bytes, 0)!![0], 1e-4)
+        assertNull(fixtures.exifPlaceAt(bytes, fixtures.mpfSecondPicture(bytes)))
+    }
+
+    @Test
+    fun `a removed place is taken out of a motion photo's movie`() {
+        val original = fixtures.motionPhoto()
+        val file = fileOf(original)
+
+        rewrite(file, "image/jpeg", LocationEdit.Clear)
+
+        val bytes = file.readBytes()
+        assertFalse(String(bytes, Charsets.ISO_8859_1).contains("+38.9067"))
+        val movieData = 72
+        assertArrayEquals(original.copyOfRange(original.size - movieData, original.size), bytes.copyOfRange(bytes.size - movieData, bytes.size))
+    }
+
+    @Test
+    fun `a removed place kept in a PNG's compressed XMP fails the edit`() {
+        val file = fileOf(fixtures.pngWithXmp(fixtures.xmp("""exif:GPSLatitude="38,54.402N">"""), compressed = true))
+
+        assertThrows(PlaceLeftInFileException::class.java) { rewrite(file, "image/png", LocationEdit.Clear) }
+    }
+
+    @Test
+    fun `a new place written into a JPEG file replaces the old one`() {
+        val file = jpegWithPlace()
+
+        rewrite(file, "image/jpeg", LocationEdit.Set(10.0, 20.0))
+
+        assertEquals(10.0, ExifInterface(file.absolutePath).latLong!![0], 1e-4)
     }
 }

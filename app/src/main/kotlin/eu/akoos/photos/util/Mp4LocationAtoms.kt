@@ -23,6 +23,7 @@
 package eu.akoos.photos.util
 
 import android.util.Log
+import eu.akoos.photos.data.db.entity.isUsableGpsFix
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.File
@@ -33,6 +34,7 @@ import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.Locale
 
 private const val TAG = "Mp4LocationAtoms"
 
@@ -200,6 +202,7 @@ object Mp4LocationAtoms {
     private const val MAX_MOOV_BYTES = 64L * 1024 * 1024
 
     private const val XYZ = "©xyz"
+    private const val LOCI = "loci"
     private const val QUICKTIME_ISO6709_KEY = "com.apple.quicktime.location.ISO6709"
 
     /** The packed ISO-639-2/T code for "eng", the language both muxers give their `©xyz`. */
@@ -427,9 +430,10 @@ object Mp4LocationAtoms {
         return true
     }
 
-    /** The movie box's location string: a user-data `©xyz` first, else the QuickTime ISO 6709 key. */
-    private fun movieIso6709(moov: ByteArray, start: Int): String? {
-        val kids = children(moov, start, moov.size) ?: return null
+    /** The location string of the movie box whose children span [start, end) of [moov]: a user-data `©xyz`
+     *  first, else the QuickTime ISO 6709 key, else a user-data 3GPP `loci` written out in ISO 6709. */
+    internal fun movieIso6709(moov: ByteArray, start: Int, end: Int = moov.size): String? {
+        val kids = children(moov, start, end) ?: return null
         for (udta in kids.filter { it.type == "udta" }) {
             val xyz = children(moov, udta.payload, udta.end)?.firstOrNull { it.type == XYZ } ?: continue
             if (xyz.end - xyz.payload < 4) continue
@@ -437,8 +441,45 @@ object Mp4LocationAtoms {
             printable(moov, xyz.payload + 4, length)?.let { return it }
         }
         for (meta in kids.filter { it.type == "meta" }) quickTimeIso6709(moov, meta)?.let { return it }
+        for (udta in kids.filter { it.type == "udta" }) {
+            val loci = children(moov, udta.payload, udta.end)?.firstOrNull { it.type == LOCI } ?: continue
+            lociIso6709(moov, loci.payload, loci.end)?.let { return it }
+        }
         return null
     }
+
+    /**
+     * The place of a 3GPP `loci` payload in [start, end) as an ISO 6709 string: after the full box header,
+     * the packed language and the NUL-terminated name (UTF-8, or UTF-16 after a byte order mark) and the
+     * role byte come longitude, latitude and altitude, each signed 16.16 fixed point. Null when the box is
+     * cut short or the position is out of range or 0, 0.
+     */
+    internal fun lociIso6709(buf: ByteArray, start: Int, end: Int): String? {
+        val name = start + 4 + 2
+        val role = afterLociName(buf, name, end) ?: return null
+        val coordinates = role + 1
+        if (coordinates + 12 > end) return null
+        val longitude = fixed16(buf, coordinates)
+        val latitude = fixed16(buf, coordinates + 4)
+        val altitude = fixed16(buf, coordinates + 8)
+        if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0 || !isUsableGpsFix(latitude, longitude)) return null
+        return String.format(Locale.ROOT, "%+08.4f%+09.4f%+.3f/", latitude, longitude, altitude)
+    }
+
+    private fun afterLociName(buf: ByteArray, from: Int, end: Int): Int? {
+        if (from + 1 < end && buf[from] == 0xFE.toByte() && buf[from + 1] == 0xFF.toByte()) {
+            var at = from + 2
+            while (at + 1 < end) {
+                if (buf[at] == 0.toByte() && buf[at + 1] == 0.toByte()) return at + 2
+                at += 2
+            }
+            return null
+        }
+        for (at in from until end) if (buf[at] == 0.toByte()) return at + 1
+        return null
+    }
+
+    private fun fixed16(b: ByteArray, at: Int): Double = u32(b, at).toInt() / 65536.0
 
     /** The UTF-8 value of the `com.apple.quicktime.location.ISO6709` key of a QuickTime `meta` box. */
     private fun quickTimeIso6709(buf: ByteArray, meta: Node): String? {

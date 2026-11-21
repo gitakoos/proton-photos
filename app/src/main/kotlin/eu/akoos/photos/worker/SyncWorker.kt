@@ -217,6 +217,8 @@ class SyncWorker @AssistedInject constructor(
             if (!wifiOnly || networkObserver.currentlyOnWifi()) {
                 // Refresh cloud state first so deleted-cloud photos are removed from DB before reconcile.
                 cloudRepo.refreshCloudPhotosIncremental(userId)
+                // Started, never awaited: the map's GPS walk runs on its own scope behind the health gate.
+                cloudRepo.startCloudGpsBackfill(userId, respectHealthGate = true)
             }
             reconcile(userId).collect {}
             // Upload errors must NOT silently disappear — swallowing them gives a "success"

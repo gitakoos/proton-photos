@@ -267,6 +267,20 @@ class WriteCloudPhotoMetadataUseCaseTest {
     }
 
     @Test
+    fun `a removed place left in the file fails the edit and keeps the original`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        rewriter.failWith = PlaceLeftInFileException("the removed place could not be taken out of the file")
+
+        val result = useCase(original, newCaptureMs = null, location = LocationEdit.Clear)
+
+        assertTrue("must report failure", result is WriteCloudPhotoMetadataUseCase.Result.Failed)
+        assertFalse((result as WriteCloudPhotoMetadataUseCase.Result.Failed).transient)
+        assertTrue("nothing may be uploaded", cloud.uploadedItems.isEmpty())
+        assertTrue("original must survive", cloud.photos.value.any { it.linkId == "orig" })
+    }
+
+    @Test
     fun `a photo in no album is corrected and trashed`() = runTest {
         val original = cloudPhoto("orig")
         cloud.add(original)
@@ -431,6 +445,8 @@ class WriteCloudPhotoMetadataUseCaseTest {
         private val result: UploadXAttrMetadata = UploadXAttrMetadata(displayWidth = 4000, displayHeight = 3000),
     ) : CloudPhotoExifRewriter {
 
+        var failWith: Exception? = null
+
         data class Call(
             val mimeType: String,
             val writeCaptureMs: Long?,
@@ -454,6 +470,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
             copyright: String?,
         ): UploadXAttrMetadata {
             calls += Call(mimeType, writeCaptureMs, xAttrCaptureMs, location, description, artist, copyright)
+            failWith?.let { throw it }
             return result
         }
 

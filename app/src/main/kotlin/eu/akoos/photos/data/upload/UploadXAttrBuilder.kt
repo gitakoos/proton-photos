@@ -26,13 +26,20 @@ import android.content.Context
 import android.net.Uri
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.util.VideoLocation
+import eu.akoos.photos.util.VideoLocationMetadata
+import eu.akoos.photos.util.originalUriForExif
 import java.io.File
 
 /**
  * Builds the encrypted xAttr metadata an upload carries (camera, location, capture time, display
  * dimensions) from the ORIGINAL source file, gated against the strip settings.
  */
-internal class UploadXAttrBuilder(private val context: Context) {
+internal class UploadXAttrBuilder(
+    private val context: Context,
+    private val readVideoLocation: (String) -> VideoLocation? = { VideoLocationMetadata.read(context, it) },
+    private val exifReadUri: (String) -> String = { originalUriForExif(context, it) },
+) {
 
     /** RAW formats whose embedded preview (what the thumbnail decodes from) is already display-
      *  oriented, so their xAttr must report a NORMAL camera orientation — see [buildXAttrMetadata]. */
@@ -57,7 +64,7 @@ internal class UploadXAttrBuilder(private val context: Context) {
      *  - Camera.Device: only when camera info is NOT stripped.
      *  - Camera.CaptureTime: [item].dateTaken — already floored to upload time when timestamps are
      *    stripped (see [eu.akoos.photos.domain.usecase.UploadPendingUseCase]), else the real capture time.
-     *  - Location: only when GPS is NOT stripped.
+     *  - Location: only when GPS is NOT stripped, for videos too (from the container's ISO 6709 tag).
      *  - displayWidth/Height: W/H swapped when EXIF orientation / video rotation is 90/270.
      */
     fun buildXAttrMetadata(
@@ -104,13 +111,18 @@ internal class UploadXAttrBuilder(private val context: Context) {
                 // stream's, so the xAttr matches the bytes on the wire; rotation stays with the container.
                 val baseW = videoDimsOverride?.first ?: rawW.takeIf { it > 0 } ?: item.width
                 val baseH = videoDimsOverride?.second ?: rawH.takeIf { it > 0 } ?: item.height
+                val location = if (stripGps) null else runCatching { readVideoLocation(sourceUri) }.getOrNull()
                 eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(
+                    latitude = location?.latitude,
+                    longitude = location?.longitude,
                     displayWidth = baseW.takeIf { it > 0 },
                     displayHeight = baseH.takeIf { it > 0 },
                 )
             }
             item.mimeType.startsWith("image/") -> {
-                val meta = ExifHelper.readMetadata(context, sourceUri)
+                // The original-tagged read keeps the GPS Android 10+ redacts; a refused one falls back to the plain read.
+                val meta = ExifHelper.readMetadataOrNull(context, exifReadUri(sourceUri))
+                    ?: ExifHelper.readMetadata(context, sourceUri)
                 val orientation = meta.orientation
                     ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                 val swap = orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 ||

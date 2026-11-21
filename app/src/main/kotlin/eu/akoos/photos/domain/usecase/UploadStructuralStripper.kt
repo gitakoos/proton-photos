@@ -33,6 +33,9 @@ import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.HeifExifStrip
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
+import eu.akoos.photos.util.MovieLocation
+import eu.akoos.photos.util.PlaceLeftovers
+import eu.akoos.photos.util.PlaceScrubber
 import eu.akoos.photos.util.UltraHdrUtil
 import java.io.File
 import java.io.RandomAccessFile
@@ -132,6 +135,7 @@ class UploadStructuralStripper @Inject constructor(
             if (strippedPrimary == null && !stripConfig.isNoOp && HeifExifStrip.isHeif(source)) {
                 stripHeifMotionExif(source, joined, info.videoOffset, stripConfig)
             }
+            scrubAppendedPlace(joined, primaryForJoin.length(), stripConfig)
             strippedPrimary?.delete()
             primary?.delete()
             source.delete()
@@ -144,6 +148,38 @@ class UploadStructuralStripper @Inject constructor(
             return source
         }
     }
+
+    /**
+     * When [config] strips the location, blanks the copies of it in the parts re-attached after the
+     * primary of [joined] without moving a byte: the GPS block of each appended picture (and the MPF
+     * index realigned), XMP and IPTC places, and the location atoms of the movie from [movieStart]. What
+     * stays is found by [placeLeftInUpload], which holds the upload back.
+     */
+    internal fun scrubAppendedPlace(joined: File, movieStart: Long?, config: MetadataStripConfig) {
+        if (!config.stripGps) return
+        runCatching {
+            val bytes = joined.readBytes()
+            var changed = PlaceScrubber.scrub(bytes, removePlace = true, keepMainExifPlace = false)
+            if (movieStart != null && movieStart < bytes.size &&
+                MovieLocation.process(bytes, movieStart.toInt(), bytes.size, erase = true) != 0
+            ) {
+                changed = true
+            }
+            if (changed) joined.writeBytes(bytes)
+        }.onFailure { Log.w(UPLOAD_TAG, "appended place scrub failed for ${joined.name}: ${it.message}") }
+    }
+
+    /**
+     * Whether [file], about to upload with its location stripped, still holds a place outside its main
+     * EXIF: in an appended picture, the XMP or IPTC of a JPEG, PNG or WebP, or a motion photo's movie. A
+     * file that cannot be read counts as holding one.
+     */
+    fun placeLeftInUpload(file: File): Boolean = runCatching {
+        val bytes = file.readBytes()
+        val movieStart = MotionPhotoUtil.detect(file)?.videoOffset
+        (PlaceScrubber.covers(bytes) && PlaceLeftovers.holdsPlace(bytes)) ||
+            (movieStart != null && movieStart < bytes.size && MovieLocation.holdsPlace(bytes, movieStart.toInt(), bytes.size))
+    }.getOrDefault(true)
 
     /**
      * Strips what [config] asks for from [joined], a byte-exact copy of the HEIF motion photo [source]
@@ -290,6 +326,7 @@ class UploadStructuralStripper @Inject constructor(
                 }
             }
 
+            scrubAppendedPlace(joined!!, movieStart = null, stripConfig)
             if (!verifyGainMapPreserved(joined!!)) {
                 Log.d(UPLOAD_TAG, "Ultra HDR rebuild unverified for $localUri; ordinary strip applies")
                 return null

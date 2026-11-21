@@ -24,10 +24,21 @@ package eu.akoos.photos.data.repository
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -36,12 +47,14 @@ import eu.akoos.photos.crypto.DecryptPriority
 import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.GpsCheck
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.forEachSqlChunk
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import java.util.concurrent.ConcurrentHashMap
@@ -78,6 +91,11 @@ private const val TAG = "CloudGpsBackfill"
  * the Drive API or starving foreground scroll, with a brief pause between pages; per-photo fetches go
  * through the shared 429 / 5xx-aware [retryWithBackoff] so a rate-limit backs off rather than spamming.
  * A single [backfilling] guard collapses overlapping triggers so concurrent calls don't double-run.
+ *
+ * Once the XAttrs are walked, [CloudContentGpsBackfill] reads the file of each photo whose XAttr held no
+ * Location. A photo in a hidden album or hidden on its own is passed over as [GpsCheck.SKIPPED_HIDDEN] and
+ * set back to unchecked on the first walk after it is shown again. [start] runs the walk on this class's
+ * own scope, so it outlives the screen that asked for it; [stop] ends it at sign-out.
  */
 @Singleton
 class CloudGpsBackfillScheduler @Inject constructor(
@@ -88,7 +106,14 @@ class CloudGpsBackfillScheduler @Inject constructor(
     private val albumService: AlbumService,
     private val shareService: PhotosShareService,
     private val deviceHealth: DeviceHealthPolicy,
+    private val contentGps: CloudContentGpsBackfill,
 ) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** True while the running walk was asked for by the user, who is waiting on the map: it then stops
+     *  waiting on the health gate, even when it was started by a background trigger. */
+    private val gateBypassed = MutableStateFlow(false)
+
     /** Concurrency bound on in-flight XAttr decrypts — a handful keeps JNI / GC pressure low. */
     private val semaphore = Semaphore(WORKER_COUNT)
 
@@ -108,10 +133,15 @@ class CloudGpsBackfillScheduler @Inject constructor(
      * and decrypts by [semaphore], with a short [PAGE_DELAY_MS] gap between pages. Stops a pass early
      * when a page resolves no new revisions (a sustained outage), leaving those rows for a later run.
      * A no-op once every row has been processed (nothing left with `gpsChecked = 0`), and
-     * self-collapsing across overlapping calls, so the screen can fire it freely on entry.
+     * self-collapsing across overlapping calls, so the screen can fire it freely on entry. With
+     * [respectHealthGate] false the walk, or the one already running, no longer waits on the health gate.
      */
-    suspend fun backfillAll(userId: UserId) {
-        if (!backfilling.compareAndSet(false, true)) return
+    suspend fun backfillAll(userId: UserId, respectHealthGate: Boolean = true) {
+        if (!backfilling.compareAndSet(false, true)) {
+            if (!respectHealthGate) gateBypassed.value = true
+            return
+        }
+        gateBypassed.value = !respectHealthGate
         try {
             // Every fetch below addresses this user's own volume, so the walk is scoped to it: a row
             // from an album another user shared could never resolve a revision here, and would be
@@ -125,6 +155,7 @@ class CloudGpsBackfillScheduler @Inject constructor(
             // Photos in a client-side hidden album are kept out of the proactive geocode; snapshot the
             // member set once so the walk stays consistent across its pages.
             val hiddenLinkIds = albumService.observeHiddenAlbumMemberLinkIds().first()
+            releaseShownAgain(userId, hiddenLinkIds)
             // A fix at exactly 0, 0 is a photo with no GPS; one stored before that was recognised goes here.
             try {
                 photoLocationDao.deleteNoFixRows()
@@ -133,90 +164,143 @@ class CloudGpsBackfillScheduler @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "dropping 0, 0 fixes failed: ${e.message}")
             }
-            while (true) {
-                // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
-                // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
-                // background and does not compete with the UI.
-                deviceHealth.awaitBackgroundWorkAllowed()
-                val batch = runCatching { photoListingDao.getUngeocoded(userId.id, ownVolumeId, PAGE) }
-                    .getOrElse { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "query failed: ${e.message}"); break
-                    }
-                if (batch.isEmpty()) break
+            walkXAttrs(userId, ownVolumeId, hiddenLinkIds)
+            contentGps.backfill(userId, ownVolumeId, hiddenLinkIds, userAsked = gateBypassed.value, awaitGate = ::awaitGate)
+        } finally {
+            gateBypassed.value = false
+            backfilling.set(false)
+        }
+    }
 
-                // Split hidden-album members off the geocode path. They are still flagged (below) so a
-                // page of them advances the marking-based walk instead of stalling it.
-                val (hidden, geocodable) = if (hiddenLinkIds.isEmpty()) emptyList<PhotoListingEntity>() to batch
-                    else batch.partition { it.linkId in hiddenLinkIds }
+    /**
+     * Run [backfillAll] on this class's own scope and return at once, so the walk is not cancelled with the
+     * screen or worker that asked for it.
+     */
+    fun start(userId: UserId, respectHealthGate: Boolean) {
+        scope.launch {
+            try {
+                backfillAll(userId, respectHealthGate)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "walk failed: ${e.message}")
+            }
+        }
+    }
 
-                val resolved = resolveXAttrs(userId, geocodable)
+    /** Cancel every walk [start] launched and wait for it to end, so nothing more is written for an account
+     *  that is signing out. */
+    suspend fun stop() {
+        withTimeoutOrNull(STOP_TIMEOUT_MS) {
+            scope.coroutineContext.job.children.toList().forEach { it.cancelAndJoin() }
+        }
+    }
 
-                // A page whose every fetch failed (offline / rate-limited / endpoint down) resolves
-                // no NEW revision: nothing to mark, so marking-as-checked can't advance the walk.
-                // Stop this pass rather than spin — the rows stay gpsChecked=0 and a later run retries
-                // from the same spot. (Cached rows count as resolved, so a page that's all cache still
-                // makes progress.) A page made up only of hidden rows still advances via the flag below,
-                // so pause only when the geocodable rows resolved nothing.
-                if (resolved.ids.isEmpty() && resolved.goneForGood.isEmpty() && hidden.isEmpty()) {
-                    Log.d(TAG, "page resolved 0 revisions — pausing walk, will retry on a later run")
-                    break
+    /** Defer the walk while the phone is hot, low on battery or in the power saver, until the user asks for it. */
+    private suspend fun awaitGate() {
+        if (gateBypassed.value) return
+        merge(
+            flow { deviceHealth.awaitBackgroundWorkAllowed(); emit(Unit) },
+            gateBypassed.filter { it }.map { },
+        ).first()
+    }
+
+    /** Set the photos passed over while hidden that are no longer hidden back to unchecked, so this walk reads them. */
+    private suspend fun releaseShownAgain(userId: UserId, hiddenLinkIds: Set<String>) {
+        try {
+            val shown = photoListingDao.gpsSkippedHiddenLinkIds(userId.id).filterNot { it in hiddenLinkIds }
+            shown.forEachSqlChunk { photoListingDao.setGpsCheck(it, GpsCheck.UNCHECKED) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "releasing photos shown again failed: ${e.message}")
+        }
+    }
+
+    /** The XAttr leg: every unchecked own-volume row, page by page, until none remain or a page makes no progress. */
+    private suspend fun walkXAttrs(userId: UserId, ownVolumeId: String, hiddenLinkIds: Set<String>) {
+        while (true) {
+            // Not gated on interaction: it runs quietly in the background and does not compete with the UI.
+            awaitGate()
+            val batch = runCatching { photoListingDao.getUngeocoded(userId.id, ownVolumeId, PAGE) }
+                .getOrElse { e ->
+                    if (e is CancellationException) throw e
+                    Log.w(TAG, "query failed: ${e.message}"); break
                 }
+            if (batch.isEmpty()) break
 
-                val located = ConcurrentHashMap.newKeySet<PhotoLocationEntity>()
-                coroutineScope {
-                    geocodable.forEach { row ->
-                        if (row.linkId !in resolved.ids) return@forEach
-                        launch {
-                            try {
-                                semaphore.withPermit {
-                                    // Background GPS backfill yields the process-global crypto gate to
-                                    // interactive decrypts; the on-demand export path stays foreground.
-                                    withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
-                                        photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
-                                    }?.let { located.add(it) }
-                                }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "gps decrypt ${row.linkId} failed: ${e.message}")
+            // Split hidden-album members off the geocode path. They are still flagged (below) so a
+            // page of them advances the marking-based walk instead of stalling it.
+            val (hidden, geocodable) = if (hiddenLinkIds.isEmpty()) emptyList<PhotoListingEntity>() to batch
+                else batch.partition { it.linkId in hiddenLinkIds }
+
+            val resolved = resolveXAttrs(userId, geocodable)
+
+            // A page whose every fetch failed (offline / rate-limited / endpoint down) resolves
+            // no NEW revision: nothing to mark, so marking-as-checked can't advance the walk.
+            // Stop this pass rather than spin: the rows stay gpsChecked=0 and a later run retries
+            // from the same spot. (Cached rows count as resolved, so a page that's all cache still
+            // makes progress.) A page made up only of hidden rows still advances via the flag below,
+            // so pause only when the geocodable rows resolved nothing.
+            if (resolved.ids.isEmpty() && resolved.goneForGood.isEmpty() && hidden.isEmpty()) {
+                Log.d(TAG, "page resolved 0 revisions, pausing walk, will retry on a later run")
+                break
+            }
+
+            val located = ConcurrentHashMap.newKeySet<PhotoLocationEntity>()
+            coroutineScope {
+                geocodable.forEach { row ->
+                    if (row.linkId !in resolved.ids) return@forEach
+                    launch {
+                        try {
+                            semaphore.withPermit {
+                                // Background GPS backfill yields the process-global crypto gate to
+                                // interactive decrypts; the on-demand export path stays foreground.
+                                withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+                                    photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
+                                }?.let { located.add(it) }
                             }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "gps decrypt ${row.linkId} failed: ${e.message}")
                         }
                     }
                 }
+            }
 
-                Log.d(TAG, "page: walked=${batch.size} xattrResolved=${resolved.ids.size} located=${located.size}")
-                if (located.isNotEmpty()) {
-                    runCatching { photoLocationDao.upsert(located.toList()) }
-                        .onFailure {
-                            if (it is CancellationException) throw it
-                            Log.w(TAG, "upsert ${located.size} location(s) failed: ${it.message}")
-                        }
-                }
-                // Flag rows whose revision was actually read (cached or freshly fetched), including
-                // no-GPS ones, the rows whose revision is gone for good, and the hidden rows skipped
-                // above: all advance the walk and never need reprocessing. A row that is never flagged
-                // comes back first on every page, newest first, so enough unreadable ones would stop the
-                // walk for good and leave every older photo off the map. Rows whose fetch failed for a
-                // passing reason keep gpsChecked=0 and a later run retries them.
-                if (resolved.goneForGood.isNotEmpty()) {
-                    eu.akoos.photos.util.SyncDiagnostics.log("map: ${resolved.goneForGood.size} photo(s) with an unreadable revision set aside")
-                }
-                val toMark = resolved.ids.toList() + resolved.goneForGood + hidden.map { it.linkId }
-                runCatching { photoListingDao.markGpsChecked(toMark) }
+            Log.d(TAG, "page: walked=${batch.size} xattrResolved=${resolved.ids.size} located=${located.size}")
+            if (located.isNotEmpty()) {
+                runCatching { photoLocationDao.upsert(located.toList()) }
                     .onFailure {
                         if (it is CancellationException) throw it
-                        Log.w(TAG, "markGpsChecked failed: ${it.message}")
+                        Log.w(TAG, "upsert ${located.size} location(s) failed: ${it.message}")
                     }
-
-                if (batch.size < PAGE) break
-
-                // Trickle a large library: a short gap between pages keeps the backfill gentle on the
-                // Drive API and off the foreground's back instead of bursting page after page.
-                delay(PAGE_DELAY_MS)
             }
-        } finally {
-            backfilling.set(false)
+            // Flag rows whose revision was actually read (cached or freshly fetched), including
+            // no-GPS ones, the rows whose revision is gone for good, and the hidden rows skipped
+            // above: all advance the walk. A hidden row gets its own state, which the next walk
+            // after it is shown again sets back to unchecked. A row that is never flagged
+            // comes back first on every page, newest first, so enough unreadable ones would stop the
+            // walk for good and leave every older photo off the map. Rows whose fetch failed for a
+            // passing reason keep gpsChecked=0 and a later run retries them.
+            if (resolved.goneForGood.isNotEmpty()) {
+                eu.akoos.photos.util.SyncDiagnostics.log("map: ${resolved.goneForGood.size} photo(s) with an unreadable revision set aside")
+            }
+            val toMark = resolved.ids.toList() + resolved.goneForGood
+            runCatching {
+                if (toMark.isNotEmpty()) photoListingDao.markGpsChecked(toMark)
+                if (hidden.isNotEmpty()) photoListingDao.setGpsCheck(hidden.map { it.linkId }, GpsCheck.SKIPPED_HIDDEN)
+            }.onFailure {
+                if (it is CancellationException) throw it
+                Log.w(TAG, "markGpsChecked failed: ${it.message}")
+            }
+
+            if (batch.size < PAGE) break
+
+            // Trickle a large library: a short gap between pages keeps the backfill gentle on the
+            // Drive API and off the foreground's back instead of bursting page after page.
+            delay(PAGE_DELAY_MS)
         }
     }
 
@@ -314,6 +398,9 @@ class CloudGpsBackfillScheduler @Inject constructor(
 
         /** Rows pulled per page — bounds how many entities + their crypto material are resident. */
         const val PAGE = 200
+
+        /** How long sign-out waits for a running walk to wind down. */
+        const val STOP_TIMEOUT_MS = 5_000L
     }
 }
 

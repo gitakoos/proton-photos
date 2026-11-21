@@ -560,12 +560,18 @@ class SettingsViewModel @Inject constructor(
      *
      * Read on demand rather than observed: it walks the vault directory, so a screen that kept it live
      * would re-walk it on every preference change to answer a question nobody has asked yet. The
-     * diagnostics chooser opening is exactly when the answer is wanted.
+     * diagnostics chooser opening is exactly when the answer is wanted. The map's cloud place counts
+     * ([SettingsUiState.mapDiagnostics]) are read at the same moment.
      */
     fun refreshVaultDiagnostics() {
         viewModelScope.launch {
             val snapshot = hiddenVaultJournal.vaultSnapshot()
             _uiState.update { it.copy(vaultDiagnostics = snapshot) }
+        }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val counts = runCatching { photoListingDao.cloudPlaceCounts(userId.id) }.getOrNull() ?: return@launch
+            _uiState.update { it.copy(mapDiagnostics = counts.report()) }
         }
     }
 

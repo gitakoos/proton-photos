@@ -373,6 +373,20 @@ class ExifHelperTest {
         assertNull(meta.dateTimeOriginal)
     }
 
+    @Test
+    fun `readMetadataOrNull is null for a source that cannot be opened`() {
+        val meta = ExifHelper.readMetadataOrNull(context, Uri.fromFile(File(context.cacheDir, "nope.jpg")).toString())
+
+        assertNull(meta)
+    }
+
+    @Test
+    fun `readMetadataOrNull reads a source that opens`() {
+        val meta = ExifHelper.readMetadataOrNull(context, sourceUri())
+
+        assertEquals(47.4979, meta?.gpsLatitude ?: 0.0, 1e-4)
+    }
+
     // ─── an in-place strip of a gallery photo keeps its capture date ──────────
 
     private val galleryUri = "content://media/external/images/media/35"

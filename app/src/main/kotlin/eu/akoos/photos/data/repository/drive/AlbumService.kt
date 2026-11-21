@@ -60,6 +60,7 @@ import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.keepingGpsCheckOf
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.VideoDurationBackfillScheduler
@@ -1463,7 +1464,7 @@ class AlbumService @Inject constructor(
                     builtEntity.copy(parentLinkId = albumLinkId, isChildOfAlbum = true)
                 } else {
                     builtEntity
-                }
+                }.keepingGpsCheckOf(cached)
                 chunkNewEntities.add(entity)
                 result.add(entity.toDomain())
             }

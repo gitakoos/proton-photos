@@ -157,6 +157,13 @@ interface DrivePhotoRepository {
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): eu.akoos.photos.data.localcrypto.CachedOriginal
+
+    /** Record the GPS fix [photo]'s copy at [fileUri] carries for the map, when the photo has no fix yet. Never throws. */
+    suspend fun recordFileLocation(userId: UserId, photo: CloudPhoto, fileUri: String)
+
+    /** Whether [photo]'s own file may show or plot a place its Drive attributes do not hold; false when unsure. */
+    suspend fun fileMayFillPlace(userId: UserId, photo: CloudPhoto): Boolean
+
     /**
      * [uploadUri] overrides [item].uri — used when metadata has been stripped to a temp file.
      *
@@ -573,12 +580,13 @@ interface DrivePhotoRepository {
     fun backfillThumbnails(userId: UserId)
 
     /**
-     * Walk the cloud photos whose encrypted XAttr hasn't been geocoded yet, decrypt each to recover
-     * its GPS Location block, and persist the coordinates so the map plots synced photos. Resumable
-     * and idempotent, a re-run only touches rows not yet checked. Needs no runtime permission
-     * (cloud GPS comes from the photo's own encrypted metadata, not the device MediaStore).
+     * Start the walk that recovers the GPS of every cloud photo for the map, from its encrypted XAttr and,
+     * where that has none, from the file's own first and last blocks. Returns at once: the walk runs on its
+     * own scope, so leaving the screen that started it does not stop it. Resumable, idempotent and
+     * self-collapsing. With [respectHealthGate] false (the user opened the map) a running walk stops
+     * waiting for the phone to cool down or charge.
      */
-    suspend fun backfillCloudGps(userId: UserId)
+    fun startCloudGpsBackfill(userId: UserId, respectHealthGate: Boolean)
 
     /**
      * Walk the cloud videos whose duration isn't known yet, decrypt each one's XAttr to recover its

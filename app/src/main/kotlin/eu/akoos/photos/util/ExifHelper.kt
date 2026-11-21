@@ -223,11 +223,15 @@ sealed interface StripResult {
 
 object ExifHelper {
 
+    fun readMetadata(context: Context, uri: String): PhotoMetadata =
+        readMetadataOrNull(context, uri) ?: PhotoMetadata()
+
+    /** [readMetadata] that tells a failed read (null) apart from a file that carries no tags. */
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept as fallback for older EXIF files.
-    fun readMetadata(context: Context, uri: String): PhotoMetadata {
+    fun readMetadataOrNull(context: Context, uri: String): PhotoMetadata? {
         return try {
             val stream = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
-                ?: return PhotoMetadata()
+                ?: return null
             val exif = stream.use { ExifInterface(it) }
             // A 0, 0 fix is what a camera writes when it has none, so it reads as no location.
             val latLon = exif.latLong?.takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(it[0], it[1]) }
@@ -264,7 +268,7 @@ object ExifHelper {
                 exposureMode = exif.getAttributeInt(ExifInterface.TAG_EXPOSURE_MODE, -1).takeIf { it >= 0 },
             )
         } catch (_: Exception) {
-            PhotoMetadata()
+            null
         }
     }
 
@@ -415,6 +419,7 @@ object ExifHelper {
                 exif.setAttribute(ExifInterface.TAG_COPYRIGHT, null)
             }
             exif.saveAttributes()
+            if (config.stripGps) PlaceScrubber.scrubFile(tmpFile, removePlace = true, keepMainExifPlace = false)
             tmpFile
         } catch (_: Exception) {
             runCatching { tmpFile.delete() }
@@ -471,8 +476,7 @@ object ExifHelper {
                 try {
                     val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
                         ?: throw java.io.IOException("could not open $uri")
-                    fd.use {
-                        val out = FileOutputStream(it.fileDescriptor)
+                    android.os.ParcelFileDescriptor.AutoCloseOutputStream(fd).use { out ->
                         val channel = out.channel
                         channel.position(0)
                         stripped.inputStream().use { input -> input.copyTo(out) }

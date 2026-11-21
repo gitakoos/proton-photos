@@ -239,7 +239,11 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
 
         // 5. The xAttr for the corrected copy (read-only over the already-edited device file), and the
         //    upload item carrying it. Same displayName: this is a correction, not a copy.
-        val xAttr = exifRewriter.xAttrFor(deviceUri, cloudPhoto.mimeType, effectiveCaptureMs, location)
+        val xAttr = try {
+            exifRewriter.xAttrFor(deviceUri, cloudPhoto.mimeType, effectiveCaptureMs, location)
+        } catch (e: PlaceLeftInFileException) {
+            return@withContext Result.Failed(e.message ?: "place left in the file")
+        }
         // dims and duration come from the xAttr the rewriter read off the already-edited device file
         // (real values for a video, 0 for an image); the video's own already-known cloud duration is the
         // fallback when the container could not be probed.

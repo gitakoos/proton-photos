@@ -27,14 +27,20 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
+import androidx.core.net.toUri
 import androidx.exifinterface.media.ExifInterface
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.localcrypto.VaultFiles
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.PlaceLeftovers
+import eu.akoos.photos.util.PlaceScrubber
 import eu.akoos.photos.util.isExifWritableImageMime
+import eu.akoos.photos.util.originalUriForExif
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -43,6 +49,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "CloudExifRewriter"
+
+/** The file of a cloud photo still holds a place the edit removes or replaces, so no copy may be uploaded. */
+class PlaceLeftInFileException(message: String) : IllegalStateException(message)
 
 /**
  * The real [CloudPhotoExifRewriter]. Rewrites the changed EXIF on a downloaded original in place,
@@ -81,11 +90,50 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
             writeCaptureMs != null && WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(mimeType) ->
                 Mp4CreationTime.stamp(file, writeCaptureMs)
         }
+        if (isExifWritableImageMime(mimeType)) scrubAfterEdits(file, location)
         // The in-file edits leave orientation, dimensions, camera and subject-area untouched, so the
         // xAttr reads the same values whether it runs before or after them; derive it from the corrected
         // file through the shared read-only builder.
         return xAttrFor(fileUri, mimeType, xAttrCaptureMs, location)
     }
+
+    /**
+     * Throws [PlaceLeftInFileException] when the image at [uri] still carries a place [location] removes,
+     * or an old place a new one did not overwrite, in its EXIF or in any copy [PlaceLeftovers] finds, so
+     * the replacement fails and the original stays as it is. A file that cannot be read counts as one.
+     */
+    private fun checkPlaceInFile(uri: String, location: LocationEdit) {
+        if (location is LocationEdit.Unchanged) return
+        val readable = VaultFiles.readableUri(context, originalUriForExif(context, uri).toUri())
+        val bytes = runCatching { context.contentResolver.openInputStream(readable)?.use { it.readBytes() } }.getOrNull()
+            ?: throw PlaceLeftInFileException("the file could not be checked for a place")
+        val exifPlace = runCatching { ExifInterface(ByteArrayInputStream(bytes)).latLong }.getOrNull()
+        val oldPlaceLeft = when (location) {
+            is LocationEdit.Set -> exifPlace != null && !samePlace(exifPlace, location)
+            else -> exifPlace != null
+        }
+        if (oldPlaceLeft || PlaceLeftovers.holdsPlace(bytes)) {
+            throw PlaceLeftInFileException(
+                if (location is LocationEdit.Clear) "the removed place could not be taken out of the file"
+                else "the old place could not be replaced in the file",
+            )
+        }
+    }
+
+    /** Blanks the copies of a removed or replaced place the EXIF edit cannot reach, and realigns the MPF index. */
+    private fun scrubAfterEdits(file: File, location: LocationEdit) {
+        runCatching {
+            PlaceScrubber.scrubFile(
+                file,
+                removePlace = location !is LocationEdit.Unchanged,
+                keepMainExifPlace = location is LocationEdit.Set,
+            )
+        }.onFailure { Log.w(TAG, "in-file place scrub skipped: ${it.message}") }
+    }
+
+    private fun samePlace(latLong: DoubleArray, location: LocationEdit.Set): Boolean =
+        kotlin.math.abs(latLong[0] - location.latitude) < PLACE_TOLERANCE_DEG &&
+            kotlin.math.abs(latLong[1] - location.longitude) < PLACE_TOLERANCE_DEG
 
     override fun xAttrFor(
         uri: String,
@@ -106,6 +154,7 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
                 durationMillis = media.durationMs.takeIf { it > 0 },
             )
         }
+        checkPlaceInFile(uri, location)
         // Read the metadata so the xAttr keeps the source orientation, dimensions, camera and
         // subject-area; only the capture time and place are allowed to change here.
         val meta = ExifHelper.readMetadata(context, uri)
@@ -254,4 +303,9 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
         }
         intArrayOf(cy - h / 2, cx - w / 2, cy + h / 2, cx + w / 2)
     }.getOrNull()
+
+    private companion object {
+        /** EXIF stores a coordinate as rationals; a round trip stays well inside this. */
+        const val PLACE_TOLERANCE_DEG = 1e-4
+    }
 }

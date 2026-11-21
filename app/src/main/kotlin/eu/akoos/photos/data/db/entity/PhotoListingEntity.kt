@@ -84,8 +84,8 @@ data class PhotoListingEntity(
     /** Armored encrypted XAttr blob for this photo's active revision. Decrypted later (off the read
      *  path) to recover the GPS Location block for the map; null for rows captured before this column. */
     val encXAttr: String? = null,
-    /** Set once the GPS backfill has processed this row, so it is never reprocessed. */
-    val gpsChecked: Boolean = false,
+    /** How far the GPS backfill has got with this row, one of the [GpsCheck] states. */
+    val gpsChecked: Int = GpsCheck.UNCHECKED,
     /** Video length in MILLISECONDS, recovered from the xAttr Media.Duration block (stored there in
      *  seconds, converted on parse). Populated for our own uploads at pairing time and for every other
      *  video by the bounded background duration backfill. Null for images and for rows not yet walked. */
@@ -114,3 +114,42 @@ data class PhotoListingEntity(
         durationMs = durationMs,
     )
 }
+
+/** The states of [PhotoListingEntity.gpsChecked]; the DAO's queries spell the same numbers out. */
+object GpsCheck {
+    const val UNCHECKED = 0
+
+    /** The XAttr was read; a Location in it is stored in `photo_location`. */
+    const val XATTR_READ = 1
+
+    /** The XAttr held no Location and the file's own first and last blocks were read for one. */
+    const val CONTENT_READ = 2
+
+    /** Passed over while the photo was hidden; set back to [UNCHECKED] once it no longer is. */
+    const val SKIPPED_HIDDEN = 3
+
+    /** The XAttr held no Location and the file was not read: its uploader read the EXIF, or its format is not parsed. */
+    const val CONTENT_SKIPPED = 4
+
+    /** As [XATTR_READ], with one failed file read counted. */
+    const val CONTENT_FAILED_ONCE = 5
+
+    /** As [XATTR_READ], with two failed file reads counted. */
+    const val CONTENT_FAILED_TWICE = 6
+
+    /** The file read failed three times; not tried again until a new revision rebuilds the row. */
+    const val CONTENT_GAVE_UP = 7
+}
+
+/** How many of a user's cloud photos the map can plot, for the diagnostics report. */
+data class CloudPlaceCounts(val total: Int, val located: Int, val checkedWithout: Int) {
+    fun report(): String = "cloud items: $total\nwith a place: $located\nchecked without one: $checkedWithout"
+}
+
+/** This rebuilt row with [existing]'s GPS walk state kept, so long as both describe the same revision. */
+fun PhotoListingEntity.keepingGpsCheckOf(existing: PhotoListingEntity?): PhotoListingEntity =
+    if (existing != null && existing.revisionId == revisionId && existing.gpsChecked != gpsChecked) {
+        copy(gpsChecked = existing.gpsChecked)
+    } else {
+        this
+    }

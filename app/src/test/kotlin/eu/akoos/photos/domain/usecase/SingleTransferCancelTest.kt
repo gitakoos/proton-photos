@@ -368,6 +368,7 @@ class SingleTransferCancelTest {
             sdkRouting = mockk(relaxed = true),
             sdkPhotoDownloadOps = mockk(relaxed = true),
             photoLocationDao = mockk(relaxed = true),
+            photoLocationResolver = mockk(relaxed = true),
             context = context,
         )
         val dir = File(context.cacheDir, "fullres").also { it.deleteRecursively(); it.mkdirs() }

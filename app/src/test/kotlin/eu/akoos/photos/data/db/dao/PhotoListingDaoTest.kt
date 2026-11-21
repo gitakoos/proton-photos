@@ -27,7 +27,10 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import eu.akoos.photos.data.db.entity.CloudPlaceCounts
+import eu.akoos.photos.data.db.entity.GpsCheck
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.toCloudPhotos
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -443,11 +446,86 @@ class PhotoListingDaoTest {
 
     @Test
     fun `getUngeocoded returns the user's un-checked rows on their own volume`() = runTest {
-        dao.upsertAll(listOf(entity("link1"), entity("link2").copy(gpsChecked = true)))
+        dao.upsertAll(listOf(entity("link1"), entity("link2").copy(gpsChecked = GpsCheck.XATTR_READ)))
 
         val rows = dao.getUngeocoded("user1", OWN_VOLUME, 10)
 
         assertEquals(listOf("link1"), rows.map { it.linkId })
+    }
+
+    @Test
+    fun `getXAttrReadWithoutLocation returns read rows the map has no place for, in linkId order`() = runTest {
+        dao.upsertAll(listOf(
+            entity("c").copy(gpsChecked = GpsCheck.XATTR_READ),
+            entity("a").copy(gpsChecked = GpsCheck.XATTR_READ),
+            entity("located").copy(gpsChecked = GpsCheck.XATTR_READ),
+            entity("unchecked"),
+            entity("done").copy(gpsChecked = GpsCheck.CONTENT_READ),
+            sharedAlbumEntity("shared").copy(gpsChecked = GpsCheck.XATTR_READ),
+        ))
+        db.photoLocationDao().upsert(listOf(PhotoLocationEntity("located", "user1", 38.9, 1.4)))
+
+        val rows = dao.getXAttrReadWithoutLocation("user1", OWN_VOLUME, "", 10)
+
+        assertEquals(listOf("a", "c"), rows.map { it.linkId })
+    }
+
+    @Test
+    fun `getXAttrReadWithoutLocation keeps offering a photo with failed reads counted until it is given up`() = runTest {
+        dao.upsertAll(listOf(
+            entity("once").copy(gpsChecked = GpsCheck.CONTENT_FAILED_ONCE),
+            entity("twice").copy(gpsChecked = GpsCheck.CONTENT_FAILED_TWICE),
+            entity("gaveUp").copy(gpsChecked = GpsCheck.CONTENT_GAVE_UP),
+        ))
+
+        val rows = dao.getXAttrReadWithoutLocation("user1", OWN_VOLUME, "", 10)
+
+        assertEquals(listOf("once", "twice"), rows.map { it.linkId })
+    }
+
+    @Test
+    fun `getXAttrReadWithoutLocation continues after the given linkId`() = runTest {
+        dao.upsertAll(listOf(
+            entity("a").copy(gpsChecked = GpsCheck.XATTR_READ),
+            entity("b").copy(gpsChecked = GpsCheck.XATTR_READ),
+        ))
+
+        val rows = dao.getXAttrReadWithoutLocation("user1", OWN_VOLUME, "a", 10)
+
+        assertEquals(listOf("b"), rows.map { it.linkId })
+    }
+
+    @Test
+    fun `cloudPlaceCounts counts built rows, located rows and rows checked without a place`() = runTest {
+        dao.upsertAll(listOf(
+            entity("located").copy(gpsChecked = GpsCheck.XATTR_READ),
+            entity("read").copy(gpsChecked = GpsCheck.CONTENT_READ),
+            entity("skipped").copy(gpsChecked = GpsCheck.CONTENT_SKIPPED),
+            entity("waiting").copy(gpsChecked = GpsCheck.XATTR_READ),
+            entity("hidden").copy(gpsChecked = GpsCheck.SKIPPED_HIDDEN),
+            entity("unchecked"),
+            entity("stub").copy(revisionId = ""),
+        ))
+        db.photoLocationDao().upsert(listOf(PhotoLocationEntity("located", "user1", 38.9, 1.4)))
+
+        val counts = dao.cloudPlaceCounts("user1")
+
+        assertEquals(CloudPlaceCounts(total = 6, located = 1, checkedWithout = 3), counts)
+    }
+
+    @Test
+    fun `cloudPlaceCounts is all zero for a user with no rows`() = runTest {
+        assertEquals(CloudPlaceCounts(0, 0, 0), dao.cloudPlaceCounts("nobody"))
+    }
+
+    @Test
+    fun `a row passed over while hidden is listed and can be set back to unchecked`() = runTest {
+        dao.upsertAll(listOf(entity("hidden"), entity("other")))
+        dao.setGpsCheck(listOf("hidden"), GpsCheck.SKIPPED_HIDDEN)
+
+        assertEquals(listOf("hidden"), dao.gpsSkippedHiddenLinkIds("user1"))
+        dao.setGpsCheck(listOf("hidden"), GpsCheck.UNCHECKED)
+        assertEquals(listOf("hidden", "other"), dao.getUngeocoded("user1", OWN_VOLUME, 10).map { it.linkId }.sorted())
     }
 
     @Test

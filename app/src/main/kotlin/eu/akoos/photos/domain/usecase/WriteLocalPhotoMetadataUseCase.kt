@@ -37,6 +37,7 @@ import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.PlaceScrubber
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.isExifWritableImageMime as isExifWritableImageMimeShared
 import eu.akoos.photos.util.mimeFromPath
@@ -230,7 +231,7 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
             // setLatLong sets the coordinate plus its N/S and E/W reference tags, matching
             // ExifHelper.writeGpsLocation; the "rw" descriptor is what a foreign MediaStore file needs
             // (a raw path write is refused under scoped storage) and is where consent is demanded.
-            editExifViaFd(uri) { exif -> exif.setLatLong(latitude, longitude) }
+            editExifViaFd(uri, scrubOldPlace = true) { exif -> exif.setLatLong(latitude, longitude) }
         }
 
     /** Removes the GPS EXIF block. Image-only, mirroring [writeLocation]. Reuses the audited GPS tag
@@ -304,19 +305,24 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
         }
 
     /**
-     * Opens a "rw" descriptor on [uri], runs [mutate] against its [ExifInterface], and saves. Maps a
-     * recoverable [SecurityException] to [MetadataWriteResult.NeedsPermission]; rethrows cancellation
-     * before any other handling so a cancelled write never reports Failed.
+     * Opens a "rw" descriptor on [uri], runs [mutate] against its [ExifInterface], and saves. With
+     * [scrubOldPlace] the copies of the old place outside the EXIF GPS block are blanked too
+     * ([PlaceScrubber]). Maps a recoverable [SecurityException] to [MetadataWriteResult.NeedsPermission];
+     * rethrows cancellation before any other handling so a cancelled write never reports Failed.
      */
-    private fun editExifViaFd(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
+    private fun editExifViaFd(
+        uri: String,
+        scrubOldPlace: Boolean = false,
+        mutate: (ExifInterface) -> Unit,
+    ): MetadataWriteResult =
         eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
             context,
             uri,
             changed = { it is MetadataWriteResult.Success },
             onError = { MetadataWriteResult.Failed(it.message ?: "exif write failed") },
-        ) { target -> editExifViaFdAt(target, mutate) }
+        ) { target -> editExifViaFdAt(target, scrubOldPlace, mutate) }
 
-    private fun editExifViaFdAt(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
+    private fun editExifViaFdAt(uri: String, scrubOldPlace: Boolean, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
         try {
             val parsed = Uri.parse(uri)
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
@@ -327,6 +333,9 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
                     val exif = ExifInterface(it.fileDescriptor)
                     mutate(exif)
                     exif.saveAttributes()
+                    if (scrubOldPlace) {
+                        PlaceScrubber.scrubDescriptor(it.fileDescriptor, removePlace = true, keepMainExifPlace = true)
+                    }
                 }
             }
             MetadataWriteResult.Success

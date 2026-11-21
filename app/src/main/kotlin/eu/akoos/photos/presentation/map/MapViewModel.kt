@@ -163,15 +163,17 @@ class MapViewModel @Inject constructor(
     }
 
     /**
-     * Cloud-photo backfill — the GPS comes from each photo's own encrypted XAttr, so it needs NO
-     * Android permission and runs unconditionally on entry (even when ACCESS_MEDIA_LOCATION is
-     * denied). Writes `photo_location` keyed by cloud linkId (never colliding with the local URIs);
-     * self-collapsing across overlapping calls.
+     * Cloud-photo backfill: the GPS comes from each photo's own encrypted XAttr (or, lacking one, its
+     * file), so it needs NO Android permission and runs unconditionally on entry (even when
+     * ACCESS_MEDIA_LOCATION is denied). Writes `photo_location` keyed by cloud linkId (never colliding
+     * with the local URIs); self-collapsing across overlapping calls. The walk runs on its own scope, so
+     * closing the map does not stop it, and skips the health gate like the local walk: the user opened
+     * the map and wants their pins now.
      */
     fun startCloudBackfill() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            withContext(Dispatchers.IO) { drivePhotoRepository.backfillCloudGps(userId) }
+            drivePhotoRepository.startCloudGpsBackfill(userId, respectHealthGate = false)
         }
     }
 

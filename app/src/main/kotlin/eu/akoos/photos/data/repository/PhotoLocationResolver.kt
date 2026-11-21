@@ -46,9 +46,9 @@ private const val TAG = "PhotoLocationResolver"
  * [CloudGpsBackfillScheduler] walk and by the download path, which needs a single photo's coordinates
  * on demand so an exported file keeps its location.
  *
- * The ONLY location source is the cloud XAttr Location block. A photo uploaded with GPS stripped has
+ * The location source here is the cloud XAttr Location block. A photo uploaded with GPS stripped has
  * no Location in its XAttr, so [locate] and [resolve] yield null for it and the caller writes nothing;
- * coordinates are never invented from any other source.
+ * a fix the file itself carries is read by [CloudContentGpsBackfill] and the download path instead.
  *
  * Resolving the parent key mirrors [eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler]:
  * the photo's nodeKey was encrypted to its parent link's key (the photos root, or an album). That
@@ -76,15 +76,19 @@ class PhotoLocationResolver @Inject constructor(
      * revision endpoint. The parent-key resolution mirrors the thumbnail scheduler's owner-side branches.
      */
     suspend fun locate(userId: UserId, row: PhotoListingEntity, armoredXAttr: String?): PhotoLocationEntity? {
-        val encXAttr = armoredXAttr ?: return null
+        val json = decryptXAttr(userId, row, armoredXAttr ?: return null) ?: return null
+        val (lat, lon) = parsePhotoLocation(json) ?: return null
+        return PhotoLocationEntity(id = row.linkId, userId = userId.id, latitude = lat, longitude = lon)
+    }
+
+    /** One [row]'s XAttr decrypted to its JSON, or null when its key material can't be resolved. */
+    suspend fun decryptXAttr(userId: UserId, row: PhotoListingEntity, armoredXAttr: String): String? {
         val encNodeKey = row.encNodeKey ?: return null
         val encNodePass = row.encNodePassphrase ?: return null
         val parentLinkId = row.parentLinkId ?: return null
         val parentKey = getParentKeyBytes(userId, parentLinkId, row.volumeId) ?: return null
         val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
-        val json = cryptoServiceClient.decryptXAttr(encXAttr, nodeKeyBytes) ?: return null
-        val (lat, lon) = parsePhotoLocation(json) ?: return null
-        return PhotoLocationEntity(id = row.linkId, userId = userId.id, latitude = lat, longitude = lon)
+        return cryptoServiceClient.decryptXAttr(armoredXAttr, nodeKeyBytes)
     }
 
     /**
