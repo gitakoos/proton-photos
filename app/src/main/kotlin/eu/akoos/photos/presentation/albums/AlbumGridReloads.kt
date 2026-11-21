@@ -22,7 +22,9 @@
 
 package eu.akoos.photos.presentation.albums
 
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -30,7 +32,12 @@ import kotlinx.coroutines.flow.merge
 /**
  * When the Albums grid reads its albums again: on a change to the album list, and whenever photos go into
  * or come out of the Drive trash ([trashMoves], the photo count of each move), since that changes the photo
- * counts the server keeps for the albums those photos are in.
+ * counts the server keeps for the albums those photos are in. Moves that come in a burst, such as a batch
+ * that trashes its photos one by one, share one reload once [ALBUM_GRID_TRASH_SETTLE_MS] passes without
+ * another move.
  */
+@OptIn(FlowPreview::class)
 internal fun albumGridReloads(listChanges: Flow<Unit>, trashMoves: Flow<Int>): Flow<Unit> =
-    merge(listChanges, trashMoves.filter { it != 0 }.map { })
+    merge(listChanges, trashMoves.filter { it != 0 }.debounce(ALBUM_GRID_TRASH_SETTLE_MS).map { })
+
+internal const val ALBUM_GRID_TRASH_SETTLE_MS = 1_000L

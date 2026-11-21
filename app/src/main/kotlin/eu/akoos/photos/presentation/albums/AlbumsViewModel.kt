@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
@@ -217,6 +218,10 @@ class AlbumsViewModel @Inject constructor(
 
     private fun applySort(albums: List<Album>): List<Album> =
         sortAlbums(albums, sortMode.value, customOrder.value, newestPhoto.value)
+
+    // A newer load replaces an older one still in flight, so a slower, older answer never lands last.
+    private var loadJob: kotlinx.coroutines.Job? = null
+    private var membershipPrefetchJob: kotlinx.coroutines.Job? = null
 
     init {
         observeSortMode()
@@ -537,7 +542,8 @@ class AlbumsViewModel @Inject constructor(
     }
 
     fun loadAlbums() {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             // Phase 1: instant cache read so the grid paints on cold/airplane-mode launch.
             val cached = runCatching { driveRepo.loadAlbumsCached() }.getOrNull().orEmpty()
@@ -572,15 +578,19 @@ class AlbumsViewModel @Inject constructor(
             }
             runCatching { driveRepo.loadAlbums(userId) }.fold(
                 onSuccess = { albums ->
+                    ensureActive()
                     _uiState.update { it.copy(isLoading = false, albums = applySort(albums)) }
                     // Fire-and-forget membership prefetch so a later album-open paints from cache.
                     // Delayed 5 s so foreground gallery decrypts get first crack at the network semaphore.
-                    viewModelScope.launch {
+                    membershipPrefetchJob?.cancel()
+                    membershipPrefetchJob = viewModelScope.launch {
                         kotlinx.coroutines.delay(5_000)
                         runCatching { driveRepo.prefetchAlbumsMembership(userId, albums) }
                     }
                 },
                 onFailure = { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    ensureActive()
                     val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                     _uiState.update {
                         it.copy(
