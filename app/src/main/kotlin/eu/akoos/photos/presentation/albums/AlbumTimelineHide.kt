@@ -32,12 +32,29 @@ package eu.akoos.photos.presentation.albums
  *
  * Three surfaces flip the same set — the album's own drawer, the drawer on its card, and the Settings
  * picker — so the rule lives here rather than once per caller.
+ *
+ * Beside the set sits the hide-all switch, which means every album excluded. It is the form the shared
+ * backup carries between devices, so it stays on exactly while every album is excluded.
  */
 object AlbumTimelineHide {
 
+    /** The stored exclusion: the per-album set and the hide-all switch. */
+    data class Stored(val excludedAlbumIds: Set<String>, val hideAll: Boolean)
+
     /** True while [albumLinkId]'s photos are kept out of the main feed. */
-    fun isExcluded(excludedAlbumIds: Set<String>, albumLinkId: String): Boolean =
-        albumLinkId.isNotBlank() && albumLinkId in excludedAlbumIds
+    fun isExcluded(excludedAlbumIds: Set<String>, albumLinkId: String, hideAll: Boolean = false): Boolean =
+        albumLinkId.isNotBlank() && (hideAll || albumLinkId in excludedAlbumIds)
+
+    /**
+     * [stored] after flipping [albumLinkId]. While the hide-all switch is on every album counts as
+     * excluded, so the flip takes this one album out: the switch goes off and every other album of
+     * [allAlbumIds] stays excluded one by one.
+     */
+    fun toggled(stored: Stored, albumLinkId: String, allAlbumIds: Set<String>): Stored = when {
+        albumLinkId.isBlank() -> stored
+        stored.hideAll -> Stored((stored.excludedAlbumIds + allAlbumIds) - albumLinkId, hideAll = false)
+        else -> stored.copy(excludedAlbumIds = toggled(stored.excludedAlbumIds, albumLinkId))
+    }
 
     /**
      * [excludedAlbumIds] after flipping [albumLinkId]. Every other id carries through untouched, so

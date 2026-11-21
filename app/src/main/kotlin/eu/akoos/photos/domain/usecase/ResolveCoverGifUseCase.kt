@@ -67,7 +67,7 @@ class ResolveCoverGifUseCase @Inject constructor(
                 // Not cached yet: fetch the full original only when the metered-network policy allows.
                 if (!fullResDownloadAllowed()) return@runCatching null
                 val file = driveRepo.downloadFullResPhoto(userId, photo)
-                "file://${file.absolutePath}"
+                "file://${file.storedFile.absolutePath}"
             }.getOrNull()
         }
     }

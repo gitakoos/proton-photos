@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.presentation.gallery
 
-import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -53,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +60,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.BiasAlignment
@@ -103,11 +102,24 @@ import eu.akoos.photos.presentation.util.formatVideoTime
  *
  * Holds a [State] rather than the bare map so the provider hands down a STABLE reference: the map
  * changes on every decrypt during a scroll, and providing the value itself would recompose the whole
- * nav root each time. Cells read `.current.value`, so only the tiles whose entry changed rebind.
+ * nav root each time. Cells read their own entry through [rememberStoreThumbnailUrl], so only the tiles
+ * whose entry changed rebind.
  * Defaults to an empty map so a cell composed outside any provider falls back to the item's own URL.
  */
 val LocalThumbnailUrls: ProvidableCompositionLocal<State<Map<String, String>>> =
     compositionLocalOf { mutableStateOf(emptyMap()) }
+
+/**
+ * [key]'s entry in [LocalThumbnailUrls], or null for a null [key] or one the store does not hold. Read
+ * through a derived state so the caller recomposes only when this one entry changes: reading the
+ * store's `.value` directly subscribes to the whole map, and every thumbnail that lands anywhere would
+ * redraw the tile.
+ */
+@Composable
+fun rememberStoreThumbnailUrl(key: String?): State<String?> {
+    val urls = LocalThumbnailUrls.current
+    return remember(key, urls) { derivedStateOf { key?.let { urls.value[it] } } }
+}
 
 /** Primitive, Compose-stable snapshot of everything [PhotoCell] renders for one [GalleryItem].
  *  Computed in the caller's item scope so the cell itself takes only stable params (and stays
@@ -262,7 +274,17 @@ internal fun photoCellInputsFor(
  * MediaStore JPEG into heap per cell. A single fixed size (rather than per-column sizing) keeps
  * one warm bitmap per photo across zoom levels — re-binds during scroll are memory-cache hits.
  */
-private const val GRID_THUMB_PX = 320
+internal const val GRID_THUMB_PX = 320
+
+/**
+ * Decode size for a hidden-on-device tile. Drawn upscaled under a heavy scrim, so the photo is a
+ * smooth colour wash instead of a recognisable image, with no per-cell RenderEffect to pay for
+ * while scrolling. Hidden tiles use their own memory-cache key, so the sharp grid bitmap is never
+ * what a hidden tile reads from the cache.
+ */
+internal const val HIDDEN_THUMB_PX = 24
+
+internal fun hiddenThumbKey(key: String): String = "$key:hidden"
 
 /**
  * Where a tile's crop is anchored for a [focus] given as fractions of the photo: the point the crop window
@@ -331,7 +353,8 @@ internal fun PhotoCell(
     // cell's linkId. [stableKey] is the cloud linkId for a cloud cell, and a local cell's stableKey
     // (its uri) simply misses the map. The lookup is O(1); the resolved value drives both the
     // placeholder decision and the image request below.
-    val resolvedImageData = imageData ?: LocalThumbnailUrls.current.value[stableKey]
+    val storeImageData by rememberStoreThumbnailUrl(stableKey)
+    val resolvedImageData = imageData ?: storeImageData
 
     // A local GIF animates only when the user opted into grid autoplay; otherwise the decoder-free
     // loader renders its still first frame. Every other cell keeps the default (animating) loader.
@@ -454,11 +477,11 @@ internal fun PhotoCell(
                 // off) and reports intrinsic size the same way as the image path.
                 val loaded = osThumb as? LocalVideoThumb.Loaded
                 if (loaded != null) {
-                    val request = remember(loaded.bitmap, stableKey) {
+                    val request = remember(loaded.bitmap, stableKey, isHiddenOnDevice) {
                         ImageRequest.Builder(context)
                             .data(loaded.bitmap)
-                            .size(GRID_THUMB_PX)
-                            .memoryCacheKey(stableKey)
+                            .size(if (isHiddenOnDevice) HIDDEN_THUMB_PX else GRID_THUMB_PX)
+                            .memoryCacheKey(if (isHiddenOnDevice) hiddenThumbKey(stableKey) else stableKey)
                             .crossfade(false)
                             .build()
                     }
@@ -476,11 +499,11 @@ internal fun PhotoCell(
                 // provider that refused loadThumbnail): decode at tile size, addressed by a stable
                 // memory-cache key so a warm thumbnail is an O(1) cache hit on re-bind instead of a
                 // fresh decode. crossfade(false) drops the per-bind fade that churned while flinging.
-                val request = remember(resolvedImageData, stableKey) {
+                val request = remember(resolvedImageData, stableKey, isHiddenOnDevice) {
                     ImageRequest.Builder(context)
                         .data(resolvedImageData)
-                        .size(GRID_THUMB_PX)
-                        .memoryCacheKey(stableKey)
+                        .size(if (isHiddenOnDevice) HIDDEN_THUMB_PX else GRID_THUMB_PX)
+                        .memoryCacheKey(if (isHiddenOnDevice) hiddenThumbKey(stableKey) else stableKey)
                         .crossfade(false)
                         .build()
                 }
@@ -546,22 +569,13 @@ internal fun PhotoCell(
             }
         }
 
-        // Hidden-eye overlay — drawn on the cell when its cloud linkId is referenced by a
-        // SyncState row with status HIDDEN. A heavy black scrim PLUS a real RenderEffect
-        // blur (Android 12+) ensures none of the underlying content is readable even by
-        // squinting — a plain dim still showed recognisable shapes and colours. Pre-S
-        // devices fall back to the scrim alone (Compose's blur modifier no-ops on older
-        // platforms without the BlurEffect API).
+        // Hidden-eye overlay, drawn when the cell's cloud linkId is referenced by a SyncState row
+        // with status HIDDEN. The image underneath is decoded at a tiny size (HIDDEN_THUMB_PX), so it
+        // is already a blur on every Android version, and the heavy black scrim hides what is left.
         if (isHiddenOnDevice) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                            Modifier.blur(28.dp)
-                        else
-                            Modifier,
-                    )
                     .background(Color.Black.copy(alpha = 0.7f)),
             )
             HiddenEyeBadge()

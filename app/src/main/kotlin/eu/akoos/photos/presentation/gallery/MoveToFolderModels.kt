@@ -25,8 +25,9 @@ package eu.akoos.photos.presentation.gallery
 import eu.akoos.photos.domain.entity.LocalMediaItem
 
 /** One existing device folder the "Move to folder" picker offers as a target: its bucket [name], a
- *  [coverUri] for the newest photo in it, and how many device photos it holds ([count]). */
-data class DeviceFolderChoice(val name: String, val coverUri: String?, val count: Int)
+ *  [coverUri] for the newest photo in it, how many device files it holds ([count]) and how many of
+ *  those are videos ([videoCount]). */
+data class DeviceFolderChoice(val name: String, val coverUri: String?, val count: Int, val videoCount: Int = 0)
 
 /**
  * Group device photos into one [DeviceFolderChoice] per MediaStore bucket for the move picker: the
@@ -42,7 +43,12 @@ fun deviceFolderChoices(items: List<LocalMediaItem>): List<DeviceFolderChoice> {
     }
     return byBucket
         .map { (name, locals) ->
-            DeviceFolderChoice(name, locals.maxByOrNull { it.dateTaken }?.uri, locals.size)
+            DeviceFolderChoice(
+                name = name,
+                coverUri = locals.maxByOrNull { it.dateTaken }?.uri,
+                count = locals.size,
+                videoCount = locals.count { it.mimeType.startsWith("video/") },
+            )
         }
         .sortedWith(compareByDescending<DeviceFolderChoice> { it.count }.thenBy { it.name.lowercase() })
 }

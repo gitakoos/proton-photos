@@ -112,6 +112,7 @@ class ReconcileSingleFlightTest {
         coEvery { localRepo.confirmedGone(any()) } answers { firstArg<Collection<String>>().toSet() }
         syncStateRepo = mockk(relaxed = true)
         every { syncStateRepo.observeAll(any()) } returns flowOf(emptyList())
+        syncStateRepo.answerReadsFromObserveAll()
 
         val prefs = mockk<Preferences>(relaxed = true)
         val dataStore = mockk<DataStore<Preferences>>()
@@ -136,7 +137,7 @@ class ReconcileSingleFlightTest {
         val listing = mockk<PhotoListingDao>()
         coEvery { listing.getOwnStreamPairingRows(any()) } returns emptyList()
         val scope = CoroutineScope(StandardTestDispatcher(testScheduler) + SupervisorJob()).also { scopes += it }
-        return ReconcileSyncStateUseCase(localRepo, mockk<DrivePhotoRepository>(relaxed = true), syncStateRepo, listing, context, scope)
+        return ReconcileSyncStateUseCase(localRepo, mockk<DrivePhotoRepository>(relaxed = true), syncStateRepo, listing, context, scope, InMemoryShortCloudCopyStore())
     }
 
     @Test

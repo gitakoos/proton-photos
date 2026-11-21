@@ -71,6 +71,7 @@ class ExcludedFoldersViewModel @Inject constructor(
         val name: String,
         val coverUri: String?,
         val itemCount: Int,
+        val videoCount: Int = 0,
         /** True = excluded from backup. False = included (default). */
         val isExcluded: Boolean,
         /** True = also surfaced as a Drive album (the second per-folder checkbox). */
@@ -110,6 +111,7 @@ class ExcludedFoldersViewModel @Inject constructor(
                         name       = bucket.name,
                         coverUri   = bucket.coverUri,
                         itemCount  = bucket.itemCount,
+                        videoCount = bucket.videoCount,
                         isExcluded = bucket.name in excludedNames,
                         isMirrored = bucket.name in mirror,
                     )

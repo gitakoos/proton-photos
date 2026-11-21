@@ -29,6 +29,7 @@ import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.entity.toEntity
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.SyncStatePage
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.flatMapSqlChunks
 import eu.akoos.photos.util.forEachSqlChunk
@@ -44,12 +45,23 @@ class SyncStateRepositoryImpl @Inject constructor(
     override fun observeAll(userId: UserId): Flow<List<SyncState>> =
         dao.observeAll(userId.id).map { list -> list.map { it.toDomain() } }
 
+    override suspend fun getQueuedOrIn(userId: UserId, extraUris: Set<String>): List<SyncState> =
+        // More uris than one statement can bind: the full read filtered here gives the same rows in the same order.
+        if (extraUris.size > SQL_CHUNK) {
+            super.getQueuedOrIn(userId, extraUris)
+        } else {
+            dao.getQueuedOrIn(userId.id, extraUris.toList()).map { it.toDomain() }
+        }
+
     override fun countPendingUploads(userId: UserId): Flow<Int> =
         dao.countPendingUploads(userId.id)
 
     override suspend fun upsert(state: SyncState, userId: UserId) {
         dao.upsert(state.toEntity(userId.id))
     }
+
+    override suspend fun insertIfAbsent(state: SyncState, userId: UserId): Boolean =
+        dao.insertIgnore(state.toEntity(userId.id)) != -1L
 
     override suspend fun upsertAll(states: List<SyncState>, userId: UserId) {
         dao.upsertAll(states.map { it.toEntity(userId.id) })
@@ -68,6 +80,7 @@ class SyncStateRepositoryImpl @Inject constructor(
             lastSyncSuccessMs = entity.lastSyncSuccessMs,
             backedUpAtMs = entity.backedUpAtMs,
             sizeBytes = entity.sizeBytes,
+            linkBasis = entity.linkBasis,
         )
     }
 
@@ -149,6 +162,23 @@ class SyncStateRepositoryImpl @Inject constructor(
 
     override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
 
+    override suspend fun setOriginalHash(localUri: String, originalHash: String?) =
+        dao.setOriginalHash(localUri, originalHash)
+
+    override suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String) =
+        dao.recordOwnDeviceWrite(localUri, before, after)
+
+    override suspend fun recordOwnDeviceWriteOverRow(
+        localUri: String,
+        after: String,
+        localHash: String,
+        backedUpAtMs: Long,
+    ) = dao.recordOwnDeviceWriteOverRow(localUri, after, localHash, backedUpAtMs)
+
+    override suspend fun clearAlbumAddIntent(localUri: String) {
+        dao.clearAlbumAddIntent(localUri)
+    }
+
     override suspend fun markRemovedFromDrive(localUri: String) = dao.markRemovedFromDrive(localUri)
 
     override suspend fun clearQueuedForSyncedAll(localUris: List<String>) =
@@ -165,10 +195,46 @@ class SyncStateRepositoryImpl @Inject constructor(
         return untouched
     }
 
-    override suspend fun getLocalOnly(userId: UserId): List<SyncState> =
-        dao.getLocalOnly(userId.id).map { it.toDomain() }
+    override suspend fun pageByStatus(userId: UserId, status: SyncStatus, afterKey: Long, limit: Int): SyncStatePage {
+        val page = dao.pageByStatus(userId.id, status, afterKey, limit)
+        return SyncStatePage(page.map { it.row.toDomain() }, page.lastOrNull()?.pageKey ?: afterKey)
+    }
+
+    // A lookup by primary key, the account checked here: a filter on the account in SQL could steer the
+    // query onto the account index, a scan of the account's rows per call.
+    override suspend fun getOwnByUris(userId: UserId, localUris: List<String>): List<SyncState> =
+        dao.getByUris(localUris).mapNotNull { row -> row.takeIf { it.userId == userId.id }?.toDomain() }
+
+    override suspend fun syncedUrisByCloudId(userId: UserId, cloudFileIds: Collection<String>): Map<String, List<String>> =
+        cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedPairsForCloudIds(userId.id, chunk) }
+            .groupBy({ it.cloudFileId }, { it.localUri })
+
+    override suspend fun markLinkProven(
+        userId: UserId,
+        localUri: String,
+        cloudFileId: String,
+        cloudHash: String,
+        originalHash: String,
+        now: Long,
+    ): Boolean = dao.markLinkProven(userId.id, localUri, cloudFileId, cloudHash, originalHash, now) > 0
+
+    override suspend fun unlinkNameLink(userId: UserId, localUri: String, cloudFileId: String): Boolean =
+        dao.unlinkNameLink(userId.id, localUri, cloudFileId) > 0
+
+    override suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
+        cloudFileIds.toList().flatMapSqlChunks { chunk -> dao.syncedCloudIdsAmong(userId.id, chunk) }.toHashSet()
 
     override suspend fun getQueueSource(localUri: String): String? = dao.getQueueSource(localUri)
 
     override suspend fun clearManualQueue(): Int = dao.clearManualQueue()
+
+    override suspend fun clearManualQueueFor(localUri: String): Int = dao.cancelManualFor(localUri)
+
+    override suspend fun markUnuploadable(localUri: String, at: Long) {
+        dao.markUnuploadable(localUri, at)
+    }
+
+    override suspend fun keepCancelled(localUri: String) {
+        dao.keepCancelled(localUri)
+    }
 }

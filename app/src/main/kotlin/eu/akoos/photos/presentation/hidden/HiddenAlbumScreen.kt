@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.hidden
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.app.KeyguardManager
 import androidx.activity.compose.BackHandler
 import androidx.biometric.BiometricManager
@@ -43,7 +44,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -153,6 +153,7 @@ fun HiddenAlbumScreen(
     var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
     val vaultPasswordViewModel: VaultPasswordViewModel = hiltViewModel()
     val vaultPasswordSet by vaultPasswordViewModel.isSet.collectAsStateWithLifecycle()
+    val passwordTipDue by viewModel.passwordTipDue.collectAsStateWithLifecycle()
 
     SecureScreenEffect()
 
@@ -209,7 +210,7 @@ fun HiddenAlbumScreen(
         if (!state.isAuthenticated && !promptShown) {
             // LocaleOverride wraps LocalContext in a ContextWrapper, so a direct cast
             // to FragmentActivity throws ClassCastException. findFragmentActivity()
-            // walks the baseContext chain to reach the underlying MainActivity.
+            // walks the baseContext chain to reach the underlying MainHostActivity.
             val fragmentActivity = context.findFragmentActivity()
             if (fragmentActivity == null) {
                 onBack()
@@ -396,12 +397,13 @@ fun HiddenAlbumScreen(
                     // different lists (CloudOnly for the cloud photos, LocalOnly for the device
                     // ones), so each is reduced here to the key it reports back.
                     val returnLeadingSlots = remember(
-                        state.hiddenAlbums, state.hiddenFolders, state.looseDeviceCopyLinkIds,
+                        state.hiddenAlbums, state.hiddenFolders, state.looseDeviceCopyLinkIds, passwordTipDue,
                     ) {
-                        // The notice is emitted above the albums, so it holds a slot of its own here.
-                        // Every full-span row ahead of the photos has to be counted or the return
-                        // lands the grid one row off for each one that is not.
-                        val noticeSlots = if (state.looseDeviceCopyLinkIds.isEmpty()) 0 else 1
+                        // The password tip and the notice are emitted above the albums, so each holds a
+                        // slot of its own here. Every full-span row ahead of the photos has to be counted
+                        // or the return lands the grid one row off for each one that is not.
+                        val noticeSlots = (if (passwordTipDue) 1 else 0) +
+                            (if (state.looseDeviceCopyLinkIds.isEmpty()) 0 else 1)
                         val albumSlots =
                             if (state.hiddenAlbums.isEmpty()) 0 else 1 + state.hiddenAlbums.chunked(2).size
                         val folderSlots =
@@ -443,6 +445,35 @@ fun HiddenAlbumScreen(
                         // other gallery app. Both kinds sit in this grid looking identical, which is
                         // the one thing worth saying out loud on a screen whose whole promise is that
                         // what it holds is out of sight.
+                        // Without a Hidden password, a sign-out Proton forces moves the photos hidden
+                        // only on this phone back into the gallery. Tapping opens the set-password flow;
+                        // the line goes once a password is set.
+                        if (passwordTipDue) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_password_tip") {
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier
+                                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(PillBg)
+                                        .clickable { vaultPasswordStep = VaultPasswordStep.Set }
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Info,
+                                        contentDescription = null,
+                                        tint = FgMute,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        stringResource(R.string.hidden_password_tip),
+                                        color = FgDim,
+                                        fontSize = 12.5.sp,
+                                    )
+                                }
+                            }
+                        }
                         if (state.looseDeviceCopyLinkIds.isNotEmpty()) {
                             item(span = { GridItemSpan(maxLineSpan) }, key = "loose_device_copies") {
                                 Row(
@@ -756,7 +787,7 @@ fun HiddenAlbumScreen(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding(),
+                .snackbarAboveBars(),
         )
     }
 }
@@ -945,8 +976,9 @@ private fun HiddenFolderCard(
         UnifiedAlbumCard(
             coverModel = folder.coverUri?.let(android.net.Uri::parse),
             title = folder.name,
+            // The vault keeps no file type per photo, so the count stays neutral.
             metaText = pluralStringResource(
-                R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+                R.plurals.count_items_plural, folder.itemCount, folder.itemCount,
             ),
             isDeviceFolder = true,
             onClick = onOpen,

@@ -28,6 +28,7 @@ import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.localcrypto.VaultReadProvider
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.PhotoDownloadService
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -87,24 +88,25 @@ class OutgoingPhotoUris @Inject constructor(
         } ?: run {
             val userId = accountManager.getPrimaryUserId().first()
                 ?: error(context.getString(R.string.viewer_not_signed_in))
-            cloudRepo.downloadFullResPhoto(userId, photo)
+            cloudRepo.downloadFullResPhoto(userId, photo).storedFile
         }
         return providerUri(file, photo.displayName)
     }
 
     /**
      * The uri for a device-backed photo. A MediaStore photo already has one. A vaulted photo does not:
-     * it is an app-private `file://` the platform refuses to put in an intent, so it goes out through
-     * the share provider, which serves the bytes in place and puts no part of the vault's location in
-     * the uri. The vault names its files by a private code, so the receiver is told the name the photo
-     * was hidden under.
+     * it is an app-private `file://` the platform refuses to put in an intent, and its bytes are
+     * encrypted, so it goes out through the vault's read provider, which decrypts as the receiver reads
+     * and puts no part of the vault's location in the uri. The vault names its files by a private code,
+     * so the receiver is told the name the photo was hidden under.
      */
     fun localUri(local: LocalMediaItem): Uri {
         val parsed = Uri.parse(local.uri)
         if (!hiddenStorage.isHiddenUri(local.uri)) return parsed
         val file = parsed.path?.let { File(it) }?.takeIf { it.exists() }
             ?: error(context.getString(R.string.viewer_unknown_error))
-        return providerUri(file, local.displayName)
+        VaultReadProvider.setDisplayName(file.name, local.displayName)
+        return VaultReadProvider.uriFor(file.name)
     }
 
     private fun providerUri(file: File, displayName: String): Uri =

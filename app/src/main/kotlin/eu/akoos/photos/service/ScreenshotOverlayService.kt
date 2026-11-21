@@ -1656,7 +1656,7 @@ class ScreenshotOverlayService : Service() {
 
     /**
      * When the shot was annotated, bakes the annotation layer onto a full-resolution copy and returns
-     * a shareable content Uri from cacheDir/fullres via the share FileProvider; with an empty layer it
+     * a shareable content Uri of it, kept encrypted in the scratch folder emptied at every start; with an empty layer it
      * just returns the original shot Uri. So Copy and Share always act on WHAT THE USER SEES. Switches
      * to Dispatchers.IO for the bitmap copy + JPEG encode + file write since callers run on the
      * main-dispatched service scope.
@@ -1669,10 +1669,9 @@ class ScreenshotOverlayService : Service() {
             val out = src.copy(Bitmap.Config.ARGB_8888, true)
             val canvas = Canvas(out)
             dv.bakeOnto(canvas, out.width, out.height)
-            val dir = java.io.File(cacheDir, "fullres").apply { mkdirs() }
-            val file = java.io.File(dir, "annotated_${out.width}x${out.height}.jpg")
-            java.io.FileOutputStream(file).use { out.compress(Bitmap.CompressFormat.JPEG, 95, it) }
-            androidx.core.content.FileProvider.getUriForFile(this@ScreenshotOverlayService, "$packageName.share.fileprovider", file)
+            eu.akoos.photos.util.shareCopyUri(this@ScreenshotOverlayService, "annotated_${out.width}x${out.height}.jpg") {
+                out.compress(Bitmap.CompressFormat.JPEG, 95, it)
+            }
         }.getOrElse { currentShotUri }
     }
 

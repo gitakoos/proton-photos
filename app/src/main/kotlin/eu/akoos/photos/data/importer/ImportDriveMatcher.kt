@@ -51,6 +51,9 @@ class ImportLinkCheckException(cause: Throwable) : Exception("import link check 
  *  3. While the backup rewrites this kind of file (compression, or strip for a photo), a photo of the same
  *     name, or of the name the rewrite gives it, captured in the same second. The backup's compressed or
  *     stripped copy of a photo can only be found this way.
+ *
+ * The video of a Live Photo whose still is in Drive is also looked for among the videos Drive keeps with that
+ * still ([videosKeptWith]), which the library listing has no row for.
  */
 @Singleton
 class ImportDriveMatcher @Inject constructor(
@@ -71,6 +74,12 @@ class ImportDriveMatcher @Inject constructor(
         val mimeType: String,
         val captureMs: Long,
     )
+
+    /**
+     * The videos Drive keeps with a still: whether it keeps any that is not in the trash, and the link of the
+     * one holding the bytes looked for, or null.
+     */
+    data class KeptVideos(val any: Boolean, val sameLinkId: String?)
 
     /**
      * The Drive link [entry] already is for [userId], or null. With [confirmLedgerLink] a ledger link counts
@@ -95,6 +104,31 @@ class ImportDriveMatcher @Inject constructor(
             photoListingDao.linkIdByContentHash(userId.id, hash)?.let { return it }
         }
         return null
+    }
+
+    /**
+     * The videos Drive keeps with the still [stillLinkId], read from Drive, matched against the content of
+     * [sha1s]. A kept link Drive returns no detail for counts as kept, so a video is never joined beside one
+     * that could not be read; a still Drive no longer has keeps nothing. A Drive check that fails throws
+     * [ImportLinkCheckException].
+     */
+    suspend fun videosKeptWith(userId: UserId, stillLinkId: String, sha1s: List<String>): KeptVideos {
+        val hashes = sha1s.distinct().mapNotNull { drivePhotoRepository.cloudContentHash(it) }.toSet()
+        try {
+            val volumeId = drivePhotoRepository.getVolumeId(userId)
+            val related = linkDetailHelpers
+                .batchFetchLinkDetails(userId, volumeId, listOf(stillLinkId), strict = true)[stillLinkId]
+                ?.photo?.relatedPhotosLinkIds.orEmpty()
+            if (related.isEmpty()) return KeptVideos(any = false, sameLinkId = null)
+            val details = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, related, strict = true)
+            val kept = related.filter { id -> details[id]?.link?.state?.let { it == LINK_STATE_ACTIVE } ?: true }
+            val same = kept.firstOrNull { id -> details[id]?.photo?.contentHash?.let { it in hashes } == true }
+            return KeptVideos(any = kept.isNotEmpty(), sameLinkId = same)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw ImportLinkCheckException(e)
+        }
     }
 
     private suspend fun ledgerLink(userId: UserId, sourceSha1: String, confirm: Boolean): String? {

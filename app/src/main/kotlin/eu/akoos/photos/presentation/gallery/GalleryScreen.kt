@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -37,6 +38,8 @@ import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.animation.AnimatedVisibility
@@ -174,6 +177,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.painterResource
@@ -274,9 +278,12 @@ internal fun buildContentFilterSummary(
     backedUpLabel: String,
     cloudLabel: String,
     offlineLabel: String,
+    // The picked labels, by name or as a count.
+    labelText: String? = null,
 ): String? {
     if (filter == ContentFilter()) return null
     val parts = buildList {
+        labelText?.let { add(it) }
         when (filter.mediaType) {
             MediaType.PhotosOnly -> add(photosLabel)
             MediaType.VideosOnly -> add(videosLabel)
@@ -392,11 +399,13 @@ fun GalleryScreen(
     onPendingWidgetPhotoConsumed: () -> Unit = {},
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val state by viewModel.screenState.collectAsStateWithLifecycle()
     val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
     // Fresh per-cell decrypted thumbnail URLs (see GalleryViewModel.thumbnailUrls). The timeline model
     // no longer carries them on the row, so the grid resolves each cloud cell's URL from this map.
-    val thumbnailUrls by viewModel.thumbnailUrls.collectAsStateWithLifecycle()
+    // Held as a State and read only inside the grid's cell scopes, so a decrypt landing does not
+    // recompose this screen.
+    val thumbnailUrls = viewModel.thumbnailUrls.collectAsStateWithLifecycle()
     val albumsViewModel: AlbumsViewModel = hiltViewModel()
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()
@@ -413,6 +422,7 @@ fun GalleryScreen(
     val cloudSaveUi by cloudSaveVm.ui.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val resources = LocalResources.current
     val appColors = AppColors.current
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     // People rail: the face bar is open either because the chip is toggled on (this flag) or because a
@@ -587,20 +597,20 @@ fun GalleryScreen(
         LaunchedEffect(gridState, staggeredState, mosaicGrid, state.filteredItems) {
             val rendered = state.filteredItems
             if (rendered.isEmpty()) return@LaunchedEffect
-            // Stable-key → filteredItems index, for the two cell key shapes the grid emits.
-            val indexByLinkId = HashMap<String, Int>(rendered.size)
-            rendered.forEachIndexed { idx, gi -> cloudLinkIdOf(gi)?.let { indexByLinkId[it] = idx } }
+            // Grid cell key -> filteredItems index, for every cell key shape the grid emits (a synced or
+            // device cell is keyed by its local uri, not a link). Built off the main thread: it covers the
+            // whole list and is rebuilt on every list change.
+            val indexByKey = withContext(Dispatchers.Default) { GalleryKeyIndex(rendered) }
             var lastAnchor = -1
             snapshotFlow {
                 // Anchor on the last visible cell of whichever grid is showing so prefetch warms the
                 // rows just past the viewport in mosaic mode too, not only the fixed grid.
-                val last = if (mosaicGrid)
+                if (mosaicGrid)
                     staggeredState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
                 else
                     gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
-                last?.removePrefix("cloud_")?.removePrefix("synced_")
-            }.collect { anchorLinkId ->
-                val anchorIdx = anchorLinkId?.let { indexByLinkId[it] } ?: return@collect
+            }.collect { anchorKey ->
+                val anchorIdx = anchorKey?.let { indexByKey.positionOfKey(it) }?.takeIf { it >= 0 } ?: return@collect
                 // Only look ahead while moving forward; reverse scroll keeps warm rows warm.
                 if (anchorIdx <= lastAnchor) { lastAnchor = anchorIdx; return@collect }
                 lastAnchor = anchorIdx
@@ -631,7 +641,9 @@ fun GalleryScreen(
         if (memoryLinkIds.isNotEmpty()) viewModel.requestThumbnailsVisible(memoryLinkIds)
     }
 
-    val mediaPermissions = MediaPermissions.requestSet(Build.VERSION.SDK_INT)
+    // Remembered: a fresh array each pass would make the grid's permission callback a new value every
+    // time this screen recomposes, so the whole photo grid would rebuild with it instead of skipping.
+    val mediaPermissions = remember { MediaPermissions.requestSet(Build.VERSION.SDK_INT) }
     // Whether the request going out now asks for access the app already held: its instant answer then
     // changes nothing the device list was read under, so it must not start another whole-library scan.
     val askedWhileGranted = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
@@ -843,6 +855,8 @@ fun GalleryScreen(
 
     // ── Filter bottom sheet state ─────────────────────────────────────────────
     var showFilterSheet by remember { mutableStateOf(false) }
+    // The filter sheet's Labels page is open in place of its filters.
+    var labelPage by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Grouping is controlled exclusively by the photo grid's pinch gesture (see
@@ -939,7 +953,7 @@ fun GalleryScreen(
                     ),
                 )
             } else if (state.hideCloudNoticePending) {
-                snackbarHostState.showSnackbar(context.getString(R.string.hide_cloud_copy_notice))
+                snackbarHostState.showSnackbar(resources.getString(R.string.hide_cloud_copy_notice))
             }
             viewModel.resetMultiHideState()
         }
@@ -962,11 +976,11 @@ fun GalleryScreen(
         if (multiDownloadState is MultiDownloadState.Done) {
             val msg = if (multiDownloadState.failed == 0)
                 if (multiDownloadState.succeeded == 1)
-                    context.getString(R.string.gallery_download_done_singular)
+                    resources.getString(R.string.gallery_download_done_singular)
                 else
-                    context.getString(R.string.gallery_download_done, multiDownloadState.succeeded)
+                    resources.getString(R.string.gallery_download_done, multiDownloadState.succeeded)
             else
-                context.getString(R.string.gallery_download_partial, multiDownloadState.succeeded, multiDownloadState.failed)
+                resources.getString(R.string.gallery_download_partial, multiDownloadState.succeeded, multiDownloadState.failed)
             snackbarHostState.showSnackbar(msg)
             viewModel.resetMultiDownloadState()
         }
@@ -1122,11 +1136,11 @@ fun GalleryScreen(
                     is AddToAlbumMessage.AddedAndUploading -> context.resources.getQuantityString(
                         R.plurals.gallery_add_to_album_some_queued, outcome.uploading, outcome.uploading,
                     )
-                    is AddToAlbumMessage.Uploading -> context.getString(R.string.gallery_add_to_album_queued)
+                    is AddToAlbumMessage.Uploading -> resources.getString(R.string.gallery_add_to_album_queued)
                     // Edge case: nothing added and nothing queued but the op still "succeeded"
                     // (e.g. the photos were already in the picked album). Surface a snackbar anyway.
                     AddToAlbumMessage.NothingAdded ->
-                        context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
+                        resources.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
                 }
                 if (msg != null) snackbarHostState.showSnackbar(msg)
                 viewModel.resetAddToAlbumState()
@@ -1145,9 +1159,9 @@ fun GalleryScreen(
         when (multiStripState) {
             is MultiStripState.Done -> {
                 val msg = if (multiStripState.skipped == 0)
-                    context.getString(R.string.gallery_stripped_metadata, multiStripState.stripped)
+                    resources.getString(R.string.gallery_stripped_metadata, multiStripState.stripped)
                 else
-                    context.getString(R.string.gallery_stripped_with_skipped,
+                    resources.getString(R.string.gallery_stripped_with_skipped,
                         multiStripState.stripped, multiStripState.skipped)
                 snackbarHostState.showSnackbar(msg)
                 viewModel.resetMultiStripState()
@@ -1189,7 +1203,7 @@ fun GalleryScreen(
                 val pullState = rememberPullToRefreshState()
                 PullToRefreshBox(
                     isRefreshing = state.isRefreshing,
-                    onRefresh = { viewModel.refresh() },
+                    onRefresh = { viewModel.pullRefresh() },
                     state = pullState,
                     modifier = Modifier.fillMaxSize(),
                     indicator = {}
@@ -1349,6 +1363,7 @@ fun GalleryScreen(
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
+                        progress = viewModel.progress,
                         albumsState = albumsState,
                         isOnlineNow = isOnlineNow,
                         onFilterSelected = viewModel::onFilterSelected,
@@ -1440,10 +1455,8 @@ fun GalleryScreen(
             onDismiss = viewModel::clearSelection,
             // Whichever Photos grid is on screen: scrolling it collapses the drawer, so reaching
             // past it to carry on through the timeline needs no deliberate pull or tap first.
-            contentScrolling = if (mosaicGrid) {
-                staggeredState.isScrollInProgress
-            } else {
-                gridState.isScrollInProgress
+            contentScrollingProvider = {
+                if (mosaicGrid) staggeredState.isScrollInProgress else gridState.isScrollInProgress
             },
             modifier = Modifier.align(Alignment.BottomCenter),
             selectAllCount = selectAllCount,
@@ -1455,72 +1468,18 @@ fun GalleryScreen(
         )
 
         // ── UNIFIED PROGRESS PILL ─────────────────────────────────────────────
-        // One surface for the timeline's own long work, matching the device-folder back-up and
-        // album bulk actions. Sits at the top edge, clear of the selection drawer, which stays
-        // visible while these run. A multi-download is not here: it registers with the
-        // TransferCenter, so the Activity screen lists its photos and cancels the batch, and a
-        // second copy would just be a pill with no cancel of its own.
-        val opSharingTpl = stringResource(R.string.op_sharing_fmt)
+        GalleryOperationPill(
+            progress = viewModel.progress,
+            folderHideProgress = viewModel.folderHideProgress,
+            shareState = multiShareState,
+            visible = showOverlays,
+            topPadding = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp,
+            onCancelFolderHide = viewModel::cancelFolderHide,
+        )
+
         val opAddingLabel = stringResource(R.string.op_adding_to_album)
-        val opBackingUpTpl = stringResource(R.string.op_backing_up_fmt)
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opHidingLabel = stringResource(R.string.op_hiding)
-        val folderHidingTpl = stringResource(R.string.device_folder_hiding_fmt)
-        val shS = multiShareState
-        // Background back-up surfaces as the same pill as the share, so the user sees progress (and
-        // can cancel) in-app instead of only from the notification.
-        val uploadActive = state.isSyncing && state.uploadTotalCount > 0
-        // The pill's X hides the back-up pill for the rest of this run; it never stops the back-up, whose
-        // progress also shows by the avatar and whose cancel is in the notification and on Activity.
-        var uploadPillHidden by remember { mutableStateOf(false) }
-        LaunchedEffect(uploadActive) { if (!uploadActive) uploadPillHidden = false }
-        // Hiding a device folder from the Albums tab reports here too: it copies file by file and a
-        // folder can hold thousands, so it takes the pill's count and cancel rather than a blocking
-        // sheet the user would have to sit through.
-        val fh = viewModel.folderHideProgress.collectAsStateWithLifecycle().value
-        val galleryOpProgress = when {
-            shS is MultiShareState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    shS.done, shS.total, opSharingTpl.format(shS.done, shS.total))
-            fh != null ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    fh.done, fh.total, folderHidingTpl.format(fh.done, fh.total))
-            uploadActive && !uploadPillHidden ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    state.uploadDoneIdx, state.uploadTotalCount,
-                    opBackingUpTpl.format(state.uploadDoneIdx, state.uploadTotalCount))
-            else -> null
-        }
-        // Only the folder hide and the back-up are cancellable from the pill (a share finishes
-        // quickly and has its own controls). The branches mirror the chain above, so the X always
-        // belongs to the operation on show. Mirrors the upload notification's cancel.
-        val galleryOpCancel: (() -> Unit)? = when {
-            shS is MultiShareState.Working -> null
-            fh != null -> { { viewModel.cancelFolderHide() } }
-            uploadActive -> { { uploadPillHidden = true } }
-            else -> null
-        }
-        // Hold the last non-null progress so the pill can animate OUT cleanly when the work finishes,
-        // instead of vanishing the instant it goes null.
-        var lastOpProgress by remember { mutableStateOf(galleryOpProgress) }
-        if (galleryOpProgress != null) lastOpProgress = galleryOpProgress
-        // Rides the same scroll-hide signal as the header and dock, so it never sits orphaned over the
-        // grid once the rest of the chrome slides away (issue #98). Kept during selection mode.
-        AnimatedVisibility(
-            visible = showOverlays && galleryOpProgress != null,
-            enter = fadeIn() + slideInVertically { -it },
-            exit = fadeOut() + slideOutVertically { -it },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp),
-        ) {
-            eu.akoos.photos.presentation.common.OperationProgressPill(
-                progress = lastOpProgress,
-                onCancel = galleryOpCancel,
-                hidesOnly = uploadActive && fh == null,
-            )
-        }
-
         // Foreground bulk actions (delete / hide / move to album) take over the screen with a
         // blocking drawer so a second destructive tap can't land on a half-finished one. Background
         // work (downloads, back-up) stays in the passive pill above.
@@ -1584,8 +1543,7 @@ fun GalleryScreen(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(96.dp),
         )
 
         // ── DEBUG heap readout ────────────────────────────────────────────────
@@ -1613,17 +1571,22 @@ fun GalleryScreen(
     // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showFilterSheet) {
         AppModalSheet(
-            onDismissRequest = { showFilterSheet = false },
+            onDismissRequest = { showFilterSheet = false; labelPage = false },
             sheetState = filterSheetState,
             containerColor = AppColors.current.sheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
+            onBackStep = { labelPage.also { if (it) labelPage = false } },
         ) {
             ContentFilterSheet(
                 currentFilter = state.contentFilter,
                 currentCategory = state.selectedFilter,
                 onApply = { filter -> viewModel.setContentFilter(filter) },
                 onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
-                onDismiss = { showFilterSheet = false },
+                onDismiss = { showFilterSheet = false; labelPage = false },
+                // The labels lead the timeline's sheet, for a guest too.
+                labels = state.labelUsage,
+                labelPage = labelPage,
+                onLabelPageChange = { labelPage = it },
                 // Categories + media type live inline in the timeline rail, so the drawer keeps the
                 // sync-status + date pickers only, matching the Search screen's sheet.
                 showCategorySection = false,
@@ -1682,7 +1645,7 @@ fun GalleryScreen(
                     tabScope.launch {
                         val msg = if (queued > 0) R.string.backup_started
                             else R.string.device_folder_already_backed_up
-                        snackbarHostState.showSnackbar(context.getString(msg))
+                        snackbarHostState.showSnackbar(resources.getString(msg))
                     }
                 }
             },

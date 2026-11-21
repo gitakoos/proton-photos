@@ -48,12 +48,17 @@ import eu.akoos.photos.data.upload.LocalRewrites
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.PerfDiagnostics
+import eu.akoos.photos.util.SQL_CHUNK_SIZE
+import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
+import eu.akoos.photos.domain.repository.DriveCopyClaimedSize
+import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -91,10 +96,17 @@ class ReconcileSyncStateUseCase @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     @ApplicationContext private val context: Context,
     @AppScope private val appScope: CoroutineScope,
+    private val shortCopies: ShortCloudCopyStore = ShortCloudCopyStoreImpl(context),
+    private val claimedSizes: DriveCopyClaimedSize? = null,
 ) {
     private val gates = ConcurrentHashMap<String, SharedRunGate<Int>>()
 
     private val passTurns = Mutex()
+
+    /** Rows one read of sync_state returns at most. Every read of the table a pass makes is a page of
+     *  this many rows or a lookup of this many uris, so no read holds the whole table. At most
+     *  [SQL_CHUNK_SIZE], the width of a lookup's uri list. */
+    internal var readPageRows: Int = SQL_CHUNK_SIZE
 
     /** Emits a running mark at once, then the finished totals of a pass that began after this call.
      *  Throws what that pass threw. */
@@ -183,6 +195,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 .also { Log.d(TAG, "Folder filter applied: ${it.size}/${allLocalItems.size} items") }
         }
 
+        // Before the pairing reads the table, so the copies it finds are already out of the match.
+        checkEditorCopies(userId, allLocalItems, scan.complete, askedAtMs)
+
         val recorded = pairAndRecord(
             userId, allLocalItems, localItems, initialListingComplete, stripOnUpload, compressOnUpload,
             compressVideosOnUpload, scan.complete, scanStartMs,
@@ -205,6 +220,70 @@ class ReconcileSyncStateUseCase @Inject constructor(
         }
 
         return recorded.total
+    }
+
+    /**
+     * The one-time look for the photo editor's short Drive copies, over every backed-up device file the scan
+     * found, in or out of the backup folders. Each suspect ([maybeShortEditorCopy]) is told apart by its Drive
+     * copy's declared size ([editorCopyVerdict]): a short one is recorded and its device file queued to be
+     * backed up again whole, a whole one is left as it is, one whose length cannot be known is recorded as
+     * unverifiable (never freed), and one whose size or file cannot be read now waits for a later pass.
+     *
+     * It waits for a pass that starts with backed-up rows: on a fresh install or after cleared data the
+     * pairing that follows backs the files up again, and a later pass looks at them. Marked done once every
+     * suspect was told apart and the scan saw the whole device, or saw the file of every row backed up in the
+     * window; until then free-up checks each suspect itself ([FreeUpSpaceUseCase]).
+     */
+    private suspend fun checkEditorCopies(
+        userId: UserId,
+        allLocalItems: List<LocalMediaItem>,
+        scanComplete: Boolean,
+        checkStartedMs: Long,
+    ) {
+        if (shortCopies.editorCopiesChecked(userId.id)) return
+        val byUri = allLocalItems.associateBy { it.uri }
+        val suspects = ArrayList<SyncState>()
+        // Backup times of the rows in the window whose file this scan did not return.
+        val unseen = ArrayList<Long>()
+        var synced = 0
+        forEachRowAt(userId, SyncStatus.SYNCED) { row ->
+            synced++
+            val file = byUri[row.localUri]
+            if (file == null) {
+                row.backedUpAtMs?.takeIf { it >= EDITOR_SHORT_COPIES_SINCE_MS }?.let { unseen += it }
+            } else if (maybeShortEditorCopy(row, file.displayName, file.mimeType, Long.MAX_VALUE)) {
+                suspects += row
+            }
+        }
+        if (synced == 0) return
+        // Fixed at the first look, so a copy the corrected editor uploads while the look waits for a whole
+        // scan is never taken for an old one.
+        val since = shortCopies.editorCopiesCheckStartedMs(userId.id, checkStartedMs)
+        var unresolved = 0
+        val unverifiable = ArrayList<String>()
+        var short = 0
+        for (row in suspects) {
+            if ((row.backedUpAtMs ?: Long.MAX_VALUE) >= since) continue
+            val linkId = row.cloudFileId ?: continue
+            val claimed = claimedSizes?.claimedSize(userId, linkId, fetchIfUncached = true)
+            val sha1 = if (claimed == null) null else localRepo.sha1(row.localUri)
+            // The file's own length: the scan's size can predate the editor's EXIF write through a descriptor.
+            val deviceBytes = if (sha1 == null) 0L else localRepo.fileStamp(row.localUri)?.sizeBytes ?: 0L
+            when (editorCopyVerdict(row, claimed, sha1, deviceBytes)) {
+                EditorCopyVerdict.SHORT -> {
+                    shortCopies.recordShortAndRequeue(syncStateRepo, userId, row)
+                    short++
+                }
+                EditorCopyVerdict.WHOLE -> Unit
+                EditorCopyVerdict.UNVERIFIABLE -> unverifiable += linkId
+                EditorCopyVerdict.UNRESOLVED -> unresolved++
+            }
+        }
+        shortCopies.addUnverifiable(unverifiable)
+        if (short > 0) Log.w(TAG, "reconcile: $short edited copies short on Drive, queued to be backed up again whole")
+        if (unresolved == 0 && (scanComplete || unseen.none { it < since })) {
+            shortCopies.markEditorCopiesChecked(userId.id)
+        }
     }
 
     /** What [pairAndRecord] leaves for the queue clean-up after it. */
@@ -230,12 +309,6 @@ class ReconcileSyncStateUseCase @Inject constructor(
         scanComplete: Boolean,
         scanStartMs: Long,
     ): Recorded {
-        // Unpacked, so the snapshot and the cloud rows can go after their last use below (the partition
-        // and the demotion loop) instead of living through every write.
-        val (total, newStates, freshAutoFolderUris, pairedSyncedUris, existingByUri, cloudByLinkId) =
-            matchLocals(userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload)
-        PerfDiagnostics.mark("reconcile:end", localItems.size)
-
         // Previously SYNCED entries whose cloud counterpart was deleted → LOCAL_ONLY (still on device,
         // no longer in Drive). The first loop already covers items in selected folders; this catches
         // items in non-selected folders or edge cases where the file wasn't in localItems.
@@ -254,69 +327,61 @@ class ReconcileSyncStateUseCase @Inject constructor(
         //
         // The same set of every device uri serves the gone-file checks of the queue clean-up.
         val allLocalUris: Set<String> = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
+
+        // Unpacked, so each part can go after its last use below instead of living through every write.
+        val (total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris, cloudAbsent, goneCandidates, shortPaired, falseNameLinks) =
+            matchLocals(
+                userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload,
+                allLocalUris, scanComplete, scanStartMs,
+            )
+        PerfDiagnostics.mark("reconcile:end", localItems.size)
+
         val nowMs = System.currentTimeMillis()
-        // Reuse the pre-loop snapshot: this pass only demotes rows that were SYNCED BEFORE
-        // reconcile ran, and the new states aren't persisted until the upsertAll below.
-        val syncedStates = existingByUri.values
-            .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
-        val goneCandidates = ArrayList<SyncState>()
         // Rows this pass marked removed from Drive. The match above already counted them as unmatched
         // in-scope locals up for the folder backup; the stamp below must leave them out, or it would
         // overwrite the mark and upload the photo straight back.
         val removedFromDrive = HashSet<String>()
-        for (state in syncedStates) {
-            when {
-                // Cloud counterpart absent from the local cloud listing. A photo just uploaded is
-                // SYNCED before the listing catches up, so demoting it now would re-queue it for a
-                // duplicate upload and drop its green badge. Only demote once it has been missing
-                // past the grace window; by then a true cloud-side delete is real.
-                state.cloudFileId !in cloudByLinkId ->
-                    if (nowMs - (state.lastSyncSuccessMs ?: 0L) > CLOUD_ABSENCE_GRACE_MS) {
-                        // Demote only while the row still carries the cloud id this snapshot saw: a twin
-                        // genuinely gone still matches and is demoted, but one an upload re-promoted
-                        // mid-pass now carries a different id and is left alone (its pairing survives).
-                        val demoted = syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
-                        // The cloud copy is genuinely gone (past the grace window): removed from Drive
-                        // here, on another device or on the web. The row is marked so, which spends its
-                        // prior upload intent: without it the folder backup (a null or AUTO_FOLDER source)
-                        // or the stranded-intent recovery below (a MANUAL one) would upload the photo
-                        // straight back on the next pass, a deleted photo coming back.
-                        if (demoted > 0) {
-                            syncStateRepo.markRemovedFromDrive(state.localUri)
-                            removedFromDrive += state.localUri
-                        }
-                    }
-                // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
-                // user the photo is "on this device" when it actually isn't. Only on a scan that saw
-                // the whole device, and only for a row that predates it: a download saved while this
-                // pass ran is recorded SYNCED, yet the scan, begun before it, could not list its file.
-                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) -> goneCandidates += state
+        for (state in cloudAbsent) {
+            // A photo just uploaded is SYNCED before the listing catches up, so demoting it now would
+            // re-queue it for a duplicate upload and drop its green badge. Only demote once it has been
+            // missing past the grace window; by then a true cloud-side delete is real.
+            if (nowMs - (state.lastSyncSuccessMs ?: 0L) <= CLOUD_ABSENCE_GRACE_MS) continue
+            // Demote only while the row still carries the cloud id the scan saw: a twin genuinely gone
+            // still matches and is demoted, but one an upload re-promoted mid-pass now carries a
+            // different id and is left alone (its pairing survives).
+            val demoted = syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
+            // The cloud copy is genuinely gone (past the grace window): removed from Drive here, on
+            // another device or on the web. The row is marked so, which spends its prior upload intent:
+            // without it the folder backup (a null or AUTO_FOLDER source) or the stranded-intent
+            // recovery below (a MANUAL one) would upload the photo straight back on the next pass, a
+            // deleted photo coming back.
+            if (demoted > 0) {
+                syncStateRepo.markRemovedFromDrive(state.localUri)
+                removedFromDrive += state.localUri
             }
         }
         // The scan's word alone is not proof: a torn read can skip a row, and a trashed file is still
         // restorable. Only a file a lookup by id no longer finds is demoted.
         if (goneCandidates.isNotEmpty()) {
-            val confirmed = localRepo.confirmedGone(goneCandidates.map { it.localUri })
-            for (state in goneCandidates) {
+            val confirmed = localRepo.confirmedGone(goneCandidates.keys.toList())
+            for (state in goneCandidates.values) {
                 if (state.localUri in confirmed) {
                     syncStateRepo.upsert(state.copy(status = SyncStatus.CLOUD_ONLY), userId)
                 }
             }
         }
 
-        val localOnlyCount = newStates.count { it.status == SyncStatus.LOCAL_ONLY }
-        val syncedCount    = newStates.count { it.status == SyncStatus.SYNCED }
+        val localOnlyCount = guardedDemotions.size + plainWrites.count { it.status == SyncStatus.LOCAL_ONLY }
+        val syncedCount    = plainWrites.count { it.status == SyncStatus.SYNCED }
         Log.d(TAG, "reconcile done: $syncedCount SYNCED, $localOnlyCount LOCAL_ONLY (will upload)")
-        // Split the batch so a row an upload promoted to SYNCED+cloudFileId after the pre-loop snapshot
-        // is never clobbered back to LOCAL_ONLY. Only a computed-LOCAL_ONLY row that ALREADY EXISTED in
-        // that snapshot is clobber-prone (an upload cannot claim a sync_state row that does not exist
-        // yet); route those through the guarded update, which no-ops on a row now finished uploading.
-        // Everything else stays in the plain batch: a genuinely new row (which must still INSERT) and
-        // every SYNCED/promote write.
-        val (guardedDemotions, rest) = newStates.partition {
-            it.status == SyncStatus.LOCAL_ONLY && existingByUri.containsKey(it.localUri)
-        }
-        syncStateRepo.upsertAll(rest, userId)
+        // The batch comes split (see [Matched]) so a row an upload promoted to SYNCED+cloudFileId after
+        // the pairing read it is never clobbered back to LOCAL_ONLY: the guarded update no-ops on a row
+        // now finished uploading, while a genuinely new row (which must still INSERT) and every
+        // SYNCED/promote write go through the plain batch.
+        // A name link the bytes disproved is unlinked first, while it still links the photo the pass saw, so
+        // the guarded write below then finds the row no longer SYNCED and makes it a queued device file.
+        for (state in falseNameLinks) syncStateRepo.unlinkNameLink(userId, state.localUri, state.cloudFileId!!)
+        syncStateRepo.upsertAll(plainWrites, userId)
         // A guarded update that changed no row means the row is SYNCED now (the upload won the race),
         // so its uri must not be re-queued below: a finished upload is never queued for a duplicate.
         val skippedDemotionUris = syncStateRepo.updateDomainColumnsIfNotSyncedWithCloudAll(guardedDemotions, userId)
@@ -335,20 +400,44 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // intent is never touched here (those rows are LOCAL_ONLY, not in this set).
         syncStateRepo.clearQueuedForSyncedAll(pairedSyncedUris)
 
+        // A Drive copy found short: recorded so nothing pairs with it again, and its device file queued to
+        // be backed up again whole. The device file stays.
+        if (shortPaired.isNotEmpty()) {
+            shortPaired.forEach { shortCopies.recordShortAndRequeue(syncStateRepo, userId, it) }
+            Log.w(TAG, "reconcile: ${shortPaired.size} Drive copies shorter than their device file; queued again")
+        }
+
         // Every in-scope local this pass wrote a row for; the out-of-scope de-queue below spares these.
-        val inScopeUris: Set<String> = newStates.mapTo(HashSet(newStates.size)) { it.localUri }
+        val inScopeUris = HashSet<String>(plainWrites.size + guardedDemotions.size + shortPaired.size)
+        plainWrites.mapTo(inScopeUris) { it.localUri }
+        guardedDemotions.mapTo(inScopeUris) { it.localUri }
+        shortPaired.mapTo(inScopeUris) { it.localUri }
         return Recorded(total, allLocalUris, inScopeUris)
     }
 
-    /** What the pairing loop hands on: the rows it computed, and the two lookups the demotion pass
-     *  after it still reads. The other lookups it builds are dropped when it returns. */
+    /**
+     * What the pairing loop hands on: the rows it computed, in device order, and the SYNCED rows whose
+     * cloud or device copy it found gone. The lookups it builds are dropped when it returns.
+     *
+     * The computed rows come in two batches. [guardedDemotions] holds each computed-LOCAL_ONLY row that
+     * already existed when the pairing read it, the only kind an upload could have promoted to
+     * SYNCED+cloudFileId since (an upload cannot claim a sync_state row that does not exist yet).
+     * [plainWrites] holds the rest: genuinely new rows and every SYNCED write.
+     */
     private data class Matched(
         val total: Int,
-        val newStates: List<SyncState>,
+        val plainWrites: List<SyncState>,
+        val guardedDemotions: List<SyncState>,
         val freshAutoFolderUris: List<String>,
         val pairedSyncedUris: List<String>,
-        val existingByUri: Map<String, SyncState>,
-        val cloudByLinkId: Map<String, PhotoPairingRow>,
+        /** SYNCED rows whose cloud copy the listing lacks, in table order; the grace window still applies. */
+        val cloudAbsent: List<SyncState>,
+        /** SYNCED rows whose device file the scan did not find, by uri, in table order; not yet confirmed. */
+        val goneCandidates: Map<String, SyncState>,
+        /** Backed-up rows paired to a Drive copy that holds fewer bytes than their device file. */
+        val shortPaired: List<SyncState>,
+        /** SYNCED rows linked by name whose device file the bytes showed to be another photo. */
+        val falseNameLinks: List<SyncState>,
     )
 
     /** Matches each in-scope device file to its cloud copy and computes the row it gets. */
@@ -359,11 +448,17 @@ class ReconcileSyncStateUseCase @Inject constructor(
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
         compressVideosOnUpload: Boolean,
+        allLocalUris: Set<String>,
+        scanComplete: Boolean,
+        scanStartMs: Long,
     ): Matched {
         // Cloud DB was already refreshed by the caller (GalleryViewModel.refresh / doSync).
         // Avoid calling refreshCloudPhotosIncremental here: it can replay old "add" events
         // and re-insert photos the caller just deleted from the cloud DB.
         val cloudItems = cloudPairingRows(userId)
+        val appUpdatedAtMs = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
 
         val total = localItems.size + cloudItems.size
 
@@ -377,26 +472,57 @@ class ReconcileSyncStateUseCase @Inject constructor(
         //                      original local file's DATE_TAKEN, so for any photo our app
         //                      uploaded the cloud side has the matching value to 1-second
         //                      precision (item.dateTaken / 1000 in PhotoUploadService).
-        //   4. byName          last-resort name+size. Kept for compatibility with rows that
-        //                      somehow have no captureTime, but matches first by captureTime
-        //                      because size is fragile across strip-on-upload.
+        //   4. byName          last-resort name+size, only for a cloud copy with no captureTime.
+        //                      One that has a capture time and disagrees on the second is another
+        //                      photo as far as a name can tell: a same-named, same-sized file of other
+        //                      bytes linked on it would never be backed up.
         // One walk in listing order fills all four, a later row replacing an earlier one under the
         // same key, so each lookup keeps the same row a per-lookup associateBy would.
         val cloudByLinkId = HashMap<String, PhotoPairingRow>()
         val cloudByHash = HashMap<String, PhotoPairingRow>()
         val cloudByNameAndDate = HashMap<NameKey, PhotoPairingRow>()
         val cloudByNameSize = HashMap<NameKey, PhotoPairingRow>()
+        // Drive copies holding fewer bytes than their device file. Their content hash names the whole file,
+        // so they pair with nothing by hash or name; a row paired to one by id is queued to be backed up
+        // again. Grows during the pass as more are found.
+        val shortIds: MutableSet<String> = HashSet(shortCopies.all())
         for (cloud in cloudItems) {
             cloudByLinkId[cloud.linkId] = cloud
+            if (cloud.linkId in shortIds) continue
             val hash = cloud.contentHash
             if (!hash.isNullOrEmpty()) cloudByHash[hash] = cloud
             if (cloud.captureTime > 0) cloudByNameAndDate[NameKey(cloud.displayName, cloud.captureTime)] = cloud
-            cloudByNameSize[NameKey(cloud.displayName, cloud.sizeBytes)] = cloud
+            if (cloud.captureTime <= 0) cloudByNameSize[NameKey(cloud.displayName, cloud.sizeBytes)] = cloud
         }
         Log.d(TAG, "reconcile: ${localItems.size} local, ${cloudItems.size} cloud " +
             "(${cloudByHash.size} with hash, ${cloudByNameAndDate.size} with captureTime)")
 
-        val newStates = ArrayList<SyncState>(localItems.size)
+        // The SYNCED rows as they stand before the pairing, the only ones this pass demotes: it writes
+        // nothing until the pairing is done, and a row another writer makes SYNCED while it runs waits for
+        // the next pass. Read a page at a time, keeping only the rows to act on. Keyed by uri, so a row
+        // read twice is acted on once.
+        val cloudAbsent = LinkedHashMap<String, SyncState>()
+        val goneCandidates = LinkedHashMap<String, SyncState>()
+        forEachRowAt(userId, SyncStatus.SYNCED) { state ->
+            val cloudId = state.cloudFileId ?: return@forEachRowAt
+            when {
+                // Cloud counterpart absent from the local cloud listing: demoted after the pairing, once
+                // past the grace window.
+                cloudId !in cloudByLinkId -> cloudAbsent.putIfAbsent(state.localUri, state)
+                // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
+                // user the photo is "on this device" when it actually isn't. Only on a scan that saw
+                // the whole device, and only for a row that predates it: a download saved while this
+                // pass ran is recorded SYNCED, yet the scan, begun before it, could not list its file.
+                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) ->
+                    goneCandidates.putIfAbsent(state.localUri, state)
+            }
+        }
+
+        val plainWrites = ArrayList<SyncState>(localItems.size)
+        val guardedDemotions = ArrayList<SyncState>()
+        // Backed-up rows whose Drive copy this pass found short: queued to be backed up again once the
+        // pairing is written.
+        val shortPaired = ArrayList<SyncState>()
         // In-scope local URIs that need an AUTO_FOLDER queue stamp this pass. Covers TWO cases: a
         // freshly-created LOCAL_ONLY row (unmatched, no row before), AND an already-LOCAL_ONLY row that
         // is not yet queued (or is queued AUTO_FOLDER), the latter re-queuing a row after its folder is
@@ -406,25 +532,50 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // Local URIs paired to a cloud copy this pass (status SYNCED). Their queued flag is cleared
         // after the bulk upsert (RULE 1) so a just-paired row can't be re-queued for a duplicate.
         val pairedSyncedUris = mutableListOf<String>()
+        // Name links the bytes showed to be false (see [nameLinkDisproved]): each row, with the cloud id it
+        // linked, is unlinked before the writes so its file is backed up as a photo of its own.
+        val falseNameLinks = ArrayList<SyncState>()
 
-        // One snapshot of every SyncState row, indexed by local URI, instead of a per-item
-        // getByUri() DAO round-trip inside the loop below (an N+1 that, at tens of thousands of
-        // local items, issued tens of thousands of point queries). The same snapshot also feeds
-        // the SYNCED-demotion pass further down: that loop reads rows reconcile hasn't written
-        // yet, so the pre-loop view is exactly what it needs.
-        val existingByUri = syncStateRepo.observeAll(userId).first().associateBy { it.localUri }
-        // Cloud twins already paired to a local file this install. The name+date re-pair below rescues
-        // only an UNCLAIMED twin, so it can never steal a cloud copy that already belongs to another
-        // local. After a reinstall this set is empty (the rows were wiped), which is exactly when a
-        // downloaded file needs to re-pair instead of re-uploading a duplicate.
-        val claimedCloudIds: Set<String> = existingByUri.values.asSequence()
-            .filter { it.status == SyncStatus.SYNCED }
-            .mapNotNull { it.cloudFileId }
-            .toSet()
+        // A compressed or strip-transcoded photo went up as JPEG (IMG.heic as IMG.jpg), a compressed
+        // video as MP4 (clip.mov as clip.mp4), so while that rewrite is on, look for that name too.
+        // captureTime in the cloud listing is Unix seconds; LocalMediaItem.dateTaken is ms.
+        fun nameDateTwinOf(local: LocalMediaItem): PhotoPairingRow? {
+            val localCaptureTimeSec = local.dateTaken / 1000L
+            val rewritesFormat =
+                if (local.mimeType.startsWith("video/")) compressVideosOnUpload else compressOnUpload || stripOnUpload
+            return cloudByNameAndDate[NameKey(local.displayName, localCaptureTimeSec)]
+                ?: UploadFormatNaming.reencodedName(local.displayName, local.mimeType)
+                    ?.takeIf { rewritesFormat }
+                    ?.let { cloudByNameAndDate[NameKey(it, localCaptureTimeSec)] }
+        }
+
+        // The rows of the device files a lookup at a time, [readPageRows] files each, instead of one
+        // read of the whole table: only the current chunk's rows are held. Nothing is written until the
+        // pairing is done, so every lookup sees the table as the first one did.
+        var existingByUri: Map<String, SyncState> = emptyMap()
+        // Cloud twins already paired to a local file this install, among the current chunk's twins. The
+        // name+date re-pair below rescues only an UNCLAIMED twin, so it can never steal a cloud copy that
+        // already belongs to another local. After a reinstall nothing is claimed (the rows were wiped),
+        // which is exactly when a downloaded file needs to re-pair instead of re-uploading a duplicate.
+        var claimedCloudIds: Set<String> = emptySet()
         var changeHashes = 0
         var changeHashBytes = 0L
 
-        for (local in localItems) {
+        for ((index, local) in localItems.withIndex()) {
+            if (index % readPageRows == 0) {
+                val chunk = localItems.subList(index, minOf(index + readPageRows, localItems.size))
+                // This chunk's own rows. A row another account holds on the same uri counts as no row.
+                existingByUri = syncStateRepo.getOwnByUris(userId, chunk.map { it.uri }).associateBy { it.localUri }
+                // Asked only for the twins the re-pair can weigh: those of files no cloud id pairs yet.
+                val repairTwins = chunk.mapNotNullTo(HashSet()) { file ->
+                    // A link made by name may be dropped below, so its file's twin is asked about too.
+                    val row = existingByUri[file.uri]
+                    val pairedById = row?.cloudFileId?.let { cloudByLinkId[it] } != null && row?.linkBasis != LinkBasis.NAME
+                    if (pairedById) null else nameDateTwinOf(file)?.linkId
+                }
+                claimedCloudIds =
+                    if (repairTwins.isEmpty()) emptySet() else syncStateRepo.syncedCloudIdsAmong(userId, repairTwins)
+            }
             val existingSync = existingByUri[local.uri]
             // HIDDEN rows belong to a photo the user moved into the Hidden vault: the local
             // MediaStore copy is gone (or about to be), so reconcile must NOT generate a new
@@ -437,11 +588,32 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // The editor owns the row until its upload finishes; touching it here would
             // race the editor and produce a duplicate Drive entry. Same skip shape as HIDDEN.
             if (existingSync?.status == SyncStatus.UPLOADING) continue
-            val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
+            val rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload)
+            val pairedCloud = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
+            // A Drive copy that claims this file's bytes by hash yet stores fewer bytes than the file holds
+            // is not its backup. Only a file still at the size its row recorded is measured so: the row's
+            // hash is then of these bytes, while a file that changed size is the device-change check's. The
+            // content hash is looked up only once the sizes already disagree.
+            if (pairedCloud != null && existingSync != null && existingSync.status == SyncStatus.SYNCED && (
+                    pairedCloud.linkId in shortIds || (
+                        existingSync.sizeBytes == local.sizeBytes &&
+                            driveCopyShortOf(pairedCloud.sizeBytes, local.sizeBytes) &&
+                            hashStandsForDeviceBytes(existingSync) &&
+                            !pairedCloud.contentHash.isNullOrEmpty() &&
+                            cloudRepo.cloudContentHash(existingSync.localHash) == pairedCloud.contentHash
+                        )
+                    )
+            ) {
+                shortIds += pairedCloud.linkId
+                shortPaired += existingSync
+                continue
+            }
+            val byId = pairedCloud
 
             // A backed-up file another app edited in place keeps its uri and so its pairing; only its size
             // shows the change. Such a file is re-hashed: bytes that match the stored hash or the cloud
-            // copy, or a rewrite this process made, keep the backup stamp, anything else loses it so free-up
+            // copy, or a rewrite this app made (noted in this process, or recorded on the row as the bytes it
+            // left, which outlives a restart), keep the backup stamp, anything else loses it so free-up
             // space never deletes bytes Drive does not hold. Nothing is re-uploaded. A file this pass does
             // not hash keeps its old stored size, so a later pass looks again.
             val changeCheck = byId != null && existingSync != null && sizeChangedSinceBackup(existingSync, local.sizeBytes)
@@ -456,6 +628,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val deviceChanged = deviceHash != null &&
                 !LocalRewrites.consume(local.uri, local.sizeBytes) &&
                 deviceHash != existingSync?.localHash &&
+                !deviceHash.equals(existingSync?.originalHash, ignoreCase = true) &&
                 cloudRepo.cloudContentHash(deviceHash)?.let { it == byId?.contentHash } != true
 
             // Content hash is the AUTHORITATIVE matcher: it compares the actual file bytes (the local
@@ -465,29 +638,42 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // it, recompute from the file once (persisted below) when the cloud library is fully
             // listed so there's a complete set to match against. This also pairs a renamed cloud copy.
             val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
-            var recomputedHash: String? = null
-            val localHashHex: String? = storedHash
-                ?: if (initialListingComplete && cloudByHash.isNotEmpty())
-                    localRepo.sha1(local.uri).also { recomputedHash = it } else null
             // A row its cloud id already pairs, and already stamped backed up, comes out the same whatever the
             // hash match says (the id wins the match and the stamp is kept), so its hash is not looked up:
-            // turning a hash into the Drive form is a keyed HMAC per photo, every pass.
+            // turning a hash into the Drive form is a keyed HMAC per photo, every pass. Nor is a missing hash
+            // recomputed for it: adopting the file's hash as the row's would vouch for whatever the file holds
+            // (a download row records its bytes apart, and an older version linked some by name and size
+            // alone), and a new hash would drop the bytes the row recorded.
             val hashDecides = byId == null || existingSync?.backedUpAtMs == null
-            val byContentHash = localHashHex?.takeIf { hashDecides }
-                ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            var recomputedHash: String? = null
+            val localHashHex: String? = storedHash
+                ?: if (hashDecides && initialListingComplete && cloudByHash.isNotEmpty())
+                    localRepo.sha1(local.uri).also { recomputedHash = it } else null
+            val localDriveHash = localHashHex?.takeIf { hashDecides }?.let { cloudRepo.cloudContentHash(it) }
+            val byContentHash = localDriveHash?.let { cloudByHash[it] }
+                ?.takeUnless { it.linkId in shortIds }
+            // A link made by name whose file holds other bytes than the photo, and that no longer agrees
+            // with it on the exact name and capture second either, is another photo: it loses the link and
+            // is backed up as its own. One that agrees keeps it (a download this app stamped).
+            val falseNameLink = byId != null && existingSync != null &&
+                existingSync.status == SyncStatus.SYNCED &&
+                existingSync.linkBasis == LinkBasis.NAME &&
+                nameLinkDisproved(
+                    existingSync.linkBasis, localDriveHash, byId.contentHash,
+                    linkShowsAsOne(existingSync.linkBasis, local, byId.displayName, byId.captureTime),
+                )
+            if (falseNameLink) {
+                Log.w(TAG, "reconcile: ${local.displayName} holds other bytes than the Drive photo it was linked to by name; unlinked")
+                falseNameLinks += existingSync!!
+            }
+            val linkedById = byId.takeUnless { falseNameLink }
+            val falseLinkId = byId?.linkId?.takeIf { falseNameLink }
 
-            // captureTime in the cloud listing is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
-            // A compressed or strip-transcoded photo went up as JPEG (IMG.heic as IMG.jpg), a compressed
-            // video as MP4 (clip.mov as clip.mp4), so while that rewrite is on, look for that name too.
-            val rewritesFormat =
-                if (local.mimeType.startsWith("video/")) compressVideosOnUpload else compressOnUpload || stripOnUpload
-            val nameDateTwin = cloudByNameAndDate[NameKey(local.displayName, localCaptureTimeSec)]
-                ?: UploadFormatNaming.reencodedName(local.displayName, local.mimeType)
-                    ?.takeIf { rewritesFormat }
-                    ?.let { cloudByNameAndDate[NameKey(it, localCaptureTimeSec)] }
+            val nameDateTwin = nameDateTwinOf(local)?.takeUnless { it.linkId in shortIds || it.linkId == falseLinkId }
             val nameCandidate = nameDateTwin
-                ?: cloudByNameSize[NameKey(local.displayName, local.sizeBytes)]?.takeIf { it.sizeBytes > 0 }
+                ?: cloudByNameSize[NameKey(local.displayName, local.sizeBytes)]
+                    ?.takeIf { it.sizeBytes > 0 && it.linkId !in shortIds && it.linkId != falseLinkId }
             // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
             // photo carries no ContentHash to check, or strip-on-upload / compress-on-upload changed
             // the bytes so the same photo can't hash-match its rewritten cloud copy. When the cloud
@@ -497,8 +683,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // uploaded. (No name-only fallback either: a recurring camera name like IMG_0001.jpg must
             // never pair on its own.)
             val byNameUnverifiable = nameCandidate?.takeIf {
-                it.contentHash.isNullOrEmpty() ||
-                    uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload)
+                it.contentHash.isNullOrEmpty() || rewritesBytes
             }
             // Last resort, downloads-only: re-pair to a still-present cloud twin by name + EXACT capture
             // second even when that twin HAS a hash. A download stamps the twin's own capture time into
@@ -507,12 +692,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // [contentCertain] below, so it suppresses a duplicate re-upload after a reinstall WITHOUT
             // ever letting free-up-space delete the local on this looser proof.
             val byNameDateRepair = repairTwinLinkId(
-                strong = byId != null || byContentHash != null,
+                strong = linkedById != null || byContentHash != null,
                 hasLegacyNameMatch = byNameUnverifiable != null,
                 nameDateTwinLinkId = nameDateTwin?.linkId,
                 claimedTwinLinkIds = claimedCloudIds,
             )?.let { cloudByLinkId[it] }
-            val matchedCloud = byId ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
+            val matchedCloud = linkedById ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
             if (matchedCloud == null) {
                 Log.d(TAG, "LOCAL_ONLY: ${local.displayName} (size=${local.sizeBytes}, " +
                     "captureSec=$localCaptureTimeSec, existingCloudId=${existingSync?.cloudFileId})")
@@ -527,8 +712,16 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // A direct cloud id counts only for a row with no stored hash to check it by (a download);
             // a stored hash must itself match a cloud copy, so a name-paired row or a file whose stamp
             // was taken off above never earns one through its cloud id alone.
-            val contentCertain = byContentHash != null || (byId != null && storedHash == null)
-            newStates += SyncState(
+            val contentCertain = byContentHash != null || (linkedById != null && storedHash == null)
+            val computed = SyncState(
+                linkBasis = linkBasisOf(
+                    matchedLinkId = matchedCloud?.linkId,
+                    byIdLinkId = linkedById?.linkId,
+                    byContentHashLinkId = byContentHash?.linkId,
+                    byNameUnverifiable = byNameUnverifiable != null,
+                    rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload),
+                    existingBasis = existingSync?.linkBasis.takeUnless { falseNameLink },
+                ),
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
                 localHash = deviceHash ?: recomputedHash ?: existingSync?.localHash.orEmpty(),
@@ -540,15 +733,19 @@ class ReconcileSyncStateUseCase @Inject constructor(
                     else existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
                 sizeBytes = existingSync?.takeIf { keepStoredSize }?.sizeBytes ?: local.sizeBytes,
             )
+            if (status == SyncStatus.LOCAL_ONLY && existingSync != null) guardedDemotions += computed else plainWrites += computed
             // An in-scope local that needs backing up gets an AUTO_FOLDER queue stamp (after the upsert
             // below). This fires for a brand-new LOCAL_ONLY row AND for an existing LOCAL_ONLY row whose
             // source is null or already AUTO_FOLDER, re-queuing a folder-backup row once its folder is
             // re-selected. Any other source (MANUAL / ALBUM_ADD / EDITOR) is left untouched so
             // an explicit or editor intent is never relabelled AUTO_FOLDER (those rows are already
-            // queued, so the selector still picks them up).
+            // queued, so the selector still picks them up). A file kept off the queue as unuploadable
+            // is stamped again once it changed since (see [unuploadableRetryDue]).
             if (status == SyncStatus.LOCAL_ONLY) {
                 val src = existingSync?.queueSource
-                val stampable = src == null || src == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER
+                val stampable = src == null || src == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER ||
+                    (src == eu.akoos.photos.domain.entity.QueueSource.UNUPLOADABLE &&
+                        unuploadableRetryDue(existingSync, local, appUpdatedAtMs))
                 if (stampable) freshAutoFolderUris += local.uri
             }
             // RULE 1: every row that lands SYNCED has its queued flag cleared (after the upsert below),
@@ -556,7 +753,20 @@ class ReconcileSyncStateUseCase @Inject constructor(
             if (status == SyncStatus.SYNCED) pairedSyncedUris += local.uri
         }
 
-        return Matched(total, newStates, freshAutoFolderUris, pairedSyncedUris, existingByUri, cloudByLinkId)
+        return Matched(
+            total, plainWrites, guardedDemotions, freshAutoFolderUris, pairedSyncedUris,
+            cloudAbsent.values.toList(), goneCandidates, shortPaired, falseNameLinks,
+        )
+    }
+
+    /** Hands each of [userId]'s rows at [status] to [action], in table order, one page held at a time. */
+    private suspend fun forEachRowAt(userId: UserId, status: SyncStatus, action: (SyncState) -> Unit) {
+        var afterKey = Long.MIN_VALUE
+        do {
+            val page = syncStateRepo.pageByStatus(userId, status, afterKey, readPageRows)
+            page.rows.forEach(action)
+            afterKey = page.lastKey
+        } while (page.rows.size >= readPageRows)
     }
 
     /**
@@ -602,24 +812,24 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // never on a row queued since the scan began (a "back up now" on a photo taken mid-pass).
         // The scan's word is then checked by a lookup by id, which alone drops the row: a torn read can
         // skip a file, and a trashed one is still restorable.
-        val goneQueued = syncStateRepo.getLocalOnly(userId)
-            .filter {
-                it.status == SyncStatus.LOCAL_ONLY && it.queued &&
-                    deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)
-            }
-            .map { it.localUri }
+        // Each step below reads the LOCAL_ONLY rows a page at a time and keeps only the ones it acts on,
+        // then writes; a uri read twice is acted on once.
+        val goneQueuedUris = LinkedHashSet<String>()
+        forEachRowAt(userId, SyncStatus.LOCAL_ONLY) {
+            if (it.queued && deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)) goneQueuedUris += it.localUri
+        }
+        val goneQueued = goneQueuedUris.toList()
         val confirmedGone = if (goneQueued.isEmpty()) emptySet() else localRepo.confirmedGone(goneQueued)
         if (confirmedGone.isNotEmpty()) {
             syncStateRepo.deleteLocalOnlyByUris(goneQueued.filter { it in confirmedGone })
             Log.d(TAG, "reconcile: dropped ${confirmedGone.size} queued LOCAL_ONLY rows whose file is gone")
         }
 
-        // One post-delete snapshot serves both this out-of-scope de-queue and the stranded-intent
+        // One post-delete scan serves both this out-of-scope de-queue and the stranded-intent
         // recovery below. Their row sets are disjoint (this pass is queued rows with a null/AUTO_FOLDER
         // source, the next is un-queued rows with a MANUAL/ALBUM_ADD/EDITOR source), so the clearQueued
         // writes here never fall into that filter and a single read is enough.
-        val afterDropSnapshot = syncStateRepo.getLocalOnly(userId)
-
+        //
         // De-queue stale LOCAL_ONLY entries for items no longer in scope (e.g. the user unchecked
         // their folder/album from the backup selection). The queue is the source of truth, so clearing
         // their queued flag is enough to drop them from the pending set while the row survives, not
@@ -635,19 +845,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // now", an ALBUM_ADD (the photo must upload to join its album), or an EDITOR save is out of
         // the normal folder scope by design, and clearing its queued flag would make the very next
         // upload pass skip it so the explicit upload would silently never run.
-        val staleLocalOnly = afterDropSnapshot
-            .filter {
-                it.status == SyncStatus.LOCAL_ONLY &&
-                    it.queued &&
-                    it.localUri !in inScopeUris &&
-                    (it.queueSource == null ||
-                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER)
-            }
-        if (staleLocalOnly.isNotEmpty()) {
-            for (state in staleLocalOnly) syncStateRepo.clearQueued(state.localUri)
-            Log.d(TAG, "reconcile: de-queued ${staleLocalOnly.size} out-of-scope LOCAL_ONLY entries")
-        }
-
+        //
         // Stranded-intent recovery. An explicit intent (MANUAL / ALBUM_ADD / EDITOR) can lose its
         // queued flag yet keep its source and never get picked up again, seen on-device as a manual
         // "back up now" row stuck at LOCAL_ONLY, queued=0, queueSource=MANUAL with no cloud copy.
@@ -655,29 +853,41 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // left alone: it means either a plain out-of-scope local that was never queued, or a MANUAL
         // upload the user cancelled via clearManualQueue (which nulls the source on purpose), both
         // must stay un-queued. Reads only LOCAL_ONLY rows, so it never touches an UPLOADING claim; a
-        // row that flips to UPLOADING between this snapshot and markQueued is harmless (claimForUpload
+        // row that flips to UPLOADING between this scan and markQueued is harmless (claimForUpload
         // guards on status, and a queued flag on an UPLOADING row is cleared when it reaches SYNCED).
+        val staleLocalOnly = LinkedHashSet<String>()
+        val strandedIntent = LinkedHashMap<String, String>()
+        forEachRowAt(userId, SyncStatus.LOCAL_ONLY) {
+            val source = it.queueSource
+            if (it.queued) {
+                if (it.localUri !in inScopeUris &&
+                    (source == null || source == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER)
+                ) {
+                    staleLocalOnly += it.localUri
+                }
+            } else if (
+                // The file must still be on the device: a deleted intent has nothing to upload, and
+                // re-queuing it would loop forever against a gone file (the gone-file drop above
+                // clears the queued ones; this stops the un-queued survivors coming back).
+                it.localUri in allLocalUris &&
+                // A stranded upload has no cloud copy by definition. Requiring cloudFileId == null
+                // stops a backed-up photo whose cloud copy was later removed (it demotes to
+                // LOCAL_ONLY) from being re-queued into an endless re-upload of a deletion.
+                it.cloudFileId == null &&
+                (source == eu.akoos.photos.domain.entity.QueueSource.MANUAL ||
+                    source == eu.akoos.photos.domain.entity.QueueSource.ALBUM_ADD ||
+                    source == eu.akoos.photos.domain.entity.QueueSource.EDITOR)
+            ) {
+                strandedIntent.putIfAbsent(it.localUri, source!!)
+            }
+        }
+        if (staleLocalOnly.isNotEmpty()) {
+            for (uri in staleLocalOnly) syncStateRepo.clearQueued(uri)
+            Log.d(TAG, "reconcile: de-queued ${staleLocalOnly.size} out-of-scope LOCAL_ONLY entries")
+        }
         val recoverNow = System.currentTimeMillis()
-        val strandedIntent = afterDropSnapshot
-            .filter {
-                it.status == SyncStatus.LOCAL_ONLY &&
-                    !it.queued &&
-                    // The file must still be on the device: a deleted intent has nothing to upload, and
-                    // re-queuing it would loop forever against a gone file (the gone-file drop above
-                    // clears the queued ones; this stops the un-queued survivors coming back).
-                    it.localUri in allLocalUris &&
-                    // A stranded upload has no cloud copy by definition. Requiring cloudFileId == null
-                    // stops a backed-up photo whose cloud copy was later removed (it demotes to
-                    // LOCAL_ONLY) from being re-queued into an endless re-upload of a deletion.
-                    it.cloudFileId == null &&
-                    (it.queueSource == eu.akoos.photos.domain.entity.QueueSource.MANUAL ||
-                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.ALBUM_ADD ||
-                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.EDITOR)
-            }
         if (strandedIntent.isNotEmpty()) {
-            for (state in strandedIntent) {
-                syncStateRepo.markQueued(state.localUri, state.queueSource!!, recoverNow)
-            }
+            for ((uri, source) in strandedIntent) syncStateRepo.markQueued(uri, source, recoverNow)
             Log.d(TAG, "reconcile: re-queued ${strandedIntent.size} stranded explicit-intent LOCAL_ONLY entries")
         }
     }
@@ -686,6 +896,28 @@ class ReconcileSyncStateUseCase @Inject constructor(
 /** A display name with a capture second or a byte size: the name matchers' lookup key. Equal exactly
  *  when both parts are, as a Pair of the two is, without boxing the number. */
 private data class NameKey(val name: String, val value: Long)
+
+/**
+ * What a row reconcile pairs rests on, a [LinkBasis] value. A link the content hash makes is proven. A link
+ * the stored cloud id makes keeps the mark the row carries, so a name link stays one on every later pass
+ * until the content hash proves it. A link a name rule makes is marked by name: [LinkBasis.NAME_REWRITTEN]
+ * where the upload rewrites the bytes ([rewritesBytes]) and the name and capture second are all a match can
+ * have, else [LinkBasis.NAME]. An unpaired row has no link to mark.
+ */
+internal fun linkBasisOf(
+    matchedLinkId: String?,
+    byIdLinkId: String?,
+    byContentHashLinkId: String?,
+    byNameUnverifiable: Boolean,
+    rewritesBytes: Boolean,
+    existingBasis: Int?,
+): Int = when {
+    matchedLinkId == null -> LinkBasis.PROVEN
+    matchedLinkId == byContentHashLinkId -> LinkBasis.PROVEN
+    matchedLinkId == byIdLinkId -> existingBasis ?: LinkBasis.PROVEN
+    byNameUnverifiable && rewritesBytes -> LinkBasis.NAME_REWRITTEN
+    else -> LinkBasis.NAME
+}
 
 /**
  * Whether the upload may have rewritten this file's bytes, so its cloud copy can't hash-match the
@@ -698,6 +930,19 @@ internal fun uploadRewritesBytes(
     compressVideosOnUpload: Boolean,
 ): Boolean = stripOnUpload ||
     if (mimeType.startsWith("video/")) compressVideosOnUpload else compressPhotosOnUpload
+
+/**
+ * Whether a device file kept off the queue as `QueueSource.UNUPLOADABLE` is worth another try: its size
+ * moved from the one its row recorded, its modified time (seconds) passed the moment it was set aside
+ * ([SyncState.queuedAt]), or the app was updated since ([appUpdatedAtMs]). A row with no such moment
+ * recorded is tried again.
+ */
+internal fun unuploadableRetryDue(state: SyncState, local: LocalMediaItem, appUpdatedAtMs: Long): Boolean {
+    val setAsideAt = state.queuedAt ?: return true
+    return local.sizeBytes != state.sizeBytes ||
+        local.dateModified * 1000L > setAsideAt ||
+        appUpdatedAtMs > setAsideAt
+}
 
 /**
  * Whether [state], a backed-up row, names a device file whose size is no longer the one recorded for it,

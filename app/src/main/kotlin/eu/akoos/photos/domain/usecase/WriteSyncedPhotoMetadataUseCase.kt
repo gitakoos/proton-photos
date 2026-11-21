@@ -29,6 +29,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.QueueSource
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -76,8 +77,9 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
 
         /** [transient] marks a failure a retry could plausibly clear (network blip, 429/5xx) so the
          *  caller can hold the edit for another attempt rather than discard it. False by default: a
-         *  failure not built from a classified network error stays permanent. */
-        data class Failed(val reason: String, val transient: Boolean = false) : Result
+         *  failure not built from a classified network error stays permanent. [copyLinkId] is the
+         *  corrected copy already on Drive that the device file is not paired with, null when there is none. */
+        data class Failed(val reason: String, val transient: Boolean = false, val copyLinkId: String? = null) : Result
     }
 
     suspend operator fun invoke(
@@ -155,6 +157,8 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
                     transient = anyTransientAlbumMiss,
+                    // A run stopped after the re-pair left the device file on the copy, which must then stay.
+                    copyLinkId = resumeUploadedLinkId.takeIf { resumeExisting.cloudFileId != it },
                 )
             }
 
@@ -167,6 +171,8 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     status = SyncStatus.SYNCED,
                     lastSyncSuccessMs = now,
                     backedUpAtMs = now,
+                    sizeBytes = querySizeBytes(deviceUri).takeIf { it > 0L } ?: resumeExisting.sizeBytes,
+                    linkBasis = LinkBasis.PROVEN,
                 ),
                 userId,
             )
@@ -176,6 +182,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     if (it is CancellationException) throw it
                     Log.w(TAG, "trash of original $oldLinkId failed: ${it.message}")
                 }
+            CloudPhotoReplacement.Replaced.record(oldLinkId, resumeUploadedLinkId)
             return@withContext Result.Success
         }
 
@@ -272,6 +279,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     localHash = sha1,
                     status = SyncStatus.UPLOADING,
                     lastSyncAttemptMs = now,
+                    linkBasis = LinkBasis.PROVEN,
                 ),
                 userId,
             )
@@ -332,6 +340,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
                     transient = anyTransientAlbumMiss,
+                    copyLinkId = newLinkId,
                 )
             }
 
@@ -346,6 +355,9 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     status = SyncStatus.SYNCED,
                     lastSyncSuccessMs = pairedNow,
                     backedUpAtMs = pairedNow,
+                    // The size of the corrected bytes just uploaded, not the one recorded before the edit.
+                    sizeBytes = item.sizeBytes.takeIf { it > 0L } ?: existing.sizeBytes,
+                    linkBasis = LinkBasis.PROVEN,
                 ),
                 userId,
             )
@@ -363,6 +375,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     if (it is CancellationException) throw it
                     Log.w(TAG, "trash of original $oldLinkId failed: ${it.message}")
                 }
+            CloudPhotoReplacement.Replaced.record(oldLinkId, newLinkId)
             Result.Success
         } catch (e: CancellationException) {
             // Cancellation anywhere in the replacement. Before the re-pair the row is stuck at UPLOADING
@@ -386,21 +399,12 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
      * per-file failure so an unreadable file never uploads as a silent Drive duplicate.
      */
     private fun computeSha1(uri: String): String? {
-        val digest = MessageDigest.getInstance("SHA-1")
-        try {
-            val stream = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
-            stream.use { s ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (s.read(buffer).also { read = it } != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            }
+        return try {
+            eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return null
+            null
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     /** Byte length behind [uri] via the resolver, or 0 when it cannot be determined. */

@@ -33,6 +33,11 @@ import kotlinx.coroutines.flow.Flow
 /** Person ids per recount statement, well inside the 999 host-variable floor of Android 11 and older. */
 private const val RECOUNT_SLICE = 500
 
+/** True for a person row the user hid, matched by name against `person_hidden`; the rows an ordinary people
+ *  list leaves out and the hidden list reads. */
+private const val IS_HIDDEN =
+    "EXISTS (SELECT 1 FROM person_hidden h WHERE h.userId = person.userId AND h.name = person.displayName AND h.hidden = 1)"
+
 @Dao
 interface PersonDao {
 
@@ -45,8 +50,9 @@ interface PersonDao {
     @Upsert
     suspend fun upsert(person: PersonEntity)
 
-    /** Live stream of the account's people, most-photographed first, the people screen's source. */
-    @Query("SELECT * FROM person WHERE userId = :userId ORDER BY faceCount DESC")
+    /** Live stream of the account's people, most-photographed first, the people screen's source. A hidden person
+     *  is left out, so no people surface or suggestion built on this stream offers it. */
+    @Query("SELECT * FROM person WHERE userId = :userId AND NOT $IS_HIDDEN ORDER BY faceCount DESC")
     fun observePeopleForUser(userId: String): Flow<List<PersonEntity>>
 
     /** [observePeopleForUser] narrowed to the people carrying a name, in the same order, for the surfaces
@@ -54,9 +60,22 @@ interface PersonDao {
      *  name of spaces still comes through, so the caller's own blank check stays what decides. */
     @Query(
         "SELECT * FROM person WHERE userId = :userId AND displayName IS NOT NULL AND displayName != '' " +
-            "ORDER BY faceCount DESC, id",
+            "AND NOT $IS_HIDDEN ORDER BY faceCount DESC, id",
     )
     fun observeNamedPeopleForUser(userId: String): Flow<List<PersonEntity>>
+
+    /** The people the user hid, most-photographed first, named and never-named groups alike. A never-named group
+     *  carries its reserved name in [PersonEntity.displayName]; the caller shows it as unnamed. */
+    @Query("SELECT * FROM person WHERE userId = :userId AND $IS_HIDDEN ORDER BY faceCount DESC, id")
+    fun observeHiddenPeopleForUser(userId: String): Flow<List<PersonEntity>>
+
+    /** The ids of the account's hidden people, for the passes that must never offer or merge one. */
+    @Query("SELECT id FROM person WHERE userId = :userId AND $IS_HIDDEN")
+    suspend fun hiddenPersonIds(userId: String): List<Long>
+
+    /** [namedPeopleForUser] without the hidden people, for a pass that offers people to choose from. */
+    @Query("SELECT * FROM person WHERE userId = :userId AND displayName IS NOT NULL AND NOT $IS_HIDDEN")
+    suspend fun visibleNamedPeopleForUser(userId: String): List<PersonEntity>
 
     /** Live stream of one of the account's people, or null while there is none of that id. */
     @Query("SELECT * FROM person WHERE userId = :userId AND id = :id LIMIT 1")
@@ -154,6 +173,10 @@ interface PersonDao {
     /** How many people an owner holds, so a sign-in migration can report what it carried or dropped. */
     @Query("SELECT COUNT(*) FROM person WHERE userId = :userId")
     suspend fun countForUser(userId: String): Int
+
+    /** The same count, live, for a surface that appears once the account holds any person (hidden ones included). */
+    @Query("SELECT COUNT(*) FROM person WHERE userId = :userId")
+    fun observeCountForUser(userId: String): Flow<Int>
 
     /** How many of the account's people carry a name (the Unsorted bucket never counts), for the diagnostics. */
     @Query(

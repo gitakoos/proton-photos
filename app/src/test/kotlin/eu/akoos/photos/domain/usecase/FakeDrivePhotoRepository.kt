@@ -62,7 +62,7 @@ import java.io.File
  *  - [downloadFullResPhoto] returns a throwaway temp file carrying [downloadBytes].
  *  - [callLog] records the order of upload / add / delete calls so ordering invariants can be asserted.
  *  - [loadAlbums] / [createDriveAlbum] are minimal; [retryPendingOrphanDeletes] is a no-op;
- *    [cloudContentHash] returns null.
+ *    [cloudContentHash] returns [contentHashOf], null unless set.
  * Every other member is an unused no-op / empty result.
  */
 internal class FakeDrivePhotoRepository : DrivePhotoRepository {
@@ -244,12 +244,33 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         return albumIdsByPhoto
     }
 
+    /** Runs at the start of every [downloadFullResPhoto] call, while that download is in flight. */
+    var onDownloadStarted: (suspend (CloudPhoto) -> Unit)? = null
+
+    /** linkIds [downloadFullResPhoto] was asked for, in call order. */
+    val downloadedLinkIds = mutableListOf<String>()
+
+    /** linkIds [discardPartialDownload] was asked to clean up. */
+    val discardedDownloads = mutableListOf<String>()
+
+    override fun discardPartialDownload(photo: CloudPhoto) {
+        discardedDownloads += photo.linkId
+    }
+
     override suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = (fullResCacheDir?.let { dir ->
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal = downloadFullResPhotoAfterHook(photo)
+
+    private suspend fun downloadFullResPhotoAfterHook(photo: CloudPhoto): eu.akoos.photos.data.localcrypto.CachedOriginal {
+        downloadedLinkIds += photo.linkId
+        onDownloadStarted?.invoke(photo)
+        return eu.akoos.photos.data.localcrypto.CachedOriginal(fakeFullResFile(photo))
+    }
+
+    private fun fakeFullResFile(photo: CloudPhoto): File = (fullResCacheDir?.let { dir ->
         File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
     } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
         writeBytes(downloadBytes)
@@ -264,7 +285,10 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         Album(linkId = "album-$name", name = name, photoCount = 0, coverLinkId = null, lastActivityTimeMs = null)
 
     override suspend fun retryPendingOrphanDeletes(userId: UserId) {}
-    override fun cloudContentHash(localSha1Hex: String): String? = null
+    /** Drive's content hash for a bare SHA-1; null (no root hash key) unless a test sets it. */
+    var contentHashOf: (String) -> String? = { null }
+
+    override fun cloudContentHash(localSha1Hex: String): String? = contentHashOf(localSha1Hex)
 
     // ── Unused members: never reached by the use cases under test ────────────────────
     override suspend fun getVolumeId(userId: UserId): String = "vol1"

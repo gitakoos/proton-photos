@@ -82,4 +82,33 @@ class SignOutReplayPlanTest {
         assertTrue(SignOutCleanup.consumeUnfinishedSignIn("gave-up"))
         assertFalse(SignOutCleanup.consumeUnfinishedSignIn("gave-up"))
     }
+
+    @Test
+    fun `a sign-out from Settings cut short is finished while its account is still enabled`() {
+        assertEquals(
+            mapOf("a" to UserSignOutReplay.FINISH),
+            SignOutCleanup.userSignOutReplayPlan(pending = setOf("a"), enabledUserIds = setOf("a", "b"), running = emptySet()),
+        )
+    }
+
+    @Test
+    fun `a sign-out from Settings whose account is already disabled only loses the marker`() {
+        assertEquals(
+            mapOf("a" to UserSignOutReplay.DROP),
+            SignOutCleanup.userSignOutReplayPlan(pending = setOf("a"), enabledUserIds = setOf("b"), running = emptySet()),
+        )
+    }
+
+    @Test
+    fun `a sign-out from Settings still running in this process is left to it`() {
+        assertEquals(
+            mapOf("a" to UserSignOutReplay.SKIP),
+            SignOutCleanup.userSignOutReplayPlan(pending = setOf("a"), enabledUserIds = setOf("a"), running = setOf("a")),
+        )
+    }
+
+    @Test
+    fun `the plaintext staging folder is among the caches a sign-out empties`() {
+        assertTrue("plain_staging" in SignOutCleanup.CACHE_DIRS)
+    }
 }

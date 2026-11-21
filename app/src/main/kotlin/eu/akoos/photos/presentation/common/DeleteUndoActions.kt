@@ -55,7 +55,17 @@ fun buildDeleteUndoAction(
     val trashed = localTrashedUris.toHashSet()
     val syncedRelinks = items.mapNotNull { item ->
         (item as? GalleryItem.Synced)?.takeIf { it.local.uri in trashed }?.let {
-            UndoAction.Delete.Relink(it.local.uri, it.cloud.linkId, it.cloud.sizeBytes)
+            UndoAction.Delete.Relink(it.local.uri, it.cloud.linkId, it.cloud.sizeBytes, it.cloud.contentHash)
+        }
+    }
+    // Each photo once, whichever of its copies the undo brings back: a paired photo trashed on the device
+    // and in Drive is one photo, not one per copy, and not the larger of the two lists either.
+    val trashedLinks = targets.cloudLinkIds.toHashSet()
+    val itemCount = items.count { item ->
+        when (item) {
+            is GalleryItem.Synced -> item.cloud.linkId in trashedLinks || item.local.uri in trashed
+            is GalleryItem.CloudOnly -> item.cloud.linkId in trashedLinks
+            is GalleryItem.LocalOnly -> item.local.uri in trashed
         }
     }
     return if (targets.cloudLinkIds.isNotEmpty() || localTrashedUris.isNotEmpty()) {
@@ -63,6 +73,7 @@ fun buildDeleteUndoAction(
             cloudLinkIds = targets.cloudLinkIds,
             localTrashedUris = localTrashedUris,
             syncedRelinks = syncedRelinks,
+            itemCount = itemCount,
         )
     } else {
         null

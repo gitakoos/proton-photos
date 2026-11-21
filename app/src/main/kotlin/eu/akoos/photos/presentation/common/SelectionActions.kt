@@ -133,7 +133,7 @@ fun selectionCloudLinkIds(items: Collection<GalleryItem>): Set<String> =
 /**
  * How much of a selection an album already holds, as the add-to-album picker reports it.
  *
- * - [All]: every cloud-backed selected photo is already in the album.
+ * - [All]: every selected photo is already in the album.
  * - [Some]: [inAlbum] of [total] are, so the picker shows the fraction.
  * - [None]: the album holds nothing in the selection, and the picker stays blank.
  */
@@ -147,20 +147,24 @@ sealed interface AlbumMembership {
  * Membership of [selectedPhotoLinkIds] (a selection's Drive linkIds, per [selectionCloudLinkIds])
  * against one album's [albumMemberIds].
  *
- * The denominator counts only cloud-backed photos: a device-only photo cannot be in a Drive album,
- * so counting it would read as a permanent shortfall no action could clear. A selection with no
- * cloud copy at all therefore resolves to [AlbumMembership.None] rather than a zero fraction.
+ * [deviceOnlyCount] is the number of selected photos with no Drive copy yet. None of them is in the
+ * album, and an add queues them to join it once backed up, so they count towards the total: a
+ * selection holding one reads as a fraction, never as All, which in the picker means a tap takes the
+ * selection out. A selection with no cloud copy at all resolves to [AlbumMembership.None] rather than
+ * a zero fraction.
  */
 fun albumMembershipState(
     selectedPhotoLinkIds: Set<String>,
     albumMemberIds: Set<String>,
+    deviceOnlyCount: Int = 0,
 ): AlbumMembership {
     if (selectedPhotoLinkIds.isEmpty()) return AlbumMembership.None
     val inAlbum = selectedPhotoLinkIds.count { it in albumMemberIds }
+    val total = selectedPhotoLinkIds.size + deviceOnlyCount.coerceAtLeast(0)
     return when (inAlbum) {
         0 -> AlbumMembership.None
-        selectedPhotoLinkIds.size -> AlbumMembership.All
-        else -> AlbumMembership.Some(inAlbum, selectedPhotoLinkIds.size)
+        total -> AlbumMembership.All
+        else -> AlbumMembership.Some(inAlbum, total)
     }
 }
 

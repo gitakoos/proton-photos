@@ -58,6 +58,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
@@ -148,23 +150,36 @@ fun UnifiedAlbumCard(
         }
 
         Spacer(Modifier.height(8.dp))
-        Text(
-            text = title,
-            color = FgPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = metaText,
-            color = FgMute,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        // Room for a two-line name on every card, so the covers of the next row line up whatever the names.
+        val captionMinHeight = with(LocalDensity.current) {
+            AlbumCardTitleLineHeight.toDp() * AlbumCardTitleMaxLines + AlbumCardMetaLineHeight.toDp()
+        }
+        Column(modifier = Modifier.heightIn(min = captionMinHeight)) {
+            Text(
+                text = title,
+                color = FgPrimary,
+                fontSize = 14.sp,
+                lineHeight = AlbumCardTitleLineHeight,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = AlbumCardTitleMaxLines,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = metaText,
+                color = FgMute,
+                fontSize = 12.sp,
+                lineHeight = AlbumCardMetaLineHeight,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
+
+/** A grid card's album name wraps to this many lines before it ends in an ellipsis. */
+private const val AlbumCardTitleMaxLines = 2
+private val AlbumCardTitleLineHeight = 18.sp
+private val AlbumCardMetaLineHeight = 16.sp
 
 /** Corner of every album cover, on a card and on a list row alike. */
 internal val AlbumCoverCorner = 14.dp

@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +51,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.theme.AppColors
 import java.text.SimpleDateFormat
@@ -157,11 +158,11 @@ private fun MonthTile(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppColors.current
-    val thumbUrls = LocalThumbnailUrls.current.value
+    val storeUrl by rememberStoreThumbnailUrl((bucket.coverItem as? GalleryItem.CloudOnly)?.cloud?.linkId)
     val imageModel: Any? = when (val item = bucket.coverItem) {
         is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
         is GalleryItem.Synced    -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.CloudOnly -> thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+        is GalleryItem.CloudOnly -> storeUrl ?: item.cloud.thumbnailUrl
     }
     val label = remember(bucket.year, bucket.month) {
         val cal = Calendar.getInstance().apply {

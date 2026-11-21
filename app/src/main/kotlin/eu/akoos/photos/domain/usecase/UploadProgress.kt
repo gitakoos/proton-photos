@@ -46,8 +46,11 @@ package eu.akoos.photos.domain.usecase
  * out of space, so the batch stopped and no later trigger can get past it either. It replaces the
  * closing `Idle` frame rather than preceding it, because `Idle` is what observers clear the panel
  * on, and a reason wiped in the same breath would leave the backup looking merely finished.
+ *
+ * `Cancelled` ends one file the user stopped on its own: nothing of it stays on Drive, it is not
+ * backed up, and the rest of the batch carries on.
  */
-enum class UploadStatus { Queued, Compressing, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup, StorageFull }
+enum class UploadStatus { Queued, Compressing, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup, StorageFull, Cancelled }
 
 data class UploadProgress(
     val uri: String,

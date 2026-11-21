@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Photos for Proton
+  ~ Copyright (C) 2026 Akoos <https://akoos.eu>
+  ~
+  ~ Source:  https://github.com/gitakoos/proton-photos
+  ~ Website: https://www.photosforproton.eu
+  ~
+  ~ This file is part of Photos for Proton.
+  ~
+  ~ Photos for Proton is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU General Public License version 3 as
+  ~ published by the Free Software Foundation.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  ~ GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License
+  ~ along with this program. If not, see <https://www.gnu.org/licenses/>.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path
+        android:pathData="M66,46 h60 a8,8 0 0 1 8,8 v72 a8,8 0 0 1 -8,8 h-60 a8,8 0 0 1 -8,-8 v-72 a8,8 0 0 1 8,-8 z"
+        android:fillColor="#FFFDF5"/>
+    <path
+        android:pathData="M58,54 a8,8 0 0 1 8,-8 h60 a8,8 0 0 1 8,8 v10 h-76 z"
+        android:fillColor="#E59B2E"/>
+    <path
+        android:pathData="M69.7,78 h52.6 a1.7,1.7 0 0 1 1.7,1.7 v0 a1.7,1.7 0 0 1 -1.7,1.7 h-52.6 a1.7,1.7 0 0 1 -1.7,-1.7 v-0 a1.7,1.7 0 0 1 1.7,-1.7 z"
+        android:fillColor="#CFC8B4"/>
+    <path
+        android:pathData="M69.7,90 h52.6 a1.7,1.7 0 0 1 1.7,1.7 v0 a1.7,1.7 0 0 1 -1.7,1.7 h-52.6 a1.7,1.7 0 0 1 -1.7,-1.7 v-0 a1.7,1.7 0 0 1 1.7,-1.7 z"
+        android:fillColor="#CFC8B4"/>
+    <path
+        android:pathData="M69.7,102 h52.6 a1.7,1.7 0 0 1 1.7,1.7 v0 a1.7,1.7 0 0 1 -1.7,1.7 h-52.6 a1.7,1.7 0 0 1 -1.7,-1.7 v-0 a1.7,1.7 0 0 1 1.7,-1.7 z"
+        android:fillColor="#CFC8B4"/>
+    <path
+        android:pathData="M69.7,114 h28.6 a1.7,1.7 0 0 1 1.7,1.7 v0 a1.7,1.7 0 0 1 -1.7,1.7 h-28.6 a1.7,1.7 0 0 1 -1.7,-1.7 v-0 a1.7,1.7 0 0 1 1.7,-1.7 z"
+        android:fillColor="#CFC8B4"/>
+</vector>

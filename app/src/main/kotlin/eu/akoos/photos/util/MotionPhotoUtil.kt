@@ -115,15 +115,15 @@ object MotionPhotoUtil {
     }
 
     /**
-     * Copies bytes `[videoOffset, EOF)` from [file] into [dest] as a standalone, playable .mp4.
-     * Returns false on any failure (not a Motion Photo, IO error).
+     * Copies bytes `[videoOffset, EOF)` from [file] into [dest] as a standalone, playable .mp4, written through
+     * [open] (the viewer's writes it encrypted). Returns false on any failure (not a Motion Photo, IO error).
      */
-    fun extractVideo(file: File, dest: File): Boolean {
+    fun extractVideo(file: File, dest: File, open: (File) -> java.io.OutputStream = { FileOutputStream(it) }): Boolean {
         val info = detect(file) ?: return false
         return try {
             RandomAccessFile(file, "r").use { raf ->
                 raf.seek(info.videoOffset)
-                FileOutputStream(dest).use { out ->
+                open(dest).use { out ->
                     val buffer = ByteArray(64 * 1024)
                     var remaining = info.videoLength
                     while (remaining > 0) {

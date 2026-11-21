@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.semantic
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -36,6 +37,7 @@ import eu.akoos.photos.crypto.DecryptPriority
 import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.ml.backgroundMlThreadFactory
 import eu.akoos.photos.data.db.entity.ImageEmbeddingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -66,6 +68,8 @@ import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.retryKickDelayMs
+import eu.akoos.photos.util.RescanGuard
+import eu.akoos.photos.util.settledCloudMiss
 import eu.akoos.photos.util.settledLocalMiss
 import eu.akoos.photos.util.sourceMissForDownloadFailure
 import eu.akoos.photos.util.sourceMissForUndecodedDownload
@@ -92,6 +96,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.localcrypto.LocalFiles
+import java.io.BufferedInputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -201,6 +207,15 @@ internal fun semanticRekeyPairs(
         .toList()
 
 /**
+ * The photos the walk still has to embed: every item whose [GalleryItem.stableId] holds no row yet. A
+ * backed-up photo is keyed by its Drive linkId, the same key an embedding imported from another device's
+ * shared backup carries, so an imported row counts as embedded and the photo is never embedded again here.
+ * Pure so the walk's filter is unit-tested without a database.
+ */
+internal fun semanticPendingItems(items: List<GalleryItem>, embeddedKeys: Set<String>): List<GalleryItem> =
+    items.filter { it.stableId !in embeddedKeys }
+
+/**
  * Mirrors a landed backup re-key into the walk's skip set: each device key no longer holds a row and
  * each cloud key does (moved there, or kept there), so the Synced photo reads as embedded and is not
  * queued for a second embedding.
@@ -267,6 +282,7 @@ class SemanticIndexingScheduler @Inject constructor(
      *  [stateStore] at the end of a pass and taken back by the first pass of a new process; dropped on
      *  [reset], so a rescan or a new account tries everything afresh. */
     private val retryBook = SourceRetryBook()
+    private val rescanGuard = RescanGuard()
 
     /** What the walk keeps between process starts, so a process the system killed does not begin its
      *  backoffs again. */
@@ -300,9 +316,7 @@ class SemanticIndexingScheduler @Inject constructor(
      *  stays wedged in an uncancellable native call and keeps its thread; keeping those off
      *  [Dispatchers.Default] and [Dispatchers.IO] means a systematic wedge starves neither the UI nor the
      *  loads. Elastic, so a fresh run always gets a thread while an abandoned one lingers. */
-    private val mlDispatcher = Executors.newCachedThreadPool { r ->
-        Thread(r, "semantic-ml").apply { isDaemon = true }
-    }.asCoroutineDispatcher()
+    private val mlDispatcher = Executors.newCachedThreadPool(backgroundMlThreadFactory("semantic-ml")).asCoroutineDispatcher()
 
     /** Caps how many cloud full-res downloads run at once, the same shape the face walk and the photo
      *  download path use, kept separate from [mlLock] so the downloads overlap the serialised inference. */
@@ -396,7 +410,7 @@ class SemanticIndexingScheduler @Inject constructor(
         val embeddedThisPass = AtomicInteger(0)
         // What this pass's loads came to: files each transient failure for a backoff, and counts the
         // photos left over the download budget.
-        val tally = SourcePassTally(retryBook)
+        val tally = SourcePassTally(retryBook, rescanGuard)
         try {
             val modelFile = semanticModelManager.imageModelFile()
             if (modelFile == null) {
@@ -422,7 +436,7 @@ class SemanticIndexingScheduler @Inject constructor(
             // embedding follows it there before the pending set is taken, instead of the walk
             // embedding the photo a second time.
             rekeyBackedUpPhotos(account, items, alreadyScanned)
-            val pending = items.filter { it.stableId !in alreadyScanned }
+            val pending = semanticPendingItems(items, alreadyScanned)
             val total = pending.size
             // Progress is cumulative across the auto-continue passes, not per pass: the total is the whole
             // library and the indexed value is how many photos have been embedded so far, so the bar climbs
@@ -431,6 +445,7 @@ class SemanticIndexingScheduler @Inject constructor(
             val scannedBefore = libraryTotal - total
             if (total == 0) {
                 retryBook.clear()
+                rescanGuard.clear()
                 _progress.value = SemanticIndexingProgress(SemanticIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
@@ -517,6 +532,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 if (gated) mlWalkGate.release(MlRail.SEMANTIC)
             }
             SemanticDiagnostics.recordPass(embeddedThisPass.get(), SystemClock.elapsedRealtime() - passStart)
+            SemanticDiagnostics.recordRescanLoops(tally.repeats)
             SemanticDiagnostics.recordSourceBacklog(transientWaiting = retryBook.size(), overBudget = tally.overBudget)
 
             val indexedNow = scannedBefore + embeddedThisPass.get()
@@ -527,7 +543,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 paused || stopRequested -> SemanticIndexingProgress(SemanticIndexingState.Paused, indexedNow, libraryTotal)
                 // A re-kick is coming (this pass wrote a row, or a restart is already queued), so stay
                 // Running to match the tail re-kick below and not flap the foreground service.
-                embeddedThisPass.get() > 0 || restart.isRequested() -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
+                embeddedThisPass.get() - tally.repeats > 0 || restart.isRequested() -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
                 // A full pass that embedded nothing and is not paused means the remainder can't be
                 // processed right now (deferred off Wi-Fi, every attempt failed transiently, or every photo
                 // left waits out a retry backoff). There is no immediate re-kick in that case, so settle to
@@ -546,7 +562,7 @@ class SemanticIndexingScheduler @Inject constructor(
             // due. A resume is for the account last asked for, a continuation for this walk's own, and either
             // starts only while that account is still the one signed in ([restartIfCurrent]).
             val resume = restart.take()
-            if (resume || (active() && embeddedThisPass.get() > 0)) {
+            if (resume || (active() && embeddedThisPass.get() - tally.repeats > 0)) {
                 val next = if (resume) restart.lastUserId else userId
                 scope.launch { restartIfCurrent(next) }
             } else if (active() && !abandonCap.reached()) {
@@ -626,11 +642,13 @@ class SemanticIndexingScheduler @Inject constructor(
         stopRequested = true
         retryKick.cancel()
         retryBook.clear()
+        rescanGuard.clear()
         runCatching { stateStore.delete() }
         stateRestoredFor = null
         restart.reset()
         _progress.value = SemanticIndexingProgress(SemanticIndexingState.Idle, 0, 0)
         SemanticDiagnostics.clear()
+        ThemeCacheFiles.deleteAssignments(context, userId?.id ?: PhotoLocationEntity.LOCAL_USER)
         runCatching { imageEmbeddingDao.deleteAllForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
             .onFailure { Log.w(TAG, "embedding wipe on reset failed: ${it.message}") }
     }
@@ -666,7 +684,8 @@ class SemanticIndexingScheduler @Inject constructor(
                 // download timeout kept off loadTimedOut) waits out a backoff; a cloud item deferred off
                 // Wi-Fi or out of budget stays pending for a later pass.
                 val miss = missNote.reason.let {
-                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, tally.attempts(photoKey)) else it
+                    val prior = tally.attempts(photoKey)
+                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, prior) else settledCloudMiss(it, prior)
                 }
                 if (shouldTombstoneOnNullSource(loadTimedOut.get(), miss)) {
                     val permanent = item !is GalleryItem.LocalOnly && miss == SourceMiss.PERMANENT
@@ -795,7 +814,7 @@ class SemanticIndexingScheduler @Inject constructor(
         val u = Uri.parse(uri)
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(context, u)
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))
             val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && vw > 0 && vh > 0) {
@@ -869,7 +888,7 @@ class SemanticIndexingScheduler @Inject constructor(
         } ?: return miss.giveUp(sourceMissForDownloadFailure(downloadError.get()))
         val unreadable = AtomicBoolean(false)
         return try {
-            decodeFileBounded(file, timedOut, unreadable)
+            decodeFileBounded(file.storedFile, timedOut, unreadable)
                 ?: miss.giveUp(sourceMissForUndecodedDownload(unreadable.get()))
         } finally {
             runCatching { file.delete() }
@@ -886,7 +905,7 @@ class SemanticIndexingScheduler @Inject constructor(
     }
 
     private suspend fun isLocalReadable(uri: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { true } ?: false }
+        runCatching { context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use { true } ?: false }
             .getOrDefault(false)
     }
 
@@ -898,16 +917,16 @@ class SemanticIndexingScheduler @Inject constructor(
     private fun decodeLocalBlocking(uri: String, threw: AtomicBoolean? = null): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = context.contentResolver.openInputStream(u)?.use {
+        val bmp = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use {
             BitmapFactory.decodeStream(it, null, opts)
         } ?: return@runCatching null
-        val orientation = context.contentResolver.openInputStream(u)?.use {
+        val orientation = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use {
             ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         } ?: ExifInterface.ORIENTATION_NORMAL
         orientedBitmap(bmp, orientation)
@@ -922,25 +941,25 @@ class SemanticIndexingScheduler @Inject constructor(
      *  not support, or corrupt bytes), as opposed to a decode that threw (out of memory) or a file gone. */
     private fun decodeFileBlocking(file: File, unreadable: AtomicBoolean? = null): Bitmap? = runCatching {
         if (!file.exists() || file.length() <= 0L) return@runCatching null
+        // The cache files are encrypted: read through LocalFiles. A file that does not open now is not
+        // unreadable (a cache file whose key is gone is deleted there, so it is fetched again).
+        // A read that fails part way (a damaged segment) is a miss for now, never "unreadable".
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        val sized = LocalFiles.decodeChecked(context, file, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            if (file.exists()) unreadable?.set(true)
+            if (sized.undecodable) unreadable?.set(true)
             return@runCatching null
         }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: run {
-            if (file.exists()) unreadable?.set(true)
+        val decoded = LocalFiles.decodeChecked(context, file, opts)
+        val bmp = decoded.bitmap ?: run {
+            if (decoded.undecodable) unreadable?.set(true)
             return@runCatching null
         }
-        val orientation = runCatching {
-            ExifInterface(file.absolutePath)
-                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-        orientedBitmap(bmp, orientation)
+        orientedBitmap(bmp, LocalFiles.exifOrientation(context, file))
     }.getOrNull()
 
     /**
@@ -1043,10 +1062,10 @@ class SemanticIndexingScheduler @Inject constructor(
     }
 
     private fun cloudThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
 
     private fun cloudHdThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_hd_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_hd_${safeFileId(linkId)}.jpg")
 
     /** Power-of-two downsample that lands the decoded long edge in [SOURCE_MAX_EDGE, 2*SOURCE_MAX_EDGE):
      *  enough detail for the encoder without ever holding a full-resolution bitmap. */

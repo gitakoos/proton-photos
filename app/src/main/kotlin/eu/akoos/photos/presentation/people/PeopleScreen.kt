@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -44,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.MoreVert
@@ -56,9 +59,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -67,6 +72,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.isNameableCluster
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.common.ShimmerBox
@@ -80,6 +86,7 @@ import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import eu.akoos.photos.presentation.gallery.PersonCard
 import eu.akoos.photos.presentation.gallery.PersonRow
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 
@@ -114,6 +121,7 @@ fun PeopleScreen(
     val columns = GridCells.Fixed(if (listView) 1 else display.columns)
     val rowSpacing = if (listView) 0.dp else 10.dp
     val people by viewModel.people.collectAsStateWithLifecycle()
+    val hiddenPeople by viewModel.hiddenPeople.collectAsStateWithLifecycle()
     // A null value is the pre-first-emission load; once resolved it is a (possibly empty) list.
     val loading = people == null
     val resolved = people.orEmpty()
@@ -128,6 +136,9 @@ fun PeopleScreen(
     val suggestionCount = resolved.count { isNameableCluster(it.displayName, it.isOther, it.faceCount) }
     var menuOpen by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
+    // The Hidden section starts collapsed, and a person is only shown again after the sheet confirms it.
+    var hiddenExpanded by rememberSaveable { mutableStateOf(false) }
+    var pendingShow by remember { mutableStateOf<PersonUi?>(null) }
 
     // The page as its floating header frosts it, when the frosted pills are on.
     val glass = rememberGlassBackdrop(colors.pageBg)
@@ -140,7 +151,8 @@ fun PeopleScreen(
         // empty state before the named people arrive.
         val phase = when {
             loading -> 0
-            shown.isEmpty() -> 1
+            // Hidden people still need their section, so a screen whose every person is hidden is not empty.
+            shown.isEmpty() && hiddenPeople.isEmpty() -> 1
             else -> 2
         }
         Box(Modifier.fillMaxSize().glassSource(glass)) {
@@ -200,11 +212,65 @@ fun PeopleScreen(
                             verticalArrangement = Arrangement.spacedBy(rowSpacing),
                             modifier = Modifier.fillMaxSize(),
                         ) {
+                            if (shown.isEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }, key = "none-named") {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        // A hidden named person below makes "nobody named yet" untrue; hidden
+                                        // unnamed groups alone leave it true.
+                                        Text(
+                                            text = stringResource(
+                                                if (hiddenPeople.any { !it.displayName.isNullOrBlank() }) {
+                                                    R.string.people_all_named_hidden
+                                                } else {
+                                                    R.string.people_none_named
+                                                },
+                                            ),
+                                            color = colors.fgMute,
+                                            fontSize = 14.sp,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                        Spacer(Modifier.height(14.dp))
+                                        // Same way into the review as the plain empty state, which the
+                                        // hidden section would otherwise take away.
+                                        SecondaryButton(
+                                            label = if (suggestionCount > 0) {
+                                                stringResource(R.string.person_suggestions_review_count, suggestionCount)
+                                            } else {
+                                                stringResource(R.string.person_suggestions_review)
+                                            },
+                                            onClick = onReviewSuggestions,
+                                        )
+                                    }
+                                }
+                            }
                             items(items = shown, key = { it.personId }) { person ->
                                 if (listView) {
                                     PersonRow(person = person, onClick = { onPersonClick(person.personId) })
                                 } else {
                                     PersonCard(person = person, onClick = { onPersonClick(person.personId) })
+                                }
+                            }
+                            // The people the user hid sit at the bottom, folded away until asked for.
+                            if (hiddenPeople.isNotEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }, key = "hidden-header") {
+                                    HiddenSectionHeader(
+                                        count = hiddenPeople.size,
+                                        expanded = hiddenExpanded,
+                                        padStart = if (listView) 20.dp else 4.dp,
+                                        onClick = { hiddenExpanded = !hiddenExpanded },
+                                    )
+                                }
+                                if (hiddenExpanded) {
+                                    items(items = hiddenPeople, key = { "hidden-${it.personId}" }) { person ->
+                                        if (listView) {
+                                            PersonRow(person = person, hidden = true, onClick = { pendingShow = person })
+                                        } else {
+                                            PersonCard(person = person, hidden = true, onClick = { pendingShow = person })
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -346,6 +412,52 @@ fun PeopleScreen(
                 searchPlaceholder = stringResource(R.string.people_search_hint),
             )
         }
+
+        pendingShow?.let { person ->
+            val name = person.displayName
+            ConfirmSheet(
+                title = if (name != null) stringResource(R.string.person_show_confirm_title, name) else stringResource(R.string.person_show_confirm_title_group),
+                message = stringResource(R.string.person_show_confirm_body),
+                confirmLabel = stringResource(R.string.person_show_confirm),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = {
+                    viewModel.showPerson(person.personId)
+                    pendingShow = null
+                },
+                onDismiss = { pendingShow = null },
+            )
+        }
+    }
+}
+
+/**
+ * The Hidden section's header at the bottom of the people: a chevron, the label and how many are hidden. A tap
+ * folds the section open or shut; [padStart] lines it up with the cards or the rows beneath.
+ */
+@Composable
+private fun HiddenSectionHeader(count: Int, expanded: Boolean, padStart: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = padStart, end = 8.dp, top = 18.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            Icons.Default.ExpandMore,
+            contentDescription = null,
+            tint = colors.fgDim,
+            modifier = Modifier.size(20.dp).graphicsLayer(rotationZ = if (expanded) 0f else -90f),
+        )
+        Text(
+            text = stringResource(R.string.people_hidden_section),
+            color = colors.fgDim,
+            fontSize = 13.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+        )
+        Text(text = count.toString(), color = colors.fgMute, fontSize = 13.sp)
     }
 }
 

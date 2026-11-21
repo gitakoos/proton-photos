@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -101,7 +102,9 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
-import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.presentation.common.GalleryDownloads
+import eu.akoos.photos.presentation.common.awaitUnlessStopped
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
@@ -110,6 +113,8 @@ import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
 import eu.akoos.photos.domain.usecase.PendingMove
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
+import eu.akoos.photos.domain.usecase.LinkSides
+import eu.akoos.photos.domain.usecase.syncedRowsShownAsOne
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.StripResult
@@ -121,8 +126,10 @@ import eu.akoos.photos.util.onThisDayWindowDays
 import eu.akoos.photos.util.isBatteryLow
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.SyncWorker
+import java.text.SimpleDateFormat
 import java.util.Date
 import javax.inject.Inject
+import eu.akoos.photos.presentation.people.PeopleVisibility
 
 /** Internal bag for the flows the gallery `combine` chain produces. Lives at top
  *  level so distinctUntilChanged downstream can do structural equality on it. */
@@ -135,32 +142,59 @@ private data class GallerySources(
 )
 
 /**
- * Bucket [items] into ("MMMM yyyy", items) pairs in first-seen order. One [SimpleDateFormat] and one
- * reused [Date] (set via [Date.setTime]) for the whole list — at 52k items the previous
- * `Date(item.captureTimeMs)` per element churned the allocator on every recompute. Label format,
- * locale and first-seen order are identical to the prior inline grouping, so the timeline is
- * unchanged. groupBy yields a LinkedHashMap, preserving encounter order.
+ * Bucket [items] into ("MMMM yyyy", items) pairs in first-seen order. Label format, locale and
+ * first-seen order are identical to a per-photo `format`, so the timeline is unchanged; see
+ * [groupByLabel] for why each day is formatted only once.
  */
-internal fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
-    val fmt = monthYearFormat()
-    val scratch = Date()
-    return items
-        .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
-        .entries.map { it.key to it.value }
-}
+internal fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> =
+    groupByLabel(items, monthYearFormat())
 
 /**
- * Bucket [items] into ("d MMMM yyyy", items) pairs in first-seen order. Same one-format, one-Date
- * shape as [groupByMonth]; the "d MMMM yyyy" label matches the grid's prior inline Day format, so
- * the 3-column default headers are unchanged. groupBy yields a LinkedHashMap, preserving order.
+ * Bucket [items] into ("d MMMM yyyy", items) pairs in first-seen order. The "d MMMM yyyy" label
+ * matches the grid's Day format, so the 3-column default headers are unchanged.
  */
-internal fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
-    val fmt = dayMonthYearFormat()
+internal fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> =
+    groupByLabel(items, dayMonthYearFormat())
+
+/**
+ * Bucket [items] by [fmt]'s label in first-seen order, formatting each local calendar day once: both
+ * header patterns read only the day, month and year, so every instant of a day yields the same label.
+ * The day is taken in [fmt]'s own zone, with the offset that zone has at that instant, so it is
+ * exactly the day the formatter would print. A library of a hundred thousand photos spans a few
+ * thousand days, so this is a few thousand formats per pass instead of one per photo, on a pass that
+ * runs on every list change.
+ */
+private fun groupByLabel(items: List<GalleryItem>, fmt: SimpleDateFormat): List<Pair<String, List<GalleryItem>>> {
+    if (items.isEmpty()) return emptyList()
+    val zone = fmt.timeZone
     val scratch = Date()
-    return items
-        .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
-        .entries.map { it.key to it.value }
+    val labelByDay = HashMap<Long, String>()
+    val groups = LinkedHashMap<String, MutableList<GalleryItem>>()
+    for (item in items) {
+        val ms = item.captureTimeMs
+        val localDay = Math.floorDiv(ms + zone.getOffset(ms), DAY_MS)
+        val label = labelByDay.getOrPut(localDay) { scratch.time = ms; fmt.format(scratch) }
+        groups.getOrPut(label) { ArrayList() }.add(item)
+    }
+    return groups.map { (label, members) -> label to members }
 }
+
+private const val DAY_MS = 24L * 60 * 60 * 1000
+
+/**
+ * Whether [dir] holds at least one decrypted thumbnail (`thumb_<id>.jpg`). Stops at the first one: the
+ * cache of a large library holds tens of thousands of files, and listing them all built an object per
+ * file on every gallery start just to learn whether the list was empty. A folder that is missing or
+ * cannot be read holds none.
+ */
+internal fun holdsCachedThumbnail(dir: java.io.File): Boolean = runCatching {
+    java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+        stream.any { path ->
+            val name = path.fileName.toString()
+            name.startsWith("thumb_") && name.endsWith(".jpg")
+        }
+    }
+}.getOrDefault(false)
 
 /** Output of the off-main gallery computation: the hidden/bucket-filtered list (→ items), the
  *  tab/content-filtered list (→ filteredItems), the local-only pending count, and the month + day +
@@ -175,15 +209,22 @@ private data class GalleryComputed(
 
 /**
  * Cloud ids of the SYNCED rows that name a device file: the backed-up photos this device also holds.
- * A row with a blank uri names no file and leaves its id out. With no such row the answer is the
- * snapshot's own [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
+ * A row with a blank uri names no file and leaves its id out. A row resting on a name counts only
+ * while [syncedRowsShownAsOne] shows its file and photo as one on the merge's own [sides], the check the
+ * gallery's pairing makes, so the badge never says "on device" for a photo the gallery shows apart.
+ * With neither kind of row the answer is the snapshot's own
+ * [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
  */
-internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
-    if (sync.rows.none { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }) {
+internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows, sides: LinkSides): Set<String> =
+    if (sync.rows.none {
+            it.status == SyncStatus.SYNCED && (it.localUri.isBlank() || it.linkBasis != LinkBasis.PROVEN)
+        }
+    ) {
         sync.syncedCloudIds
     } else {
+        val shown = syncedRowsShownAsOne(sync.rows, sides)
         sync.rows.asSequence()
-            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() }
+            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() && shown(it) }
             .mapNotNull { it.cloudFileId }
             .toSet()
     }
@@ -234,6 +275,7 @@ internal class UploadEndHold(
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val peopleVisibility: PeopleVisibility,
     private val sameNamedPeopleMerge: eu.akoos.photos.domain.usecase.SameNamedPeopleMerge,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
@@ -243,7 +285,7 @@ class GalleryViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val observeUser: ObserveUser,
     private val deletePhotoUseCase: DeletePhotoUseCase,
-    private val downloadPhotos: DownloadPhotosUseCase,
+    private val galleryDownloads: GalleryDownloads,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
@@ -268,10 +310,26 @@ class GalleryViewModel @Inject constructor(
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val moveToFolder: MoveToFolderUseCase,
     private val folderDelete: eu.akoos.photos.presentation.folders.DeviceFolderDeleteController,
+    private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
+    private val labelRepo: eu.akoos.photos.data.label.PhotoLabelRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
     val uiState: StateFlow<GalleryUiState> = _uiState.asStateFlow()
+
+    /** [uiState] without the back-up ticks: it changes only when something the screen body shows
+     *  changes, so an upload progress frame does not recompose the screen. The list fields keep their
+     *  instances, which keeps the equality check cheap. */
+    val screenState: StateFlow<GalleryUiState> = _uiState
+        .map { it.withoutProgress() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.withoutProgress())
+
+    /** The back-up and transfer ticks [screenState] leaves out, for the avatar and the progress pill. */
+    val progress: StateFlow<GalleryProgress> = _uiState
+        .map { it.progress() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.progress())
 
     /**
      * One-shot carrier for the multi-select share intent. A ViewModel can't call startActivity,
@@ -393,7 +451,11 @@ class GalleryViewModel @Inject constructor(
     val downloadedCloudLinkIds: StateFlow<Set<String>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptySet())
-            else syncStateSnapshot.observe(userId).map { syncedCloudIdsOnDevice(it) }
+            // With the merge's own sides, so a row resting on a name is weighed by the check the
+            // gallery's pairing makes.
+            else combine(syncStateSnapshot.observe(userId), getGalleryItems.linkSides(userId)) { sync, sides ->
+                syncedCloudIdsOnDevice(sync, sides)
+            }.distinctUntilChanged()
         }
         .flowOn(Dispatchers.Default)
         .retryOnDbTear("GalleryDownloadedIds")
@@ -406,6 +468,88 @@ class GalleryViewModel @Inject constructor(
 
     /** Applies the back-up's progress, its end once no new photo has started for [UPLOAD_END_HOLD_MS]. */
     private val uploadEndHold = UploadEndHold(viewModelScope, UPLOAD_END_HOLD_MS, ::applyUploadProgress)
+
+    /** Each labelled photo's label keys, which [applyContentFilter] matches a picked label against. */
+    @Volatile
+    private var labelIndex: Map<String, Set<String>> = emptyMap()
+
+    /**
+     * Cached primary userId for synchronous use by PhotoCell's thumbnail decrypt
+     * lambdas. Compose can't suspend on a Flow inside its body without forcing
+     * recomposition on every emission, so we stash the resolved value here and let
+     * cells read it cheaply during the grid scroll. Null until the first emission
+     * lands. In that window the cells just won't request thumbnails (the next
+     * recomposition triggered by the userId update will queue them).
+     */
+    @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
+
+    // The avatar's UP arrow has two independent sources: the backup pipeline (upload.progress) and
+    // any TransferCenter UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
+    // two are ORed into hasActiveUpload, so a frame from one source never clears what the other set.
+    private var backupUploading = false
+    private var transferUploading = false
+
+    /** The in-flight off-main month + day re-bucket from a filter toggle; cancelled when a newer
+     *  toggle supersedes it so the last filter always wins. */
+    private var monthGroupsJob: kotlinx.coroutines.Job? = null
+
+    /** The write-consent request stashed while the user approves the system dialog, replayed by
+     *  [onMovePermissionGranted] and dropped by [clearPendingMove]. */
+    private var stashedMove: PendingMove? = null
+
+    /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
+     *  system trash dialog. Cleared on commit OR on cancel. */
+    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+
+    /** Private URIs of a hide whose intent is journalled and whose system delete has not confirmed
+     *  yet. Published into HIDDEN_PHOTO_URIS once it does. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
+     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** The device photos the running hide claimed, released once it is published or undone. */
+    private var pendingHideSources: Set<String> = emptySet()
+
+    /** done/total of a device folder moving into the vault, or null when none is. Drives the pill
+     *  this screen already shows background work in: a folder can hold thousands and each file is
+     *  copied on its own, so the user watches the count and stops it from where they pressed. */
+    private val _folderHideProgress = MutableStateFlow<HiddenFolderProgress?>(null)
+    val folderHideProgress: StateFlow<HiddenFolderProgress?> = _folderHideProgress.asStateFlow()
+
+    /** The running folder hide, so a second tap cannot start a parallel one. */
+    private var folderHideJob: kotlinx.coroutines.Job? = null
+
+    /** Raised by [cancelFolderHide] and polled between photos. A flag rather than a job cancel, so a
+     *  stopped hide still records and deletes the originals of everything it already copied. */
+    private val stopFolderHide = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private val _folderHideRequest = MutableStateFlow<FolderHideRequest?>(null)
+    /** The folder hide awaiting confirmation, or null when none is. */
+    val folderHideRequest: StateFlow<FolderHideRequest?> = _folderHideRequest.asStateFlow()
+
+    /** The device folder delete awaiting confirmation, or null when none is. */
+    val folderDeleteRequest: StateFlow<eu.akoos.photos.presentation.folders.DeviceFolderDeleteRequest?> =
+        folderDelete.request
+
+    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
+     *  folder hide is in flight, which is every selection hide. */
+    private var pendingHideFolderName: String? = null
+
+    /** The photos another device hid that the hide now running moves into the vault, by link id. */
+    private var remoteHideBatch: Set<String> = emptySet()
+
+    /** Single-photo public-link state surfaced in the manage-link sheet, owned by [publicLink]. */
+    val publicLinkState: StateFlow<eu.akoos.photos.presentation.viewer.PublicLinkState> = publicLink.state
+
+    /** Strip config + counters carried across an Android 10+ write-permission dialog so the
+     *  granted retry strips the deferred foreign URIs and folds them into the final tally. */
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
+    private var pendingStripFailed = 0
 
     init {
         watchRemoteHides()
@@ -429,6 +573,7 @@ class GalleryViewModel @Inject constructor(
         observeFolderSettings()
         observeGridPreferences()
         observeFavorites()
+        observeLabels()
         observeOfflinePins()
         observeUndoRestores()
         observeBackgroundUploadProgress()
@@ -463,16 +608,6 @@ class GalleryViewModel @Inject constructor(
             }
         }
     }
-
-    /**
-     * Cached primary userId for synchronous use by PhotoCell's thumbnail decrypt
-     * lambdas. Compose can't suspend on a Flow inside its body without forcing
-     * recomposition on every emission, so we stash the resolved value here and let
-     * cells read it cheaply during the grid scroll. Null until the first emission
-     * lands — in that window the cells just won't request thumbnails (the next
-     * recomposition triggered by the userId update will queue them).
-     */
-    @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
 
     private fun observePrimaryUserId() {
         viewModelScope.launch {
@@ -525,20 +660,6 @@ class GalleryViewModel @Inject constructor(
         cloudRepo.requestThumbnailDecrypt(userId, linkIds)
     }
 
-    /**
-     * Mirror [UploadPendingUseCase.progress] into [GalleryUiState.isSyncing] so the avatar
-     * spinner reflects ALL upload activity — not just the foreground [doSync] calls. Without
-     * this, a SyncWorker tick that started from the MediaStore ContentObserver (camera fired)
-     * uploads silently and the user has no in-app indicator that anything is happening.
-     *
-     * Idle frames clear the flag; per-file Uploading/Queued frames set it.
-     */
-    // The avatar's UP arrow has two independent sources: the backup pipeline (upload.progress) and
-    // any TransferCenter UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
-    // two are ORed into hasActiveUpload, so a frame from one source never clears what the other set.
-    private var backupUploading = false
-    private var transferUploading = false
-
     /** Drives the avatar's DOWN arrow from the TransferCenter (downloads + offline pins), and folds a
      *  TransferCenter UPLOAD transfer into the UP arrow alongside the backup pipeline. */
     private fun observeActiveTransfers() {
@@ -555,6 +676,14 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Mirror [UploadPendingUseCase.progress] into [GalleryUiState.isSyncing] so the avatar
+     * spinner reflects ALL upload activity, not just the foreground [doSync] calls. Without
+     * this, a SyncWorker tick that started from the MediaStore ContentObserver (camera fired)
+     * uploads silently and the user has no in-app indicator that anything is happening.
+     *
+     * Idle frames clear the flag; per-file Uploading/Queued frames set it.
+     */
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
@@ -574,6 +703,7 @@ class GalleryViewModel @Inject constructor(
                     eu.akoos.photos.domain.usecase.UploadStatus.WaitingForWifi -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.PreparingBackup -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.StorageFull -> false
+                    eu.akoos.photos.domain.usecase.UploadStatus.Cancelled -> false
                 }
                 // Between two photos the pipeline reports Done and then the next one starting, which flipped this
                 // off and on again for every photo (the back-up pill vanished and slid back in with a new
@@ -614,9 +744,40 @@ class GalleryViewModel @Inject constructor(
                         favIds,
                         state.albumHideCloudIds,
                         state.offlinePinIds,
+                        labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
                     )
                     _uiState.update { it.copy(favoriteIds = favIds, filteredItems = filtered) }
                     recomputeMonthGroups(filtered)
+                }
+        }
+    }
+
+    /**
+     * The account's labels (a guest's own when signed out): their names and counts for the filter sheet and the
+     * pill, and each photo's label keys for the label filter. A picked label the account no longer has leaves the
+     * filter, and the timeline is filtered again whenever the labels change while one is picked.
+     */
+    private fun observeLabels() {
+        viewModelScope.launch {
+            labelRepo.observeLabelUsage()
+                .catch { }
+                .collect { usage ->
+                    val state = _uiState.value
+                    _uiState.update { it.copy(labelUsage = usage) }
+                    val pruned = LabelFilter.prune(state.contentFilter, usage)
+                    if (pruned != state.contentFilter) setContentFilter(pruned)
+                }
+        }
+        viewModelScope.launch {
+            labelRepo.observeLabelsByPhoto()
+                .map { LabelFilter.index(it) }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.Default)
+                .catch { }
+                .collect { index ->
+                    labelIndex = index
+                    val filter = _uiState.value.contentFilter
+                    if (filter.labelKeys.isNotEmpty()) setContentFilter(filter)
                 }
         }
     }
@@ -641,6 +802,7 @@ class GalleryViewModel @Inject constructor(
                             state.favoriteIds,
                             state.albumHideCloudIds,
                             ids,
+                            labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
                         )
                         _uiState.update { it.copy(offlinePinIds = ids, filteredItems = filtered) }
                         recomputeMonthGroups(filtered)
@@ -663,9 +825,7 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observePeople() {
         val peopleFlow = combine(
-            context.settingsDataStore.data
-                .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-                .distinctUntilChanged(),
+            peopleVisibility.visible(),
             accountManager.getPrimaryUserId(),
         ) { aiOn, userId -> aiOn to userId }
             .flatMapLatest { (aiOn, userId) ->
@@ -739,6 +899,7 @@ class GalleryViewModel @Inject constructor(
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
+            labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
         )
         _uiState.update { it.copy(filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -813,9 +974,7 @@ class GalleryViewModel @Inject constructor(
      */
     private suspend fun reconcileThumbnailCacheThenSeed(userId: me.proton.core.domain.entity.UserId) {
         val thumbsDir = java.io.File(context.cacheDir, "thumbnails")
-        val cacheEmpty = thumbsDir.listFiles { f ->
-            f.name.startsWith("thumb_") && f.name.endsWith(".jpg")
-        }?.isEmpty() ?: true // null = dir missing/unreadable, treat as empty
+        val cacheEmpty = !holdsCachedThumbnail(thumbsDir)
         if (cacheEmpty) {
             val hasSeedRows = runCatching { photoListingDao.getThumbnailUrlSeed(userId.id).isNotEmpty() }
                 .getOrDefault(false)
@@ -1002,6 +1161,7 @@ class GalleryViewModel @Inject constructor(
                         snapshot.favoriteIds,
                         sources.cloudInAlbum,
                         snapshot.offlinePinIds,
+                        labelFiltered = LabelFilter.bypassesAlbumHide(snapshot.contentFilter),
                     )
                     // Month- and day-bucket the filtered list and compute "On this day" here, off
                     // the Main thread, rather than inside Compose composition on every list
@@ -1226,10 +1386,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** The in-flight off-main month + day re-bucket from a filter toggle; cancelled when a newer
-     *  toggle supersedes it so the last filter always wins. */
-    private var monthGroupsJob: kotlinx.coroutines.Job? = null
-
     /** Re-bucket the date-grouped zoom levels off the main thread after a filter toggle updates
      *  [GalleryUiState.filteredItems]. The streaming combine keeps month + day groups in lockstep
      *  with the list as it loads; the explicit filter handlers update filteredItems synchronously for
@@ -1254,6 +1410,7 @@ class GalleryViewModel @Inject constructor(
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
+            labelFiltered = LabelFilter.bypassesAlbumHide(state.contentFilter),
         )
         _uiState.update { it.copy(selectedFilter = filter, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -1300,6 +1457,7 @@ class GalleryViewModel @Inject constructor(
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
+            labelFiltered = LabelFilter.bypassesAlbumHide(filter),
         )
         _uiState.update { it.copy(contentFilter = filter, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -1327,6 +1485,12 @@ class GalleryViewModel @Inject constructor(
                 doSync(userId)
             }
         }
+    }
+
+    /** The user's pull: the shared backup is brought up to date as well, in the background. */
+    fun pullRefresh() {
+        sharedBackup.refresh()
+        refresh()
     }
 
     fun refresh(force: Boolean = true) {
@@ -1510,10 +1674,6 @@ class GalleryViewModel @Inject constructor(
     // Physically relocates the selected device photos into DCIM/<name>/ so other gallery apps see
     // them there. Works signed-in and out; cloud-only photos have no device file and are skipped.
 
-    /** The write-consent request stashed while the user approves the system dialog, replayed by
-     *  [onMovePermissionGranted] and dropped by [clearPendingMove]. */
-    private var stashedMove: PendingMove? = null
-
     /** Move the selected device photos (device-only + synced, cloud-only skipped) into [folderName]
      *  under DCIM/. A blank name or a selection with no device file is a no-op. */
     fun moveSelectedToFolder(folderName: String) {
@@ -1597,10 +1757,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
-     *  system trash dialog. Cleared on commit OR on cancel. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
-
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         runDelete(_uiState.value.selectedItems.toList(), freeUpSpace, deleteFromCloud)
     }
@@ -1626,7 +1782,10 @@ class GalleryViewModel @Inject constructor(
                     // No system-trash dialog was needed, so any device copies were either untouched or
                     // removed permanently (pre-R). Only a cloud trash is reversible, so the undo carries
                     // no local URIs: localRecoverable = false.
-                    buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                    buildDeleteUndoAction(
+                        result.landed(items), result.ranFreeUpSpace ?: freeUpSpace, result.ranDeleteFromCloud ?: deleteFromCloud,
+                        hide = false, localRecoverable = false,
+                    )
                         ?.let { undoController.offer(it) }
                     _uiState.update { it.copy(
                         selectedItems    = emptySet(),
@@ -1745,14 +1904,6 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Idle, hideFailureCount = 0) }
     }
 
-    /** Private URIs of a hide whose intent is journalled and whose system delete has not confirmed
-     *  yet. Published into HIDDEN_PHOTO_URIS once it does. */
-    private var pendingHidePrivateUris: List<String> = emptyList()
-
-    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
-     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
-    private var pendingHideCloudLinkIds: List<String> = emptyList()
-
     /**
      * The two halves the current selection's hide would act on, for the confirmation that fronts it.
      *
@@ -1802,7 +1953,14 @@ class GalleryViewModel @Inject constructor(
      * after the stop is left untouched on the device.
      */
     private suspend fun runHide(split: HiddenFolderRecords.HideSplit, reportProgress: Boolean) {
-        val vaultable = split.vaultable
+        // One run per photo across every live screen: a photo another run is already moving into the vault
+        // is left to it, so the photo is copied once and its original is asked for once.
+        val owned = hiddenVaultJournal.claimSources(this, split.vaultable.map { it.local.uri })
+        pendingHideSources = owned
+        val vaultable = split.vaultable.filter { it.local.uri in owned }
+        // A copy an earlier run of the same photo left pending, its screen gone before the delete answered,
+        // is moved as it is instead of copied again.
+        val reusable = hiddenVaultJournal.pendingCopiesOf(owned)
         HiddenVaultDiagnostics.hideStarted(split)
         // Client-side hide for the cloud-only members: add their linkIds to the hidden set so the
         // shared merge filter drops them from every listing. They have no device file at all, so
@@ -1816,6 +1974,8 @@ class GalleryViewModel @Inject constructor(
             // stays reversible whichever kind of photo it was pressed on.
             pendingHideCloudLinkIds = emptyList()
             pendingHideFolderName = null
+            pendingHideSources = emptySet()
+            remoteHideBatch = emptySet()
             buildHideUndoAction(emptyList(), split.cloudLinkIds)?.let { undoController.offer(it) }
             _uiState.update { it.copy(
                 selectedItems          = emptySet(),
@@ -1827,7 +1987,9 @@ class GalleryViewModel @Inject constructor(
         // Step 1: refuse up front when the copies cannot fit. A hide holds both the originals and
         // the vault copies at once, so a volume that runs out mid-batch fails per file with
         // nothing the user can act on.
-        val shortfall = hiddenVaultJournal.spaceShortfallBytes(vaultable.sumOf { it.sizeBytes })
+        val shortfall = hiddenVaultJournal.spaceShortfallBytes(
+            vaultable.filter { it.local.uri !in reusable }.sumOf { it.sizeBytes },
+        )
         if (shortfall > 0L) {
             rollbackPendingHide()
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(
@@ -1845,10 +2007,13 @@ class GalleryViewModel @Inject constructor(
         }
         for (target in vaultable) {
             if (reportProgress && stopFolderHide.get()) break
+            // A sign-out refuses the journal below, so every further copy would only be dropped again.
+            if (hiddenVaultJournal.signingOut()) break
             val local = target.local
             val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
-            val privateUri = hiddenStorage.store(
+            val privateUri = reusable[local.uri] ?: hiddenStorage.store(
                 local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+                sourceFolder = sourceFolder, cloudLinkId = target.cloudLinkId,
             )
             if (privateUri != null) {
                 collected += HiddenVaultJournal.Entry(
@@ -1876,7 +2041,9 @@ class GalleryViewModel @Inject constructor(
         // Step 3: record the intent BEFORE anything is deleted, so an interruption during the
         // delete leaves a recoverable state rather than orphaned bytes.
         if (!hiddenVaultJournal.journal(collected)) {
-            hiddenVaultJournal.discard(collected.map { it.privateUri })
+            // A taken-over copy keeps the journal entry its own run wrote, so only the copies made here go.
+            val reused = reusable.values.toSet()
+            hiddenVaultJournal.discard(collected.map { it.privateUri }.filter { it !in reused })
             rollbackPendingHide()
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_move_to_hidden_failed))) }
             return
@@ -1934,19 +2101,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** done/total of a device folder moving into the vault, or null when none is. Drives the pill
-     *  this screen already shows background work in: a folder can hold thousands and each file is
-     *  copied on its own, so the user watches the count and stops it from where they pressed. */
-    private val _folderHideProgress = MutableStateFlow<HiddenFolderProgress?>(null)
-    val folderHideProgress: StateFlow<HiddenFolderProgress?> = _folderHideProgress.asStateFlow()
-
-    /** The running folder hide, so a second tap cannot start a parallel one. */
-    private var folderHideJob: kotlinx.coroutines.Job? = null
-
-    /** Raised by [cancelFolderHide] and polled between photos. A flag rather than a job cancel, so a
-     *  stopped hide still records and deletes the originals of everything it already copied. */
-    private val stopFolderHide = java.util.concurrent.atomic.AtomicBoolean(false)
-
     /**
      * A folder hide the user has been asked about and has not answered yet.
      *
@@ -1958,10 +2112,6 @@ class GalleryViewModel @Inject constructor(
         val bucketName: String,
         val split: HiddenFolderRecords.HideSplit? = null,
     )
-
-    private val _folderHideRequest = MutableStateFlow<FolderHideRequest?>(null)
-    /** The folder hide awaiting confirmation, or null when none is. */
-    val folderHideRequest: StateFlow<FolderHideRequest?> = _folderHideRequest.asStateFlow()
 
     /**
      * Ask about hiding [bucketName], and start reading what that would move.
@@ -2037,10 +2187,6 @@ class GalleryViewModel @Inject constructor(
         stopFolderHide.set(true)
     }
 
-    /** The device folder delete awaiting confirmation, or null when none is. */
-    val folderDeleteRequest: StateFlow<eu.akoos.photos.presentation.folders.DeviceFolderDeleteRequest?> =
-        folderDelete.request
-
     /**
      * Ask about deleting [bucketName] with everything it holds on the device, and start reading what
      * that would take. Nothing is deleted until [confirmDeleteFolder]. Held off while a folder hide
@@ -2103,22 +2249,41 @@ class GalleryViewModel @Inject constructor(
     }
 
     /** Publish the journalled hide now that the delete has confirmed, and clear the pending state. */
-    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
-     *  folder hide is in flight, which is every selection hide. */
-    private var pendingHideFolderName: String? = null
-
     private fun commitPendingHide() {
         val uris = pendingHidePrivateUris
+        val sources = pendingHideSources
         pendingHidePrivateUris = emptyList()
+        pendingHideSources = emptySet()
         remoteHideBatch = emptySet()
         // The hide landed, so the folder keeps the flag this run wrote.
         pendingHideFolderName = null
-        if (uris.isEmpty()) return
-        viewModelScope.launch { hiddenVaultJournal.confirm(uris) }
+        // The claim holds until the journal has published, so no other run reads these copies as left over.
+        settleThenRelease(sources) { hiddenVaultJournal.confirm(uris) }
     }
 
-    /** The photos another device hid that the hide now running moves into the vault, by link id. */
-    private var remoteHideBatch: Set<String> = emptySet()
+    /**
+     * Runs [settle] to the end even when this screen goes away meanwhile, then ends the claim on [sources]. Half a
+     * settle would leave copies another run could take over while their records still change underneath it.
+     */
+    private fun settleThenRelease(sources: Set<String>, settle: suspend () -> Unit) {
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                try {
+                    settle()
+                } finally {
+                    hiddenVaultJournal.releaseSources(this@GalleryViewModel, sources)
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        // A hide still waiting on its delete prompt keeps its journalled copies; the next run of the same photo,
+        // from any screen, takes them over instead of copying again.
+        hiddenVaultJournal.leaveForNextRun(pendingHidePrivateUris)
+        hiddenVaultJournal.releaseAllSources(this)
+        super.onCleared()
+    }
 
     /**
      * Carries out the hides another device asked for of photos this phone holds as a device file
@@ -2151,7 +2316,17 @@ class GalleryViewModel @Inject constructor(
                     if (cloudOnly.isNotEmpty()) context.settingsDataStore.edit { prefs ->
                         HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - cloudOnly.toSet())
                     }
-                    val synced = waiting.filterIsInstance<GalleryItem.Synced>()
+                    // A photo the vault already holds is hidden here already, and one another screen's run is moving
+                    // belongs to that run: neither is copied again.
+                    val vaulted = hiddenVaultJournal.vaultedLinks()
+                    val waitingSynced = waiting.filterIsInstance<GalleryItem.Synced>()
+                    val alreadyVaulted = waitingSynced.map { it.cloud.linkId }.filterTo(HashSet()) { it in vaulted }
+                    if (alreadyVaulted.isNotEmpty()) context.settingsDataStore.edit { prefs ->
+                        HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - alreadyVaulted)
+                    }
+                    val candidates = waitingSynced.filter { it.cloud.linkId !in alreadyVaulted }
+                    val owned = hiddenVaultJournal.claimSources(this@GalleryViewModel, candidates.map { it.local.uri })
+                    val synced = candidates.filter { it.local.uri in owned }
                     if (synced.isEmpty()) return@collect
                     remoteHideBatch = synced.mapTo(HashSet()) { it.cloud.linkId }
                     _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
@@ -2169,9 +2344,11 @@ class GalleryViewModel @Inject constructor(
         val cloudIds = pendingHideCloudLinkIds
         val folderName = pendingHideFolderName
         val declinedRemote = remoteHideBatch
+        val sources = pendingHideSources
         pendingHidePrivateUris = emptyList()
         pendingHideCloudLinkIds = emptyList()
         pendingHideFolderName = null
+        pendingHideSources = emptySet()
         remoteHideBatch = emptySet()
         // A hide another device asked for that did not land here, the system prompt declined or the copy refused,
         // leaves the queue: asking again at every opening would be a prompt the user has already answered.
@@ -2180,9 +2357,10 @@ class GalleryViewModel @Inject constructor(
                 HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - declinedRemote)
             }
         }
-        if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
+        // The copies go before the claim ends, so no other run can take over a copy this undo is dropping.
+        settleThenRelease(sources) { hiddenVaultJournal.undoHide(uris) }
+        if (cloudIds.isEmpty() && folderName == null) return
         viewModelScope.launch {
-            if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
             HiddenCloudPhotos.reveal(context, cloudIds)
             // Nothing was vaulted, so a folder left flagged would list in the vault holding no
             // photos while its card is gone from Albums, with no way back except revealing it.
@@ -2196,63 +2374,32 @@ class GalleryViewModel @Inject constructor(
     fun downloadSelected() {
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) return
-        var job: kotlinx.coroutines.Job? = null
-        job = viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
-            // One thumbnail URI per selected photo so the Activity screen lists them individually.
-            val thumbUris = items.map { thumbUriFor(it) }
-            val transferId = transferCenter.start(
-                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
-                onCancel = { job?.cancel() },
-            )
-            // Resolve per-photo album folder so cloud-album photos go to DCIM/<AlbumName>/
-            // instead of bunching in a generic Proton Photos folder. AlbumService caches the
-            // membership map for 20 min so repeated downloads don't re-fetch.
-            val memberships: Map<String, String> = runCatching { cloudRepo.getAlbumMemberships(userId) }
-                .getOrElse {
-                    android.util.Log.w("GalleryVM", "getAlbumMemberships failed: ${it.message}")
-                    emptyMap()
+        // The batch runs on [GalleryDownloads], the same one every screen uses, so this ViewModel
+        // only mirrors its progress and reports how it ended.
+        val batch = galleryDownloads.saveToDevice(items)
+        _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
+        viewModelScope.launch {
+            val progress = launch {
+                batch.progress.filterNotNull().collect { p ->
+                    _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(p.done, p.total)) }
                 }
-                .mapValues { (_, name) -> eu.akoos.photos.util.ProtonPhotosStorage.sanitize(name) }
-            val savedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
-            val result = try {
-                downloadPhotos.downloadGalleryItems(
-                    userId, items,
-                    folderName = "", // empty = save non-album photos directly into DCIM/Camera
-                    folderByLinkId = memberships,
-                    onSaved = { savedUris.add(it) },
-                ) { progress ->
-                    _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(progress.done, progress.total)) }
-                    transferCenter.progress(transferId, progress.done)
+            }
+            val outcome = batch.await()
+            progress.cancel()
+            val next = when (outcome) {
+                // Every photo cancelled one by one: nothing was downloaded, so no "0 downloaded" message.
+                is GalleryDownloads.Outcome.Finished -> outcome.progress.let { r ->
+                    if (r.done == 0 && r.cancelled > 0) MultiDownloadState.Idle
+                    else MultiDownloadState.Done(r.done - r.failed, r.failed)
                 }
-            } finally {
-                transferCenter.finish(transferId)
+                is GalleryDownloads.Outcome.Failed ->
+                    MultiDownloadState.Done(0, items.count { it is GalleryItem.CloudOnly })
+                // Stopped from the Activity screen or by a sign-out: clear the in-progress indicator
+                // so it does not stay spinning.
+                GalleryDownloads.Outcome.NotSignedIn, null -> MultiDownloadState.Idle
             }
-            transferCenter.log(
-                TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),
-            )
-            _uiState.update { it.copy(
-                multiDownloadState = MultiDownloadState.Done(result.done - result.failed, result.failed),
-                selectedItems = emptySet(),
-            ) }
+            _uiState.update { it.copy(multiDownloadState = next, selectedItems = emptySet()) }
         }
-        // Stopping the batch from the Activity screen cancels this job; clear the gallery's
-        // in-progress download indicator so it does not stay spinning.
-        job?.invokeOnCompletion { cause ->
-            if (cause is kotlinx.coroutines.CancellationException) {
-                _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Idle, selectedItems = emptySet()) }
-            }
-        }
-    }
-
-    /** Thumbnail URI for one gallery item: the on-device file for local/synced photos, the cached
-     *  cloud thumbnail (which may not exist yet) for cloud-only ones. */
-    private fun thumbUriFor(item: GalleryItem): String = when (item) {
-        is GalleryItem.LocalOnly -> item.local.uri
-        is GalleryItem.Synced -> item.local.uri
-        is GalleryItem.CloudOnly ->
-            "file://" + java.io.File(context.cacheDir, "thumbnails/thumb_${item.cloud.linkId}.jpg").absolutePath
     }
 
     fun resetMultiDownloadState() {
@@ -2302,58 +2449,14 @@ class GalleryViewModel @Inject constructor(
             return
         }
 
-        // Pin only the ones not already offline.
+        // Pin only the ones not already offline. The pins download on [GalleryDownloads], so a
+        // batch that is still running when the app moves on is neither dropped nor left half-pinned.
         val toPin = cloudItems.filter { it.cloud.linkId !in pinned }
-        val linkIds = toPin.map { it.cloud.linkId }
+        val pinning = galleryDownloads.pinOffline(toPin.map { it.cloud })
+        _uiState.update { it.copy(selectedItems = emptySet()) }
         viewModelScope.launch {
-            // Optimistic pin: add every linkId in one edit so the badges light up before any byte is
-            // fetched; failures below remove the ones that didn't land.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
-            }
-            _uiState.update { it.copy(selectedItems = emptySet()) }
-            val userId = accountManager.getPrimaryUserId().first()
-            var succeeded = 0
-            val failedLinkIds = mutableListOf<String>()
-            val savedPaths = mutableListOf<String>()
-            val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, toPin.size)
-            try {
-                for (item in toPin) {
-                    val linkId = item.cloud.linkId
-                    try {
-                        val uid = userId ?: error("Not signed in")
-                        val file = cloudRepo.downloadFullResPhoto(uid, item.cloud)
-                        val stored = offlineStore.store(linkId, file)
-                        savedPaths += "file://${stored.absolutePath}"
-                        succeeded++
-                    } catch (e: Exception) {
-                        if (e is kotlinx.coroutines.CancellationException) throw e
-                        android.util.Log.w("GalleryVM", "offline pin failed: ${e.message}")
-                        failedLinkIds += linkId
-                    }
-                    transferCenter.progress(transferId, succeeded + failedLinkIds.size)
-                }
-            } finally {
-                transferCenter.finish(transferId)
-            }
-            // Revert the optimistic pin for anything that didn't download, so a failed item never
-            // looks pinned with no blob behind it.
-            if (failedLinkIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
-                }
-                failedLinkIds.forEach { offlineStore.delete(it) }
-            }
-            // Drop any blob whose pin was removed (un-pinned, or a sign-out) while its download was
-            // in flight, so a blob never outlives its pin.
-            val finalPins = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-            (linkIds - failedLinkIds.toSet()).forEach { id ->
-                if (id !in finalPins) offlineStore.delete(id)
-            }
-            transferCenter.log(TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths)
-            _offlineBatchResult.emit(succeeded)
+            val result = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineBatchResult.emit(result.pinned)
         }
     }
 
@@ -2383,7 +2486,7 @@ class GalleryViewModel @Inject constructor(
                             val uid = userId ?: error("Not signed in")
                             val file = cloudRepo.downloadFullResPhoto(uid, item.cloud)
                             androidx.core.content.FileProvider.getUriForFile(
-                                context, "${context.packageName}.share.fileprovider", file,
+                                context, "${context.packageName}.share.fileprovider", file.storedFile,
                             ).also {
                                 // Report the real filename to the receiver instead of the linkId.
                                 eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, item.cloud.displayName)
@@ -2463,9 +2566,6 @@ class GalleryViewModel @Inject constructor(
     // cloud-backed photo (see [showPublicLink] gating in GalleryScreen). The link machine itself
     // lives in the shared [PublicLinkController] so the gallery and the viewer behave identically;
     // the methods below resolve the selected linkId / local uri and delegate.
-
-    /** Single-photo public-link state surfaced in the manage-link sheet, owned by [publicLink]. */
-    val publicLinkState: StateFlow<eu.akoos.photos.presentation.viewer.PublicLinkState> = publicLink.state
 
     /** The single cloud-backed (Synced/CloudOnly) linkId in the current selection, or null when
      *  the selection is empty, larger than one, or contains a local-only item. Drives both the
@@ -2707,14 +2807,6 @@ class GalleryViewModel @Inject constructor(
     // settings. The picker gates its confirm on at least one field, so an empty config never reaches
     // here and counts as a silent no-op.
 
-    /** Strip config + counters carried across an Android 10+ write-permission dialog so the
-     *  granted retry strips the deferred foreign URIs and folds them into the final tally. */
-    private var pendingStripConfig: MetadataStripConfig? = null
-    private var pendingStripUris: List<String> = emptyList()
-    private var pendingStripStripped = 0
-    private var pendingStripSkipped = 0
-    private var pendingStripFailed = 0
-
     fun stripMetadataSelected(config: MetadataStripConfig) {
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty() || config.isNoOp) return
@@ -2847,13 +2939,16 @@ class GalleryViewModel @Inject constructor(
         favoriteIds: Set<String> = emptySet(),
         albumHideCloudIds: Set<String> = emptySet(),
         offlinePinIds: Set<String> = emptySet(),
+        // A picked label shows every photo carrying it, album members included, as a category does.
+        labelFiltered: Boolean,
     ): List<GalleryItem> {
         // Album-membership filter only applies on the [GalleryFilter.All] view. Non-All tabs
         // (Favorites, Screenshots, Videos, …) bypass it — when the user explicitly picks a
         // category, they want every matching item, regardless of whether the photo is also
         // in an album. The set is empty when the "Hide photos in albums" toggle is off,
         // so this is a no-op for users who don't enable the feature.
-        val baseItems = if (filter == GalleryFilter.All) {
+        // With nothing to hide the list is handed on as it is, rather than copied photo by photo.
+        val baseItems = if (filter == GalleryFilter.All && !labelFiltered && albumHideCloudIds.isNotEmpty()) {
             items.filter { item ->
                 val cloudLinkId = when (item) {
                     is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -2938,8 +3033,11 @@ class GalleryViewModel @Inject constructor(
 
         // Date
         if (filter.year != null || filter.month != null || filter.day != null) {
+            // One calendar for the pass, moved to each photo's time: a new one per photo of the library
+            // was the cost of this filter, on the main thread when a date is picked.
+            val cal = java.util.Calendar.getInstance()
             result = result.filter { item ->
-                val cal = java.util.Calendar.getInstance().apply { timeInMillis = item.captureTimeMs }
+                cal.timeInMillis = item.captureTimeMs
                 val dom = cal.get(java.util.Calendar.DAY_OF_MONTH)
                 val yearMatch  = filter.year  == null || cal.get(java.util.Calendar.YEAR) == filter.year
                 val monthMatch = filter.month == null || (cal.get(java.util.Calendar.MONTH) + 1) == filter.month
@@ -2949,7 +3047,7 @@ class GalleryViewModel @Inject constructor(
             }
         }
 
-        return result
+        return LabelFilter.apply(result, filter, labelIndex)
     }
 }
 

@@ -99,6 +99,7 @@ object FaceDiagnostics {
      *  the server answered that the link, its keys or its revision are gone, or the downloaded original
      *  is a format the decoder cannot read. Atomic: several workers increment it. */
     private val permanentSkips = AtomicInteger(0)
+    private val rescanLoops = AtomicInteger(0)
 
     /** As of the last pass end: photos waiting out a retry backoff after a transient load failure,
      *  photos that pass left for the next one because its download budget was spent, and photos only in
@@ -309,6 +310,11 @@ object FaceDiagnostics {
     /** Note one more cloud photo recorded scanned because its source can never load. */
     fun recordPermanentSkip() {
         permanentSkips.incrementAndGet()
+    }
+
+    /** Add the photos a pass settled again after the process had already settled them as often as a loop allows. */
+    fun recordRescanLoops(count: Int) {
+        if (count > 0) rescanLoops.addAndGet(count)
     }
 
     /** Record, at a pass end, how many photos wait out a retry backoff, how many the pass left over its
@@ -548,6 +554,7 @@ object FaceDiagnostics {
         unloadableLocal.set(0)
         watchdogTimeouts.set(0)
         permanentSkips.set(0)
+        rescanLoops.set(0)
         transientWaiting = 0
         overBudget = 0
         deferredOffWifi = 0
@@ -619,7 +626,8 @@ object FaceDiagnostics {
             append("permanentSkipped=").append(permanentSkips.get())
             append(" transientWaiting=").append(transientWaiting)
             append(" overBudget=").append(overBudget)
-            append(" waitingForWifi=").append(deferredOffWifi).append('\n')
+            append(" waitingForWifi=").append(deferredOffWifi)
+            append(" rescanLoops=").append(rescanLoops.get()).append('\n')
             append("facesDetected=").append(facesDetected.get()).append('\n')
             append("storedFaces=").append(countText(counts?.faces))
             append(" ungrouped=").append(countText(counts?.ungrouped))

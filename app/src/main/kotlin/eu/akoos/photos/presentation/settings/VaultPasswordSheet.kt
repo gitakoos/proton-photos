@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -72,7 +73,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.SheetBg
 
 /** The shortest vault password the sheet accepts. */
-internal const val VAULT_PASSWORD_MIN_LENGTH = 8
+internal const val VAULT_PASSWORD_MIN_LENGTH = 12
 
 /** Why a typed vault password cannot be saved yet, or null when it can. */
 internal enum class VaultPasswordProblem { TooShort, Mismatch }
@@ -318,9 +319,10 @@ internal fun VaultPasswordFlow(
     viewModel: VaultPasswordViewModel,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     var wrongCurrent by remember(step) { mutableStateOf(false) }
     fun done(message: Int) {
-        Toast.makeText(context, context.getString(message), Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, resources.getString(message), Toast.LENGTH_SHORT).show()
         onStep(VaultPasswordStep.None)
     }
     when (step) {

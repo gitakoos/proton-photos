@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -57,6 +59,7 @@ import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.data.hidden.VaultPasswordStore
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateSnapshot
@@ -65,6 +68,9 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.LinkSides
+import eu.akoos.photos.domain.usecase.syncedRowsShownAsOne
 import eu.akoos.photos.presentation.albums.DeviceFolder
 import eu.akoos.photos.presentation.albums.DeviceFolderCards
 import eu.akoos.photos.util.friendlyNetworkError
@@ -78,16 +84,17 @@ internal const val HIDDEN_CLOUD_SELECTION_PREFIX = "hidden_cloud_"
 /**
  * The linkIds among [hiddenIds] that a SYNCED row pairs to a device file: individually hidden cloud
  * photos whose device copy is still in the phone's gallery. A vaulted photo's row reads HIDDEN, so it
- * never counts.
+ * never counts. A row resting on a name counts only while [syncedRowsShownAsOne] shows its file and
+ * photo as one on the merge's own [sides], the check the gallery's pairing makes.
  */
-internal fun looseDeviceCopies(hiddenIds: Set<String>, rows: List<SyncStateLite>): Set<String> =
+internal fun looseDeviceCopies(hiddenIds: Set<String>, rows: List<SyncStateLite>, sides: LinkSides): Set<String> =
     if (hiddenIds.isEmpty()) {
         emptySet()
     } else {
+        val shown = syncedRowsShownAsOne(rows, sides)
         rows.asSequence()
-            .filter { it.status == SyncStatus.SYNCED }
+            .filter { it.status == SyncStatus.SYNCED && it.cloudFileId in hiddenIds && shown(it) }
             .mapNotNull { it.cloudFileId }
-            .filter { it in hiddenIds }
             .toSet()
     }
 
@@ -145,6 +152,13 @@ data class HiddenAlbumUiState(
     val allSelected: Boolean get() = selectableCount > 0 && selectedCount == selectableCount
 }
 
+/**
+ * A sign-out Proton forces moves the photos hidden only on this phone back into the gallery when no Hidden
+ * password is set; with one they go into a password-protected zip instead. A guest is never signed out that
+ * way and has a warning of its own, so the tip is for a signed-in account alone.
+ */
+internal fun hiddenPasswordTipDue(signedIn: Boolean, passwordSet: Boolean): Boolean = signedIn && !passwordSet
+
 @HiltViewModel
 class HiddenAlbumViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -154,11 +168,23 @@ class HiddenAlbumViewModel @Inject constructor(
     private val hiddenVaultRestorer: HiddenVaultRestorer,
     private val driveRepo: DrivePhotoRepository,
     private val syncStateSnapshot: SyncStateSnapshot,
+    private val getGalleryItems: GetGalleryItemsUseCase,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    vaultPasswordStore: VaultPasswordStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HiddenAlbumUiState())
     val uiState: StateFlow<HiddenAlbumUiState> = _uiState.asStateFlow()
+
+    /** Whether the screen suggests setting a Hidden password, per [hiddenPasswordTipDue]. False until both
+     *  answers are in, so the line never flashes up before a set password has been read. */
+    val passwordTipDue: StateFlow<Boolean> = combine(
+        accountManager.getPrimaryUserId().map { it != null },
+        vaultPasswordStore.observeIsSet(),
+    ) { signedIn, passwordSet -> hiddenPasswordTipDue(signedIn, passwordSet) }
+        .distinctUntilChanged()
+        .catch { emit(false) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Tracks the active DataStore observer so a re-authentication (rare but possible
      *  if the user fails biometrics then retries) cancels the previous collector before
@@ -368,8 +394,8 @@ class HiddenAlbumViewModel @Inject constructor(
             val hiddenIds = context.settingsDataStore.data
                 .map { it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet() }
                 .distinctUntilChanged()
-            combine(hiddenIds, syncStateSnapshot.observe(userId)) { ids, sync ->
-                looseDeviceCopies(ids, sync.rows)
+            combine(hiddenIds, syncStateSnapshot.observe(userId), getGalleryItems.linkSides(userId)) { ids, sync, sides ->
+                looseDeviceCopies(ids, sync.rows, sides)
             }
                 .flowOn(Dispatchers.Default)
                 .distinctUntilChanged()

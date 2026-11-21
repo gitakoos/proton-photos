@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -145,7 +146,7 @@ class AlbumSharingService @Inject constructor(
         val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
         if (coverLinkId != null) {
             photoListingDao.getByLinkId(coverLinkId)?.thumbnailUrl?.let { return it }
-            val file = File(thumbnailCacheDir, "thumb_$coverLinkId.jpg")
+            val file = File(thumbnailCacheDir, "thumb_${safeFileId(coverLinkId)}.jpg")
             if (file.exists() && file.length() > 0) return "file://${file.absolutePath}"
         }
         // Membership fallback: cross-account shares rewrite linkIds, so coverLinkId often
@@ -161,7 +162,7 @@ class AlbumSharingService @Inject constructor(
                     ?.thumbnailUrl
                 if (firstFromDb != null) return firstFromDb
                 for (mid in memberIds) {
-                    val file = File(thumbnailCacheDir, "thumb_$mid.jpg")
+                    val file = File(thumbnailCacheDir, "thumb_${safeFileId(mid)}.jpg")
                     if (file.exists() && file.length() > 0) return "file://${file.absolutePath}"
                 }
             }
@@ -1437,28 +1438,14 @@ class AlbumSharingService @Inject constructor(
      */
     suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto> = withContext(Dispatchers.IO) {
         val volumeId = shareService.getVolumeId(userId)
-        val manager = apiProvider.get<DriveApiService>(userId)
 
-        // 1. Walk the shared-by-me feed.
-        val sharedLinkIds = mutableListOf<String>()
-        var anchorId: String? = null
-        var page = 0
-        try {
-            do {
-                val resp = semaphore.withPermit {
-                    manager.invoke { getSharedByMeListings(volumeId, anchorId) }.valueOrThrow
-                }
-                page++
-                sharedLinkIds.addAll(resp.links.map { it.linkId })
-                anchorId = if (resp.more) resp.anchorId else null
-                Log.d(TAG, "loadSharedByMePhotos: feed page=$page links=${resp.links.size} more=${resp.more}")
-            } while (anchorId != null)
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            // No feed → no shared photos; don't fail the caller (shared-albums section renders).
-            Log.w(TAG, "loadSharedByMePhotos: shares feed failed: ${e.message}", e)
-            return@withContext emptyList()
-        }
+        // 1. Walk the shared-by-me feed. Null when the app's own walk failed: no feed, no shared photos.
+        val feedStarted = System.nanoTime()
+        val sharedLinkIds = sdkRouting.run(
+            eu.akoos.photos.data.sdk.SdkRoute.SHARED_BY_ME,
+            viaSdk = { sdkSharedOps.sharedByMeLinkIds(userId, volumeId) },
+        ) { walkSharedByMeFeed(userId, volumeId) } ?: return@withContext emptyList()
+        val feedMs = (System.nanoTime() - feedStarted) / 1_000_000
         if (sharedLinkIds.isEmpty()) return@withContext emptyList()
 
         // 2. Exclude albums already represented in the shared-albums section.
@@ -1486,8 +1473,33 @@ class AlbumSharingService @Inject constructor(
                 )
             }.getOrNull()
         }
-        Log.d(TAG, "loadSharedByMePhotos: feedLinks=${sharedLinkIds.size} candidates=${candidateLinkIds.size} photos=${result.size}")
+        Log.d(TAG, "loadSharedByMePhotos: feedLinks=${sharedLinkIds.size} feedMs=$feedMs candidates=${candidateLinkIds.size} photos=${result.size}")
         result
+    }
+
+    /** The app's own walk of the shared-by-me feed, to its last page; null when a page failed. */
+    private suspend fun walkSharedByMeFeed(userId: UserId, volumeId: String): List<String>? {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val sharedLinkIds = mutableListOf<String>()
+        var anchorId: String? = null
+        var page = 0
+        try {
+            do {
+                val resp = semaphore.withPermit {
+                    manager.invoke { getSharedByMeListings(volumeId, anchorId) }.valueOrThrow
+                }
+                page++
+                sharedLinkIds.addAll(resp.links.map { it.linkId })
+                anchorId = if (resp.more) resp.anchorId else null
+                Log.d(TAG, "loadSharedByMePhotos: feed page=$page links=${resp.links.size} more=${resp.more}")
+            } while (anchorId != null)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            // No feed → no shared photos; don't fail the caller (shared-albums section renders).
+            Log.w(TAG, "loadSharedByMePhotos: shares feed failed: ${e.message}", e)
+            return null
+        }
+        return sharedLinkIds
     }
 
     suspend fun loadShareInvitations(userId: UserId, shareId: String): List<ShareInvitation> = withContext(Dispatchers.IO) {
@@ -1773,8 +1785,6 @@ class AlbumSharingService @Inject constructor(
         sourceVolumeId: String,
         onProgress: (copied: Int, total: Int) -> Unit = { _, _ -> },
     ): SaveSharedAlbumResult = withContext(Dispatchers.IO) {
-        val manager = apiProvider.get<DriveApiService>(userId)
-
         val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
 
         // === Phase 3: create the new owned album =================================
@@ -1783,15 +1793,7 @@ class AlbumSharingService @Inject constructor(
         val newAlbumLinkId = newAlbum.linkId
 
         // === Phase 5: walk the shared album's children + copy each ===============
-        val children = mutableListOf<String>()
-        var anchor: String? = null
-        do {
-            val resp = semaphore.withPermit {
-                manager.invoke { getAlbumChildren(sourceVolumeId, sourceAlbumLinkId, anchor) }.valueOrThrow
-            }
-            resp.photos.forEach { children.add(it.linkId) }
-            anchor = if (resp.more) resp.anchorId else null
-        } while (anchor != null)
+        val children = albumService.listAlbumChildren(userId, sourceVolumeId, sourceAlbumLinkId).children.map { it.linkId }
 
         val photoDetailMap = linkDetailHelpers
             .batchFetchLinkDetailsViaShare(userId, sharingShareId, children.distinct())
@@ -2039,32 +2041,49 @@ class AlbumSharingService @Inject constructor(
     ): SaveSharedPhotosResult = withContext(Dispatchers.IO) {
         val ids = photoLinkIds.distinct()
         if (ids.isEmpty()) return@withContext SaveSharedPhotosResult(0, 0, 0)
-        val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
+        val started = System.nanoTime()
+        val sdkOn = sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.SAVE_TO_LIBRARY)
+        // The keys the app's own copy needs: worked out first, as always, when that copy does every photo,
+        // and only once a photo needs it when the SDK goes first. A failure there is kept, so the SDK path
+        // asks once and counts every photo left for the app's own copy as failed.
+        var prep: OwnLibraryCopyContext? =
+            if (sdkOn) null else prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
+        var prepFailure: Exception? = null
         val details = linkDetailHelpers.batchFetchLinkDetailsViaShare(userId, sharingShareId, ids)
         val contentHashOf = { linkId: String ->
             val d = details[linkId]
             d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
         }
         val held = sharedPhotosAlreadyHeld(ids, contentHashOf) { photoListingDao.findExistingContentHashes(userId.id, it) }
-        var copied = 0
-        var failed = 0
-        var skipped = 0
-        for (linkId in ids) {
-            val d = details[linkId]
-            if (linkId in held) {
-                skipped++
-                continue
-            }
+        val toCopy = ids.filter { it !in held }
+        val counts = eu.akoos.photos.data.sdk.saveSharedPhotosRouted(
+            linkIds = toCopy,
+            sdkOn = sdkOn,
+            viaSdk = { linkIds, onOutcome -> sdkSharedOps.saveToTimeline(userId, sourceVolumeId, linkIds, onOutcome) },
+        ) { linkId ->
             try {
-                copyPhotoToOwnLibrary(userId, sourceVolumeId, linkId, d, prep)
-                copied++
+                prepFailure?.let { throw it }
+                val copyContext = prep ?: try {
+                    prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId).also { prep = it }
+                } catch (e: Exception) {
+                    if (e !is kotlinx.coroutines.CancellationException) prepFailure = e
+                    throw e
+                }
+                copyPhotoToOwnLibrary(userId, sourceVolumeId, linkId, details[linkId], copyContext)
+                true
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "saveSharedPhotosToOwnLibrary: copy failed linkId=$linkId msg=${e.message}", e)
-                failed++
+                false
             }
         }
-        SaveSharedPhotosResult(copied, failed, skipped)
+        val skipped = ids.size - toCopy.size + counts.alreadyThere
+        Log.d(
+            TAG,
+            "saveSharedPhotosToOwnLibrary: copied=${counts.copied} failed=${counts.failed} skipped=$skipped " +
+                "sdk=$sdkOn ms=${(System.nanoTime() - started) / 1_000_000}",
+        )
+        SaveSharedPhotosResult(counts.copied, counts.failed, skipped)
     }
 
     data class SaveSharedAlbumResult(

@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.presentation.common
 
-import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -45,11 +44,11 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -59,7 +58,10 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.GRID_THUMB_PX
+import eu.akoos.photos.presentation.gallery.HIDDEN_THUMB_PX
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
+import eu.akoos.photos.presentation.gallery.hiddenThumbKey
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.CloudBadgeSurface
@@ -105,12 +107,15 @@ fun CloudPhotoCell(
     // Style overrides (defaults are Gallery's)
     cornerRadiusDp: Dp = 10.dp,
     placeholderIconSizeDp: Dp = 28.dp,
+    /** Decode size. The default matches the gallery grid so a photo shown by both shares one cached bitmap;
+     *  a layout with very large tiles (two columns) passes a larger value. */
+    thumbPx: Int = GRID_THUMB_PX,
     modifier: Modifier = Modifier,
 ) {
     // The freshly-decrypted URL for this cell's cloud row, from the shared store. Used only when the
     // caller passes no explicit [cloudThumbnailUrl] (the Shared tab keeps its own URL and wins). A
     // cell keyed on a linkId not in the map just misses and stays on the caller's value.
-    val storeThumbnailUrl = cloudLinkId?.let { LocalThumbnailUrls.current.value[it] }
+    val storeThumbnailUrl by rememberStoreThumbnailUrl(cloudLinkId)
     val effectiveCloudUrl = cloudThumbnailUrl ?: storeThumbnailUrl
 
     // Coil model: prefer local Uri (faster, no network), otherwise the CDN URL.
@@ -187,11 +192,12 @@ fun CloudPhotoCell(
             // the first scroll. `Size.ORIGINAL` would inherit that bug; explicit pixel
             // budget keeps the decoded bitmap small.
             val context = androidx.compose.ui.platform.LocalContext.current
-            val request = remember(imageModel, cloudLinkId) {
+            val baseKey = cloudLinkId ?: ("cloud:" + localUri)
+            val request = remember(imageModel, baseKey, isHiddenOnDevice, thumbPx) {
                 ImageRequest.Builder(context)
                     .data(imageModel)
-                    .size(512)
-                    .memoryCacheKey("cloud:" + (cloudLinkId ?: localUri))
+                    .size(if (isHiddenOnDevice) HIDDEN_THUMB_PX else thumbPx)
+                    .memoryCacheKey(if (isHiddenOnDevice) hiddenThumbKey(baseKey) else baseKey)
                     .crossfade(false)
                     .build()
             }
@@ -211,20 +217,12 @@ fun CloudPhotoCell(
             showCloudBadge  -> CloudBadge()
         }
 
-        // Hidden-eye overlay — heavy black scrim PLUS a real RenderEffect blur (Android 12+)
-        // ensures none of the underlying content is readable even by squinting. Pre-S
-        // devices fall back to the scrim alone (Compose's blur modifier no-ops on older
-        // platforms without the BlurEffect API).
+        // Hidden-eye overlay. The image underneath is decoded at a tiny size (HIDDEN_THUMB_PX), so it is
+        // already a blur on every Android version, and the heavy black scrim hides what is left.
         if (isHiddenOnDevice) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                            Modifier.blur(28.dp)
-                        else
-                            Modifier,
-                    )
                     .background(Color.Black.copy(alpha = 0.7f)),
             )
             HiddenEyeBadge()

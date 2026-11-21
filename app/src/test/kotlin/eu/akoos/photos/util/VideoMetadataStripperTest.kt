@@ -25,7 +25,9 @@ package eu.akoos.photos.util
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -103,5 +105,48 @@ class VideoMetadataStripperTest {
     @Test
     fun `capacity above cap signals rethrow`() {
         assertNull(VideoMetadataStripper.nextSampleBufferCapacity(VideoMetadataStripper.MAX_SAMPLE_BUFFER_BYTES + 1))
+    }
+
+    // ─── finishOutput (stop writes the moov, so it decides success) ───────────
+
+    @Test
+    fun `a muxer stop that throws fails the remux even when the file would verify`() {
+        var released = false
+        var verified = false
+        val ok = VideoMetadataStripper.finishOutput(
+            stop = { throw IllegalStateException("stop failed") },
+            release = { released = true },
+            verify = { verified = true; true },
+        )
+        assertFalse(ok)
+        assertTrue(released)
+        assertFalse(verified)
+    }
+
+    @Test
+    fun `an output that does not verify fails the remux`() {
+        assertFalse(VideoMetadataStripper.finishOutput(stop = {}, release = {}, verify = { false }))
+    }
+
+    @Test
+    fun `a verify that throws fails the remux`() {
+        assertFalse(VideoMetadataStripper.finishOutput(stop = {}, release = {}, verify = { error("probe") }))
+    }
+
+    @Test
+    fun `release runs before the verification reads the file`() {
+        val order = mutableListOf<String>()
+        val ok = VideoMetadataStripper.finishOutput(
+            stop = { order += "stop" },
+            release = { order += "release" },
+            verify = { order += "verify"; true },
+        )
+        assertTrue(ok)
+        assertEquals(listOf("stop", "release", "verify"), order)
+    }
+
+    @Test
+    fun `a release that throws does not hide a good stop and verify`() {
+        assertTrue(VideoMetadataStripper.finishOutput(stop = {}, release = { error("release") }, verify = { true }))
     }
 }

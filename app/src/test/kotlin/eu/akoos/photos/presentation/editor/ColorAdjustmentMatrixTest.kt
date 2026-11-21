@@ -115,6 +115,103 @@ class ColorAdjustmentMatrixTest {
         assertEquals(-64f, m[14], eps)
     }
 
+    /** Red output of [m] for a grey input pixel [v] (the same value on R, G and B). */
+    private fun greyRed(m: FloatArray?, v: Float): Float {
+        requireNotNull(m)
+        return m[0] * v + m[1] * v + m[2] * v + m[4]
+    }
+
+    private fun only(
+        brightness: Int = 0, exposure: Int = 0, contrast: Int = 0, highlights: Int = 0, shadows: Int = 0,
+        saturation: Int = 0, temperature: Int = 0, tone: Int = 0, fade: Int = 0,
+    ) = colorAdjustmentMatrix(brightness, exposure, contrast, highlights, shadows, saturation, temperature, tone, fade)
+
+    @Test
+    fun positive_highlights_brighten_a_bright_pixel() {
+        assertEquals(225f, greyRed(only(highlights = 50), 200f), eps)
+    }
+
+    @Test
+    fun negative_highlights_darken_a_bright_pixel() {
+        assertEquals(175f, greyRed(only(highlights = -50), 200f), eps)
+    }
+
+    @Test
+    fun highlights_keep_black_black() {
+        assertEquals(0f, greyRed(only(highlights = 100), 0f), eps)
+        assertEquals(0f, greyRed(only(highlights = -100), 0f), eps)
+    }
+
+    @Test
+    fun highlights_move_the_bright_end_more_than_the_dark_end() {
+        assertEquals(62.5f, greyRed(only(highlights = 100), 50f), eps)
+        assertEquals(250f, greyRed(only(highlights = 100), 200f), eps)
+    }
+
+    @Test
+    fun zero_highlights_change_nothing() {
+        assertNull(only(highlights = 0))
+    }
+
+    @Test
+    fun auto_fix_highlights_value_pulls_a_near_white_pixel_down() {
+        // Auto fix sets highlights to -14 when the photo's brightest part is above 232.
+        assertEquals(231.6f, greyRed(only(highlights = -14), 240f), eps)
+    }
+
+    @Test
+    fun positive_shadows_lift_a_dark_pixel_and_negative_shadows_deepen_it() {
+        assertEquals(77.5f, greyRed(only(shadows = 50), 50f), eps)
+        assertEquals(22.5f, greyRed(only(shadows = -50), 50f), eps)
+    }
+
+    @Test
+    fun positive_exposure_brightens_and_negative_darkens() {
+        assertEquals(150f, greyRed(only(exposure = 50), 100f), eps)
+        assertEquals(50f, greyRed(only(exposure = -50), 100f), eps)
+    }
+
+    @Test
+    fun positive_brightness_brightens_and_negative_darkens() {
+        assertEquals(130f, greyRed(only(brightness = 20), 100f), eps)
+        assertEquals(70f, greyRed(only(brightness = -20), 100f), eps)
+    }
+
+    @Test
+    fun positive_contrast_spreads_tones_apart() {
+        assertEquals(236f, greyRed(only(contrast = 50), 200f), eps)
+        assertEquals(11f, greyRed(only(contrast = 50), 50f), eps)
+    }
+
+    @Test
+    fun positive_temperature_warms_red_up_and_blue_down() {
+        val m = requireNotNull(only(temperature = 40))
+        assertEquals(20f, m[4], eps)
+        assertEquals(0f, m[9], eps)
+        assertEquals(-20f, m[14], eps)
+    }
+
+    @Test
+    fun positive_tone_shifts_green_up() {
+        val m = requireNotNull(only(tone = 40))
+        assertEquals(0f, m[4], eps)
+        assertEquals(20f, m[9], eps)
+        assertEquals(0f, m[14], eps)
+    }
+
+    @Test
+    fun positive_fade_lifts_black_and_lowers_white() {
+        assertEquals(15f, greyRed(only(fade = 50), 0f), eps)
+        assertEquals(244.5f, greyRed(only(fade = 50), 255f), eps)
+    }
+
+    @Test
+    fun positive_saturation_pushes_a_colour_away_from_grey() {
+        // A pure red pixel (255, 0, 0): more saturation raises its red output above 255 before clamping.
+        val m = requireNotNull(only(saturation = 50))
+        assertEquals(1.3935f, m[0], eps)
+    }
+
     @Test
     fun combine_returns_the_non_null_operand_when_one_is_null() {
         val x = floatArrayOf(

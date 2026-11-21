@@ -25,6 +25,9 @@ package eu.akoos.photos.util
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
+import eu.akoos.photos.data.localcrypto.CacheFiles
+import eu.akoos.photos.data.localcrypto.LocalKeyUnavailableException
+import eu.akoos.photos.data.localcrypto.VaultFiles
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -48,11 +51,87 @@ internal fun shareStripKind(mimeType: String?, uri: String): ShareStripKind {
     }
 }
 
+/** Where stripped share copies live: the scratch folder emptied at every start, never the full-size cache. */
+internal fun strippedShareDir(context: Context): File = File(context.cacheDir, VaultFiles.SHARE_DIR)
+
+/** How long a share copy is kept for the receiving app to read, across restarts too. */
+internal const val SHARE_COPY_KEEP_MS = VaultFiles.SHARE_KEEP_MS
+
+private const val SHARE_WORK_DIR = VaultFiles.SHARE_WORK_DIR
+private const val STRIPPED_PREFIX = "stripped_"
+
+/**
+ * Removes the stripped share copies an earlier version wrote in plain into the full-size cache folder, made before
+ * [before] (the start of this process).
+ */
+fun sweepLegacyShareCopies(context: Context, before: Long) {
+    for (f in File(context.cacheDir, "fullres").listFiles().orEmpty()) {
+        if (f.isFile && f.name.startsWith(STRIPPED_PREFIX) && f.lastModified() < before) runCatching { f.delete() }
+    }
+}
+
+/**
+ * Turns the stripped [plain] copy into the share copy in [dir], encrypted like the other caches, and removes
+ * [plain]. When no key can be had now the copy stays as it is, in the scratch folder the next start empties.
+ */
+internal fun sealShareCopy(context: Context, plain: File, dir: File): File {
+    // A name of its own, so a copy another app may still be reading is never written over.
+    val target = uniqueIn(dir, plain.name)
+    try {
+        val sealed = CacheFiles.encryptingStream(java.io.FileOutputStream(target), context)
+        sealed.use { out -> plain.inputStream().use { it.copyTo(out) } }
+        plain.delete()
+        return target
+    } catch (e: LocalKeyUnavailableException) {
+        target.delete()
+        if (!plain.renameTo(target)) throw java.io.IOException("share copy not moved")
+        return target
+    } catch (e: Exception) {
+        target.delete()
+        plain.delete()
+        throw e
+    }
+}
+
+/** A new, empty file in [dir] named after [name], with a part of its own so no two shares ever share one. */
+private fun uniqueIn(dir: File, name: String): File {
+    val dot = name.lastIndexOf('.')
+    val base = (if (dot > 0) name.substring(0, dot) else name).padEnd(3, '_')
+    val ext = if (dot > 0) name.substring(dot) else ".bin"
+    return File.createTempFile("${base}_", ext, dir)
+}
+
+/**
+ * A copy made only to be shared, written by [write], kept as [sealShareCopy] keeps a stripped one (encrypted, in
+ * the share folder). Its file name is unique; [name] is what the receiving app is told.
+ */
+internal fun makeShareCopy(context: Context, name: String, write: (java.io.OutputStream) -> Unit): File {
+    val dir = strippedShareDir(context).apply { mkdirs() }
+    val work = File(dir, SHARE_WORK_DIR).apply { mkdirs() }
+    val plain = uniqueIn(work, name)
+    try {
+        java.io.FileOutputStream(plain).use(write)
+    } catch (e: Exception) {
+        plain.delete()
+        throw e
+    }
+    return sealShareCopy(context, plain, dir)
+}
+
+/** [makeShareCopy] as a share-provider uri that reports [name] as the file name. */
+fun shareCopyUri(context: Context, name: String, write: (java.io.OutputStream) -> Unit): Uri {
+    val copy = makeShareCopy(context, name, write)
+    return FileProvider.getUriForFile(context, "${context.packageName}.share.fileprovider", copy).also {
+        ShareFileProvider.putDisplayName(it, name)
+    }
+}
+
 /**
  * Produces a share-ready content [Uri] whose bytes have [config]'s metadata removed, or null to tell
  * the caller to share the ORIGINAL unchanged. The source is never mutated and no in-place stripper is
- * called: a stripped copy is written under `cacheDir/fullres` (the one cache root the share
- * FileProvider exposes) and handed out through it, with [displayName] reported as the filename.
+ * called: a stripped copy is written, encrypted, into the scratch folder emptied at every start (never the
+ * full-size cache) and handed out through the share FileProvider, which decrypts it as the receiver reads,
+ * with [displayName] reported as the filename. Copies older than [SHARE_COPY_KEEP_MS] go at the next strip or start.
  *
  * IMAGE runs the EXIF temp-file strip. VIDEO can only shed its location atom, so it acts only when
  * [MetadataStripConfig.stripGps] is set and otherwise returns null. Any failure — an unsupported
@@ -73,18 +152,21 @@ fun stripForShare(
     if (kind == ShareStripKind.VIDEO && !config.stripGps) return null
 
     return try {
-        val shareDir = File(context.cacheDir, "fullres").apply { mkdirs() }
-        val temp = when (kind) {
-            ShareStripKind.IMAGE -> ExifHelper.stripToTempFile(context, sourceUri, config, shareDir)
+        val shareDir = strippedShareDir(context).apply { mkdirs() }
+        VaultFiles.sweepShareCopies(shareDir, System.currentTimeMillis() - SHARE_COPY_KEEP_MS)
+        val work = File(shareDir, SHARE_WORK_DIR).apply { mkdirs() }
+        val stripped = when (kind) {
+            ShareStripKind.IMAGE -> ExifHelper.stripToTempFile(context, sourceUri, config, work)
             ShareStripKind.VIDEO ->
                 // The remux always emits an MPEG-4 container, so the copy is named .mp4 regardless of
                 // source. remuxWithoutLocation deletes the partial output on failure, so a false leaves
                 // no orphan here.
-                File.createTempFile("stripped_", ".mp4", shareDir).let { out ->
+                File.createTempFile(STRIPPED_PREFIX, ".mp4", work).let { out ->
                     if (VideoMetadataStripper.remuxWithoutLocation(context, sourceUri, out)) out else null
                 }
             ShareStripKind.UNSUPPORTED -> null
         } ?: return null
+        val temp = sealShareCopy(context, stripped, shareDir)
 
         FileProvider.getUriForFile(context, "${context.packageName}.share.fileprovider", temp).also {
             if (!displayName.isNullOrBlank()) ShareFileProvider.putDisplayName(it, displayName)

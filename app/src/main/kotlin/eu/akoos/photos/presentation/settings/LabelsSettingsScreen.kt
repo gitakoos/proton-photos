@@ -99,6 +99,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -444,15 +445,18 @@ private fun CreateRow(name: String, locked: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** One label with its photo count; while [selecting], a check mark in front tells whether it is picked. Shared
+ *  with the label filter's page, which lines the row up with its own side margin through [horizontalPadding]. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LabelRow(
+internal fun LabelRow(
     usage: LabelUsage,
     locked: Boolean,
     selecting: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    horizontalPadding: Dp = 16.dp,
 ) {
     val colors = AppColors.current
     Row(
@@ -461,7 +465,7 @@ private fun LabelRow(
             .alpha(if (locked) 0.5f else 1f)
             .background(if (selected) colors.accent.copy(alpha = 0.12f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 15.dp),
+            .padding(horizontal = horizontalPadding, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selecting) {

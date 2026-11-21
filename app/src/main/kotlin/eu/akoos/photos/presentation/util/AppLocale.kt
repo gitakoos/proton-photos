@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import java.util.Locale
 
 /**
@@ -43,5 +44,5 @@ import java.util.Locale
 fun appLocale(): Locale {
     // stringResource reads LocaleOverride's localized context; reading LocalConfiguration recomposes on changes.
     LocalConfiguration.current
-    return LocalContext.current.resources.configuration.locales[0] ?: Locale.getDefault()
+    return LocalContext.current.resources.configuration.locales[0] ?: LocalLocale.current.platformLocale
 }

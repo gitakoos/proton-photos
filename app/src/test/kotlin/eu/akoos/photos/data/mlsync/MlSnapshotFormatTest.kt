@@ -24,6 +24,7 @@ package eu.akoos.photos.data.mlsync
 
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Cover
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Face
+import eu.akoos.photos.data.mlsync.MlSnapshotRecord.HiddenPerson
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.ManualPhoto
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.NameChange
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.NotPerson
@@ -32,6 +33,7 @@ import eu.akoos.photos.data.mlsync.MlSnapshotRecord.PhotoKey
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Removal
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.ScanMarker
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.SearchEmbedding
+import eu.akoos.photos.domain.usecase.HiddenPersonToken
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -52,6 +54,10 @@ import kotlin.random.Random
  * unknown version, dangling references, unknown flags) and the writer's section discipline. Plain JVM.
  */
 class MlSnapshotFormatTest {
+
+    private companion object {
+        val GOLDEN_TOKEN = HiddenPersonToken.PREFIX + "0123456789abcdef0123456789abcdef"
+    }
 
     private fun snapshotBytes(header: MlSnapshotHeader, records: List<MlSnapshotRecord>): ByteArray {
         val buffer = ByteArrayOutputStream()
@@ -93,6 +99,7 @@ class MlSnapshotFormatTest {
         notPersonCount = records.count { it is NotPerson },
         coverCount = records.count { it is Cover },
         scanMarkerCount = records.count { it is ScanMarker },
+        hiddenPeopleCount = records.count { it is HiddenPerson },
     )
 
     private fun searchHeader(
@@ -188,7 +195,7 @@ class MlSnapshotFormatTest {
     // Golden FACES snapshot, embedding width 2. The four parts are kept apart so a test can find a record.
     private val goldenFacesHeader = unhex(
         "50 50 4D 4C 53 4E 41 50", // magic "PPMLSNAP"
-        "06 00 00 00", // version 6
+        "07 00 00 00", // version 7
         "01", // kind FACES
         "02 00 64 31", // device id "d1"
         "05 00 50 68 6F 6E 65", // device label "Phone"
@@ -207,6 +214,14 @@ class MlSnapshotFormatTest {
         "01 00 00 00", // not-person marks
         "01 00 00 00", // covers
         "02 00 00 00", // scan markers
+        "01 00 00 00", // hidden people
+    )
+    private val goldenFacesV6Header = unhex(
+        "50 50 4D 4C 53 4E 41 50", "06 00 00 00", "01", "02 00 64 31", "05 00 50 68 6F 6E 65",
+        "08 07 06 05 04 03 02 01", "07 00 00 00", "02 00 61 62", "01 00 00 00", "02 00 00 00",
+        "0B 00 00 00 00 00 00 00",
+        "02 00 00 00", "02 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00",
+        "01 00 00 00", "02 00 00 00",
     )
     private val goldenFacesTables = unhex(
         "01 02 00 6B 31", // KEY 0 "k1"
@@ -252,7 +267,12 @@ class MlSnapshotFormatTest {
         "06 00 00 00 00 00 00 00 00 09 00 00 00 00 00 00 00", // COVER person 0, key 0, set at 9
         "07 00 00 00 00 00", // SCAN_MARKER key 0
         "07 01 00 00 00 01", // SCAN_MARKER key 1, hi-res checked
+        "0B 01 00 00 00 01 0C 00 00 00 00 00 00 00", // HIDDEN_PERSON person 1, hidden, at 12
         "FF", // END
+    )
+    private val goldenFacesRestV6 = unhex(
+        "04 01 00 00 00 01 00 00 00 06 00 00 00 00 00 00 00", "05 00 00 00 00 00 00 00 00 01 00 00 00 07 00 00 00 00 00 00 00",
+        "06 00 00 00 00 00 00 00 00 09 00 00 00 00 00 00 00", "07 00 00 00 00 00", "07 01 00 00 00 01", "FF",
     )
     private val goldenFacesRestV4 = unhex(
         "04 01 00 00 00 01 00 00 00", // MANUAL_PHOTO person 1, key 1
@@ -264,7 +284,8 @@ class MlSnapshotFormatTest {
     )
     private val goldenFacesBytes = goldenFacesHeader + goldenFacesTables + goldenFace + goldenFacesRest
     private val goldenFacesV4 = goldenFacesV4Bytes + goldenFace + goldenFacesRestV4
-    private val goldenFacesV5 = goldenFacesV5Header + goldenFacesTables + goldenFace + goldenFacesRest
+    private val goldenFacesV5 = goldenFacesV5Header + goldenFacesTables + goldenFace + goldenFacesRestV6
+    private val goldenFacesV6 = goldenFacesV6Header + goldenFacesTables + goldenFace + goldenFacesRestV6
     private val goldenFaceStart = goldenFacesHeader.size + goldenFacesTables.size
 
     private fun goldenFacesRecords(): List<MlSnapshotRecord> = listOf(
@@ -284,6 +305,7 @@ class MlSnapshotFormatTest {
         Cover("Ann", "k1", setAtMillis = 9L),
         ScanMarker("k1", hiResScanned = false),
         ScanMarker("k2", hiResScanned = true),
+        HiddenPerson("Zoë", hidden = true, changedAtMillis = 12L),
     )
 
     private fun goldenFacesHeaderValue(records: List<MlSnapshotRecord>, facesWipedAtMillis: Long = 11L) = facesHeader(
@@ -375,7 +397,7 @@ class MlSnapshotFormatTest {
     fun `a version 4 faces snapshot still reads, as one with no naming times and no name changes`() {
         val (header, records) = readAll(goldenFacesV4)
 
-        val expected = goldenFacesRecords().filterNot { it is NameChange || it is Removal }.map {
+        val expected = goldenFacesRecords().filterNot { it is NameChange || it is Removal || it is HiddenPerson }.map {
             when (it) {
                 is Person -> Person(it.name)
                 is ManualPhoto -> ManualPhoto(it.personName, it.photoKey)
@@ -394,14 +416,80 @@ class MlSnapshotFormatTest {
     fun `a version 5 faces snapshot still reads, as one written before any delete everywhere`() {
         val (header, records) = readAll(goldenFacesV5)
 
-        assertEquals(goldenFacesHeaderValue(goldenFacesRecords(), facesWipedAtMillis = 0L), header)
-        assertEquals(goldenFacesRecords(), records)
+        val expected = goldenFacesRecords().filterNot { it is HiddenPerson }
+        assertEquals(goldenFacesHeaderValue(expected, facesWipedAtMillis = 0L), header)
+        assertEquals(expected, records)
     }
 
     @Test
-    fun `a faces snapshot is written as version 6 and a search snapshot as version 4`() {
+    fun `a version 6 faces snapshot still reads, as one with no hidden people`() {
+        val (header, records) = readAll(goldenFacesV6)
+
+        val expected = goldenFacesRecords().filterNot { it is HiddenPerson }
+        assertEquals(goldenFacesHeaderValue(expected), header)
+        assertEquals(0, (header as MlSnapshotHeader.Faces).hiddenPeopleCount)
+        assertEquals(expected, records)
+    }
+
+    @Test
+    fun `a hidden person with an unknown flag bit or a dangling person is refused`() {
+        val hiddenStart = goldenFacesBytes.size - 1 - 14
+        val unknownFlag = goldenFacesBytes.copyOf().also { it[hiddenStart + 5] = 0x03 }
+        val dangling = goldenFacesBytes.copyOf().also { it[hiddenStart + 1] = 2 }
+        assertThrows(MlSnapshotFormatException::class.java) { readAll(unknownFlag) }
+        assertThrows(MlSnapshotFormatException::class.java) { readAll(dangling) }
+    }
+
+    @Test
+    fun `a shown-again hidden person reads back with its bit clear`() {
+        val records = goldenFacesRecords().dropLast(1) + HiddenPerson("Ann", hidden = false, changedAtMillis = 99L)
+        val (_, read) = readAll(snapshotBytes(goldenFacesHeaderValue(records), records))
+        assertEquals(HiddenPerson("Ann", hidden = false, changedAtMillis = 99L), read.last())
+    }
+
+    @Test
+    fun `the hidden-person golden vector matches byte for byte`() {
+        val face = { key: String, person: String, confirmed: String? ->
+            Face(
+                photoKey = key, faceIndex = 0, left = 0.25f, top = 0.5f, right = 0.75f, bottom = 1f,
+                landmarks = floatArrayOf(1f, 2f), score = 0.875f, blur = 2f, rejected = false,
+                personName = person, confirmedName = confirmed, embedding = floats(1f, -1f),
+            )
+        }
+        val records = listOf(
+            PhotoKey("k1"),
+            PhotoKey("k2"),
+            Person("Anna", namedAtMillis = 0L),
+            Person(GOLDEN_TOKEN, namedAtMillis = 0L),
+            face("k1", "Anna", null),
+            face("k2", GOLDEN_TOKEN, GOLDEN_TOKEN),
+            ScanMarker("k1", hiResScanned = false),
+            ScanMarker("k2", hiResScanned = false),
+            HiddenPerson("Anna", hidden = true, changedAtMillis = 1_700_000_000_000L),
+            HiddenPerson(GOLDEN_TOKEN, hidden = false, changedAtMillis = 1_700_000_001_000L),
+        )
+        val header = facesHeader(
+            records,
+            embeddingDim = 2,
+            deviceId = "d1",
+            deviceLabel = "Phone",
+            createdAtMillis = 1_700_000_002_000L,
+            faceModelVersion = 7,
+            faceModelSha256 = "ab",
+        )
+
+        val written = hex(snapshotBytes(header, records)).lowercase()
+
+        val golden = javaClass.getResourceAsStream("/mlsnapshot/v7_hidden_golden.hex")!!
+            .bufferedReader().readText().replace(Regex("[ \t\r\n]+"), "").lowercase()
+        assertEquals(golden, written)
+        assertEquals(records, readAll(unhex(golden)).second)
+    }
+
+    @Test
+    fun `a faces snapshot is written as version 7 and a search snapshot as version 4`() {
         val faces = snapshotBytes(goldenFacesHeaderValue(goldenFacesRecords()), goldenFacesRecords())
-        assertEquals(6, faces[8].toInt())
+        assertEquals(7, faces[8].toInt())
         val search = listOf(PhotoKey("k"), SearchEmbedding("k", floats(1f, 2f)))
         assertEquals(4, snapshotBytes(searchHeader(search, embeddingDim = 2), search)[8].toInt())
     }
@@ -531,7 +619,7 @@ class MlSnapshotFormatTest {
 
     @Test
     fun `an unknown version is refused before any record is read`() {
-        for (version in listOf(7L, 3L, 0xFFFFFFFFL)) {
+        for (version in listOf(8L, 3L, 0xFFFFFFFFL)) {
             val bytes = goldenFacesBytes.copyOf()
             for (b in 0 until 4) bytes[8 + b] = (version ushr (8 * b)).toByte()
             val error = assertThrows(UnsupportedMlSnapshotVersionException::class.java) {

@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import dagger.hilt.EntryPoint
@@ -59,6 +60,7 @@ internal interface CloudCompressAccess {
 @Composable
 fun rememberCloudCompressAction(items: Collection<GalleryItem>, isSignedIn: Boolean): SelectionAction? {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     var asking by remember { mutableStateOf<List<GalleryItem>?>(null) }
     val list = remember(items) { items.toList() }
@@ -84,7 +86,7 @@ fun rememberCloudCompressAction(items: Collection<GalleryItem>, isSignedIn: Bool
                         val waits = queue.waitsForWifi()
                         Toast.makeText(
                             context,
-                            context.getString(if (waits) R.string.cloud_compress_waiting_wifi else R.string.cloud_compress_started),
+                            resources.getString(if (waits) R.string.cloud_compress_waiting_wifi else R.string.cloud_compress_started),
                             Toast.LENGTH_LONG,
                         ).show()
                     }

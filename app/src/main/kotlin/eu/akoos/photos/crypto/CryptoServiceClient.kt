@@ -28,6 +28,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.DeadObjectException
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -38,6 +39,7 @@ import kotlinx.coroutines.withTimeout
 import me.proton.core.crypto.common.pgp.SessionKey
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -247,14 +249,17 @@ class CryptoServiceClient @Inject constructor(
             local = { fallback.get().decryptSessionKey(contentKeyPacketBase64, nodeKeyBytes) },
         )
 
-    suspend fun decryptFileToDestination(sessionKey: SessionKey, encryptedFile: File, destFile: File): File =
+    /**
+     * Decrypts [encryptedFile] (a Drive block or thumbnail) with [sessionKey] and returns the plaintext in memory.
+     * From `:crypto` it comes back through a pipe, so it is never written to a file in either process.
+     */
+    suspend fun decryptWithSessionKey(sessionKey: SessionKey, encryptedFile: File): ByteArray =
         withService(
             remote = { svc ->
-                val ok = svc.decryptFileWithSessionKey(sessionKey.key, encryptedFile.absolutePath, destFile.absolutePath)
-                if (!ok) throw RemoteException("decryptFileWithSessionKey failed in :crypto")
-                destFile
+                readThroughPipe { out -> svc.decryptWithSessionKeyToFd(sessionKey.key, encryptedFile.absolutePath, out) }
+                    ?: throw RemoteException("decryptWithSessionKeyToFd failed in :crypto")
             },
-            local = { fallback.get().decryptFileToDestination(sessionKey, encryptedFile, destFile) },
+            local = { fallback.get().decryptWithSessionKey(sessionKey, encryptedFile.readBytes()) },
         )
 
     suspend fun decryptBinaryPgpWithNodeKey(data: ByteArray, nodeKeyBytes: ByteArray): ByteArray? =
@@ -271,15 +276,12 @@ class CryptoServiceClient @Inject constructor(
             local = { fallback.get().decryptXAttr(xAttrArmored, nodeKeyBytes) },
         )
 
-    /** File-based binary-PGP decrypt for large download blocks. Returns true on success
-     *  (plaintext written to [destFile]). Falls back to the in-process byte[] helper. */
-    suspend fun decryptBinaryToFile(encryptedFile: File, destFile: File, nodeKeyBytes: ByteArray): Boolean =
+    /** Binary-PGP decrypt of a large download block in [encryptedFile], the plaintext returned in memory as for
+     *  [decryptWithSessionKey]. Null when it does not decrypt. Falls back to the in-process byte[] helper. */
+    suspend fun decryptBinaryFile(encryptedFile: File, nodeKeyBytes: ByteArray): ByteArray? =
         withService(
-            remote = { svc -> svc.decryptBinaryToFile(encryptedFile.absolutePath, destFile.absolutePath, nodeKeyBytes) },
-            local = {
-                val plain = fallback.get().decryptBinaryPgpWithNodeKey(encryptedFile.readBytes(), nodeKeyBytes)
-                if (plain != null) { destFile.writeBytes(plain); true } else false
-            },
+            remote = { svc -> readThroughPipe { out -> svc.decryptBinaryToFd(encryptedFile.absolutePath, out, nodeKeyBytes) } },
+            local = { fallback.get().decryptBinaryPgpWithNodeKey(encryptedFile.readBytes(), nodeKeyBytes) },
         )
 
     private companion object {
@@ -300,4 +302,34 @@ class CryptoServiceClient @Inject constructor(
          *  slowing steady-state scroll. */
         const val COLD_OPEN_DECRYPTS = 32
     }
+}
+
+/**
+ * Runs [write] with the write end of a new pipe and returns everything read from the other end, or null when
+ * [write] answers false. The write end is closed here once [write] returns, as the binder hands the other process
+ * its own copy.
+ */
+internal fun readThroughPipe(write: (ParcelFileDescriptor) -> Boolean): ByteArray? {
+    val (readEnd, writeEnd) = ParcelFileDescriptor.createPipe()
+    return readWhileWriting(ParcelFileDescriptor.AutoCloseInputStream(readEnd), closeWriteEnd = { writeEnd.close() }) {
+        write(writeEnd)
+    }
+}
+
+/**
+ * Reads [input] to its end on a thread of its own while [write] runs, so a writer never waits on a full pipe, then
+ * returns what was read, or null when [write] answered false. [closeWriteEnd] runs when [write] returns or throws,
+ * which ends the read once the other side has closed its copy too.
+ */
+internal fun readWhileWriting(input: java.io.InputStream, closeWriteEnd: () -> Unit, write: () -> Boolean): ByteArray? {
+    val read = AtomicReference<ByteArray?>()
+    val reader = Thread({ runCatching { input.use { read.set(it.readBytes()) } } }, "crypto-pipe-reader")
+    reader.start()
+    val ok = try {
+        write()
+    } finally {
+        runCatching { closeWriteEnd() }
+        reader.join()
+    }
+    return if (ok) read.get() else null
 }

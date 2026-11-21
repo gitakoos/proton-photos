@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.ContentProviderOperation
 import android.content.ContentResolver
 import android.content.Context
@@ -205,7 +206,7 @@ class LargeLibrarySimulator @Inject constructor(
             ids.chunked(BATCH_SIZE).forEach { photoListingDao.deleteByLinkIds(userId.id, it) }
             // Drop the decrypted thumbnails the scheduler wrote for these rows.
             val thumbDir = File(context.cacheDir, "thumbnails")
-            ids.forEach { File(thumbDir, "thumb_$it.jpg").delete() }
+            ids.forEach { File(thumbDir, "thumb_${safeFileId(it)}.jpg").delete() }
         }
         thumbnailDecryptScheduler.clear()
         File(context.cacheDir, "sim_blobs").deleteRecursively()

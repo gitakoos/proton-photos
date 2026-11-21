@@ -27,6 +27,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.upload.MirrorSourceCheck
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadDeviceFiles
 import eu.akoos.photos.data.upload.UploadImageCompressor
@@ -61,7 +62,34 @@ internal class UploadTemps {
     // Set once a mirror step rewrote the on-device file, whose bytes may then differ from the upload's.
     // Only ever set, never cleared: a later step that leaves the file alone does not undo an earlier rewrite.
     var deviceRewritten = false
+    // Set when the strip fell back to the untouched original while it still carries the location the
+    // user asked to strip. Only a re-encode that leaves the location out (the compression) may then send
+    // the file; otherwise [UploadBytePreparer.compress] holds the upload back.
+    var locationStripOwed = false
 }
+
+/** The location strip failed and only the original, location included, was left to send. */
+internal class LocationStripFailedException :
+    IllegalStateException("location strip failed; the original is held back until it can be stripped")
+
+/**
+ * Whether a video whose strip remux and in-place erase both failed still owes its location strip:
+ * always when its bytes could not be copied or are an MP4 / MOV the erase could not walk (the location
+ * may sit anywhere in a tree it could not read), else only when the platform reads a location from it.
+ */
+internal inline fun videoLocationStripOwed(copied: Boolean, isoMedia: Boolean, hasLocation: () -> Boolean): Boolean =
+    !copied || isoMedia || hasLocation()
+
+/**
+ * Whether a photo the strip left untouched still owes its location strip: when the user strips GPS
+ * and the file carries a fix. An HEIC-family motion photo is the exception: its container cannot be
+ * rewritten and re-encoding it would drop the clip, so it uploads as it is, as it always has.
+ */
+internal inline fun photoLocationStripOwed(
+    stripGps: Boolean,
+    hasLocation: () -> Boolean,
+    keepsMotionAsIs: () -> Boolean,
+): Boolean = stripGps && hasLocation() && !keepsMotionAsIs()
 
 /** What [UploadBytePreparer.compress] settled on: the uri to hash and send, and whether compression met a Motion Photo. */
 internal class PreparedUpload(val finalUploadUri: String, val compressIsMotionPhoto: Boolean)
@@ -93,8 +121,9 @@ internal class UploadBytePreparer(
         // Strip metadata into a temp file if configured. Images go through EXIF tag
         // wiping; videos through a stream-copy re-mux that drops the container's GPS
         // location atom (EXIF wiping can't reach an MP4/MOV moov/udta). Both paths
-        // fall back to the original URI when the temp couldn't be produced — a strip
-        // failure must never block the backup of the file itself.
+        // fall back to the original URI when the temp couldn't be produced. When that
+        // original still carries the location the user asked to strip, the fallback
+        // marks it owed and [compress] holds the upload back unless a re-encode drops it.
         return if (stripOnUpload && localItem.mimeType.startsWith("image/")) {
             // Motion Photos carry an MP4 appended after the primary still. A plain ExifInterface
             // rewrite-strip drops that trailer (and the motion is lost), so detect first and, for
@@ -123,11 +152,19 @@ internal class UploadBytePreparer(
             if (motionTemp != null) {
                 temps.strippedFile = motionTemp
                 Log.d(UPLOAD_TAG, "Motion Photo primary stripped, trailer preserved for ${localItem.displayName}")
+                // A JPEG motion photo whose primary strip failed comes back byte-exact, fix included:
+                // it waits like any other photo whose strip left its location. A HEIF one whose layout
+                // the in-place GPS patch refused uploads as it is, which the stripper has logged.
+                val motionKeepsLocation = stripConfig.stripGps &&
+                    !eu.akoos.photos.util.HeifExifStrip.isHeif(motionTemp) &&
+                    photoHasLocation(android.net.Uri.fromFile(motionTemp).toString())
+                if (motionKeepsLocation) temps.locationStripOwed = true
                 // Mirror: a motion photo can't be wiped in place (an EXIF rewrite drops its
                 // trailer), so overwrite the on-device original with the whole motion-preserving
                 // stripped file instead — the local loses its metadata too and byte-matches the
                 // cloud. Silent with all-files; a refused write leaves the original intact.
-                val motionMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, motionTemp)
+                val motionMirrorLanded = !motionKeepsLocation && mirrorStripToLocal &&
+                    deviceFiles.overwriteLocalInPlace(state.localUri, motionTemp, MirrorSourceCheck.Kind.MOTION_PHOTO)
                 if (motionMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
@@ -142,7 +179,7 @@ internal class UploadBytePreparer(
                 // Mirror: same reasoning as the motion photo. An in-place EXIF rewrite would drop the
                 // appended gain map, so the on-device original is replaced with the whole verified
                 // file instead. Silent with all-files; a refused write leaves the original intact.
-                val gainMapMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, gainMapTemp)
+                val gainMapMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, gainMapTemp, MirrorSourceCheck.Kind.IMAGE)
                 if (gainMapMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
@@ -152,7 +189,7 @@ internal class UploadBytePreparer(
                 }
                 android.net.Uri.fromFile(gainMapTemp).toString()
             } else if (mirrorStripToLocal &&
-                ExifHelper.stripFieldsInPlace(context, state.localUri, stripConfig)
+                ExifHelper.stripFieldsInPlace(context, state.localUri, stripConfig, announce = false)
                     is eu.akoos.photos.util.StripResult.Stripped
             ) {
                 // Confirmed neither a motion photo nor a verifiably preservable Ultra HDR (both
@@ -197,22 +234,28 @@ internal class UploadBytePreparer(
                         Log.d(UPLOAD_TAG, "Stripped JPEG transcoded for ${localItem.displayName} (unwritable container)")
                         android.net.Uri.fromFile(transcoded).toString()
                     } else {
+                        temps.locationStripOwed = photoLocationOwed(state.localUri, localItem.mimeType, stripConfig)
                         state.localUri
                     }
                 } else {
+                    temps.locationStripOwed = photoLocationOwed(state.localUri, localItem.mimeType, stripConfig)
                     state.localUri
                 }
             }
         } else if (stripOnUpload && stripConfig.stripGps && localItem.mimeType.startsWith("video/")) {
-            val tmp = File.createTempFile("stripped_", ".mp4", context.cacheDir)
-            if (eu.akoos.photos.util.VideoMetadataStripper
-                    .remuxWithoutLocation(context, state.localUri, tmp)) {
-                temps.strippedFile = tmp
-                Log.d(UPLOAD_TAG, "Video location atom stripped for ${localItem.displayName}")
+            val tmp = File.createTempFile("stripped_", ".mp4", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
+            val remuxed = eu.akoos.photos.util.VideoMetadataStripper.remuxWithoutLocation(context, state.localUri, tmp)
+            // The remux failed: erase the location atoms in place on a copy instead, which keeps every
+            // other byte of the file. Null when that cannot vouch for the copy either.
+            if (!remuxed) tmp.delete()
+            val stripped = if (remuxed) tmp else eraseLocationOnCopy(state.localUri, temps)
+            if (stripped != null) {
+                temps.strippedFile = stripped
+                Log.d(UPLOAD_TAG, "Video location atom stripped for ${localItem.displayName} (${if (remuxed) "remux" else "in place"})")
                 // Mirror: overwrite the on-device video with the location-stripped remux so the
                 // local loses its GPS too and matches the cloud. Silent with all-files; a refused
                 // write leaves the original intact.
-                val videoMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, tmp)
+                val videoMirrorLanded = mirrorStripToLocal && deviceFiles.overwriteLocalInPlace(state.localUri, stripped, MirrorSourceCheck.Kind.VIDEO)
                 if (videoMirrorLanded) {
                     temps.deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
@@ -220,16 +263,53 @@ internal class UploadBytePreparer(
                 if (UploadPendingUseCase.mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, videoMirrorLanded)) {
                     invalidateMirroredLocation(userId, state.localUri)
                 }
-                android.net.Uri.fromFile(tmp).toString()
+                android.net.Uri.fromFile(stripped).toString()
             } else {
-                // Re-mux failed — the temp is already cleaned up by the stripper; upload
-                // the untouched original so the file still reaches Drive.
-                Log.w(UPLOAD_TAG, "Video location strip failed for ${localItem.displayName}; uploading original")
+                // Neither strip landed. The original goes on only when it carries no location; a video
+                // that may still hold one waits for the compression to drop it or for a later pass.
+                Log.w(UPLOAD_TAG, "Video location strip failed for ${localItem.displayName}")
                 state.localUri
             }
         } else {
             state.localUri
         }
+    }
+
+    /**
+     * A copy of the video at [uri] with its location atoms erased in place, or null when the copy or the
+     * erase fails. A null also settles [UploadTemps.locationStripOwed] for the original.
+     */
+    private fun eraseLocationOnCopy(uri: String, temps: UploadTemps): File? {
+        val copy = File.createTempFile("stripped_", ".mp4", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
+        val copied = runCatching {
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))!!
+                .use { input -> copy.outputStream().use { input.copyTo(it) } }
+        }.isSuccess
+        if (copied && eu.akoos.photos.util.Mp4LocationAtoms.erase(copy)) return copy
+        val isoMedia = copied && eu.akoos.photos.util.Mp4LocationAtoms.isIsoMedia(copy)
+        copy.delete()
+        temps.locationStripOwed = videoLocationStripOwed(copied, isoMedia) {
+            eu.akoos.photos.util.PhotoGpsResolver.videoGps(context, uri) != null
+        }
+        return null
+    }
+
+    /** Whether the untouched photo at [uri] still owes its location strip; read as the upload reads it. */
+    private fun photoLocationOwed(uri: String, mimeType: String, stripConfig: MetadataStripConfig): Boolean =
+        photoLocationStripOwed(
+            stripGps = stripConfig.stripGps,
+            hasLocation = { photoHasLocation(uri) },
+            keepsMotionAsIs = {
+                UploadImageCompressor.isExifUnwritable(mimeType) && structuralStripper.isMotionPhotoUpload(uri)
+            },
+        )
+
+    /** Whether the photo at [uri] carries a usable GPS fix, read as the upload reads it. */
+    private fun photoHasLocation(uri: String): Boolean {
+        val meta = runCatching { ExifHelper.readMetadata(context, uri) }.getOrNull()
+        val lat = meta?.gpsLatitude
+        val lng = meta?.gpsLongitude
+        return lat != null && lng != null && eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng)
     }
 
     /** The compression and the uncompressed-video mvhd floor, reading [strippedUploadUri]. */
@@ -322,6 +402,9 @@ internal class UploadBytePreparer(
                     uri = strippedUploadUri,
                     settings = compression,
                     captureMs = localItem.dateTaken,
+                    // The strip in effect, as for the photo compressor: when the location strip above
+                    // fell back to the original, the transcode still leaves the location out.
+                    stripConfig = compressStripConfig,
                     onPlanned = { plan ->
                         emitPhase(UploadStatus.Compressing, localItem.sizeBytes, VideoUploadCompressor.Progress(0f, plan.codec, null))
                     },
@@ -348,6 +431,15 @@ internal class UploadBytePreparer(
             strippedUploadUri
         }
 
+        // The strip fell back to an original that still carries its location, and no re-encode dropped
+        // it: hold the upload back. The row returns to the queue and the next pass tries the strip again.
+        if (temps.locationStripOwed && temps.compressedFile == null) {
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload ${eu.akoos.photos.util.uploadLogRef(state.localUri)}: location strip failed, original held back"
+            )
+            throw LocationStripFailedException()
+        }
+
         // Strip-timestamp floors the cloud DISPLAY date (localItem.dateTaken is now), and the
         // compress path already stamps that floored time into the transcoded mvhd. The gap is an
         // UNCOMPRESSED video: its container's own mvhd creation time can still reveal the real
@@ -364,7 +456,7 @@ internal class UploadBytePreparer(
                 Mp4CreationTime.stamp(temps.strippedFile!!, localItem.dateTaken)
             } else {
                 runCatching {
-                    val tmp = File(context.cacheDir, "upl_ts_" + System.nanoTime() + ".mp4")
+                    val tmp = File(eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context), "upl_ts_" + System.nanoTime() + ".mp4")
                     context.contentResolver.openInputStream(Uri.parse(uploadUri))!!.use { input ->
                         tmp.outputStream().use { output -> input.copyTo(output) }
                     }
@@ -416,7 +508,7 @@ internal class UploadBytePreparer(
                 // temp when strip is mirrored, or from the original when strip-upload is off. A null
                 // (compression failed or not smaller) skips silently.
                 temps.compressedFile?.let { local ->
-                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local)) {
+                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local, MirrorSourceCheck.Kind.IMAGE)) {
                         temps.deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed for ${localItem.displayName}")
                     }
@@ -442,7 +534,7 @@ internal class UploadBytePreparer(
                 val localCompressed = eu.akoos.photos.data.upload.UploadImageCompressor
                     .compressToTemp(context, state.localUri, compression.tier, MetadataStripConfig())
                 if (localCompressed != null) {
-                    if (deviceFiles.overwriteLocalInPlace(state.localUri, localCompressed)) {
+                    if (deviceFiles.overwriteLocalInPlace(state.localUri, localCompressed, MirrorSourceCheck.Kind.IMAGE)) {
                         temps.deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed (strip-free) for ${localItem.displayName}")
                     }
@@ -460,7 +552,7 @@ internal class UploadBytePreparer(
                 Log.d(UPLOAD_TAG, "Mirror compress skipped for ${localItem.displayName}: ${localItem.mimeType} cannot hold an MP4")
             } else if (mirrorStripToLocal || !stripOnUpload) {
                 temps.compressedFile?.let { local ->
-                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local)) {
+                    if (deviceFiles.overwriteLocalInPlace(state.localUri, local, MirrorSourceCheck.Kind.VIDEO)) {
                         temps.deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror compress: on-device video compressed for ${localItem.displayName}")
                     }

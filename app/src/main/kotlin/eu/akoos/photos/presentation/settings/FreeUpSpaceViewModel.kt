@@ -107,6 +107,9 @@ class FreeUpSpaceViewModel @Inject constructor(
     /** What the current run freed so far, across its dialogs, for the closing message. */
     private var freedThisRun = 0
 
+    /** The copies the current run kept because they could not be checked, across its dialogs. */
+    private var uncheckedThisRun = 0
+
     init { load() }
 
     /**
@@ -148,6 +151,7 @@ class FreeUpSpaceViewModel @Inject constructor(
                 // prevent, so it falls through to the catch and the rest of the sweep does not run.
                 val candidates = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
                 freedThisRun = 0
+                uncheckedThisRun = 0
                 val result = freeUpSpace.verifyAndReclaim(
                     userId = userId,
                     candidates = candidates,
@@ -175,15 +179,18 @@ class FreeUpSpaceViewModel @Inject constructor(
         when (result) {
             is FreeUpSpaceUseCase.FreeUpResult.Done -> {
                 freedThisRun += result.freed
+                uncheckedThisRun += result.unchecked
                 _uiState.update {
                     it.copy(
                         running = false, verifying = false, pendingIntent = null,
-                        message = doneMessage(result.skipped), messageIsError = freeUpLeftCopies(result.skipped),
+                        message = doneMessage(result.skipped),
+                        messageIsError = freeUpLeftCopies(result.skipped, uncheckedThisRun),
                     )
                 }
                 load()
             }
             is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+                uncheckedThisRun += result.unchecked
                 pendingLocalUris = result.localUris
                 pendingRemaining = result.remaining
                 _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }
@@ -206,7 +213,9 @@ class FreeUpSpaceViewModel @Inject constructor(
             _uiState.update { it.copy(pendingIntent = null) }
             val userId = accountManager.getPrimaryUserId().first()
             if (next.isEmpty() || userId == null) {
-                _uiState.update { it.copy(message = doneMessage(0), messageIsError = false) }
+                _uiState.update {
+                    it.copy(message = doneMessage(0), messageIsError = freeUpLeftCopies(0, uncheckedThisRun))
+                }
                 load()
                 return@launch
             }
@@ -244,8 +253,14 @@ class FreeUpSpaceViewModel @Inject constructor(
     }
 
     private fun doneMessage(skipped: Int): String {
-        val freed = freedMessage(freedThisRun)
-        return if (skipped > 0) freed + " " + context.getString(R.string.free_up_skipped_pre_r) else freed
+        val parts = mutableListOf(freedMessage(freedThisRun))
+        if (skipped > 0) parts += context.getString(R.string.free_up_skipped_pre_r)
+        if (uncheckedThisRun > 0) {
+            parts += context.resources.getQuantityString(
+                R.plurals.free_up_kept_unchecked, uncheckedThisRun, uncheckedThisRun,
+            )
+        }
+        return parts.joinToString(" ")
     }
 
     private fun freedMessage(freed: Int): String =
@@ -257,5 +272,5 @@ class FreeUpSpaceViewModel @Inject constructor(
 }
 
 /** A finished Free up shows a warning rather than the check when some device copies stayed: [skipped] could not
- *  be removed here. Pure. */
-internal fun freeUpLeftCopies(skipped: Int): Boolean = skipped > 0
+ *  be removed here, and [unchecked] could not be checked against their backup. Pure. */
+internal fun freeUpLeftCopies(skipped: Int, unchecked: Int = 0): Boolean = skipped > 0 || unchecked > 0

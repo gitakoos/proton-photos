@@ -35,6 +35,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.job
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -250,6 +251,112 @@ class UploadPipelineIntegrationTest {
             cloud.photos.value.sortedByDescending { it.captureTime }.map {
                 PhotoPairingRow(it.linkId, it.contentHash, it.captureTime, it.displayName, it.sizeBytes)
             }
+        }
+    }
+
+    // ── Delete after backup: the device file is checked again right before it goes ───────────────
+
+    private val unreadable = object : java.io.InputStream() {
+        override fun read(): Int = throw java.io.IOException("unreadable")
+    }
+
+    /** Serves [uri]'s bytes from [bytes] on every read, so a test can change the file between reads. */
+    private fun serveContent(uri: String, bytes: () -> java.io.InputStream) {
+        org.robolectric.Shadows.shadowOf(context.contentResolver)
+            .registerInputStreamSupplier(android.net.Uri.parse(uri)) { bytes() }
+    }
+
+    private fun sha1Of(bytes: ByteArray): String =
+        eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(java.io.ByteArrayInputStream(bytes))
+
+    private fun trashRequestsFor(uri: String) =
+        org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == uri }
+
+    private suspend fun uploadWithDeleteAfterBackup(uri: String, afterUpload: () -> java.io.InputStream) {
+        context.settingsDataStore.edit { it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true }
+        local.add(localItem(uri))
+        val original = "original bytes".toByteArray()
+        // The file reads as it did for the upload until the Drive copy exists, then as [afterUpload] says.
+        serveContent(uri) {
+            if (cloud.photos.value.isEmpty()) java.io.ByteArrayInputStream(original) else afterUpload()
+        }
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+        assertEquals("the upload itself lands", 1, cloud.photos.value.size)
+    }
+
+    @Test
+    fun `delete after backup removes a device file that still holds the bytes the upload read`() = runTest {
+        val uri = "content://media/40"
+        uploadWithDeleteAfterBackup(uri) { java.io.ByteArrayInputStream("original bytes".toByteArray()) }
+
+        assertEquals("the device file is sent to the trash", 1, trashRequestsFor(uri))
+        // The test resolver has no media provider, so the trash comes back refused and the file waits in the
+        // consent queue, exactly as a refused trash on a device does; the row keeps its pairing either way.
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        row(uri)!!.let {
+            assertTrue(it.status == SyncStatus.CLOUD_ONLY || uri in pending)
+            assertNotNull("not queued to be backed up again", it.cloudFileId)
+            assertNotNull(it.backedUpAtMs)
+        }
+    }
+
+    @Test
+    fun `delete after backup keeps a device file edited after the upload read it and queues it again`() = runTest {
+        val uri = "content://media/41"
+        val edited = "edited bytes".toByteArray()
+        uploadWithDeleteAfterBackup(uri) { java.io.ByteArrayInputStream(edited) }
+
+        assertEquals("the edited file is never trashed", 0, trashRequestsFor(uri))
+        row(uri)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertNull("the pairing to the Drive copy of the old bytes is taken off", it.cloudFileId)
+            assertNull(it.backedUpAtMs)
+            assertEquals(sha1Of(edited), it.localHash)
+            assertNull(it.originalHash)
+            assertTrue("queued to be backed up again", it.queued)
+            assertEquals(QueueSource.MANUAL, it.queueSource)
+        }
+        assertEquals("the Drive copy stays", 1, cloud.photos.value.size)
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        assertTrue("not left for the consent dialog either", uri !in pending)
+    }
+
+    @Test
+    fun `delete after backup keeps a device file it cannot read again with its backup as it is`() = runTest {
+        val uri = "content://media/42"
+        uploadWithDeleteAfterBackup(uri) { unreadable }
+
+        assertEquals("never trashed", 0, trashRequestsFor(uri))
+        row(uri)!!.let {
+            assertEquals("still backed up", SyncStatus.SYNCED, it.status)
+            assertEquals("the pairing stays", cloud.photos.value.single().linkId, it.cloudFileId)
+            assertNotNull("the backup stamp stays", it.backedUpAtMs)
+            assertEquals(sha1Of("original bytes".toByteArray()), it.localHash)
+            assertEquals("the recorded original stays for free-up", sha1Of("original bytes".toByteArray()), it.originalHash)
+            assertEquals("not queued, so no second Drive copy", false, it.queued)
+        }
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        assertTrue("not left for the consent dialog either", uri !in pending)
+        assertEquals(1, cloud.photos.value.size)
+    }
+
+    @Test
+    fun `an upload records the device file's own hash and reconcile keeps it`() = runTest {
+        val uri = "content://media/43"
+        local.add(localItem(uri))
+        val bytes = "device bytes".toByteArray()
+        serveContent(uri) { java.io.ByteArrayInputStream(bytes) }
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        assertEquals(sha1Of(bytes), row(uri)!!.originalHash)
+
+        reconcileUseCase(userId).collectToEnd()
+
+        row(uri)!!.let {
+            assertEquals(SyncStatus.SYNCED, it.status)
+            assertEquals("a reconcile pass that keeps the pairing keeps the hash", sha1Of(bytes), it.originalHash)
         }
     }
 
@@ -811,6 +918,158 @@ class UploadPipelineIntegrationTest {
         // A second reconcile must not resurrect or re-queue it.
         reconcileUseCase(userId).collectToEnd()
         assertNull("reconcile must not re-create a deleted photo's row", row(gone))
+    }
+
+    // ── Scenario 6: cancelling one upload from its Activity row ─────────────────────
+
+    @Test
+    fun `cancelling one running upload stops only it, the rest back up and it is not retried`() = runTest {
+        val uris = listOf("content://media/one1", "content://media/one2", "content://media/one3")
+        uris.forEach { local.add(localItem(it)) }
+        forceUploadUseCase.forceUpload(userId, uris)
+        val target = uris[1]
+        val events = mutableListOf<UploadProgress>()
+        backgroundScope.launch(kotlinx.coroutines.test.UnconfinedTestDispatcher(testScheduler)) {
+            uploadUseCase.progress.collect { events += it }
+        }
+        // The user taps the row's X while this photo is on the wire.
+        cloud.onUploadStarted = { item ->
+            if (item.uri == target) {
+                uploadUseCase.cancelItem(target)
+                kotlinx.coroutines.awaitCancellation()
+            }
+        }
+
+        val result = uploadUseCase(userId)
+
+        // The other two backed up; nothing of the cancelled one reached Drive.
+        assertEquals(2, cloud.photos.value.size)
+        assertTrue(cloud.uploadedItems.none { it.uri == target })
+        uris.filter { it != target }.forEach { assertEquals(SyncStatus.SYNCED, row(it)!!.status) }
+        // Its claim went back and it is neither backed up nor queued: a manual pick waits for the user.
+        row(target)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertNull(it.cloudFileId)
+            assertEquals(false, it.queued)
+            assertEquals(QueueSource.CANCELLED, it.queueSource)
+        }
+        // Not counted as attempted, so the run never reads as failed and is never retried for it.
+        assertEquals(2, result.attempted)
+        assertEquals(2, result.successCount)
+        assertTrue(events.any { it.uri == target && it.status == UploadStatus.Cancelled })
+        assertTrue(target in uploadUseCase.cancelledItems.value)
+
+        // A later pass does not pick it up again.
+        cloud.onUploadStarted = null
+        uploadUseCase(userId)
+        assertEquals(2, cloud.photos.value.size)
+    }
+
+    @Test
+    fun `a queued auto-backup photo cancelled before its turn never starts and the next run takes it up`() = runTest {
+        seedBulkUploadGates(folder = "Camera")
+        val uris = (1..5).map { "content://media/auto$it" }
+        uris.forEach {
+            local.add(localItem(it, bucket = "Camera"))
+            syncRepo.upsert(localOnlyRow(it), userId)
+            syncRepo.markQueued(it, QueueSource.AUTO_FOLDER, System.currentTimeMillis() - 60_000L)
+        }
+        val target = uris.last()
+        // Three run at once, so the last photo is still waiting when the first one starts.
+        cloud.onUploadStarted = { if (it.uri != target) uploadUseCase.cancelItem(target) }
+
+        val result = uploadUseCase(userId)
+
+        assertEquals(4, cloud.photos.value.size)
+        assertTrue("a cancelled queued photo is never started", cloud.uploadedItems.none { it.uri == target })
+        assertEquals(4, result.attempted)
+        // Like the batch stop, an automatic backup keeps its queued intent for the next run.
+        row(target)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertTrue(it.queued)
+            assertEquals(QueueSource.AUTO_FOLDER, it.queueSource)
+        }
+
+        cloud.onUploadStarted = null
+        uploadUseCase(userId)
+        assertEquals(SyncStatus.SYNCED, row(target)!!.status)
+        assertEquals(5, cloud.photos.value.size)
+    }
+
+    @Test
+    fun `a queued manual upload cancelled before its turn is de-queued and stays off Drive`() = runTest {
+        val uris = (1..5).map { "content://media/man$it" }
+        uris.forEach { local.add(localItem(it)) }
+        forceUploadUseCase.forceUpload(userId, uris)
+        val target = uris.last()
+        cloud.onUploadStarted = { if (it.uri != target) uploadUseCase.cancelItem(target) }
+
+        uploadUseCase(userId)
+        cloud.onUploadStarted = null
+        uploadUseCase(userId)
+
+        assertEquals(4, cloud.photos.value.size)
+        assertTrue(cloud.uploadedItems.none { it.uri == target })
+        row(target)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertEquals(false, it.queued)
+        }
+    }
+
+    @Test
+    fun `a cancelled manual upload a process death stranded stays off the queue through reconcile`() = runTest {
+        seedBulkUploadGates(folder = "Camera")
+        // One out of the backup folders (only the stranded-intent recovery could queue it) and one inside.
+        val outside = "content://media/cancel-out"
+        val inside = "content://media/cancel-in"
+        local.add(localItem(outside, bucket = "Downloads"))
+        local.add(localItem(inside, bucket = "Camera"))
+        for (uri in listOf(outside, inside)) {
+            syncRepo.upsert(localOnlyRow(uri), userId)
+            syncRepo.markQueued(uri, QueueSource.MANUAL, System.currentTimeMillis() - 60_000L)
+            assertEquals(1, syncRepo.claimForUpload(uri))
+            // The user taps the row's X while it is claimed, and the process dies before the release.
+            syncRepo.clearManualQueueFor(uri)
+        }
+
+        // The next start recovers the stranded claims, then reconcile runs, twice.
+        syncRepo.resetStaleUploadingClaims()
+        reconcileUseCase(userId).collectToEnd()
+        reconcileUseCase(userId).collectToEnd()
+        uploadUseCase(userId)
+
+        for (uri in listOf(outside, inside)) {
+            row(uri)!!.let {
+                assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+                assertEquals("a cancelled photo is not queued again: $uri", false, it.queued)
+                assertEquals(QueueSource.CANCELLED, it.queueSource)
+            }
+        }
+        assertTrue(cloud.uploadedItems.isEmpty())
+
+        // Asking again replaces the mark and backs it up.
+        forceUploadUseCase.forceUpload(userId, listOf(outside))
+        uploadUseCase(userId)
+        assertEquals(SyncStatus.SYNCED, row(outside)!!.status)
+    }
+
+    @Test
+    fun `cancelling the only upload ends the batch without counting a failure`() = runTest {
+        val uri = "content://media/only"
+        local.add(localItem(uri))
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        cloud.onUploadStarted = {
+            uploadUseCase.cancelItem(uri)
+            kotlinx.coroutines.awaitCancellation()
+        }
+
+        val result = uploadUseCase(userId)
+
+        assertTrue(cloud.photos.value.isEmpty())
+        assertEquals(0, result.attempted)
+        assertEquals(false, result.allFailed)
+        assertEquals(SyncStatus.LOCAL_ONLY, row(uri)!!.status)
+        assertEquals(UploadStatus.Idle, uploadUseCase.progress.replayCache.last().status)
     }
 
     private fun localOnlyRow(uri: String) = SyncState(

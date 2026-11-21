@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -150,7 +151,7 @@ fun GalleryPickScreen(
     singlePick: Boolean = false,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val thumbnailUrls by viewModel.thumbnailUrls.collectAsStateWithLifecycle()
+    val thumbnailUrls = viewModel.thumbnailUrls.collectAsStateWithLifecycle()
     val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val appColors = AppColors.current
@@ -469,8 +470,7 @@ fun GalleryPickScreen(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(96.dp),
         )
     }
 }

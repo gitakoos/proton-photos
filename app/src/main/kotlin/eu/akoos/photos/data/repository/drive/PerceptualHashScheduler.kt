@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -246,7 +247,7 @@ class PerceptualHashScheduler @Inject constructor(
         val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             context.contentResolver.loadThumbnail(uri, Size(256, 256), null)
         } else {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
+            context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, BitmapFactory.Options().apply { inSampleSize = 4 })
             }
         }
@@ -261,7 +262,7 @@ class PerceptualHashScheduler @Inject constructor(
      *  already confirmed the file exists (see [enqueue]). */
     private fun hashCloud(linkId: String): PdqHash.Fingerprint? = runCatching {
         val file = cloudThumbFile(linkId)
-        BitmapFactory.decodeFile(file.absolutePath)?.let { bmp ->
+        eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(context, file)?.let { bmp ->
             val fp = PdqHash.fingerprint(bmp)
             bmp.recycle()
             fp
@@ -274,7 +275,7 @@ class PerceptualHashScheduler @Inject constructor(
     }
 
     private fun cloudThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
 
     private companion object {
         /** Worker pool size and concurrency bound. Bitmap decodes are light, so a small pool clears

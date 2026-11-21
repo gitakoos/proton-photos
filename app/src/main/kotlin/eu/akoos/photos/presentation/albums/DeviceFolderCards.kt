@@ -66,6 +66,7 @@ object DeviceFolderCards {
                 name = name,
                 coverUri = coverItem?.uri,
                 itemCount = sorted.size,
+                videoCount = sorted.count { it.mimeType.startsWith("video/") },
                 coverIsGif = coverItem?.let {
                     it.mimeType.equals("image/gif", ignoreCase = true) ||
                         it.displayName.endsWith(".gif", ignoreCase = true)

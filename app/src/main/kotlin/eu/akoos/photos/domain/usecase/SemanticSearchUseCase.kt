@@ -130,6 +130,22 @@ class SemanticSearchUseCase @Inject constructor(
         }
     }
 
+    /**
+     * The L2-normalised text embeddings of [texts], in order, through the same reused encoder a search
+     * uses; null when the text model is not on the device or the encoder fails. The theme index embeds
+     * its fixed prompt table through this once per model generation.
+     */
+    suspend fun embedTexts(texts: List<String>): List<FloatArray>? = withContext(Dispatchers.Default) {
+        try {
+            val textModel = modelManager.textModelFile() ?: return@withContext null
+            texts.map { embedQuery(it, textModel) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     /** [search] returning just the photo keys, for a caller that only needs the ranking. */
     suspend fun searchKeys(query: String, userId: UserId?, limit: Int = DEFAULT_LIMIT): List<String> =
         search(query, userId, limit).map { it.photoKey }

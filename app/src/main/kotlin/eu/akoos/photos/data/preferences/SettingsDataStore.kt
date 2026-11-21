@@ -31,13 +31,26 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import eu.akoos.photos.data.localcrypto.encryptedPreferencesDataStore
 import eu.akoos.photos.util.MetadataStripConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+/**
+ * The settings. A change that cannot be written encrypted is not saved and does not reach the caller: the user is
+ * told instead ([eu.akoos.photos.data.localcrypto.GuardedPreferencesStore]). A write whose correctness depends on
+ * landing goes through [settingsDataStoreStrict].
+ */
+val Context.settingsDataStore: DataStore<Preferences> by encryptedPreferencesDataStore(name = "settings")
+
+/**
+ * The same settings, with a change that cannot be written encrypted thrown back to the caller as
+ * [eu.akoos.photos.data.localcrypto.SettingsWriteRefusedException]: for a write the code later trusts as stored
+ * (the Hidden vault's records, the sign-out markers), whose caller handles the failure.
+ */
+val Context.settingsDataStoreStrict: DataStore<Preferences>
+    get() = (settingsDataStore as? eu.akoos.photos.data.localcrypto.GuardedPreferencesStore)?.strict ?: settingsDataStore
 
 object SettingsKeys {
     val AUTO_SYNC = booleanPreferencesKey("auto_sync")
@@ -198,6 +211,8 @@ object SettingsKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     /** Legacy — kept only so old installs migrate cleanly to [THEME_MODE]. */
     val DARK_MODE = booleanPreferencesKey("dark_mode")
+    /** One-shot flag for [settleThemeDefault]: set on the first start that knows the "system" default. */
+    val THEME_DEFAULT_SETTLED = booleanPreferencesKey("theme_default_settled")
     /**
      * Accent-color palette selection. Independent of [THEME_MODE] — palette only swaps
      * the accent/accent2 tokens, never the light/dark base surfaces. Default value is
@@ -409,6 +424,29 @@ object SettingsKeys {
     val HIDDEN_PENDING_HIDES = stringSetPreferencesKey("hidden_pending_hides")
 
     /**
+     * When each journalled hide asked for its original to be deleted, as "hiddenUri|epochMs" strings.
+     *
+     * The system delete prompt outlives the screen and even the process that opened it, and tapping
+     * Allow later still removes the original. While a prompt may still be answered, a vault copy whose
+     * original is still on the device is kept: dropping it then would leave the photo nowhere.
+     */
+    val HIDDEN_DELETE_REQUESTS = stringSetPreferencesKey("hidden_delete_requests")
+
+    /**
+     * Accounts whose sign-out from Settings started and has not reached the end, where the account is
+     * disabled. Written before the first step, so a process that dies part way leaves the next launch the
+     * work of finishing it (see [eu.akoos.photos.util.SignOutCleanup.userSignOutReplayPlan]).
+     */
+    val USER_SIGN_OUT_PENDING = stringSetPreferencesKey("user_sign_out_pending")
+
+    /**
+     * Vault uris whose file was changed in place (an edit, an EXIF write) after it was hidden. A Drive
+     * copy recorded for one of them holds only the version before the change, so a sign-out treats the
+     * file as the only copy of what it now holds.
+     */
+    val HIDDEN_URI_EDITED = stringSetPreferencesKey("hidden_uri_edited")
+
+    /**
      * mediaUri → capture-date-ms mapping for files whose MediaStore DATE_TAKEN is missing or
      * wrong, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
      * MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and video
@@ -571,6 +609,30 @@ object SettingsKeys {
     fun cloudVerifiedAtKey(userId: String) =
         longPreferencesKey("cloud_verified_at_$userId")
 
+    /** Drive link ids whose copy holds fewer bytes than the device file it came from
+     *  ([eu.akoos.photos.domain.repository.ShortCloudCopyStore]). */
+    val SHORT_CLOUD_COPY_IDS = stringSetPreferencesKey("short_cloud_copy_ids")
+
+    /** Drive link ids of photo editor copies whose shortness cannot be told: kept on the device for good. */
+    val UNVERIFIABLE_CLOUD_COPY_IDS = stringSetPreferencesKey("unverifiable_cloud_copy_ids")
+
+    /** `linkId|deviceUri` for each short Drive copy whose device file is queued to be backed up again; the
+     *  short copy goes to Drive's trash once the whole one is up. */
+    val SHORT_CLOUD_COPY_REPLACEMENTS = stringSetPreferencesKey("short_cloud_copy_replacements")
+
+    /** Device uris taken off the pending delete queue because their Drive copy was short; deleted after
+     *  their whole backup, as delete-after-backup asked. */
+    val DELETE_AFTER_WHOLE_BACKUP_URIS = stringSetPreferencesKey("delete_after_whole_backup_uris")
+
+    /** Whether the one-time look for the photo editor's short Drive copies ran for this account. Until it
+     *  has, free-up checks each such copy itself. */
+    fun editorCopiesCheckedKey(userId: String) =
+        booleanPreferencesKey("editor_copies_checked_$userId")
+
+    /** When that look first ran for this account, as epoch millis; only copies backed up before it count. */
+    fun editorCopiesCheckStartedKey(userId: String) =
+        longPreferencesKey("editor_copies_check_started_$userId")
+
     /** Notification preferences. Producers read these before posting; the Notifications settings
      *  screen toggles them. NOTIFY_ALBUM_DOWNLOAD and NOTIFY_DELETE_REMINDER are opt-OUTS: absent =
      *  true (shown). NOTIFY_BACKUP_STATUS is the opposite, an opt-IN: absent = false (hidden), since
@@ -579,6 +641,12 @@ object SettingsKeys {
     val NOTIFY_BACKUP_STATUS = booleanPreferencesKey("notify_backup_status")
     val NOTIFY_ALBUM_DOWNLOAD = booleanPreferencesKey("notify_album_download")
     val NOTIFY_DELETE_REMINDER = booleanPreferencesKey("notify_delete_reminder")
+
+    /** The disguise icons turn off the share sheet entry and the external picker entry while they are
+     *  active. An opt-out: absent = on. DISGUISE_SAVED_PICKER holds the picker's own state from before
+     *  that, only while the entries are off, so leaving the disguise restores it. */
+    val DISGUISE_CUTS_ENTRIES = booleanPreferencesKey("disguise_cuts_entries")
+    val DISGUISE_SAVED_PICKER = booleanPreferencesKey("disguise_saved_picker")
 
     // Metadata stripping — which fields to strip when uploading photos
     val STRIP_GPS = booleanPreferencesKey("strip_gps")
@@ -661,6 +729,13 @@ object SettingsKeys {
     /** Ceiling on [PENDING_DELETE_URIS] so a consent the user never grants can't grow the set
      *  unbounded. Once reached, the longest-waiting entries are dropped rather than queued on. */
     const val PENDING_DELETE_URIS_MAX = 200
+
+    /**
+     * Device copies free-up kept because nothing could tell whether they still hold what was backed up,
+     * each as "size|modified|uri" with the stamp its file had then, so the free-up list leaves them out
+     * until the file changes. See [eu.akoos.photos.data.preferences.FreeUpUncheckedStoreImpl].
+     */
+    val FREE_UP_UNCHECKED = stringSetPreferencesKey("free_up_unchecked")
 
     /**
      * Just-created but uncommitted Drive file nodes whose best-effort cleanup delete failed at the
@@ -833,7 +908,7 @@ object SettingsKeys {
     val HIDDEN_REMOTE_HIDE_QUEUE = stringSetPreferencesKey("hidden_remote_hide_queue")
 
     /** Whether the shared backup on Proton Drive is on: each round reads the other devices' copies of the faces,
-     *  the search index, the labels and the hidden items, merges them, and saves this device's own. Absent = off. */
+     *  the search index, the labels, the hidden items and the settings, merges them, and saves this device's own. Absent = off. */
     val SHARED_BACKUP_ENABLED = booleanPreferencesKey("shared_backup_enabled")
 
     /** When the last shared-backup round finished, epoch millis, and whether it failed. */
@@ -843,6 +918,15 @@ object SettingsKeys {
     /** What each kind's own copy on Drive held when this device last wrote it, as `"kind|sha256"` over the copy with
      *  its time left out, so an unchanged copy is not written again. */
     val SHARED_BACKUP_SAVED = stringSetPreferencesKey("shared_backup_saved")
+
+    /** What the last round that went through saw of the backup folders, as `"nodeUid|revisionUid"` per file, so the
+     *  check made while the app is open runs a round only when another device wrote a file since. */
+    val SHARED_BACKUP_SEEN = stringSetPreferencesKey("shared_backup_seen")
+
+    /** When each synced setting and set member last changed here, as `"id|millis|fingerprint"`, so the shared backup
+     *  can put this device's settings together with another's, the later change winning. Wiped at sign-out together
+     *  with the account-tied settings, in the same edit. */
+    val SETTINGS_SYNC_TIMES = stringSetPreferencesKey("settings_sync_times")
 
     /** When the data behind the shared backup last changed here, epoch millis, so a round runs a few minutes after. */
     val SHARED_BACKUP_CHANGED_AT = longPreferencesKey("shared_backup_changed_at")
@@ -1066,6 +1150,24 @@ object SettingsKeys {
 
     /** List, leave and add to albums shared with this user, and download their photos, through the Drive SDK; see [SDK_ROUTE_TAGS]. */
     val SDK_ROUTE_SHARED = booleanPreferencesKey("sdk_route_shared")
+
+    /** List the photos this user shares by link through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_SHARED_BY_ME = booleanPreferencesKey("sdk_route_shared_by_me")
+
+    /** Save photos of an album shared with this user into the own library through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_SAVE_TO_LIBRARY = booleanPreferencesKey("sdk_route_save_to_library")
+
+    /** List the whole photo timeline through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_TIMELINE = booleanPreferencesKey("sdk_route_timeline")
+
+    /** List this user's own albums through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_ALBUM_LIST = booleanPreferencesKey("sdk_route_album_list")
+
+    /** List an album's photos through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_ALBUM_PHOTOS = booleanPreferencesKey("sdk_route_album_photos")
+
+    /** Fetch grid and HD thumbnails through the Drive SDK; off until switched on, see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_THUMBNAILS = booleanPreferencesKey("sdk_route_thumbnails")
 
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated

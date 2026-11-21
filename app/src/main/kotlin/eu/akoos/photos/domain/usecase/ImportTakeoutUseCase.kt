@@ -304,6 +304,12 @@ class ImportTakeoutUseCase @Inject constructor(
         // The Drive link and the capture date of each still, read from the staged rows once the first pass
         // is done (so a still that went up before a kill counts too, and a date the first pass filled in).
         var stillLinks: Map<String, String> = emptyMap()
+        // The links of the stills this invocation uploaded itself. Such a still is new to Drive, so Drive keeps
+        // no video with it yet, and its video skips the Drive check of the still's related photos.
+        val stillsSentHere = ConcurrentHashMap.newKeySet<String>()
+        // The still links a video of this run was joined to, read and written only by the sequential reader. A
+        // second video of the same still goes up on its own, since a still shows one video and hides the rest.
+        val stillsJoinedHere = HashSet<String>()
         var stillDateMs: Map<String, Long?> = emptyMap()
         coroutineScope {
             val uploadScope = this
@@ -326,7 +332,10 @@ class ImportTakeoutUseCase @Inject constructor(
                             userId = userId.id,
                         ),
                     )
-                    if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
+                    // A video that is a photo of its own in the library joins the album; one kept with a still does not.
+                    if (row.liveOf == null || photoListingDao.hasLink(userId.id, linkId)) {
+                        recordAlbumMembership(runId, row, albumMode, linkId)
+                    }
                 }
             }
 
@@ -337,7 +346,7 @@ class ImportTakeoutUseCase @Inject constructor(
                 // order here and offloads only the upload to [uploadScope].
                 runBlocking(parentContext) {
                     ensureActive()
-                    val temp = File.createTempFile("import_", tempSuffix(name), context.cacheDir)
+                    val temp = File.createTempFile("import_", tempSuffix(name), eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
                     val displayName = row.title?.takeIf { it.isNotBlank() } ?: ImportEntries.baseName(name)
                     val raw: String
                     val rowDateMs: Long
@@ -377,6 +386,9 @@ class ImportTakeoutUseCase @Inject constructor(
                                 compression = compression,
                                 stripOnUpload = stripOnUpload,
                                 pairMember = row.liveOf != null || name in stillsWithVideo,
+                                still = row.liveOf?.let { stillLinks[it] }?.let { link ->
+                                    StillOfVideo(link, sentHere = link in stillsSentHere, joinedHere = link in stillsJoinedHere)
+                                },
                             )
                         }
                     } catch (e: CancellationException) {
@@ -427,6 +439,7 @@ class ImportTakeoutUseCase @Inject constructor(
                         is EntryPlan.Upload -> {
                             val deferred = CompletableDeferred<String?>()
                             inRunUpload[raw] = deferred
+                            plan.mainPhotoLinkId?.let { stillsJoinedHere.add(it) }
                             uploadSemaphore.acquire()
                             jobs += uploadScope.async<Unit> {
                                 try {
@@ -438,7 +451,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                     val item = plan.item
                                     val linkId = drivePhotoRepository.uploadFileLinked(
                                         userId, item, plan.sha1, plan.uploadUri, plan.xAttr,
-                                        mainPhotoLinkId = row.liveOf?.let { stillLinks[it] },
+                                        mainPhotoLinkId = plan.mainPhotoLinkId,
                                         extraTags = if (name in stillsWithVideo) setOf(LIVE_PHOTO_TAG) else emptySet(),
                                     ) { phase, _, _ ->
                                         if (phase != lastPhase) {
@@ -462,8 +475,9 @@ class ImportTakeoutUseCase @Inject constructor(
                                                 userId = userId.id,
                                             ),
                                         )
-                                        if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
+                                        if (plan.mainPhotoLinkId == null) recordAlbumMembership(runId, row, albumMode, linkId)
                                     }
+                                    if (name in stillsWithVideo) stillsSentHere.add(linkId)
                                     drivePhotoRepository.cloudContentHash(plan.sha1)?.let { hash ->
                                         runCatching { photoListingDao.seedContentHash(userId.id, linkId, hash) }
                                     }
@@ -494,8 +508,9 @@ class ImportTakeoutUseCase @Inject constructor(
             // album phase, so every membership row the reconstruct reads is already recorded.
             jobs.awaitAll()
 
-            // The videos of the Live Photos, now that their stills are in Drive: each one joins its still.
-            // A video whose still did not go up stays pending for the next run.
+            // The videos of the Live Photos, now that their stills are in Drive: each one joins its still while
+            // the still keeps no video, else goes up on its own. A video whose still did not go up stays
+            // pending for the next run.
             if (pendingVideos.isNotEmpty()) {
                 val after = importStagedDao.allForZip(zipId).associateBy { it.entryName }
                 stillLinks = after.values.mapNotNull { r -> r.linkId?.let { r.entryName to it } }.toMap()
@@ -566,13 +581,21 @@ class ImportTakeoutUseCase @Inject constructor(
             val xAttr: UploadXAttrMetadata,
             /** The compressed temp [uploadUri] names, or null when the extracted file itself is sent. */
             val compressed: File?,
+            /** The still a Live Photo's video joins, or null for a photo of its own. */
+            val mainPhotoLinkId: String? = null,
         ) : EntryPlan
     }
+
+    /** The Drive link of a Live Photo video's still, whether this run uploaded that still, and whether a
+     *  video of this run was already joined to it. */
+    private class StillOfVideo(val linkId: String, val sentHere: Boolean, val joinedHere: Boolean)
 
     /**
      * Readies the extracted [temp] of an entry no earlier entry of this run shares bytes with. The caption
      * goes into an image's EXIF and the capture date into a video's mvhd, then the entry is looked up in
-     * Drive under its archive digest [raw] and its stamped digest. A photo that is not there yet is
+     * Drive under its archive digest [raw] and its stamped digest, and a Live Photo's video also among the
+     * videos Drive keeps with its [still]. Such a video joins its still only while the still keeps no video,
+     * else it goes up as a photo of its own. A photo that is not there yet is
      * compressed with the backup's options (never a half of a Live Photo, [pairMember]), and the bytes to
      * send are looked up once more. Drive's ContentHash is computed from exactly what is uploaded, so the
      * upload carries the digest of the file it sends, and a format the compression changed renames it.
@@ -589,6 +612,7 @@ class ImportTakeoutUseCase @Inject constructor(
         compression: CompressionSettings,
         stripOnUpload: Boolean,
         pairMember: Boolean,
+        still: StillOfVideo?,
     ): EntryPlan {
         val tempUri = Uri.fromFile(temp).toString()
         val caption = row.description?.takeIf { it.isNotBlank() }
@@ -606,6 +630,15 @@ class ImportTakeoutUseCase @Inject constructor(
             stripOnUpload,
             confirmLedgerLink = true,
         )?.let { return EntryPlan.InDrive(it, stamped) }
+        val mainPhotoLinkId = when {
+            still == null || still.joinedHere -> null
+            still.sentHere -> still.linkId
+            else -> {
+                val kept = driveMatcher.videosKeptWith(userId, still.linkId, listOf(raw, stamped))
+                kept.sameLinkId?.let { return EntryPlan.InDrive(it, stamped) }
+                still.linkId.takeUnless { kept.any }
+            }
+        }
 
         val compressed = if (pairMember) null else compress(tempUri, mimeType, captureMs, compression)
         try {
@@ -635,7 +668,7 @@ class ImportTakeoutUseCase @Inject constructor(
             val item = buildLocalMediaItem(tempUri, meta, entryName, sent.length(), mimeType, captureMs)
                 .copy(displayName = uploadName, mimeType = uploadMime)
             val xAttr = buildXAttr(meta, captureMs, width = null, height = null, durationMs = null)
-            return EntryPlan.Upload(item, sha1, Uri.fromFile(sent).toString(), xAttr, compressed?.first)
+            return EntryPlan.Upload(item, sha1, Uri.fromFile(sent).toString(), xAttr, compressed?.first, mainPhotoLinkId)
         } catch (e: Throwable) {
             compressed?.first?.delete()
             throw e
@@ -652,7 +685,7 @@ class ImportTakeoutUseCase @Inject constructor(
     ): Pair<File, String>? {
         if (isVideo(mimeType)) {
             if (!compressionStep.compressesVideo(mimeType, settings)) return null
-            val attempt = compressionStep.video(uri, settings, captureMs)
+            val attempt = compressionStep.video(uri, settings, captureMs, MetadataStripConfig())
             Log.d(TAG, "video compression ${attempt.outcome} ${attempt.reason ?: ""}")
             return attempt.file?.let { it to UploadFormatNaming.MP4 }
         }
@@ -849,13 +882,7 @@ class ImportTakeoutUseCase @Inject constructor(
     /** Hex SHA-1 of [file], the content digest [DrivePhotoRepository.uploadFile] requires (Drive pins
      *  its ContentHash to SHA-1). Streamed so a large file is never fully buffered. */
     private fun sha1Hex(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
     }
 
     companion object {

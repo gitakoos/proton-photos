@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.albums
 
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.presentation.settings.deviceBuckets
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,6 +57,28 @@ class DeviceFolderCardsTest {
     fun `each bucket becomes one card carrying its count`() {
         val cards = DeviceFolderCards.build(listOf(camera1, camera2, shot1), emptySet(), emptyMap())
         assertEquals(listOf("Camera" to 2, "Screenshots" to 1), cards.map { it.name to it.itemCount })
+    }
+
+    @Test
+    fun `a card counts the videos in its folder apart from the photos`() {
+        // The card reads "2 photos, 1 video", the same as the folder screen, so the video count
+        // is carried next to the total rather than folded into it.
+        val clip = item("uri/v1", "Camera", 50).copy(mimeType = "video/mp4")
+        val cards = DeviceFolderCards.build(listOf(camera1, camera2, clip, shot1), emptySet(), emptyMap())
+        assertEquals(
+            listOf(Triple("Camera", 3, 1), Triple("Screenshots", 1, 0)),
+            cards.map { Triple(it.name, it.itemCount, it.videoCount) },
+        )
+    }
+
+    @Test
+    fun `the folder pickers count the videos in a folder apart from the photos`() {
+        val clip = item("uri/v1", "Camera", 50).copy(mimeType = "video/mp4")
+        val buckets = deviceBuckets(listOf(camera1, clip, shot1))
+        assertEquals(
+            listOf(Triple("Camera", 2, 1), Triple("Screenshots", 1, 0)),
+            buckets.map { Triple(it.name, it.itemCount, it.videoCount) },
+        )
     }
 
     @Test

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.domain.usecase.UploadPendingUseCase.DeleteRecheck
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase.Removal
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -102,5 +103,124 @@ class UploadPendingDeleteAfterBackupTest {
     @Test
     fun `nothing is removed when the setting is off and the upload failed`() {
         assertEquals(Removal.NONE, removal(API_R, deleteLocalAfterBackup = false, uploadSucceeded = false))
+    }
+
+    @Test
+    fun `the device file still holding the bytes the upload read may be removed`() {
+        assertEquals(DeleteRecheck.DELETE, UploadPendingUseCase.deleteAfterBackupRecheck("abc", "abc"))
+        assertEquals(DeleteRecheck.DELETE, UploadPendingUseCase.deleteAfterBackupRecheck("ABC", "abc"))
+    }
+
+    @Test
+    fun `a device file changed since the upload read it is kept`() {
+        assertEquals(DeleteRecheck.CHANGED, UploadPendingUseCase.deleteAfterBackupRecheck("abc", "edited"))
+    }
+
+    @Test
+    fun `a device file that cannot be read now is kept`() {
+        assertEquals(DeleteRecheck.UNREADABLE, UploadPendingUseCase.deleteAfterBackupRecheck("abc", null))
+    }
+
+    @Test
+    fun `nothing to compare against keeps the device file`() {
+        // A mirror rewrite whose bytes could not be read back leaves no expected hash.
+        assertEquals(DeleteRecheck.UNREADABLE, UploadPendingUseCase.deleteAfterBackupRecheck(null, "abc"))
+        assertEquals(DeleteRecheck.UNREADABLE, UploadPendingUseCase.deleteAfterBackupRecheck("", "abc"))
+    }
+
+    @Test
+    fun `the original hash is the upload's own when the device bytes went up as they are`() {
+        assertEquals(
+            "upload",
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = false, sentDeviceBytes = true, uploadHash = "upload", sourceHash = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `the original hash is the one read before a strip or compression`() {
+        assertEquals(
+            "source",
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = false, sentDeviceBytes = false, uploadHash = "stripped", sourceHash = "source",
+            ),
+        )
+    }
+
+    @Test
+    fun `after a mirror rewrote the device file the bytes it wrote are recorded`() {
+        assertEquals(
+            "mirror",
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = true, sentDeviceBytes = false, uploadHash = "u", sourceHash = "s",
+                rewrittenHash = "mirror",
+            ),
+        )
+        assertEquals(
+            "an in-place strip uploads the rewritten device file itself",
+            "u",
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = true, sentDeviceBytes = true, uploadHash = "u", sourceHash = "s",
+            ),
+        )
+        assertEquals(
+            "mirror bytes that could not be read back are not recorded",
+            null,
+            UploadPendingUseCase.recordedOriginalHash(
+                deviceRewritten = true, sentDeviceBytes = false, uploadHash = "u", sourceHash = "s",
+                rewrittenHash = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `the hash checked before the delete is the one recorded, for every kind of upload`() {
+        for ((rewritten, sent) in listOf(false to true, false to false, true to true, true to false)) {
+            val recorded = UploadPendingUseCase.recordedOriginalHash(rewritten, sent, "u", "s", "mirror")
+            assertEquals(
+                "rewritten=$rewritten sent=$sent",
+                recorded,
+                UploadPendingUseCase.expectedDeviceHashBeforeDelete(recorded, rewritten, sent, "u", "mirror"),
+            )
+        }
+    }
+
+    @Test
+    fun `before the delete the device file is compared with the original hash when there is one`() {
+        assertEquals(
+            "orig",
+            UploadPendingUseCase.expectedDeviceHashBeforeDelete(
+                originalHash = "orig", deviceRewritten = false, sentDeviceBytes = false,
+                uploadHash = "u", rewrittenHash = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `after a mirror rewrite the device file is compared with the bytes the mirror wrote`() {
+        assertEquals(
+            "mirror",
+            UploadPendingUseCase.expectedDeviceHashBeforeDelete(
+                originalHash = null, deviceRewritten = true, sentDeviceBytes = false,
+                uploadHash = "u", rewrittenHash = "mirror",
+            ),
+        )
+        assertEquals(
+            "unreadable mirror bytes leave nothing to compare against",
+            null,
+            UploadPendingUseCase.expectedDeviceHashBeforeDelete(
+                originalHash = null, deviceRewritten = true, sentDeviceBytes = false,
+                uploadHash = "u", rewrittenHash = null,
+            ),
+        )
+        assertEquals(
+            "an in-place strip uploads the rewritten device file itself",
+            "u",
+            UploadPendingUseCase.expectedDeviceHashBeforeDelete(
+                originalHash = null, deviceRewritten = true, sentDeviceBytes = true,
+                uploadHash = "u", rewrittenHash = null,
+            ),
+        )
     }
 }

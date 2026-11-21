@@ -66,6 +66,8 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -93,6 +95,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
@@ -154,6 +157,8 @@ fun PersonDetailScreen(
     onLoadMergeCandidates: () -> Unit = {},
     onMergeName: (String) -> Unit = {},
     onIgnorePerson: () -> Unit = {},
+    /** Hides this person from People and every suggestion; the caller leaves the page once it is done. */
+    onHidePerson: () -> Unit = {},
     /** The app's own "might be the same person" prompt, or null when there is nothing to suggest. */
     mergeSuggestion: PersonUi? = null,
     onAcceptSuggestion: (Long) -> Unit = {},
@@ -184,6 +189,7 @@ fun PersonDetailScreen(
     var showUnnameConfirm by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showIgnoreConfirm by remember { mutableStateOf(false) }
+    var showHideConfirm by remember { mutableStateOf(false) }
     var showNotPersonConfirm by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var showMergePicker by remember { mutableStateOf(false) }
@@ -289,13 +295,12 @@ fun PersonDetailScreen(
                 ),
             )
         }
-        // Merge the picked photos into another person (an existing one, or a new name to split them off):
-        // the photo-level twin of the whole-cluster merge, so it shares that icon and wording rather than
-        // reading as a separate "move".
+        // Move the picked photos onto another person (an existing one, or a new name to split them off). The
+        // whole-group merge in the menu folds a group away; this moves only the selected photos, so it says so.
         add(
             SelectionAction(
-                icon = Icons.Default.CallMerge,
-                label = stringResource(R.string.person_merge_action),
+                icon = Icons.Default.SwapHoriz,
+                label = stringResource(R.string.person_move_to_person_action),
                 onClick = {
                     onLoadMergeCandidates()
                     showMoveSelectionPicker = true
@@ -315,7 +320,7 @@ fun PersonDetailScreen(
             )
         }
         // Dropping the picked faces from People for good is offered on the Unsorted pile and any unnamed
-        // cluster, so junk faces can be rejected in place; a named person keeps "Remove from person".
+        // cluster, so junk faces can be rejected in place; a named person keeps "Not this person".
         if (state.isOther || state.personName == null) {
             add(
                 SelectionAction(
@@ -400,6 +405,7 @@ fun PersonDetailScreen(
                     locationGridRows(state.items, TimeZone.getDefault(), keyOf = { it.stableId }) { fmt.format(Date(it)) }
                 }
                 val idToIndex = remember(selectableIds) { selectableIds.withIndex().associate { (i, id) -> id to i } }
+                eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, state.items) { it.stableId }
                 // Armed at the long-press anchor so the cell's release-tap does not toggle it straight back off.
                 val tapGuard = remember { mutableStateOf(false) }
                 val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
@@ -512,7 +518,7 @@ fun PersonDetailScreen(
             actions = personSelectionActions,
             onDismiss = { clearSelection() },
             // Scrolling the grid collapses the drawer, so carrying on through the photos needs no pull first.
-            contentScrolling = gridState.isScrollInProgress,
+            contentScrollingProvider = { gridState.isScrollInProgress },
             modifier = Modifier.align(Alignment.BottomCenter),
             selectAllCount = selectAllCount,
             onSelectAll = if (selectAllCount != null) {
@@ -686,9 +692,20 @@ fun PersonDetailScreen(
                                         },
                                     )
                                 }
+                                // Hides a person, named or not, from People and every suggestion; its photos and faces stay.
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.person_hide), color = appColors.fgPrimary) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = appColors.fgDim)
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        showHideConfirm = true
+                                    },
+                                )
                                 // Only for an unnamed cluster: dismissing a whole named, confirmed person
                                 // as "not a person" makes no sense. A named person's stray photos are
-                                // taken off through "Remove from this person" in selection mode instead.
+                                // taken off through "Not this person" in selection mode instead.
                                 if (state.personName == null) {
                                     DropdownMenuItem(
                                         text = {
@@ -963,10 +980,25 @@ fun PersonDetailScreen(
         )
     }
 
+    if (showHideConfirm) {
+        ConfirmSheet(
+            title = state.personName?.let { stringResource(R.string.person_hide_confirm_title, it) }
+                ?: stringResource(R.string.person_hide_confirm_title_group),
+            message = stringResource(R.string.person_hide_confirm_body),
+            confirmLabel = stringResource(R.string.person_hide_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showHideConfirm = false
+                onHidePerson()
+            },
+            onDismiss = { showHideConfirm = false },
+        )
+    }
+
     if (showIgnoreConfirm) {
         ConfirmDialog(
-            title = stringResource(R.string.person_not_a_person_confirm_title),
-            message = stringResource(R.string.person_not_a_person_confirm_body),
+            title = stringResource(R.string.person_not_a_person_title),
+            message = stringResource(R.string.person_not_a_person_body),
             confirmLabel = stringResource(R.string.person_not_a_person_confirm),
             dismissLabel = stringResource(R.string.cancel),
             destructive = true,
@@ -985,8 +1017,8 @@ fun PersonDetailScreen(
     // the picked faces, sharing the same confirm copy as the whole-cluster dismissal above.
     if (showNotPersonConfirm) {
         ConfirmDialog(
-            title = stringResource(R.string.person_not_a_person_confirm_title),
-            message = stringResource(R.string.person_not_a_person_confirm_body),
+            title = stringResource(R.string.person_not_a_person_title),
+            message = stringResource(R.string.person_not_a_person_body),
             confirmLabel = stringResource(R.string.person_not_a_person_confirm),
             dismissLabel = stringResource(R.string.cancel),
             destructive = true,

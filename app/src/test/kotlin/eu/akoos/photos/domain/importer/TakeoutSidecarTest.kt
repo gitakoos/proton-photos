@@ -190,6 +190,11 @@ class TakeoutSidecarTest {
         assertNull(TakeoutSidecar.albumFolderOf("Takeout/Google Photos/Photos from 2019/PXL.jpg"))
     }
 
+    @Test fun `an Ente Uncategorized folder is not an album, whatever its case`() {
+        assertNull(TakeoutSidecar.albumFolderOf("Uncategorized/IMG_9.jpg"))
+        assertNull(TakeoutSidecar.albumFolderOf("ente export/UNCATEGORIZED/IMG_10.jpg"))
+    }
+
     @Test fun `the archive and trash buckets are not albums`() {
         assertNull(TakeoutSidecar.albumFolderOf("Takeout/Google Photos/Archive/IMG_2.jpg"))
         assertNull(TakeoutSidecar.albumFolderOf("Takeout/Google Photos/Trash/IMG_3.jpg"))

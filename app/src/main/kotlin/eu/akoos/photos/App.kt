@@ -57,6 +57,7 @@ import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.settleThemeDefault
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.CachePruneWorker
@@ -67,29 +68,47 @@ import javax.inject.Inject
 @HiltAndroidApp
 class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
+    // Every injected dependency is a dagger.Lazy: super.onCreate() injects the fields in every process, and
+    // the :crypto process returns before using any of them, so none is built there. A plain field would
+    // build its whole graph in that process too (a second settings DataStore on the same file among it).
     @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+    lateinit var workerFactoryLazy: dagger.Lazy<HiltWorkerFactory>
+    private val workerFactory: HiltWorkerFactory get() = workerFactoryLazy.get()
 
     @Inject
-    lateinit var networkObserver: eu.akoos.photos.util.NetworkObserver
+    lateinit var networkObserverLazy: dagger.Lazy<eu.akoos.photos.util.NetworkObserver>
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver get() = networkObserverLazy.get()
 
     @Inject
-    lateinit var cloudCompressQueue: eu.akoos.photos.domain.usecase.CloudCompressQueue
+    lateinit var cloudCompressQueueLazy: dagger.Lazy<eu.akoos.photos.domain.usecase.CloudCompressQueue>
+    private val cloudCompressQueue: eu.akoos.photos.domain.usecase.CloudCompressQueue get() = cloudCompressQueueLazy.get()
 
     @Inject
-    lateinit var photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao
+    lateinit var photoListingDaoLazy: dagger.Lazy<eu.akoos.photos.data.db.dao.PhotoListingDao>
+    private val photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao get() = photoListingDaoLazy.get()
 
     @Inject
-    lateinit var thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+    lateinit var thumbnailUrlStoreLazy: dagger.Lazy<eu.akoos.photos.data.repository.drive.ThumbnailUrlStore>
+    private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore get() = thumbnailUrlStoreLazy.get()
 
     @Inject
-    lateinit var pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter
+    lateinit var pendingAlbumAddsImporterLazy: dagger.Lazy<eu.akoos.photos.data.upload.PendingAlbumAddsImporter>
+    private val pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter get() = pendingAlbumAddsImporterLazy.get()
 
     @Inject
-    lateinit var autoSaveCoordinator: eu.akoos.photos.data.autosave.AutoSaveCoordinator
+    lateinit var ownDeviceWriteRecorderLazy: dagger.Lazy<eu.akoos.photos.data.upload.OwnDeviceWriteRecorder>
 
     @Inject
-    lateinit var sharedBackupScheduler: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
+    lateinit var autoSaveCoordinatorLazy: dagger.Lazy<eu.akoos.photos.data.autosave.AutoSaveCoordinator>
+    private val autoSaveCoordinator: eu.akoos.photos.data.autosave.AutoSaveCoordinator get() = autoSaveCoordinatorLazy.get()
+
+    @Inject
+    lateinit var sharedBackupSchedulerLazy: dagger.Lazy<eu.akoos.photos.data.sharedbackup.SharedBackupScheduler>
+    private val sharedBackupScheduler: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler get() = sharedBackupSchedulerLazy.get()
+
+    @Inject
+    lateinit var localEncryptionLazy: dagger.Lazy<eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator>
+    private val localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator get() = localEncryptionLazy.get()
 
     // Set up in constructor so getWorkManagerConfiguration() works before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
@@ -113,11 +132,32 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     override fun onCreate() {
         // Taken before anything in this process can start writing ML sync scratch files.
         val processStartMs = System.currentTimeMillis()
-        super.onCreate() // Hilt injects workerFactory here
+        super.onCreate() // Hilt injects the lazy fields here; nothing is built until one is read
         installCrashLogHandler()
         // The :crypto process shares this Application but must skip the main-process init below
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
+        if (Build.VERSION.SDK_INT >= 34) eu.akoos.photos.data.importer.ZipEntryNames.install()
+        // Before any screen reads the settings: whether they are held back, so the lock and the cover fail closed.
+        eu.akoos.photos.data.localcrypto.SettingsLock.attach(this)
+        // A settings change that could not be saved encrypted is not saved at all; the user is told so.
+        eu.akoos.photos.data.localcrypto.SettingsWriteRefusals.show = {
+            android.os.Handler(mainLooper).post {
+                android.widget.Toast.makeText(this, R.string.settings_change_not_saved, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+        // First: clears scratch plaintext of an earlier process, then encrypts what an earlier version left plain.
+        localEncryption.start()
+        // A metadata write this app makes to a backed-up device photo records the bytes it left on the
+        // photo's backup row, so free-up does not take that write for an edit to back up again. One queue
+        // records them in the order they landed, so a second write chains on the first.
+        val ownDeviceWrites = kotlinx.coroutines.channels.Channel<eu.akoos.photos.data.upload.OwnDeviceWrite>(
+            kotlinx.coroutines.channels.Channel.UNLIMITED,
+        )
+        appScope.launch {
+            for (write in ownDeviceWrites) ownDeviceWriteRecorderLazy.get().record(write)
+        }
+        eu.akoos.photos.data.upload.OwnDeviceWrites.install { ownDeviceWrites.trySend(it) }
         delegatingFactory.addFactory(workerFactory)
         sweepMlSyncScratch(processStartMs)
         // Watches the data behind the automatic Drive saves and plans their next check, which a force stop drops.
@@ -459,7 +499,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // AppCompatDelegate night mode governs ProtonCore's login screens (they read uiMode via
         // isSystemInDarkTheme). Force NIGHT_YES except an explicit "light" pick — the palette is
         // dark-built and a "system" default made login appear light on light-system OEM phones.
-        // MainActivity overrides its own local night mode to FOLLOW_SYSTEM (see its onCreate), so the
+        // MainHostActivity overrides its own local night mode to FOLLOW_SYSTEM (see its onCreate), so the
         // in-app Compose ProtonPhotosTheme honours the full system/dark/light choice; this default is
         // only the fallback for the XML-based ProtonCore login activities.
         AppCompatDelegate.setDefaultNightMode(
@@ -468,8 +508,17 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 else    -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
+        // Read before anything below can write the mirror.
+        val mirrorWritten = ThemePrefsBoot.isWritten(this)
         // Background drift-sync of the mirror from DataStore (e.g. first boot before any theme write).
         appScope.launch {
+            runCatching {
+                val installUpdated = packageManager.getPackageInfo(packageName, 0)
+                    .let { it.lastUpdateTime > it.firstInstallTime }
+                var keptDark = false
+                settingsDataStore.edit { keptDark = settleThemeDefault(it, mirrorWritten, installUpdated) }
+                if (keptDark) ThemePrefsBoot.write(this@App, "dark")
+            }
             val fromDataStore = runCatching {
                 settingsDataStore.data.map { prefs ->
                     prefs[SettingsKeys.THEME_MODE] ?: when (prefs[SettingsKeys.DARK_MODE]) {
@@ -520,8 +569,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /**
-     * Privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]): wipe disk caches when the whole
-     * process backgrounds. Process-level ON_STOP is the right hook — it fires only when all
+     * Whole-process background hook: writes the decrypted-thumbnail URLs still queued for the database,
+     * and with the privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]) wipes disk caches. Process-level
+     * ON_STOP is the right hook: it fires only when all
      * Activities leave the started state, not on rotation / picker round-trips. Wipes fullres,
      * thumbnails, coil_cache, and import_thumbs; deliberately leaves in-flight upload block dirs and
      * DataStore alone.
@@ -531,6 +581,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             object : androidx.lifecycle.DefaultLifecycleObserver {
                 override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
                     appScope.launch {
+                        // Persist the decrypted-thumbnail URLs still queued, so the next cold start
+                        // finds them in the database. Before the wipe below, which nulls them again.
+                        runCatching { thumbnailUrlStore.flushPending() }
                         val enabled = runCatching {
                             settingsDataStore.data.first()[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] == true
                         }.getOrDefault(false)
@@ -611,6 +664,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
     private fun buildImageLoader(animated: Boolean): ImageLoader = ImageLoader.Builder(this)
         .components {
+            // Encrypted hidden photos decode from a decrypting stream; everything else is untouched.
+            add(eu.akoos.photos.data.localcrypto.VaultImageFetcher.Factory())
             // First in line from the API that can attach a gain map at all, and even there it claims
             // a load only when that load opted in and the bytes actually carry one. Every other load
             // falls straight through to the decoders below and decodes identically.

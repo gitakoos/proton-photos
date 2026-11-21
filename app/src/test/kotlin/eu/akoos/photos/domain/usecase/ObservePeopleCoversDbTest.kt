@@ -28,6 +28,7 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -47,7 +48,8 @@ import org.robolectric.annotation.Config
 /**
  * The People list resolves the stored covers in a few bounded reads: past the size of one statement, a
  * stored cover on the feed is still the cover, a cover off the feed or gone falls back to the person's next
- * face on the feed, a person with no face on the feed is dropped, and the order stays most-photographed first.
+ * face on the feed, a person with no face on the feed is dropped unless it is named and holds a photo added to
+ * it by hand there, and the order stays most-photographed first.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -201,5 +203,45 @@ class ObservePeopleCoversDbTest {
         // linkT is in the trash (not in the feed), linkA has two faces, content://x is a stray device key.
         assertEquals(2, livePhotoCount(listOf("linkA", "linkA", "linkB", "linkT", "content://x"), feed))
         assertEquals(0, livePhotoCount(emptyList(), feed))
+    }
+
+    @Test
+    fun `the named people's counts from two reads match one read per person`() {
+        val feed = setOf("linkA", "linkB", "linkC", "linkD")
+        val named = listOf(1L to "Anna", 2L to "Bela", 3L to "Csaba")
+        // Anna: two faces on linkA, one on the trashed linkT, linkB added by hand. Bela: linkC, and linkA added
+        // to "bela", which is another name to the exact match. Csaba: only a photo added by hand. Person 4 is not
+        // named and is not counted here.
+        val faceKeys = listOf(1L to "linkA", 1L to "linkT", 1L to "linkA", 2L to "linkC", 4L to "linkD")
+        val manualKeys = listOf("Anna" to "linkB", "Anna" to "linkA", "bela" to "linkA", "Csaba" to "linkD")
+        val counts = livePhotoCounts(named, faceKeys, manualKeys, feed)
+        assertEquals(mapOf(1L to 2, 2L to 1, 3L to 1), counts)
+        for ((id, name) in named) {
+            val keys = faceKeys.filter { it.first == id }.map { it.second } + manualKeys.filter { it.first == name }.map { it.second }
+            assertEquals(livePhotoCount(keys, feed), counts[id])
+        }
+    }
+    @Test
+    fun `a named person with no face shows a photo added to it by hand, whole, and goes once none is in the library`() = runTest {
+        db.personDao().upsert(PersonEntity(id = 7L, userId = acct, displayName = "Teszt58", faceCount = 2))
+        db.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(acct, "Teszt58", "linkT"), PersonManualPhotoEntity(acct, "Teszt58", "m")))
+        db.personDao().upsert(PersonEntity(id = 8L, userId = acct, displayName = null, faceCount = 1))
+
+        val shown = summaries(listOf(item("x"), item("m"))).single()
+
+        assertEquals(7L, shown.personId)
+        assertEquals("m", shown.coverPhotoKey)
+        assertEquals(null, shown.faceBox)
+        assertEquals("only the photo in the library counts", 1, shown.faceCount)
+        assertEquals(emptyList<Long>(), summaries(listOf(item("x"))).map { it.personId })
+    }
+
+    @Test
+    fun `a hand-added cover is the first of the photos in the library, or the first held while it loads`() {
+        val manual = mapOf("Anna" to listOf("b", "a"), "Bob" to listOf("gone"))
+        val feed = listOf(item("x"), item("a"), item("b"))
+
+        assertEquals(mapOf("Anna" to "a"), handAddedCovers(listOf("Anna", "Bob", "Nobody"), manual, feed))
+        assertEquals(mapOf("Anna" to "b", "Bob" to "gone"), handAddedCovers(listOf("Anna", "Bob"), manual, emptyList()))
     }
 }

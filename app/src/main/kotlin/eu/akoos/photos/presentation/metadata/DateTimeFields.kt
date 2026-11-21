@@ -33,13 +33,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.TimePickerDefaults
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +49,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
@@ -72,7 +66,7 @@ import java.util.Locale
 
 /**
  * The date and time picker the details sheet and the metadata editor share: the picked moment written out
- * on top, the calendar in the page (run to the edges, it is 360 wide at the least), and the time as one
+ * on top, the calendar card, and the time as one
  * field that opens an input under it. Every change goes to [onChange]; [latestMs] closes the days after it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,35 +90,11 @@ internal fun DateTimeFields(seedMs: Long, onChange: (Long) -> Unit, latestMs: Lo
             textAlign = TextAlign.Center, maxLines = 1,
             modifier = Modifier.fillMaxWidth(),
         )
-        Box(modifier = Modifier.fullBleed(20.dp)) {
-            val dateState = key(seedMs, latestMs) {
-                rememberDatePickerState(
-                    initialSelectedDateMillis = pickedDay,
-                    selectableDates = latestMs?.let { daysUpTo(it) } ?: DatePickerDefaults.AllDates,
-                )
-            }
-            LaunchedEffect(dateState.selectedDateMillis) { dateState.selectedDateMillis?.let { pickedDay = it } }
-            DatePicker(
-                state = dateState,
-                title = null,
-                headline = null,
-                showModeToggle = false,
-                colors = DatePickerDefaults.colors(
-                    containerColor = Color.Transparent,
-                    navigationContentColor = colors.fgPrimary,
-                    subheadContentColor = colors.fgDim,
-                    weekdayContentColor = colors.fgMute,
-                    yearContentColor = colors.fgPrimary,
-                    currentYearContentColor = colors.accent,
-                    selectedYearContainerColor = colors.accent,
-                    dayContentColor = colors.fgPrimary,
-                    disabledDayContentColor = colors.fgMute.copy(alpha = 0.4f),
-                    selectedDayContainerColor = colors.accent,
-                    todayContentColor = colors.accent,
-                    todayDateBorderColor = colors.accent,
-                ),
-            )
-        }
+        CalendarCard(
+            selectedDay = pickedDay,
+            latest = latestMs?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() },
+            onPick = { pickedDay = it },
+        )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -170,13 +140,4 @@ internal fun DateTimeFields(seedMs: Long, onChange: (Long) -> Unit, latestMs: Lo
             }
         }
     }
-}
-
-/** Lets a child reach [margin] past each side of its parent's padding, to the sheet's edges. */
-internal fun Modifier.fullBleed(margin: Dp): Modifier = layout { measurable, constraints ->
-    val extra = (margin * 2).roundToPx()
-    val placeable = measurable.measure(
-        constraints.copy(minWidth = constraints.maxWidth + extra, maxWidth = constraints.maxWidth + extra),
-    )
-    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
 }

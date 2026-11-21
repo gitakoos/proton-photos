@@ -235,4 +235,48 @@ class DetailsPeopleBoxTest {
     }
 
     // endregion
+    // region people added by hand
+
+    private fun manual(personId: Long, name: String) = PhotoViewerViewModel.ViewerPerson(
+        personId = personId,
+        name = name,
+        faceBox = PhotoViewerViewModel.ViewerPerson.NO_FACE,
+        faceId = "",
+        isOther = false,
+    )
+
+    @Test
+    fun `people added by hand follow the faces found`() {
+        val faced = listOf(person(1L, "face-a", name = "Alice"))
+        val row = DetailsPeopleRow.withManual(faced, listOf(manual(2L, "Bob"), manual(3L, "Cili")))
+        assertEquals(listOf(1L, 2L, 3L), row.map { it.personId })
+    }
+
+    @Test
+    fun `a person found by face is not listed again by hand`() {
+        val faced = listOf(person(1L, "face-a", name = "Alice"))
+        assertEquals(faced, DetailsPeopleRow.withManual(faced, listOf(manual(1L, "Alice"))))
+    }
+
+    @Test
+    fun `a photo with no face lists only the people added by hand`() {
+        val row = DetailsPeopleRow.withManual(emptyList(), listOf(manual(2L, "Bob"), manual(2L, "Bob")))
+        assertEquals(listOf(2L), row.map { it.personId })
+    }
+
+    @Test
+    fun `a hand-added person shows the glyph and keys apart`() {
+        val entry = manual(2L, "Bob")
+        assertNull(DetailsPeopleRow.clampedFaceBox(entry.faceBox))
+        assertEquals(DetailsPeopleRow.PillLabel.Name("Bob"), DetailsPeopleRow.pillLabel(entry))
+        val keys = DetailsPeopleRow.keys(listOf(person(1L, "face-a"), entry, manual(3L, "Cili")))
+        assertEquals(3, keys.toSet().size)
+    }
+
+    @Test
+    fun `a hand-added named person opens their page rather than the naming sheet`() {
+        assertNull(nameOrMergeSubjectFor(manual(2L, "Bob"), faceSource = "uri"))
+    }
+
+    // endregion
 }

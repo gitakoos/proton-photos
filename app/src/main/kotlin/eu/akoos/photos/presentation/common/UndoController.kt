@@ -32,10 +32,15 @@ import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.HidePersonUseCase
+import eu.akoos.photos.domain.usecase.ShowPersonUseCase
 import me.proton.core.domain.entity.UserId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +53,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,6 +76,9 @@ class UndoController @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
+    private val hidePerson: HidePersonUseCase,
+    private val showPerson: ShowPersonUseCase,
+    private val faceIndexingScheduler: FaceIndexingScheduler,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -89,14 +98,30 @@ class UndoController @Inject constructor(
      *  told; without it a photo stays hidden while the screen reads as restored. */
     val undoFailed: SharedFlow<Int> = _undoFailed.asSharedFlow()
 
+    private var keepThroughNextNavigation = false
+
     /** Offer a fresh undoable action. Replaces any earlier pending one (only the latest is undoable). */
     fun offer(action: UndoAction) {
+        keepThroughNextNavigation = false
         _pending.value = action
     }
 
     /** Drop the pending action without restoring (snackbar timed out, dismissed, or navigated away). */
     fun dismiss() {
+        keepThroughNextNavigation = false
         _pending.value = null
+    }
+
+    /** The screen that offered the pending action is closing because of it (the viewer's last photo was
+     *  deleted), so the navigation that follows must not take the bar away. */
+    fun keepThroughScreenClose() {
+        if (_pending.value != null) keepThroughNextNavigation = true
+    }
+
+    /** A destination change: the pending action stays only when [keepThroughScreenClose] asked for it,
+     *  and then for that one change. */
+    fun onNavigated() {
+        if (keepThroughNextNavigation) keepThroughNextNavigation = false else dismiss()
     }
 
     /** Reverse the pending action on the controller's own scope. No-op when nothing is pending. */
@@ -135,6 +160,7 @@ class UndoController @Inject constructor(
                         cloudRepo.addPhotosToAlbum(userId, action.albumLinkId, action.photoLinkIds)
                         true
                     }
+                    is UndoAction.PersonVisibility -> reversePersonVisibility(action)
                 }
                 if (reversedSomething) _restored.tryEmit(action)
             } catch (e: Exception) {
@@ -175,6 +201,26 @@ class UndoController @Inject constructor(
         return failed < action.count
     }
 
+    /**
+     * Do the opposite of a hide or a show, person by person, through the use cases that made it. Showing a
+     * never-named group takes its reserved label off, so the grouping is asked to run again, as the show
+     * on the People screen does.
+     */
+    private suspend fun reversePersonVisibility(action: UndoAction.PersonVisibility): Boolean {
+        val userId = accountManager.getPrimaryUserId().first()
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        var regroup = false
+        for (id in action.personIds) {
+            if (action.nowHidden) {
+                if (showPerson(account, id)) regroup = true
+            } else {
+                hidePerson(account, id)
+            }
+        }
+        if (regroup) faceIndexingScheduler.requestRecluster(userId)
+        return true
+    }
+
     /** Move each local MediaStore file back out of the device trash by clearing IS_TRASHED. Silent
      *  with MANAGE_MEDIA / all-files access (same direct-update path the mirror rename uses); a URI
      *  the OS refuses is logged and skipped, so the file just stays in the device trash and is still
@@ -197,26 +243,58 @@ class UndoController @Inject constructor(
         val now = System.currentTimeMillis()
         for (r in relinks) {
             runCatching {
-                syncStateRepo.upsert(
-                    SyncState(
-                        localUri = r.localUri,
-                        cloudFileId = r.cloudLinkId,
-                        localHash = "",
-                        cloudHash = null,
-                        status = SyncStatus.SYNCED,
-                        lastSyncAttemptMs = now,
-                        lastSyncSuccessMs = now,
-                        backedUpAtMs = now,
-                        sizeBytes = r.sizeBytes,
-                    ),
-                    userId,
-                )
+                val prior = syncStateRepo.getByUri(r.localUri)
+                val sha1 = if (relinkKeeps(prior, r)) {
+                    null
+                } else {
+                    withContext(Dispatchers.IO) {
+                        runCatching { eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, r.localUri) }.getOrNull()
+                    }
+                }
+                val onDrive = sha1 != null && !r.contentHash.isNullOrEmpty() && cloudRepo.cloudContentHash(sha1) == r.contentHash
+                syncStateRepo.upsert(relinkedRow(prior, r, sha1, onDrive, now), userId)
             }.onFailure { Log.w(TAG, "re-link SyncState skipped for one uri: ${it.message}") }
         }
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "UndoController"
+
+        /** Whether the row the delete left behind, [prior], still describes [relink]'s restored file. */
+        fun relinkKeeps(prior: SyncState?, relink: UndoAction.Delete.Relink): Boolean =
+            prior != null && prior.cloudFileId == relink.cloudLinkId && prior.backedUpAtMs != null
+
+        /**
+         * The row a restored synced photo goes back to. The delete only changed its row's status, so a row
+         * still paired to the same cloud copy keeps its hashes and backup stamp. Without it, the photo is
+         * paired again so the backup skips it, but stamped backed up only when its bytes are Drive's
+         * ([onDrive], from its SHA-1 [sha1]): free-up must never take a file nothing verified for backed up.
+         */
+        fun relinkedRow(
+            prior: SyncState?,
+            relink: UndoAction.Delete.Relink,
+            sha1: String?,
+            onDrive: Boolean,
+            now: Long,
+        ): SyncState =
+            if (prior != null && relinkKeeps(prior, relink)) {
+                prior.copy(status = SyncStatus.SYNCED, lastSyncAttemptMs = now, lastSyncSuccessMs = now)
+            } else {
+                SyncState(
+                    localUri = relink.localUri,
+                    cloudFileId = relink.cloudLinkId,
+                    localHash = if (onDrive) sha1.orEmpty() else "",
+                    cloudHash = relink.contentHash,
+                    status = SyncStatus.SYNCED,
+                    lastSyncAttemptMs = now,
+                    lastSyncSuccessMs = now,
+                    backedUpAtMs = if (onDrive) now else null,
+                    sizeBytes = relink.sizeBytes,
+                    // A link the delete's row made by name stays one, unless the bytes now prove it.
+                    linkBasis = if (onDrive) LinkBasis.PROVEN
+                        else prior?.takeIf { it.cloudFileId == relink.cloudLinkId }?.linkBasis ?: LinkBasis.PROVEN,
+                )
+            }
     }
 }
 
@@ -229,4 +307,5 @@ class UndoBarViewModel @Inject constructor(
     val undoFailed: SharedFlow<Int> = undoController.undoFailed
     fun undo() = undoController.undo()
     fun dismiss() = undoController.dismiss()
+    fun onNavigated() = undoController.onNavigated()
 }

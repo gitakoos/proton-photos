@@ -25,6 +25,9 @@ package eu.akoos.photos.presentation.gallery
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import kotlinx.coroutines.delay
 
@@ -39,8 +42,8 @@ val LocalCoverThumbnailRequester: ProvidableCompositionLocal<(String) -> Unit> =
 internal fun isCloudPhotoKey(key: String): Boolean = !key.contains("://")
 
 /** The cloud cover a face tile must ask for: a linkId with no decrypted thumbnail yet, else null. */
-internal fun coverKeyToRequest(key: String?, urls: Map<String, String>): String? =
-    key?.takeIf { isCloudPhotoKey(it) && urls[it] == null }
+internal fun coverKeyToRequest(key: String?, decryptedUrl: String?): String? =
+    key?.takeIf { isCloudPhotoKey(it) && decryptedUrl == null }
 
 /**
  * The image model for a face tile's [photoKey]: the decrypted thumbnail of a cloud photo, or a device
@@ -50,8 +53,11 @@ internal fun coverKeyToRequest(key: String?, urls: Map<String, String>): String?
  */
 @Composable
 fun rememberFaceCoverModel(photoKey: String?): Any? {
-    val urls = LocalThumbnailUrls.current.value
-    val pending = coverKeyToRequest(photoKey, urls)
+    val allUrls = LocalThumbnailUrls.current
+    // Reads only this tile's entry, so the tile recomposes when its own URL lands and not on every
+    // other decrypt.
+    val ownUrl by remember(photoKey, allUrls) { derivedStateOf { photoKey?.let { allUrls.value[it] } } }
+    val pending = coverKeyToRequest(photoKey, ownUrl)
     if (pending != null) {
         val request = LocalCoverThumbnailRequester.current
         LaunchedEffect(pending) {
@@ -60,7 +66,7 @@ fun rememberFaceCoverModel(photoKey: String?): Any? {
         }
         return null
     }
-    return photoKey?.let { urls[it] ?: it }
+    return photoKey?.let { ownUrl ?: it }
 }
 
 private const val COVER_REQUEST_DELAY_MS = 120L

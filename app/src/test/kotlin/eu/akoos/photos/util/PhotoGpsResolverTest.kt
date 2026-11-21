@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.util
 
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -65,5 +66,25 @@ class PhotoGpsResolverTest {
         assertEquals(false, eu.akoos.photos.data.db.entity.isUsableGpsFix(Double.NaN, 10.0))
         assertEquals(true, eu.akoos.photos.data.db.entity.isUsableGpsFix(0.0, 10.0))
         assertEquals(true, eu.akoos.photos.data.db.entity.isUsableGpsFix(47.4979, 19.0402))
+    }
+
+    @Test
+    fun `a downloaded file's fix is stored for a cloud photo with no row`() {
+        assertEquals(
+            PhotoLocationEntity("link-1", "user-1", 41.3874, 2.1686),
+            PhotoGpsResolver.fileFixToStore(null, 41.3874 to 2.1686, "user-1", "link-1"),
+        )
+    }
+
+    @Test
+    fun `a row from the Drive attributes is never replaced by the file's fix`() {
+        val existing = PhotoLocationEntity("link-1", "user-1", 40.4168, -3.7038)
+        assertNull(PhotoGpsResolver.fileFixToStore(existing, 41.3874 to 2.1686, "user-1", "link-1"))
+    }
+
+    @Test
+    fun `a file with no fix or a 0, 0 fix stores nothing`() {
+        assertNull(PhotoGpsResolver.fileFixToStore(null, null, "user-1", "link-1"))
+        assertNull(PhotoGpsResolver.fileFixToStore(null, 0.0 to 0.0, "user-1", "link-1"))
     }
 }

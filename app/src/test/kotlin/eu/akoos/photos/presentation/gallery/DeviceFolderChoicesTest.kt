@@ -36,12 +36,12 @@ import org.junit.Test
  */
 class DeviceFolderChoicesTest {
 
-    private fun item(uri: String, bucket: String?, dateTaken: Long): LocalMediaItem =
+    private fun item(uri: String, bucket: String?, dateTaken: Long, mimeType: String = "image/jpeg"): LocalMediaItem =
         LocalMediaItem(
             uri = uri,
             dateTaken = dateTaken,
             displayName = uri,
-            mimeType = "image/jpeg",
+            mimeType = mimeType,
             sizeBytes = 0,
             bucketName = bucket,
         )
@@ -113,6 +113,22 @@ class DeviceFolderChoicesTest {
         )
         assertEquals(1, choices.size)
         assertEquals("Trip", choices.single().name)
+    }
+
+    @Test
+    fun `videos are counted apart within the folder total`() {
+        val choices = deviceFolderChoices(
+            listOf(
+                item("p1", "Camera", 1),
+                item("p2", "Camera", 2),
+                item("v1", "Camera", 3, mimeType = "video/mp4"),
+                item("h1", "Home", 4),
+            ),
+        )
+        val camera = choices.first { it.name == "Camera" }
+        assertEquals(3, camera.count)
+        assertEquals(1, camera.videoCount)
+        assertEquals(0, choices.first { it.name == "Home" }.videoCount)
     }
 
     @Test

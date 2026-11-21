@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.hidden
 
+import eu.akoos.photos.data.localcrypto.VaultFiles
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.util.HiddenCaptureTime
 import java.io.File
 import java.text.SimpleDateFormat
@@ -56,10 +58,25 @@ import javax.inject.Singleton
 /** done/total of a folder-wide move in or out of the vault, so both directions report one shape. */
 data class HiddenFolderProgress(val done: Int, val total: Int, val restoring: Boolean)
 
-/** What an involuntary sign-out took back to the device: how many photos, and which vault files are
- *  still there because the write failed. [zipName] is the password-protected zip in Downloads the photos
- *  went into when a vault password is set; they are then in that zip and not in the gallery. */
-data class HiddenRescue(val moved: Int, val stillInVault: Set<String>, val zipName: String? = null) {
+/** What a sign-out took back to the device: how many photos, and which vault files are still there
+ *  because the write failed. [zipName] is the password-protected zip in Downloads the photos went into
+ *  when a vault password is set; they are then in that zip and not in the gallery.
+ *  [keptForPassword]: a password is set but cannot be read, so the photos stayed in the vault rather
+ *  than going to the gallery unprotected. [zipFailed]: the password reads, but the zip could not be
+ *  written, checked or put in Downloads, so the photos stayed in the vault.
+ *  [wipeable] is every vault file the vault wipe may now destroy, because its photo is safe elsewhere:
+ *  in the zip, or in Drive by Drive's own answer. No other file may be destroyed.
+ *  [keptForDrive] are the photos recorded with a Drive copy that Drive did not confirm: they stay in the
+ *  vault with their records and show in Hidden again after the next sign-in. */
+data class HiddenRescue(
+    val moved: Int,
+    val stillInVault: Set<String>,
+    val zipName: String? = null,
+    val keptForPassword: Boolean = false,
+    val zipFailed: Boolean = false,
+    val wipeable: Set<String> = emptySet(),
+    val keptForDrive: Set<String> = emptySet(),
+) {
     companion object {
         /** The gallery folder rescued photos land in, apart from every folder the user chose. The suffix
          *  names why the folder exists, so another cause can later get a folder of its own. */
@@ -98,6 +115,7 @@ class HiddenVaultRestorer @Inject constructor(
     private val photoLocationDao: PhotoLocationDao,
     private val vaultPassword: VaultPasswordStore,
     private val zipPublisher: VaultZipPublisher,
+    private val driveCopies: HiddenDriveCopyCheck,
 ) {
 
     private val runs = HiddenRestoreRuns(appScope)
@@ -162,11 +180,11 @@ class HiddenVaultRestorer @Inject constructor(
      * Detached for the same reason a reveal is: the bytes go first, so a caller that goes away
      * mid-delete would otherwise leave the index entry and the folder record standing over nothing.
      */
-    suspend fun deletePhoto(uri: String): Boolean = runs.detached {
+    suspend fun deletePhoto(uri: String, shownAt: Long? = null): Boolean = runs.detached {
         if (!hiddenStorage.isHiddenUri(uri)) return@detached false
         val buckets = recordedBucketsOf(listOf(uri))
         val cloudLinkId = recordedCloudLinkId(uri)
-        journal.discard(listOf(uri))
+        journal.discard(listOf(uri), shownAt)
         context.settingsDataStore.edit { p ->
             p[SettingsKeys.HIDDEN_PHOTO_URIS] = (p[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) - uri
         }
@@ -507,36 +525,76 @@ class HiddenVaultRestorer @Inject constructor(
 
     /**
      * Take every vault photo with no Drive copy back to the device, into the gallery [folder] of its
-     * own, for a sign-out the user did not ask for.
+     * own (or the password-protected zip), for a sign-out.
      *
      * A forced logout cannot warn, and for a photo that only ever existed on this device the vault
-     * file is the only copy, the hide having deleted the original. Those come back; the files that
-     * remain are ones Drive can return. A folder of their own keeps them apart from photos the user
-     * took out of hiding, and each keeps the name and capture date it was hidden under.
+     * file is the only copy, the hide having deleted the original. Those come back. A photo the vault
+     * recorded a Drive copy for stays out of the gallery: Drive is asked as [userId] whether it still
+     * holds that copy, and only a confirmed one may lose its vault file. One Drive does not confirm (the
+     * copy trashed since the hide, or a session that already ended) stays in the vault. A folder of their
+     * own keeps the photos apart from photos the user took out of hiding, and each keeps the name and
+     * capture date it was hidden under.
      *
-     * Answers how many came back and which vault files are still there because the write failed, so
-     * the caller wipes around them instead of over them. Detached whole, for the reason a single
-     * reveal is: the session ending is also what ends the screen that would otherwise own the run.
+     * [busy] are the files a hide was moving when the sign-out began (see
+     * [HiddenVaultJournal.beginSignOut]); they are left in the vault untouched.
+     *
+     * Answers how many came back, which vault files are still there because the write failed, and the
+     * files the wipe may destroy; a file outside that last set stays. Detached whole, for the reason a
+     * single reveal is: the session ending is also what ends the screen that would otherwise own the run.
      */
-    suspend fun rescueDeviceOnly(folder: String = HiddenRescue.FOLDER): HiddenRescue = runs.detached {
+    suspend fun rescueDeviceOnly(
+        folder: String = HiddenRescue.FOLDER,
+        userId: UserId? = null,
+        busy: Set<String> = emptySet(),
+    ): HiddenRescue = runs.detached {
         val prefs = context.settingsDataStore.data.first()
-        val paired = HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
-        val targets = HiddenVaultDecisions.deviceOnlyVaultUris(
-            blobUris = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() },
-            pairedUris = paired,
+        val cloudIdByUri = HiddenVaultDecisions.driveBacked(
+            HiddenVaultDecisions.cloudIdsByUri(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()),
+            edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
         )
-        if (targets.isEmpty()) return@detached HiddenRescue(moved = 0, stillInVault = emptySet())
+        val blobs = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+        val recordedLinks = (blobs - busy).mapNotNull { cloudIdByUri[it] }
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = blobs,
+            cloudIdByUri = cloudIdByUri,
+            liveCloudIds = driveCopies.liveOf(userId, recordedLinks),
+            busy = busy,
+        )
+        val targets = plan.rescue
+        val inDrive = plan.inDrive
+        val keptForDrive = plan.unconfirmedInDrive
+        if (targets.isEmpty()) {
+            return@detached HiddenRescue(
+                moved = 0,
+                stillInVault = emptySet(),
+                wipeable = inDrive,
+                keptForDrive = keptForDrive,
+            )
+        }
         val buckets = recordedBucketsOf(targets)
-        // With a vault password the photos go into an encrypted zip and not back into the gallery. Any
-        // failure on that route falls through to the plain rescue below, so nothing is ever lost to it.
-        val password = vaultPassword.read()
-        if (password != null) {
-            val zipped = try {
-                zipRescue(targets, password, folder, buckets)
-            } finally {
-                password.fill('\u0000')
+        // With a vault password the photos go into an encrypted zip and never back into the gallery
+        // unprotected: a password that cannot be read now, or a zip that could not be made, leaves them in the
+        // vault, which the wipe then spares.
+        val stored = vaultPassword.readState()
+        when (HiddenVaultDecisions.rescueRoute(stored)) {
+            RescueRoute.ZIP -> {
+                val password = (stored as StoredVaultPassword.Readable).password
+                val zipped = try {
+                    zipRescue(targets, password, folder, buckets)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    null
+                } finally {
+                    password.fill('\u0000')
+                }
+                val outcome = zipped?.copy(wipeable = inDrive + targets)
+                    ?: HiddenVaultDecisions.zipFailed(targets, wipeable = inDrive)
+                return@detached outcome.copy(keptForDrive = keptForDrive)
             }
-            if (zipped != null) return@detached zipped
+            RescueRoute.KEEP_IN_VAULT ->
+                return@detached HiddenVaultDecisions.keptForPassword(targets, wipeable = inDrive)
+                    .copy(keptForDrive = keptForDrive)
+            RescueRoute.GALLERY -> Unit
         }
         val tally = RevealTally()
         HiddenVaultDiagnostics.revealStarted(targets.size)
@@ -544,14 +602,48 @@ class HiddenVaultRestorer @Inject constructor(
         val stillInVault = mutableSetOf<String>()
         var moved = 0
         for (uri in targets) {
-            val outcome = restoreOne(uri, tally, folderOverride = folder)
-            if (!outcome.clearsRecords) kept += uri
-            if (outcome.revealed) moved++ else if (hiddenStorage.hasBlob(uri)) stillInVault += uri
+            // One photo failing in a way the restore did not foresee is that photo's failure alone: it
+            // stays in the vault and the others still come back.
+            val outcome = try {
+                restoreOne(uri, tally, folderOverride = folder)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Log.w(TAG, "rescue: one photo failed: ${e.javaClass.simpleName}")
+                null
+            }
+            if (outcome == null || !outcome.clearsRecords) kept += uri
+            if (outcome?.revealed == true) moved++
+            else if (withContext(Dispatchers.IO) { hiddenStorage.hasBlob(uri) }) stillInVault += uri
         }
         journal.forget(targets - kept)
         clearEmptiedFolders(buckets)
         HiddenVaultDiagnostics.revealFinished(moved, targets.size - moved, tally)
-        HiddenRescue(moved = moved, stillInVault = stillInVault)
+        HiddenRescue(moved = moved, stillInVault = stillInVault, wipeable = inDrive, keptForDrive = keptForDrive)
+    }
+
+    /**
+     * The vault files a sign-out the user confirmed with "delete" destroys, for the files the
+     * confirmation counted ([confirmed]), less the ones a hide is still moving ([busy]).
+     *
+     * A photo the user was told Drive holds is destroyed only when Drive confirms that now, asked as
+     * [userId]; one it does not confirm stays in the vault, and is answered in
+     * [UserDeletePlan.unconfirmedInDrive] so the user can be told.
+     */
+    suspend fun userDeletePlan(confirmed: Set<String>, userId: UserId?, busy: Set<String>): UserDeletePlan {
+        val prefs = context.settingsDataStore.data.first()
+        val cloudIdByUri = HiddenVaultDecisions.driveBacked(
+            HiddenVaultDecisions.cloudIdsByUri(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()),
+            edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
+        )
+        val blobs = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+        val asked = (confirmed.intersect(blobs) - busy).mapNotNull { cloudIdByUri[it] }
+        return HiddenVaultDecisions.userDeletePlan(
+            confirmed = confirmed,
+            blobUris = blobs,
+            cloudIdByUri = cloudIdByUri,
+            liveCloudIds = driveCopies.liveOf(userId, asked),
+            busy = busy,
+        )
     }
 
     /**
@@ -576,7 +668,13 @@ class HiddenVaultRestorer @Inject constructor(
         if (files.size != targets.size) return@withContext null
         val names = VaultZip.uniqueNames(files.map { it.third }) { "photo_$it" }
         val entries = files.mapIndexed { i, (_, file, _) ->
-            VaultZipEntry(file, names[i], HiddenCaptureTime.parse(file.name))
+            VaultZipEntry(
+                file,
+                names[i],
+                HiddenCaptureTime.parse(file.name),
+                open = { VaultFiles.openPlain(context, file) },
+                plainLength = VaultFiles.plainLength(file),
+            )
         }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val zipName = "${folder}_$stamp.zip"
@@ -600,6 +698,7 @@ class HiddenVaultRestorer @Inject constructor(
                 SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
                 SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
                 SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+                SettingsKeys.HIDDEN_URI_EDITED,
             )) {
                 val existing = p[key] ?: continue
                 p[key] = HiddenVaultRecords.dropped(existing, targets.toSet())
@@ -739,6 +838,7 @@ internal fun dropRevealedRecords(prefs: MutablePreferences, uri: String, shownAt
         SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
         SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
         SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+        SettingsKeys.HIDDEN_URI_EDITED,
     )) {
         val existing = prefs[key] ?: continue
         prefs[key] = HiddenVaultRecords.dropped(existing, setOf(uri))

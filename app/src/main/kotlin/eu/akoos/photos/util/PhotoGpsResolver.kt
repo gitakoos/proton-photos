@@ -80,7 +80,7 @@ object PhotoGpsResolver {
     fun videoGps(context: Context, uri: String): Pair<Double, Double>? {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, Uri.parse(uri))
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
             val loc = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION) ?: return null
             parseIso6709(loc)
         } catch (e: CancellationException) {
@@ -103,6 +103,22 @@ object PhotoGpsResolver {
         val lat = m.groupValues[1].toDoubleOrNull() ?: return null
         val lng = m.groupValues[2].toDoubleOrNull() ?: return null
         return (lat to lng).takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng) }
+    }
+
+    /**
+     * The map row to store for a downloaded cloud photo whose file carries a fix: only when the photo has
+     * no row yet, so a place its Drive attributes gave (or a correction) is never overwritten. A photo
+     * another uploader sent without a Location attribute is plotted this way once it is downloaded.
+     */
+    fun fileFixToStore(
+        existing: eu.akoos.photos.data.db.entity.PhotoLocationEntity?,
+        fix: Pair<Double, Double>?,
+        userId: String,
+        linkId: String,
+    ): eu.akoos.photos.data.db.entity.PhotoLocationEntity? {
+        if (existing != null || fix == null) return null
+        if (!eu.akoos.photos.data.db.entity.isUsableGpsFix(fix.first, fix.second)) return null
+        return eu.akoos.photos.data.db.entity.PhotoLocationEntity(linkId, userId, fix.first, fix.second)
     }
 
     /**

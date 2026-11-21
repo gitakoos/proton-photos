@@ -96,11 +96,11 @@ class AssignFacesToPersonUseCase @Inject constructor(
         if (faces.isEmpty()) return -1L
         val person = when (target) {
             is Target.Existing -> personDao.personById(target.personId)
-                ?.takeIf { it.userId == account && !it.isOther }
+                ?.takeIf { it.userId == account && !it.isOther && !HiddenPersonToken.isToken(it.displayName) }
                 ?: return -1L
             is Target.Named -> {
                 val typed = target.name.trim()
-                if (typed.isEmpty()) return -1L
+                if (typed.isEmpty() || HiddenPersonToken.isToken(typed)) return -1L
                 findByName(account, typed) ?: createPerson(account, typed, faces)
             }
         }

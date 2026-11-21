@@ -86,6 +86,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -128,7 +130,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.PhotoCellInputs
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.theme.Accent
@@ -430,6 +432,9 @@ fun SelectionDrawer(
     actions: List<SelectionAction>,
     onDismiss: () -> Unit,
     contentScrolling: Boolean = false,
+    // Read inside the drawer instead of passed as a value, so a screen that hands over a scroll state
+    // read does not recompose itself each time scrolling starts or stops. Wins over [contentScrolling].
+    contentScrollingProvider: (() -> Boolean)? = null,
     cacheThumbnails: Boolean = true,
     modifier: Modifier = Modifier,
     selectAllCount: Int? = null,
@@ -465,7 +470,7 @@ fun SelectionDrawer(
             actions = shownActions,
             opened = visible,
             onDismiss = onDismiss,
-            contentScrolling = contentScrolling,
+            contentScrolling = contentScrollingProvider ?: { contentScrolling },
             cacheThumbnails = cacheThumbnails,
             selectAllCount = if (live) selectAllCount else frozen.selectAllCount,
             onSelectAll = if (live) onSelectAll else frozen.onSelectAll,
@@ -487,7 +492,7 @@ private fun SelectionDrawerBody(
     actions: List<SelectionAction>,
     opened: Boolean,
     onDismiss: () -> Unit,
-    contentScrolling: Boolean,
+    contentScrolling: () -> Boolean,
     cacheThumbnails: Boolean,
     selectAllCount: Int?,
     onSelectAll: (() -> Unit)?,
@@ -590,8 +595,11 @@ private fun SelectionDrawerBody(
     // Scrolling what sits behind the drawer collapses it, so reaching past it to carry on through
     // the grid needs no deliberate pull or tap first. The selection is untouched: this is the list
     // getting out of the way, not the selection ending.
-    LaunchedEffect(contentScrolling) {
-        if (contentScrolling && reveal.value > 0f) reveal.animateTo(0f, tween(240))
+    val scrollingNow by rememberUpdatedState(contentScrolling)
+    LaunchedEffect(Unit) {
+        snapshotFlow { scrollingNow() }.collect { scrolling ->
+            if (scrolling && reveal.value > 0f) reveal.animateTo(0f, tween(240))
+        }
     }
 
     // The one thumbnail blown up for a closer look, held by its stable key so only ever one is.
@@ -644,6 +652,8 @@ private fun SelectionDrawerBody(
 
     Column(
         modifier = Modifier
+            // Every snackbar keeps above the drawer, at rest and opened, so none lands on its buttons.
+            .snackbarObstacle()
             .fillMaxWidth()
             // A shadow lifts the sheet off the grid instead of a hairline border, matching the borderless
             // elevated sheets the rest of the app uses (the modal bottom sheets and the import bars).
@@ -1182,7 +1192,8 @@ private fun SelectionThumb(
     cacheThumbnails: Boolean,
     onClick: () -> Unit,
 ) {
-    val imageData = inputs.imageData ?: LocalThumbnailUrls.current.value[inputs.stableKey]
+    val storeImageData by rememberStoreThumbnailUrl(inputs.stableKey)
+    val imageData = inputs.imageData ?: storeImageData
     val edge by animateDpAsState(
         targetValue = if (enlarged) THUMB_PREVIEW_SIZE else THUMB_SIZE,
         animationSpec = tween(THUMB_PREVIEW_MS),

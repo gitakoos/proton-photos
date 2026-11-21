@@ -137,7 +137,8 @@ internal class PlacementCentroids(
  *
  * A name the user has given a person is carried onto whichever new cluster inherits most of that
  * person's faces, so a rename survives the rebuild a newly indexed photo triggers rather than
- * reverting to an unnamed cluster.
+ * reverting to an unnamed cluster. A name no cluster takes keeps its person, with no face, while photos
+ * were added to it by hand ([keepHandAddedPeople]).
  *
  * The merge needs every embedding at once, so the pass holds them together, each unpacked to its float
  * vector as its page of rows is read ([loadRegroupInput]); the rows themselves are never all held, so the
@@ -277,7 +278,11 @@ class ClusterFacesUseCase @Inject constructor(
             faceDao.clearAssignments(account)
             personDao.clearForUser(account)
             clusterSummaryDao.clearForUser(account)
-            val assign = finalAssignment ?: return@withTransaction
+            // A named person left with no face still stands for the photos added to it by hand, under its id.
+            val assign = finalAssignment ?: run {
+                keepHandAddedPeople(appDatabase, account) { oldIdByName[it] }
+                return@withTransaction
+            }
 
             // Group each cluster's face ids, keeping the clearest face (the score-descending input
             // order) first so it becomes the person's cover.
@@ -366,6 +371,7 @@ class ClusterFacesUseCase @Inject constructor(
                 createdClusters.add(kept.size to (name != null))
                 if (reuseId != null) keptIdCount++
             }
+            keepHandAddedPeople(appDatabase, account) { name -> oldIdByName[name]?.takeIf { it !in usedPersonIds } }
             // Refill the centroid cache from the final people, so an incremental pass can place a newly
             // indexed face against them without re-reading every embedding.
             clusterSummaryDao.upsertAll(summaryRows)

@@ -31,8 +31,11 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import java.util.Collections
 import java.util.UUID
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -43,6 +46,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -54,8 +58,7 @@ import me.proton.core.network.data.ApiProvider
 import me.proton.core.network.data.di.BaseProtonApiUrl
 import me.proton.core.network.domain.session.SessionProvider
 import me.proton.core.user.domain.repository.UserAddressRepository
-import me.proton.drive.sdk.CorePublicAddressResolver
-import me.proton.drive.sdk.CoreUserAddressResolver
+import me.proton.drive.sdk.ClientHost
 import me.proton.drive.sdk.LoggerProvider
 import me.proton.drive.sdk.ProtonDriveClient
 import me.proton.drive.sdk.ProtonDriveSdk
@@ -71,9 +74,8 @@ class SdkClientClosedException : IllegalStateException("Drive client closed")
 
 /**
  * Builds and caches the Proton Drive SDK clients per user: the My files [ProtonDriveClient] and the
- * Photos [ProtonPhotosClient], each made on first use. The auth
- * dependencies come from the sign-in stack already in the graph, and the address resolvers ship inside
- * the SDK, so no extra Proton wiring is needed.
+ * Photos [ProtonPhotosClient], each made on first use. Their requests and
+ * address lookups go through the sign-in stack already in the graph, so no extra Proton wiring is needed.
  *
  * Every call runs through [withClient] or [withPhotosClient], which count it as in flight, so a sign-out
  * never frees a native client under a call: [close] refuses the account from then on, and [remove] waits
@@ -126,11 +128,40 @@ class SdkDriveClientProvider @Inject constructor(
         val caller = currentCoroutineContext()[Job]
         caller?.let { waitingCallers.add(it) }
         try {
-            return block(held.client)
+            return withContext(HeldCall(held)) { block(held.client) }
         } finally {
             caller?.let { waitingCallers.remove(it) }
             withContext(NonCancellable) { release(held) }
         }
+    }
+
+    /**
+     * Starts [block] in the background on the client the calling code runs inside ([withClient] /
+     * [withPhotosClient]), counted as one more call on it, so the client is never closed under [block] even
+     * after the calling code returns. Null, with nothing started, outside such a call or once its client is
+     * closed. For native work that has to finish on its own, such as an upload's draft being dropped.
+     */
+    suspend fun launchHoldingClient(block: suspend () -> Unit): Job? {
+        val held = currentCoroutineContext()[HeldCall]?.held ?: return null
+        if (!mutex.withLock { held.lease.extend() }) return null
+        // Started only once it is held in [waitingCallers], like a caller, so its pending requests stay
+        // reachable to the end. Its scope cannot be cancelled before it starts: that happens only once
+        // the client's last call is out, and this one is counted in.
+        val job = held.scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "background client work failed: ${e.javaClass.simpleName}")
+            } finally {
+                currentCoroutineContext()[Job]?.let { waitingCallers.remove(it) }
+                withContext(NonCancellable) { release(held) }
+            }
+        }
+        waitingCallers.add(job)
+        job.start()
+        return job
     }
 
     /**
@@ -160,31 +191,29 @@ class SdkDriveClientProvider @Inject constructor(
                 bindingsLanguage = "kotlin",
                 uid = sdkClientUid(installClientUid(), userId.id),
             )
-            val userAddressResolver = CoreUserAddressResolver(
-                userId = userId,
-                cryptoContext = cryptoContext,
-                userAddressRepository = userAddressRepository,
-            )
-            val publicAddressResolver = CorePublicAddressResolver(
-                userId = userId,
-                publicAddressRepository = publicAddressRepository,
+            val host = ClientHost(
+                userId = userId.id,
+                httpClient = CoreSdkHttpClient(userId, apiProvider),
+                userAddressResolver = CoreUserAddressResolver(
+                    userId = userId,
+                    cryptoContext = cryptoContext,
+                    userAddressRepository = userAddressRepository,
+                ),
+                publicAddressResolver = CorePublicAddressResolver(
+                    userId = userId,
+                    publicAddressRepository = publicAddressRepository,
+                ),
             )
             val client: ProtonSdkClient = when (kind) {
                 ClientKind.DRIVE -> ProtonDriveSdk.protonDriveClientCreate(
                     coroutineScope = scope,
-                    userId = userId,
-                    apiProvider = apiProvider,
+                    host = host,
                     request = request,
-                    userAddressResolver = userAddressResolver,
-                    publicAddressResolver = publicAddressResolver,
                 )
                 ClientKind.PHOTOS -> ProtonDriveSdk.protonPhotosClientCreate(
                     coroutineScope = scope,
-                    userId = userId,
-                    apiProvider = apiProvider,
+                    host = host,
                     request = request,
-                    userAddressResolver = userAddressResolver,
-                    publicAddressResolver = publicAddressResolver,
                 )
             }
             return HeldClient(client, scope)
@@ -324,6 +353,11 @@ class SdkDriveClientProvider @Inject constructor(
         val lease = SdkClientLease()
     }
 
+    /** The client call a coroutine runs inside, so work it starts in the background can keep that client open. */
+    private class HeldCall(val held: HeldClient) : AbstractCoroutineContextElement(HeldCall) {
+        companion object Key : CoroutineContext.Key<HeldCall>
+    }
+
     private companion object {
         const val TAG = "SdkDriveClient"
 
@@ -368,6 +402,13 @@ internal class SdkClientLease {
         if (retired) return false
         inFlight++
         _idle.value = false
+        return true
+    }
+
+    /** Counts one more call in while another is still in flight, retired or not. False once nothing holds it. */
+    fun extend(): Boolean {
+        if (inFlight == 0 || closed) return false
+        inFlight++
         return true
     }
 

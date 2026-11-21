@@ -27,6 +27,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
+import eu.akoos.photos.data.api.dto.LinkPhotoDto
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -60,6 +61,7 @@ class ImportDriveMatcherTest {
 
     private lateinit var db: AppDatabase
     private lateinit var links: LinkDetailHelpers
+    private lateinit var repo: DrivePhotoRepository
     private lateinit var matcher: ImportDriveMatcher
     private val user = UserId("user-1")
     private val captureMs = 1_700_000_000_000L
@@ -71,7 +73,7 @@ class ImportDriveMatcherTest {
     fun setUp() {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         db = Room.inMemoryDatabaseBuilder(ctx, AppDatabase::class.java).allowMainThreadQueries().build()
-        val repo = mockk<DrivePhotoRepository>()
+        repo = mockk()
         every { repo.cloudContentHash(any()) } answers { "hash-${firstArg<String>()}" }
         coEvery { repo.getVolumeId(any()) } returns "vol-1"
         links = mockk()
@@ -119,6 +121,87 @@ class ImportDriveMatcherTest {
     )
 
     private fun live(linkId: String, state: Int) = BatchLinkDto(link = LinkCoreDto(linkId = linkId, type = 2, state = state))
+
+    private fun still(linkId: String, vararg related: String) = BatchLinkDto(
+        link = LinkCoreDto(linkId = linkId, type = 2, state = 1),
+        photo = LinkPhotoDto(contentHash = "hash-still", relatedPhotosLinkIds = related.toList()),
+    )
+
+    private fun related(linkId: String, contentHash: String, state: Int = 1) = BatchLinkDto(
+        link = LinkCoreDto(linkId = linkId, type = 2, state = state),
+        photo = LinkPhotoDto(contentHash = contentHash),
+    )
+
+    private suspend fun keptWith(stillLinkId: String = "link-still") =
+        matcher.videosKeptWith(user, stillLinkId, listOf("raw", "stamped"))
+
+    /** Drive's answer for every link in [held], looked up by id. */
+    private fun driveHolds(vararg held: BatchLinkDto) {
+        val all = held.associateBy { it.link.linkId }
+        coEvery { links.batchFetchLinkDetails(user, "vol-1", any(), true) } answers {
+            thirdArg<List<String>>().mapNotNull { id -> all[id]?.let { id to it } }.toMap()
+        }
+    }
+
+    @Test
+    fun `a Live video kept with its still in Drive is found by its bytes`() = runBlocking {
+        driveHolds(
+            still("link-still", "link-other", "link-video"),
+            related("link-other", "hash-else"),
+            related("link-video", "hash-stamped"),
+        )
+        assertEquals(ImportDriveMatcher.KeptVideos(any = true, sameLinkId = "link-video"), keptWith())
+    }
+
+    @Test
+    fun `a still keeping a video of other bytes keeps a video, but not this one`() = runBlocking {
+        driveHolds(still("link-still", "link-video"), related("link-video", "hash-else"))
+        assertEquals(ImportDriveMatcher.KeptVideos(any = true, sameLinkId = null), keptWith())
+    }
+
+    @Test
+    fun `a video in the trash is not kept, even with the same bytes`() = runBlocking {
+        driveHolds(still("link-still", "link-video"), related("link-video", "hash-raw", state = 2))
+        assertEquals(ImportDriveMatcher.KeptVideos(any = false, sameLinkId = null), keptWith())
+    }
+
+    @Test
+    fun `a still with nothing kept with it keeps no video`() = runBlocking {
+        driveHolds(still("link-still"))
+        assertEquals(ImportDriveMatcher.KeptVideos(any = false, sameLinkId = null), keptWith())
+    }
+
+    @Test
+    fun `a still Drive no longer has keeps no video`() = runBlocking {
+        driveHolds()
+        assertEquals(ImportDriveMatcher.KeptVideos(any = false, sameLinkId = null), keptWith())
+    }
+
+    @Test
+    fun `a kept link Drive gives no detail for counts as a kept video`() = runBlocking {
+        driveHolds(still("link-still", "link-unread"))
+        assertEquals(ImportDriveMatcher.KeptVideos(any = true, sameLinkId = null), keptWith())
+    }
+
+    @Test
+    fun `without a content hash the kept videos still count, and none matches`() = runBlocking {
+        every { repo.cloudContentHash(any()) } returns null
+        driveHolds(still("link-still", "link-video"), related("link-video", "hash-raw"))
+        assertEquals(ImportDriveMatcher.KeptVideos(any = true, sameLinkId = null), keptWith())
+    }
+
+    @Test
+    fun `a failed check of the kept videos throws instead of sending the video again`() = runBlocking {
+        coEvery { links.batchFetchLinkDetails(any(), any(), any(), any()) } throws IOException("offline")
+        val thrown = runCatching { keptWith() }.exceptionOrNull()
+        assertTrue(thrown is ImportLinkCheckException)
+    }
+
+    @Test
+    fun `finding an entry asks Drive for no related photos`() = runBlocking {
+        assertNull(find(listOf("raw"), name = "IMG_1.mp4", mime = "video/mp4"))
+        coVerify(exactly = 0) { links.batchFetchLinkDetails(any(), any(), any(), any()) }
+    }
 
     @Test
     fun `the exact bytes of any key are a hit`() = runBlocking {

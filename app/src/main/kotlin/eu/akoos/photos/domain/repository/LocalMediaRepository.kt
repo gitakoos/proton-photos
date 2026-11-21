@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.repository
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import eu.akoos.photos.domain.entity.DeviceFileStamp
 import eu.akoos.photos.domain.entity.LocalMediaItem
 
 /**
@@ -106,6 +107,14 @@ interface LocalMediaRepository {
     suspend fun confirmedGone(uris: Collection<String>): Set<String>
 
     suspend fun queryByUri(uri: String): LocalMediaItem?
+
+    /**
+     * The size and modified time the device holds for the file at [uri], or null when it cannot be
+     * looked up. Unlike [queryByUri] it carries the real modified time, which tells a file written after
+     * its backup from one left as it was.
+     */
+    suspend fun fileStamp(uri: String): DeviceFileStamp? =
+        queryByUri(uri)?.let { DeviceFileStamp(it.sizeBytes, it.dateModified) }
 
     /**
      * The device photos of one MediaStore bucket, newest first.

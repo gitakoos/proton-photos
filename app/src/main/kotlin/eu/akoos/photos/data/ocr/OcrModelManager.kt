@@ -35,6 +35,7 @@ package eu.akoos.photos.data.ocr
 
 import android.content.Context
 import android.util.Log
+import eu.akoos.photos.data.ml.modelSideLoadDir
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -103,9 +104,9 @@ class OcrModelManager(context: Context) {
     /** App-private cache for downloaded models. */
     private val modelsDir: File get() = File(appContext.filesDir, OcrModelAssets.DIRECTORY)
 
-    /** Side-load root, matching the debug spike's convention so one adb push serves both. */
+    /** Side-load root (debug builds only), matching the debug spike's convention so one adb push serves both. */
     private val sideLoadDir: File?
-        get() = appContext.getExternalFilesDir(null)?.let { File(it, OcrModelAssets.DIRECTORY) }
+        get() = modelSideLoadDir(appContext, OcrModelAssets.DIRECTORY)
 
     /**
      * The verified files of [component] already on this device, or null when any of them has to be

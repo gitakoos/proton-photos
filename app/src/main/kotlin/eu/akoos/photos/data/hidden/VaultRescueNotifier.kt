@@ -35,7 +35,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Tells the user why hidden photos turned up in the gallery after a sign-out they did not ask for.
+ * Tells the user what happened to hidden photos after a sign-out, forced or chosen.
  *
  * The photos come back into a folder of their own, and without a word the folder would read as
  * photos that appeared from nowhere. Its own channel, so the notice can be silenced on its own.
@@ -45,8 +45,31 @@ class VaultRescueNotifier @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    /** [zipName] is the zip in Downloads the photos went into, or null when they went to the gallery. */
-    fun notifyMoved(zipName: String? = null) {
+    /**
+     * Posts [notice]. [afterUserSignOut] is true for a sign-out the user asked for, whose notices are only
+     * ever about photos that stayed in the app; a forced logout's notice opens with the sign-out itself.
+     */
+    fun notify(notice: RescueNotice, afterUserSignOut: Boolean = false) {
+        val text = when (notice) {
+            is RescueNotice.Moved ->
+                if (notice.zipName != null) context.getString(R.string.vault_rescue_zip_text, notice.zipName)
+                else context.getString(R.string.vault_rescue_text, HiddenRescue.FOLDER)
+            RescueNotice.MovedPartly ->
+                if (afterUserSignOut) context.getString(R.string.vault_signout_kept_text)
+                else context.getString(R.string.vault_rescue_partial_text, HiddenRescue.FOLDER)
+            RescueNotice.NotMoved -> context.getString(R.string.vault_rescue_not_moved_text)
+            RescueNotice.KeptForPassword -> context.getString(R.string.vault_rescue_kept_text)
+            RescueNotice.ZipFailed -> context.getString(R.string.vault_rescue_zip_failed_text)
+            RescueNotice.KeptUnconfirmedInDrive -> context.getString(R.string.vault_signout_kept_drive_text)
+        }
+        val title = if (afterUserSignOut) context.getString(R.string.vault_signout_kept_title)
+        else context.getString(R.string.vault_rescue_title)
+        val id = if (notice == RescueNotice.KeptUnconfirmedInDrive) NotificationIds.VAULT_KEPT_FOR_DRIVE
+        else NotificationIds.VAULT_RESCUE
+        post(text, title, id)
+    }
+
+    private fun post(text: String, title: String, id: Int) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         ensureNotificationChannel(
             context,
@@ -66,14 +89,9 @@ class VaultRescueNotifier @Inject constructor(
             launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val text = if (zipName != null) {
-            context.getString(R.string.vault_rescue_zip_text, zipName)
-        } else {
-            context.getString(R.string.vault_rescue_text, HiddenRescue.FOLDER)
-        }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(context.getString(R.string.vault_rescue_title))
+            .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
@@ -82,7 +100,7 @@ class VaultRescueNotifier @Inject constructor(
             .build()
         // A denied POST_NOTIFICATIONS grant makes the platform drop the post silently rather than
         // throw, so this only guards the rarer failures the manager itself can raise.
-        runCatching { nm.notify(NotificationIds.VAULT_RESCUE, notification) }
+        runCatching { nm.notify(id, notification) }
     }
 
     private companion object {

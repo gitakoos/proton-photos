@@ -1669,8 +1669,198 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrations_registerEveryStepUpToV54() {
-        for (from in 48..53) {
+    fun migrate_v54_to_v55_addsTheSkippedFlag_withAZeroDefaultForEveryMarker() {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `face_scan` (`userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, `hiResScanned` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`userId`, `photoKey`))")
+        db.execSQL("INSERT OR REPLACE INTO face_scan (userId, photoKey, hiResScanned) VALUES ('u', 'k1', 1)")
+
+        Migrations.MIGRATION_54_55.migrate(db)
+
+        db.execSQL("INSERT INTO face_scan (userId, photoKey, skipped) VALUES ('u', 'k2', 1)")
+        db.query("SELECT photoKey, hiResScanned, skipped FROM face_scan ORDER BY photoKey").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("k1", cur.getString(0))
+            assertEquals(1, cur.getInt(1))
+            assertEquals("an existing marker is not skipped", 0, cur.getInt(2))
+            assertTrue(cur.moveToNext())
+            assertEquals(1, cur.getInt(2))
+        }
+    }
+
+    @Test
+    fun migrate_v55_to_v56_createsTheExifCheckTable() {
+        Migrations.MIGRATION_55_56.migrate(db)
+
+        db.execSQL("INSERT INTO local_exif_check (uri, modifiedSeconds, gpsNone, dateRead) VALUES ('content://m/1', 100, 1, 0)")
+        db.execSQL("INSERT OR REPLACE INTO local_exif_check (uri, modifiedSeconds, gpsNone, dateRead) VALUES ('content://m/1', 200, 0, 1)")
+        db.query("SELECT uri, modifiedSeconds, gpsNone, dateRead FROM local_exif_check").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("content://m/1", cur.getString(0))
+            assertEquals("one row per file, the newer check replacing the older", 200L, cur.getLong(1))
+            assertEquals(0, cur.getInt(2))
+            assertEquals(1, cur.getInt(3))
+            assertTrue(!cur.moveToNext())
+        }
+    }
+
+    @Test
+    fun migrate_v56_to_v57_createsTheHiddenPeopleTable() {
+        Migrations.MIGRATION_56_57.migrate(db)
+
+        db.execSQL("INSERT INTO person_hidden (userId, name, hidden, changedAt) VALUES ('u', 'Anna', 1, 10)")
+        db.execSQL("INSERT OR REPLACE INTO person_hidden (userId, name, hidden, changedAt) VALUES ('u', 'Anna', 0, 20)")
+        db.query("SELECT hidden, changedAt FROM person_hidden").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("one row per name, the newer choice replacing the older", 0, cur.getInt(0))
+            assertEquals(20L, cur.getLong(1))
+            assertTrue(!cur.moveToNext())
+        }
+    }
+
+    @Test
+    fun migrate_v57_to_v58_createsTheAlbumOrderTables() {
+        Migrations.MIGRATION_57_58.migrate(db)
+
+        db.execSQL("INSERT INTO album_photo_order (userId, albumKey, photoKey, position) VALUES ('u', 'a', 'p1', 1)")
+        db.execSQL("INSERT INTO album_photo_order (userId, albumKey, photoKey, position) VALUES ('u', 'a', 'p2', 0)")
+        db.execSQL("INSERT OR REPLACE INTO album_photo_order (userId, albumKey, photoKey, position) VALUES ('u', 'a', 'p1', 2)")
+        db.query("SELECT photoKey FROM album_photo_order WHERE userId = 'u' AND albumKey = 'a' ORDER BY position").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("p2", cur.getString(0))
+            assertTrue(cur.moveToNext())
+            assertEquals("one row per photo, the newer slot replacing the older", "p1", cur.getString(0))
+            assertTrue(!cur.moveToNext())
+        }
+        db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'album_photo_order' AND name NOT LIKE 'sqlite_%'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("index_album_photo_order_userId_albumKey_position", cur.getString(0))
+        }
+
+        db.execSQL("INSERT INTO album_order_state (userId, albumKey, mode, modeAt) VALUES ('u', 'a', 'custom', 10)")
+        db.query("SELECT mode, modeAt, orderAt FROM album_order_state").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("custom", cur.getString(0))
+            assertEquals(10L, cur.getLong(1))
+            assertTrue("an order never saved has no time", cur.isNull(2))
+        }
+
+        Migrations.MIGRATION_57_58.migrate(db)
+        db.query("SELECT COUNT(*) FROM album_photo_order").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("running the step again keeps the rows", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v58_to_v59_addsTheOriginalHashColumn_existingRowsHaveNone() {
+        // sync_state as v58 leaves it: the v14 columns plus the queue columns MIGRATION_14_15 added.
+        db.execSQL(
+            """
+            CREATE TABLE sync_state (
+              localUri TEXT NOT NULL PRIMARY KEY,
+              userId TEXT NOT NULL,
+              cloudFileId TEXT,
+              localHash TEXT NOT NULL,
+              cloudHash TEXT,
+              status TEXT NOT NULL,
+              lastSyncAttemptMs INTEGER NOT NULL,
+              lastSyncSuccessMs INTEGER,
+              backedUpAtMs INTEGER,
+              sizeBytes INTEGER NOT NULL,
+              queued INTEGER NOT NULL DEFAULT 0,
+              queueSource TEXT DEFAULT NULL,
+              queuedAt INTEGER DEFAULT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "INSERT INTO sync_state (localUri, userId, cloudFileId, localHash, cloudHash, status, " +
+                "lastSyncAttemptMs, lastSyncSuccessMs, backedUpAtMs, sizeBytes) " +
+                "VALUES ('uri-synced', 'u1', 'cloud-1', 'h1', 'c1', 'SYNCED', 20, 21, 22, 200)"
+        )
+
+        Migrations.MIGRATION_58_59.migrate(db)
+
+        db.query("SELECT localHash, backedUpAtMs, originalHash FROM sync_state WHERE localUri = 'uri-synced'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the row keeps its columns", "h1", cur.getString(0))
+            assertEquals(22L, cur.getLong(1))
+            assertTrue("a row backed up before the column has no original hash", cur.isNull(2))
+        }
+        db.execSQL("UPDATE sync_state SET originalHash = 'o1' WHERE localUri = 'uri-synced'")
+        db.query("SELECT originalHash FROM sync_state WHERE localUri = 'uri-synced'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("o1", cur.getString(0))
+        }
+        db.query("PRAGMA table_info(sync_state)").use { cur ->
+            var notNull: Int? = null
+            while (cur.moveToNext()) {
+                if (cur.getString(cur.getColumnIndexOrThrow("name")) == "originalHash") {
+                    notNull = cur.getInt(cur.getColumnIndexOrThrow("notnull"))
+                    assertEquals("TEXT", cur.getString(cur.getColumnIndexOrThrow("type")))
+                }
+            }
+            assertEquals("the column is nullable", 0, notNull)
+        }
+    }
+
+    @Test
+    fun migrate_v59_to_v60_addsTheLinkBasisColumn_existingRowsReadProven() {
+        // sync_state as v59 leaves it: the v58 columns plus originalHash.
+        db.execSQL(
+            """
+            CREATE TABLE sync_state (
+              localUri TEXT NOT NULL PRIMARY KEY,
+              userId TEXT NOT NULL,
+              cloudFileId TEXT,
+              localHash TEXT NOT NULL,
+              cloudHash TEXT,
+              status TEXT NOT NULL,
+              lastSyncAttemptMs INTEGER NOT NULL,
+              lastSyncSuccessMs INTEGER,
+              backedUpAtMs INTEGER,
+              sizeBytes INTEGER NOT NULL,
+              queued INTEGER NOT NULL DEFAULT 0,
+              queueSource TEXT DEFAULT NULL,
+              queuedAt INTEGER DEFAULT NULL,
+              originalHash TEXT DEFAULT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            "INSERT INTO sync_state (localUri, userId, cloudFileId, localHash, cloudHash, status, " +
+                "lastSyncAttemptMs, lastSyncSuccessMs, backedUpAtMs, sizeBytes, originalHash) " +
+                "VALUES ('uri-synced', 'u1', 'cloud-1', 'h1', 'c1', 'SYNCED', 20, 21, 22, 200, 'o1')"
+        )
+
+        Migrations.MIGRATION_59_60.migrate(db)
+
+        db.query("SELECT localHash, originalHash, linkBasis FROM sync_state WHERE localUri = 'uri-synced'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the row keeps its columns", "h1", cur.getString(0))
+            assertEquals("o1", cur.getString(1))
+            assertEquals("a row written before the column reads as proven", 0, cur.getInt(2))
+        }
+        db.execSQL("UPDATE sync_state SET linkBasis = 1 WHERE localUri = 'uri-synced'")
+        db.query("SELECT linkBasis FROM sync_state WHERE localUri = 'uri-synced'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+        db.query("PRAGMA table_info(sync_state)").use { cur ->
+            var notNull: Int? = null
+            while (cur.moveToNext()) {
+                if (cur.getString(cur.getColumnIndexOrThrow("name")) == "linkBasis") {
+                    notNull = cur.getInt(cur.getColumnIndexOrThrow("notnull"))
+                    assertEquals("INTEGER", cur.getString(cur.getColumnIndexOrThrow("type")))
+                    assertEquals("0", cur.getString(cur.getColumnIndexOrThrow("dflt_value")))
+                }
+            }
+            assertEquals("the column is NOT NULL", 1, notNull)
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV60() {
+        for (from in 48..59) {
             assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }

@@ -226,7 +226,7 @@ object ExifHelper {
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept as fallback for older EXIF files.
     fun readMetadata(context: Context, uri: String): PhotoMetadata {
         return try {
-            val stream = context.contentResolver.openInputStream(Uri.parse(uri))
+            val stream = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
                 ?: return PhotoMetadata()
             val exif = stream.use { ExifInterface(it) }
             // A 0, 0 fix is what a camera writes when it has none, so it reads as no location.
@@ -279,7 +279,7 @@ object ExifHelper {
      *  from a content [uri]. Returns ORIENTATION_NORMAL when the stream can't be opened or
      *  carries no orientation. */
     fun readOrientation(context: Context, uri: String): Int = try {
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use {
             ExifInterface(it).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL,
             )
@@ -289,14 +289,8 @@ object ExifHelper {
     }
 
     /** Same as [readOrientation] but for a local [file] (used for the cloud full-res
-     *  download, which lands on disk before decoding). */
-    fun readOrientation(file: File): Int = try {
-        ExifInterface(file.absolutePath).getAttributeInt(
-            ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL,
-        )
-    } catch (_: Exception) {
-        ExifInterface.ORIENTATION_NORMAL
-    }
+     *  download, which lands on disk before decoding). A file of the encrypted caches is read decrypted. */
+    fun readOrientation(file: File): Int = eu.akoos.photos.data.localcrypto.LocalFiles.exifOrientation(null, file)
 
     /**
      * Rotates / flips [bitmap] so its pixels match the EXIF [orientation]. BitmapFactory
@@ -357,7 +351,7 @@ object ExifHelper {
     ): File? {
         if (config.isNoOp) return null
         val parsed = Uri.parse(uri)
-        val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
+        val inputStream = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed)) ?: return null
         // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
         // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
         val suffix = tempSuffixFor(context, parsed)
@@ -439,83 +433,54 @@ object ExifHelper {
      *    IntentSender from the [RecoverableSecurityException] so the caller can launch the system
      *    write-permission dialog and retry. (See PhotoViewerViewModel / GalleryViewModel.)
      *  - [StripResult.Failed] for a pre-flight no-op or any other I/O or EXIF error.
+     *
+     * [announce] is passed to [LocalOverwriteGuard.run]: false for a strip whose bytes go to Drive on their own.
      */
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
-    fun stripFieldsInPlace(context: Context, uri: String, config: MetadataStripConfig): StripResult {
+    fun stripFieldsInPlace(
+        context: Context,
+        uri: String,
+        config: MetadataStripConfig,
+        announce: Boolean = true,
+    ): StripResult {
         if (config.isNoOp) return StripResult.Failed
+        // A hidden photo's vault file is encrypted: the strip runs on a plaintext copy that is sealed back.
+        return eu.akoos.photos.data.localcrypto.VaultFiles.editingInPlace(
+            context,
+            uri,
+            changed = { it is StripResult.Stripped },
+            onError = { StripResult.Failed },
+        ) { target -> stripFieldsInPlaceAt(context, target, config, announce) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stripFieldsInPlaceAt(
+        context: Context,
+        uri: String,
+        config: MetadataStripConfig,
+        announce: Boolean,
+    ): StripResult {
         return try {
             // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
-            LocalOverwriteGuard(context).run(uri) {
-                val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
-                    ?: throw java.io.IOException("could not open $uri")
-                fd.use {
-                    val exif = ExifInterface(it.fileDescriptor)
-                    if (config.stripGps) {
-                        exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_TIMESTAMP, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_DATESTAMP, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_SPEED, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_SPEED_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_TRACK, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
-                        // Keep this GPS set identical to [stripToTempFile]: the user-facing in-place
-                        // "clean" path calls THIS method, so any GPS tag missing here (compass bearing,
-                        // map datum, positioning error) would survive a manual wipe yet get stripped on
-                        // upload, leaking location context on a photo the user believes is cleaned.
-                        exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING_REF, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_MAP_DATUM, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_AREA_INFORMATION, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_H_POSITIONING_ERROR, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_VERSION_ID, null)
-                        exif.setAttribute(ExifInterface.TAG_GPS_DIFFERENTIAL, null)
+            LocalOverwriteGuard(context).run(uri, announce = announce) {
+                // The strip runs on a temp copy (same tag set as [stripToTempFile]) and the result is written
+                // back over the file, cut to its new length: an EXIF block that shrinks must not leave the
+                // old file's last bytes behind the image.
+                val stripped = stripToTempFile(context, uri, config)
+                    ?: throw java.io.IOException("could not strip $uri")
+                try {
+                    val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
+                        ?: throw java.io.IOException("could not open $uri")
+                    fd.use {
+                        val out = FileOutputStream(it.fileDescriptor)
+                        val channel = out.channel
+                        channel.position(0)
+                        stripped.inputStream().use { input -> input.copyTo(out) }
+                        out.flush()
+                        channel.truncate(stripped.length())
                     }
-                    if (config.stripCameraInfo) {
-                        // Keep this set in sync with [stripToTempFile] — the user-facing UI
-                        // ("Strip camera info" button) calls THIS path, so any tag missing here
-                        // survives a manual wipe but gets stripped on upload, which would be a
-                        // confusing privacy gap. Aperture-value / ISO-ratings / white-balance /
-                        // exposure-mode must be wiped here to match `stripToTempFile`.
-                        exif.setAttribute(ExifInterface.TAG_MAKE, null)
-                        exif.setAttribute(ExifInterface.TAG_MODEL, null)
-                        exif.setAttribute(ExifInterface.TAG_LENS_MAKE, null)
-                        exif.setAttribute(ExifInterface.TAG_LENS_MODEL, null)
-                        exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, null)
-                        exif.setAttribute(ExifInterface.TAG_F_NUMBER, null)
-                        exif.setAttribute(ExifInterface.TAG_APERTURE_VALUE, null)
-                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, null)
-                        exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, null)
-                        exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, null)
-                        exif.setAttribute(ExifInterface.TAG_FLASH, null)
-                        exif.setAttribute(ExifInterface.TAG_WHITE_BALANCE, null)
-                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_MODE, null)
-                    }
-                    if (config.stripTimestamp) {
-                        exif.setAttribute(ExifInterface.TAG_DATETIME, null)
-                        exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, null)
-                        exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, null)
-                    }
-                    if (config.stripSoftwareInfo) {
-                        exif.setAttribute(ExifInterface.TAG_SOFTWARE, null)
-                        exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
-                    }
-                    // Artist / copyright are their own flag: a caller that drops the editing tool can
-                    // still keep the credit the user put on the photo. Keep the tag set identical to
-                    // [stripToTempFile] so a manual wipe and an upload strip remove the same fields.
-                    if (config.stripAuthorship) {
-                        exif.setAttribute(ExifInterface.TAG_ARTIST, null)
-                        exif.setAttribute(ExifInterface.TAG_COPYRIGHT, null)
-                    }
-                    exif.saveAttributes()
+                } finally {
+                    stripped.delete()
                 }
             }
             StripResult.Stripped
@@ -744,16 +709,14 @@ object ExifHelper {
      * from the snapshot afterwards. Returns null when the stream can't be opened or parsed.
      */
     fun readExifSnapshot(context: Context, uri: String): ExifInterface? = runCatching {
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use { ExifInterface(it) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use { ExifInterface(it) }
     }.getOrNull()
 
     /**
      * Reads the source EXIF from a local [file] into a snapshot (see the [Context]/URI overload).
      * Returns null on any parse/read failure.
      */
-    fun readExifSnapshot(file: File): ExifInterface? = runCatching {
-        ExifInterface(file.absolutePath)
-    }.getOrNull()
+    fun readExifSnapshot(file: File): ExifInterface? = eu.akoos.photos.data.localcrypto.LocalFiles.readExif(null, file)
 
     /**
      * Fill DateTimeOriginal (and DateTime) with [captureEpochMs] ONLY when the file has no original

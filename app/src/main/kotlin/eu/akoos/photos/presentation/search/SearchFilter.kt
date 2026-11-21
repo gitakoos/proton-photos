@@ -27,6 +27,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.GalleryFilter
+import eu.akoos.photos.presentation.gallery.LabelFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.isItemFavorite
@@ -53,6 +54,9 @@ internal object SearchFilter {
     private const val TIER_METADATA = 2
     private const val NO_MATCH = 3
 
+    /** Joins the haystack's fields: no typed term holds it, so a quoted phrase never spans two fields. */
+    private const val FIELD = '\u0000'
+
     /** Lower-cases and strips diacritics so an ASCII query ("jose") matches accented names
      *  ("josé"). NFD decomposes each accented letter into base + combining mark, then the
      *  `\p{Mn}` (Mark, nonspacing) class removes the marks, leaving the bare letter. The Turkish
@@ -62,10 +66,11 @@ internal object SearchFilter {
             .replace(MARK_REGEX, "")
             .replace('\u0131', 'i')
 
-    /** [q] without its last [count] words, the rest joined by single spaces: what a picked suggestion
-     *  leaves of the text that spelled it. */
+    /** [q] without its last [count] words, the rest joined by single spaces (a quoted span kept as
+     *  typed): what a picked suggestion leaves of the text that spelled it. */
     fun dropLastWords(q: String, count: Int): String =
-        q.trim().split(SPACES).filter { it.isNotEmpty() }.dropLast(count).joinToString(" ")
+        if (SearchQuery.hasQuote(q)) SearchQuery.dropTrailingWords(q, count)
+        else q.trim().split(SPACES).filter { it.isNotEmpty() }.dropLast(count).joinToString(" ")
 
     /** The twelve month names of [locale], pre-folded once, so a "june" / "június" query matches by
      *  capture month. */
@@ -118,13 +123,13 @@ internal object SearchFilter {
         foldedLabels: Map<String, String> = emptyMap(),
         foldedPlaces: Map<String, String> = emptyMap(),
         scoped: Boolean = false,
+        labelIndex: Map<String, Set<String>> = emptyMap(),
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
         // Commas separate alternatives ("beach, sunset" finds a photo that matches either), and the words
-        // of one alternative must all match ("beach june"). Commas and spaces alone are no query.
-        val alternatives = fold(qTrimmed).split(',')
-            .map { part -> part.split(' ').filter { it.isNotBlank() } }
-            .filter { it.isNotEmpty() }
+        // of one alternative must all match ("beach june"). Commas and spaces alone are no query. A quoted
+        // span is one term matched as typed.
+        val alternatives = SearchQuery.alternatives(qTrimmed)
         if (nothingAsked(if (alternatives.isEmpty()) "" else qTrimmed, filter, category, personSelected = personPhotoKeys != null, scoped = scoped)) {
             return emptyList()
         }
@@ -161,7 +166,7 @@ internal object SearchFilter {
                             // What the user attached or the photo's place says, as opposed to a date or a type.
                             val text = described
                                 ?: listOfNotNull(labelsOf(item, foldedLabels), placesOf(item, foldedPlaces))
-                                    .joinToString(" ").also { described = it }
+                                    .joinToString(FIELD.toString()).also { described = it }
                             if (text.isNotEmpty() && words.all { foldedName.contains(it) || text.contains(it) }) {
                                 TIER_DESCRIBED
                             } else {
@@ -180,7 +185,7 @@ internal object SearchFilter {
             }
             out = byName + byLabel + byMetadata
         }
-        return applyFacets(out, filter, category, offlinePinIds, favoriteIds, personPhotoKeys)
+        return applyFacets(out, filter, category, offlinePinIds, favoriteIds, personPhotoKeys, labelIndex)
     }
 
     /** True when the page asks for nothing: no query, no filter, no category chip and no person. A
@@ -207,8 +212,11 @@ internal object SearchFilter {
         offlinePinIds: Set<String> = emptySet(),
         favoriteIds: Set<String> = emptySet(),
         personPhotoKeys: Set<String>? = null,
+        labelIndex: Map<String, Set<String>> = emptyMap(),
     ): List<GalleryItem> {
         var out = applyContentFilter(items, filter, offlinePinIds)
+        // The picked labels, by exact name ([LabelFilter]).
+        out = LabelFilter.apply(out, filter, labelIndex)
         if (category != GalleryFilter.All) {
             out = when (category) {
                 // Live Photos (tag 3) and Motion Photos (tag 4) are the same concept on iOS/Android
@@ -305,13 +313,13 @@ internal object SearchFilter {
         val tags = CategorizeItem.classify(item)
         return buildString {
             append(fold(displayNameOf(item)))
-            append(' ').append(cal.get(Calendar.YEAR))
-            append(' ').append(foldedMonths[cal.get(Calendar.MONTH)])
-            append(if (mime.startsWith("video/")) " video" else " photo")
-            if (ext.isNotEmpty()) { append(' '); append(ext) }
-            tags.forEach { id -> foldedCategoryNames[id]?.let { append(' '); append(it) } }
-            labelsOf(item, foldedLabels)?.let { append(' '); append(it) }
-            placesOf(item, foldedPlaces)?.let { append(' '); append(it) }
+            append(FIELD).append(cal.get(Calendar.YEAR))
+            append(FIELD).append(foldedMonths[cal.get(Calendar.MONTH)])
+            append(FIELD).append(if (mime.startsWith("video/")) "video" else "photo")
+            if (ext.isNotEmpty()) { append(FIELD); append(ext) }
+            tags.forEach { id -> foldedCategoryNames[id]?.let { append(FIELD); append(it) } }
+            labelsOf(item, foldedLabels)?.let { append(FIELD); append(it) }
+            placesOf(item, foldedPlaces)?.let { append(FIELD); append(it) }
         }
     }
 
@@ -323,10 +331,10 @@ internal object SearchFilter {
         return null
     }
 
-    /** Each photo key's labels folded and joined by single spaces, built once per label change rather
+    /** Each photo key's labels folded and joined by [FIELD], built once per label change rather
      *  than per item and keystroke. */
     fun foldLabels(byKey: Map<String, List<String>>): Map<String, String> =
-        byKey.mapValues { (_, labels) -> labels.joinToString(" ") { fold(it) } }
+        byKey.mapValues { (_, labels) -> labels.joinToString(FIELD.toString()) { fold(it) } }
 
     /** [item]'s folded labels from [foldedLabels]: those under its stableId and, for a backed-up photo,
      *  those still under its device uri from before the backup. Null when it carries none. */
@@ -335,6 +343,6 @@ internal object SearchFilter {
         val keys = LabelKeyReconciler.keysFor(item)
         val primary = foldedLabels[keys[0]]
         val secondary = keys.getOrNull(1)?.let { foldedLabels[it] } ?: return primary
-        return if (primary == null) secondary else "$primary $secondary"
+        return if (primary == null) secondary else "$primary$FIELD$secondary"
     }
 }

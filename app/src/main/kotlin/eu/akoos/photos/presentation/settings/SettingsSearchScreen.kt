@@ -235,6 +235,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.ThemeSettings.route,
     ),
     SettingsSearchEntry(
+        R.string.settings_app_icon, R.string.settings_appearance,
+        listOf("icon", "app icon", "launcher", "disguise", "hide", "clock", "calculator", "notes", "logo", "name", "ikon", "alkalmazás ikon", "álcázás", "elrejtés", "óra", "számológép", "jegyzetek", "név"),
+        Screen.AppIcon.route,
+    ),
+    SettingsSearchEntry(
         R.string.language_section, R.string.settings_appearance,
         listOf("language", "locale", "nyelv", "dil"),
         Screen.LanguageSettings.route,

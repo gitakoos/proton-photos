@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.collage
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -68,8 +69,8 @@ class CollageBitmapSource @Inject constructor(
             is GalleryItem.LocalOnly -> decodeUri(Uri.parse(item.local.uri), maxPx)
             is GalleryItem.Synced -> decodeUri(Uri.parse(item.local.uri), maxPx)
             is GalleryItem.CloudOnly -> {
-                val cached = File(thumbnailDir, "thumb_${item.cloud.linkId}.jpg")
-                if (cached.exists()) decodeFile(cached.absolutePath, maxPx, applyExif = false) else null
+                val cached = File(thumbnailDir, "thumb_${safeFileId(item.cloud.linkId)}.jpg")
+                if (cached.exists()) decodeFile(cached, maxPx, applyExif = false) else null
             }
         }
     }
@@ -93,28 +94,31 @@ class CollageBitmapSource @Inject constructor(
                     Log.w(TAG, "full-res download failed for ${item.cloud.linkId}: ${e.message}")
                     return@withContext null
                 }
-                decodeFile(file.absolutePath, maxPx, applyExif = true)
+                decodeFile(file.storedFile, maxPx, applyExif = true)
             }
         }
     }
 
     private fun decodeUri(uri: Uri, maxPx: Int): Bitmap? = guarded {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@guarded null
         val opts = decodeOptions(bounds.outWidth, bounds.outHeight, maxPx)
-        val bmp = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        val bmp = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))?.use { BitmapFactory.decodeStream(it, null, opts) }
         // Originals carry an EXIF orientation BitmapFactory ignores, so rotate to upright here.
         bmp?.let { applyOrientation(it, ExifHelper.readOrientation(context, uri.toString())) }
     }
 
-    private fun decodeFile(path: String, maxPx: Int, applyExif: Boolean): Bitmap? = guarded {
+    /** Decodes a file of the thumbnail or full-size cache, which are kept encrypted. */
+    private fun decodeFile(file: File, maxPx: Int, applyExif: Boolean): Bitmap? = guarded {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
+        eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(context, file, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@guarded null
-        val bmp = BitmapFactory.decodeFile(path, decodeOptions(bounds.outWidth, bounds.outHeight, maxPx))
+        val bmp = eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(
+            context, file, decodeOptions(bounds.outWidth, bounds.outHeight, maxPx),
+        )
         // A cached thumbnail is already upright; only an original file needs its EXIF applied.
-        if (applyExif && bmp != null) applyOrientation(bmp, ExifHelper.readOrientation(File(path))) else bmp
+        if (applyExif && bmp != null) applyOrientation(bmp, ExifHelper.readOrientation(file)) else bmp
     }
 
     /** Bakes an [ExifInterface] orientation into the pixels, so a rotated original renders upright. */

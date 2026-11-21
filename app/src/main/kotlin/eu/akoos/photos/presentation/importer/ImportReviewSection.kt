@@ -608,9 +608,9 @@ private fun ImportReviewSummary(
  * and the discard action.
  *
  * The confirm button counts the genuinely new photos ([newCount]), not the whole kept set, so a run whose
- * archive overlaps Drive is honest about how many photos it would add. With nothing new and no album mode
- * chosen there is nothing to do, so the button says so and is disabled; with nothing new but an album mode
- * chosen the run still has albums to build, so it stays enabled under an album-action label.
+ * archive overlaps Drive is honest about how many photos it would add. With nothing new and no album to
+ * build there is nothing to do, so the button says so and is disabled; with nothing new but albums to build
+ * the run still has work, so it stays enabled under an album-action label.
  */
 @Composable
 private fun ImportReviewConfirmBar(
@@ -624,7 +624,7 @@ private fun ImportReviewConfirmBar(
 ) {
     val colors = AppColors.current
     val nothingNew = newCount == 0
-    val albumsSelected = albumMode != ImportAlbumMode.NONE
+    val albumsSelected = buildsAlbums(hasAlbums, albumMode)
     val confirmLabel = when {
         nothingNew && !albumsSelected -> stringResource(R.string.import_review_nothing_new)
         nothingNew -> stringResource(R.string.import_review_add_to_albums)
@@ -688,6 +688,13 @@ private fun ImportReviewConfirmBar(
         }
     }
 }
+
+/**
+ * Whether a confirm builds any album: the export has album folders and a mode other than [ImportAlbumMode.NONE]
+ * is chosen. An export without album folders builds none whatever the mode says.
+ */
+internal fun buildsAlbums(hasAlbums: Boolean, albumMode: ImportAlbumMode): Boolean =
+    hasAlbums && albumMode != ImportAlbumMode.NONE
 
 /** The label for one [ImportAlbumMode], shared by the trigger row and the picker sheet. */
 @Composable

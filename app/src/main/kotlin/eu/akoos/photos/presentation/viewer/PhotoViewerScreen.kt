@@ -32,6 +32,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -48,7 +50,12 @@ import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -116,6 +123,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -138,6 +146,8 @@ import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.snackbarAboveBars
+import eu.akoos.photos.presentation.common.snackbarObstacle
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import androidx.compose.ui.Alignment
@@ -148,6 +158,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -187,6 +198,7 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.LocalVideoThumb
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.people.NameOrMergeSheet
 import eu.akoos.photos.presentation.people.NameOrMergeSubject
 import eu.akoos.photos.presentation.theme.Accent
@@ -217,6 +229,9 @@ private fun GalleryItem.localUriOrNull(): String? = when (this) {
     is GalleryItem.CloudOnly -> null
 }
 
+/** How many replacements in a row one photo is followed through, a guard against a loop. */
+private const val MAX_REPLACEMENT_HOPS = 8
+
 /**
  * Reconcile the static [snapshot] handed to the viewer against the [live] timeline so the open
  * viewer reflects a photo finishing upload (LocalOnly → Synced) and any metadata refresh, without
@@ -229,10 +244,15 @@ private fun GalleryItem.localUriOrNull(): String? = when (this) {
  * surface the viewer opens from: the caller already hands a filtered list (the gallery strips
  * hidden / timeline-excluded items, albums hand their own membership), and reconciliation never
  * injects an item that wasn't in that list. Returns [snapshot] unchanged until [live] first emits.
+ *
+ * A Drive photo [replaced] by an edited copy (original link to copy) resolves to that copy, followed
+ * through a later replacement of the copy too: the original is in the trash and the live timeline no
+ * longer carries it, and a Drive-only photo has no local uri to find the copy by.
  */
 internal fun reconcileViewerItems(
     snapshot: List<GalleryItem>,
     live: List<GalleryItem>,
+    replaced: Map<String, String> = emptyMap(),
 ): List<GalleryItem> {
     if (live.isEmpty() || snapshot.isEmpty()) return snapshot
     val byStableId = live.associateBy { it.stableId }
@@ -240,9 +260,19 @@ internal fun reconcileViewerItems(
         .mapNotNull { item -> item.localUriOrNull()?.let { it to item } }
         .toMap()
 
+    fun copyOf(stableId: String): GalleryItem? {
+        var link = stableId
+        repeat(MAX_REPLACEMENT_HOPS) {
+            link = replaced[link] ?: return null
+            byStableId[link]?.let { return it }
+        }
+        return null
+    }
+
     fun resolve(item: GalleryItem): GalleryItem =
         byStableId[item.stableId]
             ?: item.localUriOrNull()?.let { byLocalUri[it] }
+            ?: copyOf(item.stableId)
             ?: item
 
     val resolved = snapshot.map(::resolve)
@@ -403,6 +433,10 @@ fun PhotoViewerScreen(
     onEditMetadata: (GalleryItem) -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
+    /** Opens an album the photo is in, from a cover in the details panel's Albums box. */
+    onOpenAlbum: (Album) -> Unit = {},
+    /** Opens a device folder by its name, from the cover in the details panel's Folder box. */
+    onOpenDeviceFolder: (String) -> Unit = {},
     /** Opened from a named person's page: make the photo on screen that person's cover, or take it off
      *  them. Null anywhere else, which leaves both out of the menu. */
     onSetPersonCover: ((GalleryItem) -> Unit)? = null,
@@ -431,12 +465,22 @@ fun PhotoViewerScreen(
     // change the uri the snapshot holds it under. The live merge leaves vaulted photos out, so the
     // vault reports its own moves and they are applied on top. See [applyVaultMoves].
     val vaultMoves by viewModel.vaultMoves.collectAsStateWithLifecycle()
+    // A Drive photo replaced by an edited copy while the viewer is open: the page moves to the copy.
+    val cloudReplacements by viewModel.cloudReplacements.collectAsStateWithLifecycle()
+    // Copies the editor saved from a photo in this list go in right after it. See [insertSavedCopies].
+    val savedEditCopies by viewModel.savedEditCopies.collectAsStateWithLifecycle()
     // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
     // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
     // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
     var matched by remember(items) { mutableStateOf(items) }
-    LaunchedEffect(items, liveItems) {
-        matched = withContext(Dispatchers.Default) { reconcileViewerItems(items, liveItems) }
+    var insertedCopies by remember(items) { mutableIntStateOf(0) }
+    LaunchedEffect(items, liveItems, cloudReplacements, savedEditCopies) {
+        val (list, inserted) = withContext(Dispatchers.Default) {
+            val withCopies = insertSavedCopies(items, savedEditCopies, liveItems)
+            reconcileViewerItems(withCopies, liveItems, cloudReplacements) to (withCopies.size - items.size)
+        }
+        matched = list
+        insertedCopies = inserted
     }
     // The vault's moves are applied on the spot, not with the matching: a moved file's page effects start in the
     // composition that sees the move, and they must find the new path in the list they read.
@@ -451,17 +495,20 @@ fun PhotoViewerScreen(
     val visible = remember(reconciled, removedIds.size) {
         // Hand back the same instance while nothing is removed, preserving the stable list identity
         // reconcileViewerItems goes out of its way to keep.
-        if (removedIds.isEmpty()) reconciled else reconciled.filterNot { it.stableId in removedIds }
+        // A hash set for the walk: a lookup in the removed list itself scans it for every photo of the library.
+        if (removedIds.isEmpty()) reconciled
+        else removedIds.toHashSet().let { removed -> reconciled.filterNot { it.stableId in removed } }
     }
     // Render off the reconciled list; every per-page lookup below reads from `items` so alias it.
     @Suppress("NAME_SHADOWING") val items = visible
-    // Changes whenever the set of dropped photos does, or a vaulted photo moves to a new path. Each
-    // per-page effect below keys on the page INDEX, and neither event changes that index: a removal
+    // Changes whenever the set of dropped photos does, a vaulted photo moves to a new path, or an editor
+    // copy is put in (which shifts the photos after it). Each
+    // per-page effect below keys on the page INDEX, which a removal or a move leaves as it is: a removal
     // deliberately leaves the next photo in the deleted one's slot, and a move leaves the same photo in
     // its own. So on their own neither changes anything those effects can see, and the viewer would
     // keep the state it built for a file that is no longer there: the photo would be drawn, but never
     // loaded at full resolution, never zoomable, and a video would never start.
-    val pageGeneration = removedIds.size + vaultMoves.size
+    val pageGeneration = removedIds.size + vaultMoves.size + insertedCopies
     // An undone delete or album removal puts its photo back where it was. Drop exactly the ids that
     // undo restored, so a photo deleted earlier in this session, whose own undo window has since
     // been taken over, stays gone.
@@ -498,10 +545,22 @@ fun PhotoViewerScreen(
         // change still re-anchors on the next settled frame.
         if (pagerState.isScrollInProgress) return@LaunchedEffect
         val key = anchorKey ?: return@LaunchedEffect
+        // The usual case, the photo still on its page, needs no walk of the whole list.
+        if (items.getOrNull(pagerState.currentPage)?.stableId == key) return@LaunchedEffect
         val newIndex = items.indexOfFirst { it.stableId == key }
         if (newIndex >= 0 && newIndex != pagerState.currentPage) {
             pagerState.scrollToPage(newIndex)
         }
+    }
+    // An editor save lands on its copy, as long as the user is still on the photo it was made from.
+    LaunchedEffect(items, savedEditCopies) {
+        if (pagerState.isScrollInProgress) return@LaunchedEffect
+        val landing = savedCopyLanding(items, savedEditCopies, viewModel.seenCopySeqs, pagerState.settledPage)
+            ?: return@LaunchedEffect
+        viewModel.seenCopySeqs += landing.seen
+        val goTo = landing.goTo ?: return@LaunchedEffect
+        anchorKey = items[goTo].stableId
+        pagerState.scrollToPage(goTo)
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Master AI-features gate, still required by the people-in-this-photo action alongside the
@@ -514,11 +573,14 @@ fun PhotoViewerScreen(
     val longPressOpensMenu by viewModel.longPressOpensMenu.collectAsStateWithLifecycle()
     // Per-feature face gate: the people-in-this-photo action needs this AND the master switch.
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
+    val peopleVisible by viewModel.peopleVisible.collectAsStateWithLifecycle()
     // The people the face index found on the settled photo, and whether their name tags are pinned over
     // the faces. Reset on every page settle so tags never carry a previous photo's faces.
     val peopleInPhoto by viewModel.peopleInPhoto.collectAsStateWithLifecycle()
     // The photo that list was read for, so the details panel shows only the settled photo's people.
     val peopleInPhotoKey by viewModel.peopleInPhotoKey.collectAsStateWithLifecycle()
+    // The people the photo was added to by hand, shown in the details panel beside the faces found.
+    val manualPeopleInPhoto by viewModel.manualPeopleInPhoto.collectAsStateWithLifecycle()
     var facesMode by remember { mutableStateOf(false) }
     // The nameless face or group a face tag or a People pill was tapped for, or null while the naming
     // sheet is closed.
@@ -771,6 +833,8 @@ fun PhotoViewerScreen(
     // Per-page full-res image cache: keeps the last loaded image so non-settled pages
     // don't visually drop quality to thumbnail while the exit animation is still playing.
     val pageImageCache = remember { mutableMapOf<Int, Any>() }
+    // An inserted copy moves every later photo one page on, so the cached images no longer match their pages.
+    LaunchedEffect(insertedCopies) { pageImageCache.clear() }
     // When the editor pops back after a save, drop everything we cached for the touched
     // page — otherwise the bitmap held in this map is the stale one rendered by Coil
     // BEFORE the cache wipe and the user sees the pre-edit version until they page away.
@@ -1063,6 +1127,17 @@ fun PhotoViewerScreen(
     // whatever the user had before it.
     val showChrome = showOverlays && textState !is ViewerTextState.Showing
 
+    // Immersive browsing follows the tap that hid the chrome, not text mode: text recognition
+    // still needs the system bars for its inset squeeze, while a plain hide drops them and
+    // fades the page to pitch black with the chrome.
+    val immersive = !showOverlays
+    val viewerBg by animateColorAsState(
+        targetValue = if (immersive) Color.Black else Bg0,
+        animationSpec = tween(durationMillis = 220),
+        label = "viewerImmersiveBg",
+    )
+    ViewerImmersiveSystemUi(immersive = immersive, themeBackground = Bg0)
+
     // Pause if the user single-taps anywhere on a photo (the same gesture that
     // toggles chrome). We do this by observing [showOverlays] — when it flips from
     // hidden to visible while playing, the user just tapped, so stop the slideshow.
@@ -1157,9 +1232,8 @@ fun PhotoViewerScreen(
     // the pager happens to sit by then.
     var pendingRemoval by remember { mutableStateOf<String?>(null) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
-    // Logged-out "Move to folder" for the single on-device photo the viewer is showing.
+    // "Move to folder" for the single on-device photo the viewer is showing.
     var showMoveSheet by remember { mutableStateOf(false) }
-    val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Set when "New album" is tapped in the add-to-album sheet: holds the photo to drop into the
     // album the create dialog makes.
     var newAlbumForPhoto by remember { mutableStateOf<GalleryItem?>(null) }
@@ -1230,7 +1304,10 @@ fun PhotoViewerScreen(
                 when {
                     // Nothing left to look at, and the photo that was on screen is the one just
                     // deleted, so there is nowhere to send the grid back to.
-                    removed != null && items.size <= 1 -> onBack(null)
+                    removed != null && items.size <= 1 -> {
+                        viewModel.keepUndoThroughClose()
+                        onBack(null)
+                    }
                     removed != null -> {
                         // Cached full-res images are keyed by page index, and every index past the
                         // deleted one is about to shift down, so a stale entry would paint the
@@ -1286,6 +1363,7 @@ fun PhotoViewerScreen(
             if (currentItems.size <= 1) {
                 // Nothing left to look at, and the photo on screen is the one just taken out, so
                 // there is nowhere to send the grid back to.
+                viewModel.keepUndoThroughClose()
                 onBack(null)
             } else {
                 // Cached full-res images are keyed by page index, and every index past the removed
@@ -1339,7 +1417,7 @@ fun PhotoViewerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Bg0)
+            .background(viewerBg)
             .onSizeChanged { containerSize = it }
             .onGloballyPositioned { viewerOrigin = it.positionInRoot() }
             // Sees every press and lift first and consumes none, for the video chrome's auto-hide.
@@ -1554,11 +1632,11 @@ fun PhotoViewerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // Theme-reactive page background: pure black viewer chrome in dark
-                    // mode, white in light mode. Bg0 also covers the one-frame window
-                    // between the thumb hiding and the full-res draw, so no off-theme
-                    // flash can show through.
-                    .background(Bg0),
+                    // Theme-reactive page background while the chrome is up (near-black in
+                    // dark mode, light in light mode); fades to pitch black with immersive
+                    // browsing. Also covers the one-frame window between the thumb hiding
+                    // and the full-res draw, so no off-theme flash can show through.
+                    .background(viewerBg),
                 contentAlignment = Alignment.Center,
             ) {
                 // The poster is the SAME thumbnail the grid and the bottom reel show for this item, so
@@ -1566,11 +1644,11 @@ fun PhotoViewerScreen(
                 // neighbour: a device photo or video decodes from its own file (Coil's VideoFrameDecoder
                 // grabs a frame for a video), and a cloud-only item uses its cloud thumbnail resolved from
                 // the shared store (falling back to any URL still on the item, e.g. an album row).
-                val thumbUrls = LocalThumbnailUrls.current.value
+                val storeThumbUrl by rememberStoreThumbnailUrl((item as? GalleryItem.CloudOnly)?.cloud?.linkId)
                 val thumbModel: Any? = when (item) {
                     is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                     is GalleryItem.Synced -> Uri.parse(item.local.uri)
-                    is GalleryItem.CloudOnly -> thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+                    is GalleryItem.CloudOnly -> storeThumbUrl ?: item.cloud.thumbnailUrl
                     null -> null
                 }
                 // Skip the AsyncImage poster for local videos once the user has tapped Play.
@@ -1643,7 +1721,7 @@ fun PhotoViewerScreen(
                         },
                         // On a cache miss (this video's own poster not yet decoded) paint the themed
                         // background at once, never the image a recycled pager slot kept from a neighbour.
-                        placeholder = ColorPainter(Bg0),
+                        placeholder = ColorPainter(viewerBg),
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
@@ -1704,6 +1782,7 @@ fun PhotoViewerScreen(
                                         uri = Uri.fromFile(motionFile),
                                         autoPlay = true,
                                         onEnded = { viewModel.stopMotionPhoto() },
+                                        pageBackground = viewerBg,
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 } else if (isPanoramaMode) {
@@ -1829,6 +1908,8 @@ fun PhotoViewerScreen(
                                     // via a Compose graphicsLayer (which does not scale a SurfaceView).
                                     scale = scale,
                                     offset = offset,
+                                    // Letterbox/shutter follow immersive black with the page.
+                                    pageBackground = viewerBg,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
@@ -2779,6 +2860,9 @@ fun PhotoViewerScreen(
         Column(
             modifier = Modifier
                 .onGloballyPositioned { bottomBarBounds = it.boundsInRoot() }
+                // Snackbars (the undo bar of a delete among them) sit above these controls while they
+                // show, and drop to the bottom edge once immersive browsing hides them.
+                .snackbarObstacle()
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(bottom = if (chromeLandscape) 4.dp else 16.dp),
@@ -3019,20 +3103,21 @@ fun PhotoViewerScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = ViewerTextPillPadding),
+                    .padding(horizontal = 24.dp, vertical = ViewerTextPillPadding)
+                    .snackbarObstacle(),
             )
         }
 
         // Bottom-anchored themed snackbar — keeps add-to-album / set-as-cover
         // confirmations + delete-failure errors inside the app's visual language
         // instead of the OS Toast popup that ignored our theme + sat below the
-        // navigation bar.
+        // navigation bar. Placed like the app-wide undo bar: above the bottom controls
+        // while they show, at the bottom edge while they are hidden.
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(24.dp),
         )
     }
 
@@ -3115,7 +3200,7 @@ fun PhotoViewerScreen(
         }
         val detailsPrivate = secure || isVaultedItem || isHidden ||
             (detailsLinkId != null && detailsLinkId in hiddenCloudLinkIds)
-        val showPeopleBox = !trashMode && !detailsPrivate && aiFeaturesEnabled && faceEnabled &&
+        val showPeopleBox = !trashMode && !detailsPrivate && peopleVisible &&
             peopleBelongTo(peopleInPhotoKey, item)
         // The model the pager draws this photo from, so each face is cropped out of the image on screen.
         val detailsThumbUrls = LocalThumbnailUrls.current.value
@@ -3130,6 +3215,21 @@ fun PhotoViewerScreen(
         val placeLabel = remember(detailsPlace, locale) {
             detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
         }
+        // Albums live on Drive, so the Albums box needs an account; like labels, none on a vaulted or hidden
+        // photo, in the trash, or in someone else's album.
+        val showAlbumsBox = item != null && isSignedIn && !trashMode && !detailsPrivate && !isReadOnlyAlbum
+        val albumMembers = remember(albums, detailsAlbums) {
+            detailsMemberAlbums(albums, detailsAlbums.albumIds, detailsAlbums.queuedAlbumIds)
+        }
+        // Without an account the albums' place holds the device folder the file is in.
+        val showFolderBox = detailsFolderBoxShown(item, isSignedIn, trashMode, detailsPrivate, isReadOnlyAlbum)
+        val folderUri = detailsDeviceUri(item)
+        LaunchedEffect(folderUri, showFolderBox) { viewModel.loadDetailsFolders(folderUri.takeIf { showFolderBox }) }
+        val detailsFolders by viewModel.detailsFolders.collectAsStateWithLifecycle()
+        val shownFolder = folderUri?.takeIf { showFolderBox }?.let { uri ->
+            detailsShownFolder(uri, detailsDeviceBucket(item), detailsFolders)
+        }
+        val canMoveFolder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
         AppModalSheet(
             onDismissRequest = { showMetadata = false; metadataPages = listOf(DetailsPage.Main) },
             sheetState = metadataSheetState,
@@ -3146,7 +3246,7 @@ fun PhotoViewerScreen(
                 exif = metadata,
                 place = placeLabel,
                 resolvedGps = detailsGps,
-                localFolder = detailsAlbums.localFolder,
+                localFolder = shownFolder?.name ?: detailsAlbums.localFolder,
                 cloudAlbums = detailsAlbums.cloudAlbums,
                 cloudVideoMeta = cloudVideoMeta,
                 isStripping = isStrippingMetadata,
@@ -3181,6 +3281,41 @@ fun PhotoViewerScreen(
                 labelsPage = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
                     { close -> DetailsLabelsPage(viewModel, item, onClose = close) }
                 } else null,
+                albumsSection = if (showAlbumsBox) {
+                    { onOpen ->
+                        DetailsAlbumsSection(
+                            albumMembers,
+                            onOpen = onOpen,
+                            onOpenAlbum = onOpenAlbum,
+                            onAdd = { showAddToAlbumSheet = true },
+                        )
+                    }
+                } else if (showFolderBox && (shownFolder != null || canMoveFolder)) {
+                    { onOpen ->
+                        DetailsFolderSection(shownFolder, onOpen = onOpen.takeIf { canMoveFolder }, onOpenFolder = onOpenDeviceFolder)
+                    }
+                } else null,
+                albumsPage = if (showAlbumsBox && item != null) {
+                    { close ->
+                        DetailsAlbumsPage(
+                            member = albumMembers,
+                            busy = isAddingToAlbum,
+                            onBack = close,
+                            onRemove = { album -> viewModel.removeFromAlbum(album.linkId, item) },
+                            onAdd = { showAddToAlbumSheet = true },
+                        )
+                    }
+                } else if (showFolderBox && canMoveFolder && folderUri != null) {
+                    { close ->
+                        DetailsFolderPage(
+                            folders = detailsFolders?.takeIf { it.uri == folderUri }?.folders.orEmpty(),
+                            current = shownFolder?.name,
+                            onBack = close,
+                            onMove = { name -> viewModel.moveToFolder(folderUri, name) },
+                            onCreate = { name -> viewModel.createFolderWith(folderUri, name) },
+                        )
+                    }
+                } else null,
                 // Rename is a node-level mutation a guest of a shared-with-me album is not granted.
                 renamePage = if (item == null || isReadOnlyAlbum) null else {
                     { _ ->
@@ -3203,7 +3338,7 @@ fun PhotoViewerScreen(
                 peopleBox = {
                     if (showPeopleBox) {
                         DetailsPeopleBox(
-                            people = peopleInPhoto,
+                            people = DetailsPeopleRow.withManual(peopleInPhoto, manualPeopleInPhoto),
                             faceSource = faceSource,
                             onPersonClick = { person ->
                                 // The details sheet goes first, so the naming sheet never opens over it.
@@ -3303,46 +3438,31 @@ fun PhotoViewerScreen(
         }
     }
 
-    // ── Add to Album sheet ────────────────────────────────────────────────────────
+    // ── Add to album ──────────────────────────────────────────────────────────────
+    // The picker every multi-select uses, with the photo on screen as its selection. A tap on an album the
+    // photo is already in takes it out through the viewer, so the details sheet follows at once.
     if (showAddToAlbumSheet) {
-        val settledItem = items.getOrNull(pagerState.settledPage)
-        val currentPhotoAlbumIds by viewModel.currentPhotoAlbumIds.collectAsStateWithLifecycle()
-        val hasCloud = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
-        // Refresh membership for the current photo every time the sheet opens — fast on cache
-        // hit (20-min TTL in AlbumService) and self-heals if the user removed the photo from an
-        // album on Drive web between sheet opens.
-        LaunchedEffect(showAddToAlbumSheet, settledItem) {
-            if (settledItem != null && hasCloud) viewModel.loadCurrentPhotoAlbumIds(settledItem)
+        items.getOrNull(pagerState.settledPage)?.let { settledItem ->
+            eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
+                selectedItems = remember(settledItem) { setOf(settledItem) },
+                cloudAlbums = remember(albums) { albums.filter { it.canAddPhotos } },
+                onCreateNew = {
+                    newAlbumForPhoto = settledItem
+                    showAddToAlbumSheet = false
+                },
+                onCloudAlbumSelected = { album ->
+                    showAddToAlbumSheet = false
+                    viewModel.addToAlbum(album.linkId, settledItem)
+                },
+                onCloudAlbumRemove = { album ->
+                    if (!isAddingToAlbum) viewModel.removeFromAlbum(album.linkId, settledItem)
+                },
+                onDismiss = { showAddToAlbumSheet = false },
+            )
         }
-        AddToAlbumSheet(
-            sheetState = addToAlbumSheetState,
-            cloudAlbums = albums,
-            currentPhotoAlbumIds = currentPhotoAlbumIds,
-            onDismiss = { showAddToAlbumSheet = false },
-            onCreateNew = {
-                newAlbumForPhoto = settledItem
-                showAddToAlbumSheet = false
-            },
-            onCloudAlbumPicked = { albumLinkId ->
-                // A backed-up photo's membership is read back after each tap, so the sheet stays open
-                // for the next album. A photo still queued to upload has nothing to read back, so
-                // its sheet closes as before.
-                if (!isAddingToAlbum) {
-                    if (settledItem != null) {
-                        // Tap-to-remove when the photo is already in this album, otherwise add.
-                        if (albumLinkId in currentPhotoAlbumIds) {
-                            viewModel.removeFromAlbum(albumLinkId, settledItem)
-                        } else {
-                            viewModel.addToAlbum(albumLinkId, settledItem)
-                        }
-                    }
-                    if (!hasCloud) showAddToAlbumSheet = false
-                }
-            },
-        )
     }
 
-    // New album from the add-to-album sheet: create it and drop the photo in (same dialog the
+    // New album from the add-to-album picker: create it and drop the photo in (same dialog the
     // gallery uses).
     newAlbumForPhoto?.let { photo ->
         eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
@@ -3354,11 +3474,10 @@ fun PhotoViewerScreen(
         )
     }
 
-    // ── Move to folder host (logged-out, single on-device photo) ──────────────────
+    // ── Move to folder host (single on-device photo) ──────────────────
     // The picker, the new-folder name dialog, the write-consent launcher a foreign-file move needs
-    // and the completion snackbar, all device-only. Mounts only while logged out and the settled
-    // photo has a device file, so a signed-in viewer subscribes none of it and relocates that one
-    // photo's uri.
+    // and the completion snackbar. Mounts only while the settled photo has a device file, and
+    // relocates that one photo's uri.
     run {
         val settledItem = items.getOrNull(pagerState.settledPage)
         val currentUri = when (settledItem) {
@@ -3541,5 +3660,44 @@ private fun HdrWindowColorMode(enabled: Boolean) {
             if (enabled) ActivityInfo.COLOR_MODE_HDR else ActivityInfo.COLOR_MODE_DEFAULT
         android.util.Log.d(ULTRA_HDR_TAG, "window color mode hdr=$enabled")
         onDispose { window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT }
+    }
+}
+
+/**
+ * Hides the status and navigation bars while immersive browsing is on, and brings them back with
+ * the chrome. A swipe from the edge still flashes the bars briefly; icons stay light over the
+ * pitch-black page. Leaving the viewer always restores the bars.
+ *
+ * Applied in a [SideEffect] so it wins over MainActivity's theme-driven bar-icon contrast on the
+ * same frame.
+ */
+@Composable
+private fun ViewerImmersiveSystemUi(immersive: Boolean, themeBackground: Color) {
+    val view = LocalView.current
+    val restoreLightIcons = themeBackground.luminance() > 0.5f
+    val currentRestoreLightIcons by rememberUpdatedState(restoreLightIcons)
+    SideEffect {
+        val window = view.context.findActivity()?.window ?: return@SideEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        if (immersive) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.isAppearanceLightStatusBars = restoreLightIcons
+            controller.isAppearanceLightNavigationBars = restoreLightIcons
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    DisposableEffect(view) {
+        onDispose {
+            val window = view.context.findActivity()?.window ?: return@onDispose
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = currentRestoreLightIcons
+            controller.isAppearanceLightNavigationBars = currentRestoreLightIcons
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 }

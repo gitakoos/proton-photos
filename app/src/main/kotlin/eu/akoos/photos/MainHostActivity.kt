@@ -90,6 +90,7 @@ import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.continueWithoutAccount
+import eu.akoos.photos.data.preferences.resolveThemeModeKey
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
@@ -158,7 +159,7 @@ internal fun isAcceptableExternalEditUri(scheme: String?, authority: String?, ow
         !isOwnProviderAuthority(authority, ownPackage)
 
 @AndroidEntryPoint
-class MainActivity : AppCompatActivity() {
+class MainHostActivity : AppCompatActivity() {
 
     @Inject lateinit var authOrchestrator: AuthOrchestrator
     @Inject lateinit var workManager: WorkManager
@@ -175,16 +176,19 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var installSessionEvents: InstallSessionEvents
     @Inject lateinit var newsRepository: NewsRepository
     @Inject lateinit var hiddenVaultRestorer: HiddenVaultRestorer
+    @Inject lateinit var hiddenVaultJournal: eu.akoos.photos.data.hidden.HiddenVaultJournal
+    @Inject lateinit var hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager
     @Inject lateinit var vaultRescueNotifier: VaultRescueNotifier
     @Inject lateinit var externalPickHandover: eu.akoos.photos.presentation.picker.ExternalPickHandover
     @Inject @eu.akoos.photos.di.AppScope lateinit var appScope: kotlinx.coroutines.CoroutineScope
+    @Inject lateinit var localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator
 
     private val vaultSignOut by lazy {
         val restorer = hiddenVaultRestorer
         val notifier = vaultRescueNotifier
         VaultSignOutPolicy(
-            rescue = { restorer.rescueDeviceOnly() },
-            notifyMoved = { zipName -> notifier.notifyMoved(zipName) },
+            rescue = { userId, busy -> restorer.rescueDeviceOnly(userId = UserId(userId), busy = busy) },
+            notify = { notice -> notifier.notify(notice) },
         )
     }
 
@@ -200,7 +204,9 @@ class MainActivity : AppCompatActivity() {
      * vault's device-only photos are rescued, then its rows, keys, preferences and decrypted caches are
      * wiped. It runs on the app scope, so a recreated or finished Activity does not cut it short, and
      * [persist] keeps a marker until the end, so a process killed part way finishes it on the next
-     * launch (see [replayUnfinishedSignOutCleanups]).
+     * launch (see [replayUnfinishedSignOutCleanups]). A marker that cannot be saved leaves the vault
+     * whole; the rest of the cleanup still runs, and a session the server ended tries the marker again
+     * at the end, so a later launch with nobody signed in deals with the vault.
      */
     private suspend fun cleanUpAfterSignOut(
         app: android.content.Context,
@@ -210,26 +216,59 @@ class MainActivity : AppCompatActivity() {
     ) {
         val cleanup = eu.akoos.photos.util.SignOutCleanup
         if (!cleanup.claim(userId.id)) return
+        // No hide is admitted from here until the vault is settled, and the ones already admitted are
+        // spared by everything below: their originals may still be deleted, and then the vault file is
+        // the only copy.
+        val busy = hiddenVaultJournal.beginSignOut()
         try {
-            if (persist) signOutStep { cleanup.markPending(app, userId.id) }
+            val endedByServer = persist && !eu.akoos.photos.data.hidden.UserSignOut.isMarked(userId.id)
+            val marked = !persist || cleanup.tryMarkPending(app, userId.id)
             cleanup.stopBackgroundWork(app, workManager)
+            // A session the server ended leaves behind the same diagnostics a sign-out from Settings empties. That
+            // one has emptied them already and opened the next log with its own line, which stays. Emptied before
+            // the vault step below, whose line about what it did opens the next log.
+            if (endedByServer) signOutStep {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cleanup.clearDiagnostics(app) }
+            }
             val vault = try {
-                policy.afterSignOut(userId.id)
+                policy.afterSignOut(userId.id, busy, markerSaved = marked)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 eu.akoos.photos.domain.repository.VaultWipe.None
             }
             signOutStep { driveRepo.clearCacheForSignOut(userId, vault) }
-            signOutStep { eu.akoos.photos.data.preferences.AccountScopedPreferences.clear(app, userId) }
+            signOutStep {
+                // Every vault file still on disk keeps its records, so the Hidden screen still reaches
+                // it; a vault left alone keeps all of them. A sign-in that gave up (persist false) never
+                // had a session, so the favourites belong to whoever is still using the app.
+                val kept = if (vault is eu.akoos.photos.domain.repository.VaultWipe.None) null
+                else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+                eu.akoos.photos.data.preferences.AccountScopedPreferences.clear(
+                    app, userId, keptVaultUris = kept, keepFavorites = !persist,
+                )
+            }
             signOutStep {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     cleanup.clearDecryptedCaches(app)
                 }
             }
-            signOutStep { cleanup.clearPending(app, userId.id) }
+            // New files stop being written with the key of the account that left; the key itself stays, so what
+            // it encrypted stays readable.
+            signOutStep { localEncryption.onSignedOut(userId.id) }
+            if (marked) {
+                signOutStep { cleanup.clearPending(app, userId.id) }
+            } else if (endedByServer) {
+                // The vault was left whole for want of a marker; one saved now has a later launch with nobody
+                // signed in run this cleanup again, rescue included.
+                signOutStep { cleanup.markPending(app, userId.id) }
+            }
         } finally {
+            hiddenVaultJournal.endSignOut()
             cleanup.release(userId.id)
         }
+        // A file the sign-out left in the vault without a record is filed into the index now, so the
+        // Hidden screen shows it in this process rather than after a restart.
+        signOutStep { hiddenVaultJournal.reconcileAgain() }
     }
 
     private suspend inline fun signOutStep(block: () -> Unit) {
@@ -237,7 +276,49 @@ class MainActivity : AppCompatActivity() {
             block()
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            android.util.Log.w("MainActivity", "sign-out cleanup step failed: ${e.javaClass.simpleName}")
+            android.util.Log.w("MainHostActivity", "sign-out cleanup step failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * Finishes a sign-out from Settings an earlier process started and did not end. The user asked to leave and
+     * part of the leaving (the vault, the caches) may already have happened, so an account still enabled is
+     * disabled now, which runs the cleanup every sign-out reaches; the vault is left as the interrupted run left
+     * it. An account already disabled or gone only loses the marker.
+     */
+    private suspend fun finishUnfinishedUserSignOuts(app: android.content.Context) {
+        val cleanup = eu.akoos.photos.util.SignOutCleanup
+        val pending = try {
+            cleanup.userSignOutsPending(app)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            return
+        }
+        if (pending.isEmpty()) return
+        val enabled = accountManager.getAccounts().first()
+            .filter {
+                it.state != me.proton.core.account.domain.entity.AccountState.Disabled &&
+                    it.state != me.proton.core.account.domain.entity.AccountState.Removed
+            }
+            .mapTo(HashSet()) { it.userId.id }
+        for ((userId, step) in cleanup.userSignOutReplayPlan(pending, enabled, cleanup.userSignOutsRunningNow())) {
+            when (step) {
+                eu.akoos.photos.util.UserSignOutReplay.FINISH -> {
+                    if (!cleanup.claimUserSignOut(userId)) continue
+                    try {
+                        signOutStep {
+                            eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, finished after a restart, vault left as it was")
+                            eu.akoos.photos.data.hidden.UserSignOut.mark(userId)
+                            accountManager.disableAccount(UserId(userId))
+                            cleanup.clearUserSignOutPending(app, userId)
+                        }
+                    } finally {
+                        cleanup.releaseUserSignOut(userId)
+                    }
+                }
+                eu.akoos.photos.util.UserSignOutReplay.DROP -> signOutStep { cleanup.clearUserSignOutPending(app, userId) }
+                eu.akoos.photos.util.UserSignOutReplay.SKIP -> Unit
+            }
         }
     }
 
@@ -285,7 +366,7 @@ class MainActivity : AppCompatActivity() {
         // Follow the real OS light/dark setting for THIS activity, so Compose's isSystemInDarkTheme()
         // reports it truthfully under the "System" theme. The app-wide default stays NIGHT_YES
         // (App.applyStoredThemeMode) to keep the XML ProtonCore login screens dark; this local
-        // override only affects MainActivity, whose every surface is themed by Compose.
+        // override only affects MainHostActivity, whose every surface is themed by Compose.
         delegate.setLocalNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         super.onCreate(savedInstanceState)
         authOrchestrator.register(this)
@@ -335,10 +416,14 @@ class MainActivity : AppCompatActivity() {
                 val persist = !eu.akoos.photos.util.SignOutCleanup.consumeUnfinishedSignIn(it.userId.id)
                 appScope.launch { cleanUpAfterSignOut(app, policy, it.userId, persist) }
             }
-            .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
+            .onUserKeyCheckFailed { /* corrupt user key - best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
 
-        appScope.launch { replayUnfinishedSignOutCleanups(app, policy) }
+        appScope.launch {
+            // A sign-out from Settings first, since finishing it disables the account and starts its cleanup.
+            finishUnfinishedUserSignOuts(app)
+            replayUnfinishedSignOutCleanups(app, policy)
+        }
 
         lifecycleScope.launch {
             // Login gate: don't arm the BG "Watching for new photos" notification before sign-in,
@@ -352,25 +437,25 @@ class MainActivity : AppCompatActivity() {
             // content-URI (sub-second on stock Android), periodic 15-min (OEM-throttle safety net),
             // and the opt-in BG service (keeps the observer alive on Samsung One UI). Gated so
             // auto-sync ON with no folder selected arms nothing.
-            SyncWorker.reconcileBackgroundWork(this@MainActivity)
+            SyncWorker.reconcileBackgroundWork(this@MainHostActivity)
             // Opt-in screenshot quick-action overlay: a specialUse foreground service cannot be
             // launched from boot on Android 14+, so re-arm it here on launch when it is enabled and
             // the draw-over-other-apps grant is still in place. start() also self-guards the grant.
             if (prefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] == true &&
-                android.provider.Settings.canDrawOverlays(this@MainActivity)
+                android.provider.Settings.canDrawOverlays(this@MainHostActivity)
             ) {
-                eu.akoos.photos.service.ScreenshotOverlayService.start(this@MainActivity)
+                eu.akoos.photos.service.ScreenshotOverlayService.start(this@MainHostActivity)
             }
             // Kick a OneTime run now so pending uploads start at launch; APPEND_OR_REPLACE coalesces
             // with the periodic run. Only when backup will actually upload.
-            if (syncEffectivelyEnabled(this@MainActivity)) {
-                SyncWorker.runNow(this@MainActivity, wifiOnly)
+            if (syncEffectivelyEnabled(this@MainHostActivity)) {
+                SyncWorker.runNow(this@MainHostActivity, wifiOnly)
             }
             // Reclaim eligible device copies on launch too, not just on the hourly worker an OEM
             // doze can delay for hours. Same age gate; a sweep with no eligible photo is cheap.
             if (prefs[SettingsKeys.AUTO_FREE_UP] == true) {
                 val freeUpInterval = FreeUpInterval.fromKey(prefs[SettingsKeys.FREE_UP_INTERVAL])
-                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainActivity), freeUpInterval.ms)
+                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainHostActivity), freeUpInterval.ms)
             }
         }
 
@@ -397,18 +482,13 @@ class MainActivity : AppCompatActivity() {
         lockGate.followSettings(this)
 
         setContent {
-            // Theme mode lives in DataStore — re-collect so a change re-themes without a restart.
+            // Theme mode lives in DataStore - re-collect so a change re-themes without a restart.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->
-                    prefs[SettingsKeys.THEME_MODE]
-                        ?: when (prefs[SettingsKeys.DARK_MODE]) {
-                            true  -> "dark"
-                            false -> "light"
-                            null  -> "dark"  // first-launch default — matches ThemePrefsBoot
-                        }
+                    resolveThemeModeKey(prefs[SettingsKeys.THEME_MODE], prefs[SettingsKeys.DARK_MODE])
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainActivity))
+            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainHostActivity))
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -417,14 +497,14 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.Dark   -> true
             }
 
-            // Accent-color palette — DataStore-backed, re-collected so changes apply live.
+            // Accent-color palette - DataStore-backed, re-collected so changes apply live.
             val paletteFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.THEME_PALETTE] }
             }
             val paletteKey by paletteFlow.collectAsState(initial = null)
             val palette = ThemePalette.fromKey(paletteKey)
 
-            // AMOLED pure-black switch — DataStore-backed, re-collected so it applies live.
+            // AMOLED pure-black switch - DataStore-backed, re-collected so it applies live.
             val amoledFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.AMOLED_BLACK] == true }
             }
@@ -435,7 +515,7 @@ class MainActivity : AppCompatActivity() {
             }
             val liquidGlass by liquidGlassFlow.collectAsState(initial = false)
 
-            // Tint the green "backed up" cloud badges with the palette accent — DataStore-backed, live.
+            // Tint the green "backed up" cloud badges with the palette accent - DataStore-backed, live.
             val tintCloudFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] == true }
             }
@@ -454,7 +534,7 @@ class MainActivity : AppCompatActivity() {
             // The animated-decoder-free Coil loader, exposed to grids/covers that render a GIF as a still.
             val staticImageLoader = remember { (application as App).staticImageLoader }
 
-            // Active locale — DataStore-driven so a change reflows string resolution without an
+            // Active locale - DataStore-driven so a change reflows string resolution without an
             // Activity recreate. Initial value from the boot-mirror to avoid a first-composition flash.
             val languageFlow = remember {
                 settingsDataStore.data.map { prefs ->
@@ -462,7 +542,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             val language by languageFlow.collectAsState(
-                initial = LanguagePrefsBoot.read(this@MainActivity),
+                initial = LanguagePrefsBoot.read(this@MainHostActivity),
             )
 
             // The clock choice is independent of the language; the formatters outside a composition read it
@@ -471,7 +551,7 @@ class MainActivity : AppCompatActivity() {
                 settingsDataStore.data.map { prefs -> ClockFormat.fromKey(prefs[SettingsKeys.CLOCK_FORMAT]) }
             }
             val clockFormat by clockFlow.collectAsState(initial = ClockFormat.AUTO)
-            val phoneIs24Hour = phoneUses24Hour(this@MainActivity)
+            val phoneIs24Hour = phoneUses24Hour(this@MainHostActivity)
             val is24Hour = clockFormat.is24Hour(phoneIs24Hour)
             ClockFormatState.update(clockFormat, phoneIs24Hour)
 
@@ -479,7 +559,7 @@ class MainActivity : AppCompatActivity() {
             val view = LocalView.current
             if (!view.isInEditMode) {
                 SideEffect {
-                    val window = this@MainActivity.window
+                    val window = this@MainHostActivity.window
                     val insets = WindowCompat.getInsetsController(window, view)
                     insets.isAppearanceLightStatusBars     = !useDark
                     insets.isAppearanceLightNavigationBars = !useDark
@@ -515,6 +595,19 @@ class MainActivity : AppCompatActivity() {
                             // dialog and sheet, the content under it stays covered and inert, and back
                             // leaves the app instead of reaching it.
                             AppLockGate(state = lockGate, onLeave = { leaveWhileLocked() }) {
+                              // Settings held back read as an empty file, which would show hidden photos again:
+                              // the app stays covered (under the lock) until they read or the user goes on.
+                              val settingsHold by eu.akoos.photos.data.localcrypto.SettingsLock.state
+                                  .collectAsStateWithLifecycle()
+                              if (settingsHold != eu.akoos.photos.data.localcrypto.SettingsHold.NONE) {
+                                  val holdScope = rememberCoroutineScope()
+                                  eu.akoos.photos.presentation.lock.SettingsHeldBackScreen(
+                                      hold = settingsHold,
+                                      onRetry = { holdScope.launch { localEncryption.retryHeldBackSettings() } },
+                                      onContinue = { holdScope.launch { localEncryption.continueWithoutHeldBackSettings() } },
+                                  )
+                                  return@AppLockGate
+                              }
                               // The whole app as the sheets frost it, when the frosted pills are on.
                               val rootGlass = rememberGlassBackdrop(AppColors.current.bg0)
                               Box(Modifier.fillMaxSize().glassSource(rootGlass)) {
@@ -556,7 +649,7 @@ class MainActivity : AppCompatActivity() {
     private fun UpdaterHost(promptAllowed: Boolean) {
         val current by updateOrchestrator.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
-        // Back from the "Install unknown apps" permission screen — fire the install immediately if
+        // Back from the "Install unknown apps" permission screen - fire the install immediately if
         // the OS now allows it, so the user needn't tap Update again.
         val installLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -651,7 +744,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Settings "Check for updates" — runs a forced check; up-to-date and network-flake each show a
+     * Settings "Check for updates" - runs a forced check; up-to-date and network-flake each show a
      * Toast. A new version surfaces via [UpdatePromptDialog] through the orchestrator's state flow.
      */
     private fun runManualUpdateCheck() {
@@ -659,14 +752,14 @@ class MainActivity : AppCompatActivity() {
             when (updateOrchestrator.runManualCheck()) {
                 UpdateOrchestrator.ManualCheckOutcome.UpToDate -> {
                     Toast.makeText(
-                        this@MainActivity,
+                        this@MainHostActivity,
                         getString(R.string.update_no_update),
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
                 is UpdateOrchestrator.ManualCheckOutcome.Failed -> {
                     Toast.makeText(
-                        this@MainActivity,
+                        this@MainHostActivity,
                         getString(R.string.update_check_failed),
                         Toast.LENGTH_SHORT,
                     ).show()
@@ -736,7 +829,7 @@ class MainActivity : AppCompatActivity() {
                 eu.akoos.photos.presentation.picker.PickAnswer.OnlyHidden -> R.string.picker_hidden_not_handed
                 eu.akoos.photos.presentation.picker.PickAnswer.Failed -> R.string.picker_prepare_failed
             }
-            Toast.makeText(this@MainActivity, getString(why), Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainHostActivity, getString(why), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -834,11 +927,11 @@ class MainActivity : AppCompatActivity() {
                 // Lightweight pair: events-based Drive delta, then one SyncState pass.
                 driveRepo.refreshCloudPhotosIncremental(userId)
                 reconcile(userId).collect {}
-                // OneTime sync if backup is effectively on — picks up LOCAL_ONLY entries reconcile
+                // OneTime sync if backup is effectively on - picks up LOCAL_ONLY entries reconcile
                 // just flagged. Skipped when no folder is selected (nothing would upload).
-                if (syncEffectivelyEnabled(this@MainActivity)) SyncWorker.runNow(this@MainActivity, wifiOnly)
+                if (syncEffectivelyEnabled(this@MainHostActivity)) SyncWorker.runNow(this@MainHostActivity, wifiOnly)
             } catch (_: Exception) {
-                // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
+                // Silent - onResume must never crash; the next refresh or SyncWorker tick retries.
             }
         }
         // Silent in-app update check. The repository caches the result for 4h, so this is a no-op

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.face
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -36,6 +37,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.clearForUser
+import eu.akoos.photos.data.ml.backgroundMlThreadFactory
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -61,6 +64,7 @@ import eu.akoos.photos.domain.model.FaceBoxNorm
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+import eu.akoos.photos.domain.usecase.keepHandAddedPeople
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
 import eu.akoos.photos.domain.usecase.FaceRegroupOutcome
 import eu.akoos.photos.domain.usecase.IncrementalBatch
@@ -129,10 +133,14 @@ import eu.akoos.photos.util.SyncDiagnostics
 import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.retryKickDelayMs
+import eu.akoos.photos.util.RescanGuard
+import eu.akoos.photos.util.settledCloudMiss
 import eu.akoos.photos.util.settledLocalMiss
 import eu.akoos.photos.util.sourceMissForDownloadFailure
 import eu.akoos.photos.util.sourceMissForUndecodedDownload
 import eu.akoos.photos.util.sourceMissForUndecodedLocal
+import eu.akoos.photos.data.localcrypto.LocalFiles
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -617,11 +625,18 @@ class FaceIndexingScheduler @Inject constructor(
     /** Own scope so an unpause kick and the settings watcher outlive the caller that triggered them. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** Cancels every job this scheduler started and waits for them to end, so none runs on after a test has
+     *  taken its doubles away (the settings watcher started here would otherwise reach the real store). */
+    @androidx.annotation.VisibleForTesting
+    internal suspend fun stopForTest() = scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin()
+
     /** Photos whose last load failed transiently, each with its attempts and when it is due again, so a
      *  pass tries never-tried photos first and a failing one waits out its backoff. Saved to [stateStore]
      *  at the end of a pass and taken back by the first pass of a new process; dropped on [reset], so a
      *  rescan or a new account tries everything afresh. */
     private val retryBook = SourceRetryBook()
+    private val rescanGuard = RescanGuard()
+    private val skippedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** What the walk keeps between process starts (the retry book and the full regroups' spacing), so a
      *  process the system killed does not begin its backoffs and its regroups again. */
@@ -653,9 +668,7 @@ class FaceIndexingScheduler @Inject constructor(
      *  [Dispatchers.Default] (shared with Compose) and [Dispatchers.IO] (the load path) means a systematic
      *  wedge starves neither the UI nor the loads. Elastic, so a fresh run always gets a thread while an
      *  abandoned one lingers; idle threads are reclaimed. */
-    private val mlDispatcher = Executors.newCachedThreadPool { r ->
-        Thread(r, "face-ml").apply { isDaemon = true }
-    }.asCoroutineDispatcher()
+    private val mlDispatcher = Executors.newCachedThreadPool(backgroundMlThreadFactory("face-ml")).asCoroutineDispatcher()
 
     /** Caps how many cloud full-res downloads run at once. A few in parallel is the same shape the
      *  photo download path already uses, and overlapping them is what makes a cloud scan keep pace
@@ -786,13 +799,16 @@ class FaceIndexingScheduler @Inject constructor(
      * model is not on the device yet (a later trigger retries once it is). Safe to call repeatedly;
      * overlapping calls collapse to one walk.
      */
-    /** Moves the faces of every device photo that has a Drive copy onto that copy's key, as the walk does for
+    /** Moves the faces of every device photo whose Drive copy the library lists onto that copy's key, as the walk does for
      *  the photos it lists, but from the sync state alone. */
     private suspend fun rekeyBackedUpFromSyncState(account: String) {
         val deviceKeys = faceDao.devicePhotoKeys(account)
         if (deviceKeys.isEmpty()) return
         val fence = writeFence.token()
-        val pairs = syncStateRekeyPairs(account, deviceKeys.flatMapSqlChunks { appDatabase.syncStateDao().getByUris(it) })
+        val rows = deviceKeys.flatMapSqlChunks { appDatabase.syncStateDao().getByUris(it) }
+        val listed = rows.mapNotNull { it.cloudFileId?.takeIf(String::isNotBlank) }.toHashSet()
+            .flatMapSqlChunks { photoListingDao.listedLinkIds(account, it) }.toHashSet()
+        val pairs = syncStateRekeyPairs(account, rows, listed)
         if (pairs.isEmpty()) return
         groupingLock.withLock {
             for ((deviceKey, cloudKey) in pairs) {
@@ -833,7 +849,7 @@ class FaceIndexingScheduler @Inject constructor(
         // What this pass's loads came to. Its moved count (a source loaded, or a photo settled without
         // one) is the pass's headway: zero means none (off Wi-Fi, or every attempt failed transiently), so
         // the tail does not re-kick and spin.
-        val tally = SourcePassTally(retryBook)
+        val tally = SourcePassTally(retryBook, rescanGuard)
         // Whether this pass holds the shared model gate: taken for the scan and kept through the pass-end
         // grouping, released once that is done, or in the finally below on any other way out.
         var holdsGate = false
@@ -866,6 +882,14 @@ class FaceIndexingScheduler @Inject constructor(
 
             val account = accountOf(userId)
             restoreWalkState(account)
+            // A name holding photos added to it by hand has a person: one an older build's regroup dropped, or
+            // that came from another device under a name no face here carries, gets it back here.
+            runCatching {
+                val fenceToken = writeFence.token()
+                appDatabase.withTransaction {
+                    if (writeFence.allows(fenceToken)) keepHandAddedPeople(appDatabase, account)
+                }
+            }.onFailure { Log.w(TAG, "hand-added people check failed: ${it.message}") }
             val items = try {
                 val provider = galleryItemsProvider.get()
                 (if (userId == null) provider.invokeLocalOnly() else provider.invoke(userId)).first()
@@ -929,6 +953,7 @@ class FaceIndexingScheduler @Inject constructor(
             // embeddings with no re-embed; release keeps the new-faces-only guard.
             if (total == 0) {
                 retryBook.clear()
+                rescanGuard.clear()
                 // Grouping is the heaviest step of all, so it waits for the same go-ahead as the scan: the
                 // charger when the user asked for it, battery and heat.
                 if (!awaitMlGoAhead(deviceHealth::mlVerdict, { deviceHealth.awaitMlWorkAllowed() }, FaceDiagnostics::recordPark) {
@@ -1167,7 +1192,7 @@ class FaceIndexingScheduler @Inject constructor(
             // back now and a full regroup follows; the rest wait for their photos ([reattachDueBeforeDrain]).
             // Only while some name has not been tried against the library yet, or this pass scanned photos
             // a waiting name may sit on.
-            val willContinue = restart.isRequested() || (active() && tally.moved > 0)
+            val willContinue = restart.isRequested() || (active() && tally.progress > 0)
             val reached = if (halted) 0 else minOf(cursor.get(), planned.size)
             val reattached = active() && writeFence.allows(passToken) && reattachFile.isFile &&
                 (reattachPending() || tally.moved > 0) &&
@@ -1226,6 +1251,7 @@ class FaceIndexingScheduler @Inject constructor(
                 mlWalkGate.release(MlRail.FACE)
             }
             pushLibraryCounts(userId)
+            FaceDiagnostics.recordRescanLoops(tally.repeats)
             FaceDiagnostics.recordSourceBacklog(
                 transientWaiting = retryBook.size(),
                 overBudget = tally.overBudget,
@@ -1240,7 +1266,7 @@ class FaceIndexingScheduler @Inject constructor(
                 paused || stopRequested -> FaceIndexingProgress(FaceIndexingState.Paused, indexedNow, libraryTotal)
                 // A re-kick is coming (this pass loaded a source or settled a photo, or a restart is already
                 // queued), so stay Running to match the tail re-kick below and not flap the foreground service.
-                tally.moved > 0 || restart.isRequested() -> FaceIndexingProgress(FaceIndexingState.Running, indexedNow, libraryTotal)
+                tally.progress > 0 || restart.isRequested() -> FaceIndexingProgress(FaceIndexingState.Running, indexedNow, libraryTotal)
                 // A full pass that moved nothing on and is not paused means the remainder can't be scanned
                 // right now (deferred off Wi-Fi, every attempt failed transiently, or every photo left waits
                 // out a retry backoff). There is no immediate re-kick then, so settle to Idle rather than a
@@ -1266,7 +1292,7 @@ class FaceIndexingScheduler @Inject constructor(
             // this walk's own, and either starts only while that account is still the one signed in
             // ([restartIfCurrent]).
             val resume = restart.take()
-            if (resume || (active() && tally.moved > 0)) {
+            if (resume || (active() && tally.progress > 0)) {
                 val next = if (resume) restart.lastUserId else userId
                 scope.launch { restartIfCurrent(next) }
             } else if (active() && !abandonCap.reached()) {
@@ -1315,7 +1341,8 @@ class FaceIndexingScheduler @Inject constructor(
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         return appDatabase.withTransaction {
             if (!writeFence.allows(fenceToken)) return@withTransaction false
-            faceScanDao.upsert(photoKeys.map { FaceScanEntity(account, it) })
+            faceScanDao.upsert(photoKeys.map { FaceScanEntity(account, it, skipped = it in skippedKeys) })
+            skippedKeys.removeAll(photoKeys.toSet())
             true
         }
     }
@@ -1339,6 +1366,7 @@ class FaceIndexingScheduler @Inject constructor(
             if (!writeFence.allows(fenceToken)) return@withTransaction false
             if (faces.isNotEmpty()) faceDao.upsert(faces)
             faceScanDao.upsert(listOf(FaceScanEntity(account, photoKey)))
+            skippedKeys.remove(photoKey)
             true
         }
     }
@@ -1750,6 +1778,8 @@ class FaceIndexingScheduler @Inject constructor(
         writeFence.invalidate()
         retryKick.cancel()
         retryBook.clear()
+        rescanGuard.clear()
+        skippedKeys.clear()
         runCatching { stateStore.delete() }
         stateRestoredFor = null
         restart.reset()
@@ -1861,6 +1891,8 @@ class FaceIndexingScheduler @Inject constructor(
         // on disk is off the faces again until the next reattach.
         regroupBaseline = null
         retryBook.clear()
+        rescanGuard.clear()
+        skippedKeys.clear()
         runCatching { stateStore.delete() }
         triedReattachStamp = null
         // Marker last: only now is the wipe durably complete. The snapshot is left on disk for the
@@ -2133,13 +2165,15 @@ class FaceIndexingScheduler @Inject constructor(
                 // could not be opened (the card unmounted) or a transient cloud failure waits out its
                 // backoff, a defer (off Wi-Fi or out of budget) waits for the next pass.
                 val miss = missNote.reason.let {
-                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, tally?.attempts(photoKey) ?: 0) else it
+                    val prior = tally?.attempts(photoKey) ?: 0
+                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, prior) else settledCloudMiss(it, prior)
                 }
                 if (shouldMarkScannedOnNullSource(loadTimedOut.get(), miss)) {
                     if (item is GalleryItem.LocalOnly) FaceDiagnostics.recordUnloadableLocal()
                     val permanent = item !is GalleryItem.LocalOnly && miss == SourceMiss.PERMANENT
                     if (permanent) FaceDiagnostics.recordPermanentSkip()
                     tally?.movedOn(photoKey, permanent)
+                    skippedKeys.add(photoKey)
                     scannedKeys.add(photoKey)
                     return true
                 }
@@ -2280,6 +2314,7 @@ class FaceIndexingScheduler @Inject constructor(
                 // The faces could not be written: still record the photo scanned, as one with no face,
                 // rather than fetch and detect it again on every later pass.
                 Log.w(TAG, "face write failed: ${e.message}")
+                skippedKeys.remove(photoKey)
                 scannedKeys.add(photoKey)
                 true
             }
@@ -2352,7 +2387,7 @@ class FaceIndexingScheduler @Inject constructor(
         val u = Uri.parse(uri)
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(context, u)
+            retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))
             val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && vw > 0 && vh > 0) {
@@ -2439,12 +2474,12 @@ class FaceIndexingScheduler @Inject constructor(
                 }
             }?.also {
                 metrics.downloadMs = SystemClock.elapsedRealtime() - dlStart
-                metrics.downloadedBytes = runCatching { it.length() }.getOrDefault(0L)
+                metrics.downloadedBytes = runCatching { it.plainLength }.getOrDefault(0L)
             }
         } ?: return miss.giveUp(sourceMissForDownloadFailure(downloadError.get()))
         val unreadable = AtomicBoolean(false)
         return try {
-            decodeFileBounded(file, timedOut, unreadable)
+            decodeFileBounded(file.storedFile, timedOut, unreadable)
                 ?: miss.giveUp(sourceMissForUndecodedDownload(unreadable.get()))
         } finally {
             runCatching { file.delete() }
@@ -2461,7 +2496,7 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     private suspend fun isLocalReadable(uri: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { true } ?: false }
+        runCatching { context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))?.use { true } ?: false }
             .getOrDefault(false)
     }
 
@@ -2473,16 +2508,16 @@ class FaceIndexingScheduler @Inject constructor(
     private fun decodeLocalBlocking(uri: String, threw: AtomicBoolean? = null): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = context.contentResolver.openInputStream(u)?.use {
+        val bmp = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use {
             BitmapFactory.decodeStream(it, null, opts)
         } ?: return@runCatching null
-        val orientation = context.contentResolver.openInputStream(u)?.use {
+        val orientation = context.contentResolver.openInputStream(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, u))?.use {
             ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         } ?: ExifInterface.ORIENTATION_NORMAL
         orientedBitmap(bmp, orientation)
@@ -2497,25 +2532,25 @@ class FaceIndexingScheduler @Inject constructor(
      *  not support, or corrupt bytes), as opposed to a decode that threw (out of memory) or a file gone. */
     private fun decodeFileBlocking(file: File, unreadable: AtomicBoolean? = null): Bitmap? = runCatching {
         if (!file.exists() || file.length() <= 0L) return@runCatching null
+        // The cache files are encrypted: read through LocalFiles. A file that does not open now is not
+        // unreadable (a cache file whose key is gone is deleted there, so it is fetched again).
+        // A read that fails part way (a damaged segment) is a miss for now, never "unreadable".
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        val sized = LocalFiles.decodeChecked(context, file, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            if (file.exists()) unreadable?.set(true)
+            if (sized.undecodable) unreadable?.set(true)
             return@runCatching null
         }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: run {
-            if (file.exists()) unreadable?.set(true)
+        val decoded = LocalFiles.decodeChecked(context, file, opts)
+        val bmp = decoded.bitmap ?: run {
+            if (decoded.undecodable) unreadable?.set(true)
             return@runCatching null
         }
-        val orientation = runCatching {
-            ExifInterface(file.absolutePath)
-                .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-        orientedBitmap(bmp, orientation)
+        orientedBitmap(bmp, LocalFiles.exifOrientation(context, file))
     }.getOrNull()
 
     /**
@@ -2632,10 +2667,10 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     private fun cloudThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
 
     private fun cloudHdThumbFile(linkId: String): File =
-        File(File(context.cacheDir, "thumbnails"), "thumb_hd_$linkId.jpg")
+        File(File(context.cacheDir, "thumbnails"), "thumb_hd_${safeFileId(linkId)}.jpg")
 
     /** Power-of-two downsample that lands the decoded long edge in [SOURCE_MAX_EDGE, 2*SOURCE_MAX_EDGE):
      *  enough detail for detection without ever holding a full-resolution bitmap. */
@@ -3706,12 +3741,18 @@ internal suspend fun awaitMlGoAhead(
 }
 
 /**
- * Device photo to its Drive key, from [account]'s sync state rows: every backed-up photo but a hidden one
- * (the vault keeps its faces off People), and only where the Drive key differs.
+ * Device photo to its Drive key, from [account]'s sync state rows: every photo that is backed up
+ * ([eu.akoos.photos.domain.entity.SyncStatus.SYNCED], so neither a hidden one, whose faces the vault keeps
+ * off People, nor one still waiting) and whose Drive copy is in [listed], the links the library holds, and
+ * only where the Drive key differs. The gallery pairs a device photo with its Drive copy only while that
+ * copy is listed, so a photo whose copy is not listed keeps its faces on its device key.
  */
 internal fun syncStateRekeyPairs(
     account: String,
     rows: List<eu.akoos.photos.data.db.entity.SyncStateEntity>,
+    listed: Set<String>,
 ): List<Pair<String, String>> =
-    rows.filter { it.userId == account && it.status != eu.akoos.photos.domain.entity.SyncStatus.HIDDEN }
-        .mapNotNull { row -> row.cloudFileId?.takeIf { it.isNotBlank() && it != row.localUri }?.let { row.localUri to it } }
+    rows.filter { it.userId == account && it.status == eu.akoos.photos.domain.entity.SyncStatus.SYNCED }
+        .mapNotNull { row ->
+            row.cloudFileId?.takeIf { it.isNotBlank() && it != row.localUri && it in listed }?.let { row.localUri to it }
+        }

@@ -22,10 +22,21 @@
 
 package eu.akoos.photos.util
 
+import android.content.ContentProvider
+import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
+import android.database.MatrixCursor
 import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
+import androidx.datastore.preferences.core.edit
 import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -33,6 +44,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
@@ -298,6 +310,35 @@ class ExifHelperTest {
         assertTrue(!MetadataStripConfig(stripAuthorship = true).isNoOp)
     }
 
+    // ─── in-place strip ends the file where the stripped image ends ──────────
+
+    @Test
+    fun `an in-place strip that shrinks the EXIF leaves no old bytes after the image`() {
+        val all = MetadataStripConfig(
+            stripGps = true,
+            stripCameraInfo = true,
+            stripTimestamp = true,
+            stripSoftwareInfo = true,
+            stripAuthorship = true,
+        )
+        val expected = ExifHelper.stripToTempFile(context, sourceUri(), all)!!
+        val expectedBytes = expected.readBytes()
+        expected.delete()
+        val before = sourceFile.length()
+        val tempsBefore = strippedTempCount()
+
+        val result = ExifHelper.stripFieldsInPlace(context, sourceUri(), all, announce = false)
+
+        assertEquals(StripResult.Stripped, result)
+        val after = sourceFile.readBytes()
+        assertTrue("the strip should shrink the file", after.size < before)
+        assertTrue("the file must equal a fresh strip", expectedBytes.contentEquals(after))
+        assertEquals(0xFF.toByte(), after[after.size - 2])
+        assertEquals(0xD9.toByte(), after[after.size - 1])
+        assertNull(readBack(sourceFile).latLong)
+        assertEquals("no stripped temp is left behind", tempsBefore, strippedTempCount())
+    }
+
     // ─── temp cleanup when the EXIF write fails after the copy ────────────────
 
     @Test
@@ -330,5 +371,128 @@ class ExifHelperTest {
         assertNull(meta.model)
         assertNull(meta.gpsLatitude)
         assertNull(meta.dateTimeOriginal)
+    }
+
+    // ─── an in-place strip of a gallery photo keeps its capture date ──────────
+
+    private val galleryUri = "content://media/external/images/media/35"
+
+    /** Serves [sourceFile] as gallery row 35, its DATE_MODIFIED kept in step with the file as a scan would. */
+    private fun installGalleryRow(dateTakenMs: Long, refuseWrites: Boolean = false) {
+        GalleryRow.file = sourceFile
+        GalleryRow.dateTakenMs = dateTakenMs
+        GalleryRow.refuseWrites = refuseWrites
+        GalleryRow.opened.clear()
+        Robolectric.setupContentProvider(GalleryRow::class.java, MediaStore.AUTHORITY)
+        runBlocking { context.settingsDataStore.edit { it.remove(SettingsKeys.DOWNLOAD_DATE_OVERRIDES) } }
+    }
+
+    private fun overrides() = runBlocking {
+        CaptureDateOverride.parse(context.settingsDataStore.data.first()[SettingsKeys.DOWNLOAD_DATE_OVERRIDES])
+    }
+
+    @Test
+    fun `a strip that keeps the date holds the photo at its capture date after the rescan`() {
+        // DateTimeOriginal with no offset, the file last changed on the day it was taken.
+        val captureMs = 1_794_312_000_000L
+        sourceFile.setLastModified(captureMs)
+        installGalleryRow(dateTakenMs = captureMs)
+
+        val result = ExifHelper.stripFieldsInPlace(
+            context, galleryUri, MetadataStripConfig(stripGps = true, stripCameraInfo = true), announce = false,
+        )
+
+        assertEquals(StripResult.Stripped, result)
+        val entry = overrides()[galleryUri]
+        assertEquals("the capture date the row reported is recorded", captureMs, entry?.captureMs)
+        assertEquals("stamped with the modified time the strip left", sourceFile.lastModified() / 1000L, entry?.modifiedSeconds)
+        // The rescan empties the column of an offsetless date a day away from the new modified time; the
+        // row then reads the recorded date instead of the day the file was added.
+        val addedSec = 1_794_916_800L
+        assertEquals(
+            captureMs,
+            CaptureDateOverride.resolveDateTaken(0L, entry?.captureMs, addedSec, entry!!.modifiedSeconds!!),
+        )
+    }
+
+    @Test
+    fun `a strip that removes the date records no date for the photo`() {
+        installGalleryRow(dateTakenMs = 1_794_312_000_000L)
+
+        val result = ExifHelper.stripFieldsInPlace(
+            context, galleryUri, MetadataStripConfig(stripGps = true, stripTimestamp = true), announce = false,
+        )
+
+        assertEquals(StripResult.Stripped, result)
+        assertNull(overrides()[galleryUri])
+    }
+
+    @Test
+    fun `a refused gallery write leaves the file and its date alone after one write attempt`() {
+        installGalleryRow(dateTakenMs = 1_794_312_000_000L, refuseWrites = true)
+        val bytes = sourceFile.readBytes()
+        val tempsBefore = strippedTempCount()
+
+        val result = ExifHelper.stripFieldsInPlace(context, galleryUri, MetadataStripConfig(stripGps = true), announce = false)
+
+        assertEquals(StripResult.Failed, result)
+        assertEquals("only the write itself opens the file for writing", 1, GalleryRow.opened.count { 'w' in it })
+        assertTrue(sourceFile.readBytes().contentEquals(bytes))
+        assertEquals(tempsBefore, strippedTempCount())
+        assertNull(overrides()[galleryUri])
+    }
+
+    @Test
+    fun `a strip opens the gallery file for writing once, for the write`() {
+        // A write-mode descriptor closed unwritten still sets off a rescan, which could drop the date.
+        installGalleryRow(dateTakenMs = 1_794_312_000_000L)
+
+        ExifHelper.stripFieldsInPlace(context, galleryUri, MetadataStripConfig(stripGps = true), announce = false)
+
+        assertEquals(listOf("rw"), GalleryRow.opened.filter { 'w' in it })
+    }
+
+    /** One gallery row backed by a test file. */
+    class GalleryRow : ContentProvider() {
+        override fun onCreate() = true
+        override fun query(
+            uri: Uri,
+            projection: Array<out String>?,
+            selection: String?,
+            args: Array<out String>?,
+            sortOrder: String?,
+        ): Cursor {
+            val cols = projection ?: arrayOf(MediaStore.MediaColumns._ID)
+            return MatrixCursor(cols).apply {
+                addRow(
+                    cols.map<String, Any> { col ->
+                        when (col) {
+                            MediaStore.MediaColumns.DATE_TAKEN -> dateTakenMs
+                            MediaStore.MediaColumns.DATE_MODIFIED -> file.lastModified() / 1000L
+                            MediaStore.MediaColumns.SIZE -> file.length()
+                            else -> 0L
+                        }
+                    }.toTypedArray(),
+                )
+            }
+        }
+
+        override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+            opened += mode
+            if (refuseWrites && mode.contains('w')) throw SecurityException("no access to $uri")
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.parseMode(mode))
+        }
+
+        override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+        override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?) = 0
+        override fun delete(uri: Uri, selection: String?, args: Array<out String>?) = 0
+        override fun getType(uri: Uri): String? = null
+
+        companion object {
+            lateinit var file: File
+            var dateTakenMs = 0L
+            var refuseWrites = false
+            val opened = mutableListOf<String>()
+        }
     }
 }

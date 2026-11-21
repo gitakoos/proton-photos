@@ -154,7 +154,7 @@ class UploadCompressionStepTest {
         val profile = VideoCompressionProfile(VideoCodecChoice.HEVC, UploadCompressionTier.SPACE_SAVER)
         val running = AtomicInteger(0)
         val most = AtomicInteger(0)
-        coEvery { video.compress(any(), any(), any(), any(), any()) } coAnswers {
+        coEvery { video.compress(any(), any(), any(), any(), any(), any()) } coAnswers {
             most.updateAndGet { maxOf(it, running.incrementAndGet()) }
             delay(50)
             running.decrementAndGet()
@@ -162,9 +162,9 @@ class UploadCompressionStepTest {
         }
         val settings = CompressionSettings(videos = true, videoProfile = profile)
 
-        List(3) { i -> async { step.video("file://clip$i.mov", settings, 1_700_000_000_000L) } }.awaitAll()
+        List(3) { i -> async { step.video("file://clip$i.mov", settings, 1_700_000_000_000L, MetadataStripConfig()) } }.awaitAll()
 
         assertEquals("transcodes never overlap", 1, most.get())
-        coVerify(exactly = 1) { video.compress("file://clip0.mov", profile, 1_700_000_000_000L, any(), any()) }
+        coVerify(exactly = 1) { video.compress("file://clip0.mov", profile, 1_700_000_000_000L, MetadataStripConfig(), any(), any()) }
     }
 }

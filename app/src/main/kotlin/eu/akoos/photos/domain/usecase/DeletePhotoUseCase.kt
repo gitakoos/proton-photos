@@ -31,7 +31,10 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LinkBasis
+import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import kotlinx.coroutines.flow.first
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -42,6 +45,9 @@ private const val TAG = "DeletePhotoUseCase"
 /** Device uris one system trash or delete request carries. The request crosses a Binder transaction,
  *  which a library-sized batch outgrows, so a larger delete asks once per chunk. */
 internal const val DEVICE_REQUEST_CHUNK = 1_000
+
+/** Device uris one sync-row lookup carries, under SQLite's bind-variable limit. */
+private const val PAIR_LOOKUP_CHUNK = 500
 
 /** The device side of a delete, apart from the use case so a test can stand in for MediaStore. */
 internal interface DeviceMediaDeletes {
@@ -61,13 +67,16 @@ class DeletePhotoUseCase internal constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val device: DeviceMediaDeletes,
     private val localRepo: LocalMediaRepository? = null,
+    /** Stops the running upload of a device file, see [UploadPendingUseCase.cancelItem]. */
+    private val cancelUpload: (String) -> Unit = {},
 ) {
     @Inject constructor(
         @ApplicationContext context: Context,
         syncStateRepo: SyncStateRepository,
         cloudRepo: DrivePhotoRepository,
         localRepo: LocalMediaRepository,
-    ) : this(syncStateRepo, cloudRepo, MediaStoreDeletes(context), localRepo)
+        upload: dagger.Lazy<UploadPendingUseCase>,
+    ) : this(syncStateRepo, cloudRepo, MediaStoreDeletes(context), localRepo, { upload.get().cancelItem(it) })
 
     sealed interface Result {
         /**
@@ -76,11 +85,23 @@ class DeletePhotoUseCase internal constructor(
          * consent), or a follow-up system request could not be built. Their rows and Drive copies
          * are left as they were.
          */
-        data class Success(val keptOnDevice: List<GalleryItem> = emptyList()) : Result {
-            /** [items] less the ones [keptOnDevice] names: what the delete carried out. */
-            fun landed(items: List<GalleryItem>): List<GalleryItem> =
-                if (keptOnDevice.isEmpty()) items
-                else keptOnDevice.toHashSet().let { kept -> items.filterNot { it in kept } }
+        data class Success(
+            val keptOnDevice: List<GalleryItem> = emptyList(),
+            /** The items the delete acted on, each as it stood when the delete ran (see [invoke]); null
+             *  when the caller's own list is that already. */
+            val acted: List<GalleryItem>? = null,
+            /** The flags the delete ran with where they differ from the caller's (see [invoke]); null
+             *  when they are the caller's. An undo is built from these. */
+            val ranFreeUpSpace: Boolean? = null,
+            val ranDeleteFromCloud: Boolean? = null,
+        ) : Result {
+            /** The items the delete acted on ([acted], else [items]) less the ones [keptOnDevice] names:
+             *  what the delete carried out. */
+            fun landed(items: List<GalleryItem>): List<GalleryItem> {
+                val ran = acted ?: items
+                return if (keptOnDevice.isEmpty()) ran
+                else keptOnDevice.toHashSet().let { kept -> ran.filterNot { it in kept } }
+            }
         }
 
         /**
@@ -127,6 +148,28 @@ class DeletePhotoUseCase internal constructor(
         deleteFromCloud: Boolean,
         hide: Boolean = false,
     ): Result {
+        // A selection is a snapshot: a photo can finish its upload or download between the tap that picked
+        // it and this delete. Each item is taken as it stands now, so the delete removes what the user
+        // asked for. A hide vaults only what was picked, so it keeps the snapshot.
+        val selected = items
+        @Suppress("NAME_SHADOWING")
+        val items = if (hide) selected else withCurrentPairs(userId, selected)
+        val acted = items.takeIf { it != selected }
+        // A selection of photos that each had one copy, all on the device or all on Drive, is trashed
+        // whole: the copy one of them gained since it was picked goes with it, and a device file whose
+        // upload is still running loses the Drive copy that upload is making.
+        val askedFreeUp = freeUpSpace
+        val askedFromCloud = deleteFromCloud
+        val whole = !hide && selected.isNotEmpty() && (
+            (askedFreeUp && selected.all { it is GalleryItem.LocalOnly }) ||
+                (askedFromCloud && selected.all { it is GalleryItem.CloudOnly })
+            )
+        @Suppress("NAME_SHADOWING")
+        val freeUpSpace = askedFreeUp || (whole && askedFromCloud)
+        @Suppress("NAME_SHADOWING")
+        val deleteFromCloud = askedFromCloud || (whole && askedFreeUp)
+        val ranFreeUp = freeUpSpace.takeIf { it != askedFreeUp }
+        val ranFromCloud = deleteFromCloud.takeIf { it != askedFromCloud }
         val (cloudLinkIds, localUriStrings) = computeDeleteTargets(items, freeUpSpace, deleteFromCloud)
 
         // Batch shape up front: item count (overload signal) plus the type mix and cloud/local
@@ -160,7 +203,7 @@ class DeletePhotoUseCase internal constructor(
 
         if (localUriStrings.isEmpty()) {
             if (cloudLinkIds.isNotEmpty() && !trashInCloud(userId, cloudLinkIds)) return Result.CloudDeleteFailed
-            return Result.Success()
+            return Result.Success(acted = acted, ranFreeUpSpace = ranFreeUp, ranDeleteFromCloud = ranFromCloud)
         }
 
         // Before Android 11 each device file is removed directly and checked on its own: Android 10
@@ -171,16 +214,73 @@ class DeletePhotoUseCase internal constructor(
         if (kept.isNotEmpty()) {
             Log.w(TAG, "Direct delete left ${kept.size}/${localUriStrings.size} device file(s) in place")
         }
-        val outcome = Result.Success(kept)
+        val outcome = Result.Success(kept, acted, ranFreeUp, ranFromCloud)
         val settled = outcome.landed(items)
         localRepo?.forgetRemoved(gone)
-        updateSyncStateAfterLocalDelete(settled, freeUpSpace, hide)
+        updateSyncStateAfterLocalDelete(userId, settled, freeUpSpace, deleteFromCloud, hide)
         val settledLinks =
             if (kept.isEmpty()) cloudLinkIds
             else computeDeleteTargets(settled, freeUpSpace, deleteFromCloud).cloudLinkIds
         if (settledLinks.isNotEmpty() && !trashInCloud(userId, settledLinks)) return Result.CloudDeleteFailed
         return outcome
     }
+
+    /**
+     * [items] with each device-only or Drive-only photo that is paired by now taken as the pair: a device
+     * file whose upload finished since it was picked, or a Drive photo saved to the device since. Only a
+     * proven SYNCED link counts ([LinkBasis.PROVEN]); one reconcile made by name alone could name a
+     * different photo. A Drive photo's device file is taken only while the device still lists it, since a
+     * stale uri would fail the whole trash request. A link a second device file holds too is left alone:
+     * the gallery pairs that Drive photo with the other file, so trashing it would take that file's backup.
+     * A counterpart the selection already holds is left as picked, so no copy is named twice. With no
+     * signed-in user there is no Drive copy to pair with.
+     */
+    internal suspend fun withCurrentPairs(userId: UserId?, items: List<GalleryItem>): List<GalleryItem> {
+        if (userId == null || items.all { it is GalleryItem.Synced }) return items
+        val pickedLinks = HashSet<String>()
+        val pickedUris = HashSet<String>()
+        for (item in items) {
+            when (item) {
+                is GalleryItem.Synced -> { pickedLinks += item.cloud.linkId; pickedUris += item.local.uri }
+                is GalleryItem.CloudOnly -> pickedLinks += item.cloud.linkId
+                is GalleryItem.LocalOnly -> pickedUris += item.local.uri
+            }
+        }
+        val deviceOnly = items.filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri }
+        val rowsByUri = deviceOnly.chunked(PAIR_LOOKUP_CHUNK)
+            .flatMap { syncStateRepo.getOwnByUris(userId, it) }
+            .filter(::provenPair)
+            .associateBy { it.localUri }
+        val newLinks = rowsByUri.values.mapNotNull { it.cloudFileId }.filter { it !in pickedLinks }.distinct()
+        val driveOnly = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId }
+        val lookup = (newLinks + driveOnly).distinct()
+        val holders = if (lookup.isEmpty()) emptyMap() else syncStateRepo.syncedUrisByCloudId(userId, lookup)
+        // The one device file a link names, or null when it names none or more than one.
+        fun soleHolder(linkId: String): String? =
+            holders[linkId]?.filter { it.isNotBlank() }?.distinct()?.singleOrNull()
+        val cloudById = if (newLinks.isEmpty()) emptyMap()
+            else cloudRepo.observePhotosByLinkIds(newLinks).first().associateBy { it.linkId }
+        return items.map { item ->
+            when (item) {
+                is GalleryItem.Synced -> item
+                is GalleryItem.LocalOnly ->
+                    rowsByUri[item.local.uri]?.cloudFileId
+                        ?.takeIf { it !in pickedLinks && soleHolder(it) == item.local.uri }
+                        ?.let { cloudById[it] }
+                        ?.let { GalleryItem.Synced(it, item.local) }
+                        ?: item
+                is GalleryItem.CloudOnly -> {
+                    val linkId = item.cloud.linkId
+                    val uri = soleHolder(linkId)?.takeIf { it !in pickedUris }
+                        ?.takeIf { syncStateRepo.getByUri(it)?.let { row -> provenPair(row) && row.cloudFileId == linkId } == true }
+                    uri?.let { localRepo?.queryByUri(it) }?.let { GalleryItem.Synced(item.cloud, it) } ?: item
+                }
+            }
+        }
+    }
+
+    private fun provenPair(row: SyncState): Boolean =
+        row.status == SyncStatus.SYNCED && !row.cloudFileId.isNullOrBlank() && row.linkBasis == LinkBasis.PROVEN
 
     /**
      * Called by the caller AFTER the user confirmed the Android 11+ system trash dialog. Runs the
@@ -192,11 +292,13 @@ class DeletePhotoUseCase internal constructor(
         items: List<GalleryItem>,
         freeUpSpace: Boolean,
         hide: Boolean = false,
+        /** Whether the whole delete takes the Drive copies, see [Result.NeedsMediaWritePermission.deleteFromCloud]. */
+        deleteFromCloud: Boolean = cloudLinkIds.isNotEmpty(),
     ): Result {
         // The system dialog was confirmed, so the device files are gone whatever the Drive half does next.
         localRepo?.forgetRemoved(computeDeleteTargets(items, freeUpSpace, deleteFromCloud = false).localUriStrings)
         if (cloudLinkIds.isNotEmpty() && !trashInCloud(userId, cloudLinkIds)) return Result.CloudDeleteFailed
-        updateSyncStateAfterLocalDelete(items, freeUpSpace, hide)
+        updateSyncStateAfterLocalDelete(userId, items, freeUpSpace, deleteFromCloud, hide)
         return Result.Success()
     }
 
@@ -212,6 +314,7 @@ class DeletePhotoUseCase internal constructor(
     ): Result {
         val landed = completeAfterPermissionGranted(
             userId, pending.cloudLinkIds, pending.itemsBeingDeleted, pending.freeUpSpace, pending.hide,
+            pending.deleteFromCloud,
         )
         if (landed !is Result.Success || pending.remaining.isEmpty()) return landed
         val next = pending.remaining.take(DEVICE_REQUEST_CHUNK)
@@ -290,14 +393,25 @@ class DeletePhotoUseCase internal constructor(
      * caller above. Despite its name, [SyncStateRepository.updateStatusAndDeleteLocal] only UPDATES
      * the status column; it deletes nothing itself.
      */
-    private suspend fun updateSyncStateAfterLocalDelete(items: List<GalleryItem>, freeUpSpace: Boolean, hide: Boolean) {
+    private suspend fun updateSyncStateAfterLocalDelete(
+        userId: UserId?,
+        items: List<GalleryItem>,
+        freeUpSpace: Boolean,
+        deleteFromCloud: Boolean,
+        hide: Boolean,
+    ) {
         for (item in items) {
             try {
-                val newStatus = postDeleteSyncStatus(item, freeUpSpace, hide)
+                var newStatus = postDeleteSyncStatus(item, freeUpSpace, hide)
                 val localUri = when (item) {
                     is GalleryItem.LocalOnly -> item.local.uri
                     is GalleryItem.Synced -> item.local.uri
                     is GalleryItem.CloudOnly -> null
+                }
+                if (item is GalleryItem.LocalOnly && freeUpSpace && deleteFromCloud && !hide &&
+                    driveCopyMadeMeanwhile(userId, item.local.uri)
+                ) {
+                    newStatus = SyncStatus.CLOUD_ONLY
                 }
                 if (newStatus != null && localUri != null) {
                     syncStateRepo.updateStatusAndDeleteLocal(localUri, newStatus)
@@ -308,6 +422,26 @@ class DeletePhotoUseCase internal constructor(
                 Log.w(TAG, "Sync-state update failed for one item after local delete", e)
             }
         }
+    }
+
+    /**
+     * Takes the Drive copy of device file [uri], trashed as a whole photo, that its backup made while the
+     * delete ran: a running upload is stopped, so it leaves no Drive copy, and one that finished since the
+     * selection was read is trashed, unless a second device file holds that Drive photo too. True when a
+     * Drive copy was trashed.
+     */
+    private suspend fun driveCopyMadeMeanwhile(userId: UserId?, uri: String): Boolean {
+        val row = syncStateRepo.getByUri(uri) ?: return false
+        if (row.status == SyncStatus.UPLOADING) {
+            cancelUpload(uri)
+            return false
+        }
+        if (userId == null || !provenPair(row)) return false
+        val linkId = row.cloudFileId ?: return false
+        val holders = syncStateRepo.syncedUrisByCloudId(userId, listOf(linkId))[linkId]
+            ?.filter { it.isNotBlank() }?.distinct()
+        if (holders != listOf(uri)) return false
+        return trashInCloud(userId, listOf(linkId))
     }
 
     /** Cloud linkIds to trash and device URI strings to delete, produced by [computeDeleteTargets]. */

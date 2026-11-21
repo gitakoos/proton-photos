@@ -110,7 +110,7 @@ internal object DateSuggestions {
      * phrase must be matched whole: "last" or "month" alone is only text.
      */
     fun relative(query: String, phrases: Map<RelativeDate, Set<String>>): Pair<RelativeDate, Int>? {
-        val words = query.trim().split(SPACES).filter { it.isNotBlank() }
+        val words = SearchQuery.pillText(query).trim().split(SPACES).filter { it.isNotBlank() }
         val keys = words.map { phraseKey(it) }
         for (count in minOf(MAX_PHRASE_WORDS, keys.size) downTo 1) {
             val tail = keys.takeLast(count).joinToString(" ")
@@ -134,7 +134,7 @@ internal object DateSuggestions {
      * spell it, or null. The longest ending wins, and a count of zero is no date.
      */
     fun counted(query: String, patterns: List<CountedPattern>): Triple<RelativeUnit, Int, Int>? {
-        val keys = query.trim().split(SPACES).filter { it.isNotBlank() }.map { phraseKey(it) }
+        val keys = SearchQuery.pillText(query).trim().split(SPACES).filter { it.isNotBlank() }.map { phraseKey(it) }
         for (count in minOf(MAX_COUNTED_WORDS, keys.size) downTo 1) {
             val tail = keys.takeLast(count).joinToString(" ")
             for (pattern in patterns) {
@@ -210,7 +210,7 @@ internal object DateSuggestions {
         abbreviations: List<String> = emptyList(),
         otherLanguages: List<List<String>> = emptyList(),
     ): DateTerm? {
-        val tokens = SearchFilter.fold(query.trim()).split(' ').filter { it.isNotBlank() }
+        val tokens = SearchFilter.fold(SearchQuery.pillText(query).trim()).split(' ').filter { it.isNotBlank() }
         val last = tokens.lastOrNull() ?: return null
         val before = tokens.getOrNull(tokens.size - 2)
         val lastYear = yearOf(last)
@@ -231,7 +231,7 @@ internal object DateSuggestions {
         years: List<Int>,
         abbreviations: List<String> = emptyList(),
     ): List<DateSuggestion> {
-        val tokens = SearchFilter.fold(query.trim()).split(' ').filter { it.isNotBlank() }
+        val tokens = SearchFilter.fold(SearchQuery.pillText(query).trim()).split(' ').filter { it.isNotBlank() }
         val last = tokens.lastOrNull() ?: return emptyList()
         if (!last.all { it.isDigit() } || last.length !in 2..3) return emptyList()
         val matching = years.filter { it.toString().startsWith(last) }

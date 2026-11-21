@@ -46,6 +46,7 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import eu.akoos.photos.util.VideoLocationMetadata
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
@@ -135,7 +136,7 @@ internal suspend fun concatMultiSourceToTemp(
         val start = clip.startMs.coerceAtLeast(0L)
         val end = clip.endMs.coerceAtLeast(start + 1L)
         val mediaItem = MediaItem.Builder()
-            .setUri(Uri.parse(uri))
+            .setUri(concatSourceUri(appContext, uri))
             .setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(start)
@@ -160,7 +161,7 @@ internal suspend fun concatMultiSourceToTemp(
     // Optional background-music item (audio only), clipped to the chosen slice and scaled to musicGain.
     val musicItem: EditedMediaItem? = if (overlayUri != null && musicGain > 0.001f && overlayEndMs > overlayStartMs) {
         val mediaItem = MediaItem.Builder()
-            .setUri(overlayUri)
+            .setUri(eu.akoos.photos.data.localcrypto.LocalFiles.readableUri(appContext, overlayUri))
             .setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(overlayStartMs.coerceAtLeast(0L))
@@ -185,6 +186,10 @@ internal suspend fun concatMultiSourceToTemp(
         suspendCancellableCoroutine<Unit> { cont ->
             handler.post { startConcat(appContext, items, musicItem, musicGapUs, outputFile, handler, onProgress, cont) }
         }
+        // Media3 writes the location of the first clip only, as two numbers, and none at all when that
+        // clip's string carries an altitude; the clip's own string goes in instead.
+        val location = locationSourceUri(clipsInPlayOrder, sources)?.let { VideoLocationMetadata.read(appContext, it) }
+        VideoLocationMetadata.carryOver(outputFile, location)
     } catch (ce: kotlin.coroutines.cancellation.CancellationException) {
         runCatching { outputFile.delete() }
         throw ce
@@ -200,8 +205,8 @@ private fun volumeProcessors(gain: Float): List<AudioProcessor> {
     if (gain in 0.999f..1.001f) return emptyList()
     val g = gain.coerceIn(0f, 1f)
     val processor = ChannelMixingAudioProcessor()
-    processor.putChannelMixingMatrix(ChannelMixingMatrix.create(1, 1).scaleBy(g))
-    processor.putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(g))
+    processor.putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 1).scaleBy(g))
+    processor.putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(g))
     return listOf(processor)
 }
 
@@ -318,3 +323,18 @@ private fun pollProgress(
         }
     }, PROGRESS_POLL_MS)
 }
+
+/**
+ * The source whose location the joined video carries: the first clip in play order. Transformer copies the
+ * output's metadata, the location among it, from the first input of each track and never from a later clip.
+ * Pure.
+ */
+internal fun locationSourceUri(clipsInPlayOrder: List<VideoClip>, sources: List<VideoSource>): String? =
+    clipsInPlayOrder.firstNotNullOfOrNull { sources.uriOf(it.sourceId) }
+
+/**
+ * The uri the Transformer reads a joined clip from. A cloud original or a hidden video is kept encrypted, so it is
+ * read through the decrypting provider; any other uri is used as it is.
+ */
+internal fun concatSourceUri(context: Context, uri: String): Uri =
+    eu.akoos.photos.data.localcrypto.LocalFiles.readableUri(context, Uri.parse(uri))

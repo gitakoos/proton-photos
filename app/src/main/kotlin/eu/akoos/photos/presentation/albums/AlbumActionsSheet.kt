@@ -37,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
@@ -124,6 +125,8 @@ internal fun AlbumActionsSheet(
     /** Null drops the grouping row. */
     onGroupingSelected: ((AlbumPhotoGrouping) -> Unit)? = null,
     onLeaveAlbum: () -> Unit,
+    /** Null drops the "Arrange photos" row. */
+    onArrangePhotos: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     // Slide the drawer away before the action lands, so a confirmation or picker never opens behind
@@ -164,6 +167,7 @@ internal fun AlbumActionsSheet(
                 onSortSelected = onSortSelected,
                 grouping = grouping,
                 onGroupingSelected = onGroupingSelected,
+                offerCustom = onArrangePhotos != null,
             )
 
             // Share and the download / save row are on every album, so this group is never empty.
@@ -212,6 +216,15 @@ internal fun AlbumActionsSheet(
                     icon = Icons.Default.EditNote,
                     title = stringResource(R.string.metadata_editor_edit_metadata),
                     onClick = { close(onEditMetadata) },
+                )
+            }
+
+            if (hasPhotos && onArrangePhotos != null) {
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.DragHandle,
+                    title = stringResource(R.string.album_arrange_photos),
+                    onClick = { close(onArrangePhotos) },
                 )
             }
 

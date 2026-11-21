@@ -30,6 +30,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.LinkIdName
 import kotlinx.coroutines.flow.Flow
+import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoListingLite
 import eu.akoos.photos.data.db.entity.PhotoPickerRow
@@ -43,6 +44,20 @@ data class PhotoPairingRow(
     val captureTime: Long,
     val displayName: String,
     val sizeBytes: Long,
+)
+
+/** What a full refresh compares a listed photo against to tell whether its stored row is still current,
+ *  without the row's crypto material. */
+data class ListingRefreshStamp(
+    val linkId: String,
+    val revisionId: String,
+    val contentHash: String?,
+    val captureTime: Long,
+    val tagsCsv: String,
+    val thumbnailUrl: String?,
+    val nameFingerprint: String?,
+    /** The row carries everything the lazy thumbnail decrypt needs: its URL, content key packet and node key. */
+    val lazyThumbnailReady: Boolean,
 )
 
 /** One user's own stream as the backup figures Settings shows: its photos, its videos, and their total
@@ -251,6 +266,11 @@ interface PhotoListingDao {
     @Query("UPDATE photo_listing SET tagsCsv = :tagsCsv WHERE linkId = :linkId")
     suspend fun setTagsCsv(linkId: String, tagsCsv: String)
 
+    /** Which of [linkIds] the user's cloud listing holds. Callers slice [linkIds] with
+     *  [eu.akoos.photos.util.flatMapSqlChunks], one host variable per link. */
+    @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND linkId IN (:linkIds)")
+    suspend fun listedLinkIds(userId: String, linkIds: List<String>): List<String>
+
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
@@ -287,6 +307,15 @@ interface PhotoListingDao {
      *  Callers chunk [linkIds]: one host variable per element, against a per-statement cap. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds)")
     suspend fun getByLinkIds(linkIds: List<String>): List<PhotoListingEntity>
+
+    /** [getByLinkIds] narrowed to the columns a full refresh weighs a row's freshness on. Callers chunk
+     *  [linkIds]. */
+    @Query(
+        "SELECT linkId, revisionId, contentHash, captureTime, tagsCsv, thumbnailUrl, nameFingerprint, " +
+            "(serverThumbnailUrl IS NOT NULL AND contentKeyPacket IS NOT NULL AND encNodeKey IS NOT NULL) " +
+            "AS lazyThumbnailReady FROM photo_listing WHERE linkId IN (:linkIds)"
+    )
+    suspend fun getRefreshStamps(linkIds: List<String>): List<ListingRefreshStamp>
 
     /**
      * Which of [contentHashes] this user's library already holds.
@@ -338,15 +367,27 @@ interface PhotoListingDao {
     )
     suspend fun seedContentHash(userId: String, linkId: String, contentHash: String)
 
-    /** Live observation for a specific set of linkIds — used by album detail screen. Callers chunk
+    /** Live observation for a specific set of linkIds (album detail, a hidden album, an import run, the
+     *  shared-by-me feed), as the display columns only: see [PhotoListingDisplayRow]. Callers chunk
      *  [linkIds] and restate this ORDER BY when merging the slices back together. */
-    @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds) ORDER BY captureTime DESC")
-    fun observeByLinkIds(linkIds: List<String>): Flow<List<PhotoListingEntity>>
+    @Query(
+        "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, thumbnailUrl, " +
+            "revisionId, contentHash, tagsCsv, durationMs FROM photo_listing WHERE linkId IN (:linkIds) " +
+            "ORDER BY captureTime DESC",
+    )
+    fun observeDisplayRowsByLinkIds(linkIds: List<String>): Flow<List<PhotoListingDisplayRow>>
 
     /** Writes JUST the thumbnailUrl — a full-row upsert would race a concurrent metadata refresh
      *  and could overwrite the freshly-decrypted URL with a stale null. */
     @Query("UPDATE photo_listing SET thumbnailUrl = :url WHERE linkId = :linkId")
     suspend fun updateThumbnailUrl(linkId: String, url: String)
+
+    /** [updateThumbnailUrl] for a batch in one transaction, so the timeline query re-runs once for the
+     *  whole batch instead of once per row. */
+    @Transaction
+    suspend fun updateThumbnailUrls(urls: Map<String, String>) {
+        for ((linkId, url) in urls) updateThumbnailUrl(linkId, url)
+    }
 
     /** linkId → already-decrypted thumbnailUrl for every own-stream row that carries one. Read once at
      *  startup to prime [ThumbnailUrlStore] so previously-decrypted cells paint immediately without a

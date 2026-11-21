@@ -62,12 +62,22 @@ fun sanitizeErrorMessage(raw: String?): String {
     s = s.replace(Regex("[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}"), "<email>")
     // Anything quoted is a name somebody chose (an album, a person, a folder).
     s = s.replace(Regex("'[^'\\n]*'|\"[^\"\\n]*\""), "<text>")
-    // A file name in any script, with the capitalised words before it that a name with spaces carries.
+    // A name after a key that introduces one, unquoted: the rest of the message is that name as far as
+    // anything here can tell, so it all goes. "album Summer at Anna's" or "name: holiday 2024".
     s = s.replace(
         Regex(
-            "(?:[\\p{Lu}\\p{N}][\\p{L}\\p{N}_()\\-.,]* ){0,3}[\\p{L}\\p{N}_()\\-.,]+" +
-                "\\.(?i:jpg|jpeg|png|webp|heic|heif|gif|mp4|mov|m4v|avi|3gp|mkv|webm)\\b",
-            // Only the extension ignores case; the capital-letter rule before it must not.
+            "(?i)\\b(named|called|album|person|folder)\\b(?:\\s*[:=])?\\s+" +
+                "(?!<|(?:not|does|is|was|has|had|already|cannot|could|missing|exists|full|of|for|to|in)\\b)\\S.*",
+        ),
+        "$1 <text>",
+    )
+    s = s.replace(Regex("(?i)\\b(file ?name|file|name|title|path)\\s*[:=]\\s*(?!<)\\S.*"), "$1: <text>")
+    // A file name in any script, with up to three words before it that a name with spaces carries, in
+    // any case; the plain words of an error message around a name stop it, so they stay readable.
+    s = s.replace(
+        Regex(
+            "(?<![\\p{L}\\p{N}_()\\-.,])(?:(?!(?i:$FILE_NAME_STOP_WORDS)\\b)[\\p{L}\\p{N}_()\\-.,]+ ){0,3}[\\p{L}\\p{N}_()\\-.,]+" +
+                "\\.(?i:$MEDIA_EXTENSIONS)\\b",
         ),
         "<file>",
     )
@@ -89,3 +99,14 @@ fun sanitizeErrorMessage(raw: String?): String {
  * `redact(e.message)` where that intent is clearer than "sanitize".
  */
 fun redact(raw: String?): String = sanitizeErrorMessage(raw)
+
+/** Every photo, video and archive extension the app reads, writes or names, for the file name rule. */
+private const val MEDIA_EXTENSIONS =
+    "jpg|jpeg|jpe|jfif|png|webp|heic|heif|heics|hif|avif|gif|bmp|tif|tiff|dng|raw|arw|cr2|cr3|nef|nrw|orf|" +
+        "rw2|raf|srw|pef|jxl|svg|mp4|m4v|mov|qt|avi|3gp|3g2|mkv|webm|mpg|mpeg|wmv|ts|mts|m2ts|zip"
+
+/** The plain words of an error message, which never belong to the file name that follows them. */
+private const val FILE_NAME_STOP_WORDS =
+    "a|an|the|to|of|for|in|on|at|from|with|by|and|or|as|is|was|not|no|cannot|could|failed|error|" +
+        "file|photo|video|image|named|called|while|when|open|read|write|save|load|copy|move|delete|create|" +
+        "rename|encrypt|decrypt|encode|decode|upload|download|uploading|downloading|process|scan|stamp|find"

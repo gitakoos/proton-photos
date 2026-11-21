@@ -27,8 +27,10 @@ import java.io.EOFException
 import java.io.File
 import java.io.FileDescriptor
 import java.io.IOException
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 
 /**
  * Rewrites the creation + modification timestamps in an MP4's mvhd/tkhd/mdhd boxes so the file
@@ -74,20 +76,75 @@ object Mp4CreationTime {
     /** Best-effort: stamp [file]'s mvhd/tkhd/mdhd creation + modification times with [captureEpochMs].
      *  Never throws; returns true when the box walk completed without error. */
     fun stamp(file: File, captureEpochMs: Long): Boolean =
-        runCatching {
-            RandomAccessFile(file, "rw").use { raf ->
-                patchTimestampBoxes(FileAccess(raf), 0L, raf.length(), toMp4Time(captureEpochMs))
-            }
-        }.isSuccess
+        runCatching { RandomAccessFile(file, "rw").use { raf -> stampHashing(FileAccess(raf), captureEpochMs, null).stamped } }
+            .getOrDefault(false)
 
     /** The same stamp against an already-open read-write [fd], which is how a MediaStore item is
      *  reached: under scoped storage its path is not writable, only the descriptor the resolver hands
      *  out. The descriptor stays the caller's to close. Never throws. */
-    fun stamp(fd: FileDescriptor, captureEpochMs: Long): Boolean =
-        runCatching {
-            val access = DescriptorAccess(fd)
-            patchTimestampBoxes(access, 0L, access.length(), toMp4Time(captureEpochMs))
+    fun stamp(fd: FileDescriptor, captureEpochMs: Long): Boolean = stamp(fd, captureEpochMs, null).stamped
+
+    /**
+     * What a stamp did: whether the box walk completed ([stamped]), and the SHA-1 of the file's bytes
+     * before and after it when they were asked for and could be read ([before], [after]).
+     */
+    class HashedStamp(val stamped: Boolean, val before: String?, val after: String?)
+
+    /**
+     * [stamp] through [fd], also giving the SHA-1 of the file's bytes before and after it when [read]
+     * opens them. Both come from ONE read of the file, made before the write: the stamp only overwrites
+     * fixed-width fields, so the bytes after it are the bytes before it with those fields laid over.
+     * [read]'s stream is closed here. Never throws.
+     */
+    fun stamp(fd: FileDescriptor, captureEpochMs: Long, read: (() -> InputStream?)?): HashedStamp =
+        runCatching { stampHashing(DescriptorAccess(fd), captureEpochMs, read) }
+            .getOrDefault(HashedStamp(false, null, null))
+
+    /** [stamp] of [file] with its hashes, the route the tests reach the shared walk by. */
+    internal fun stampHashing(file: File, captureEpochMs: Long): HashedStamp =
+        RandomAccessFile(file, "rw").use { raf -> stampHashing(FileAccess(raf), captureEpochMs) { file.inputStream() } }
+
+    private fun stampHashing(access: BoxAccess, captureEpochMs: Long, read: (() -> InputStream?)?): HashedStamp {
+        val planning = PlanningAccess(access)
+        val complete = runCatching {
+            patchTimestampBoxes(planning, 0L, access.length(), toMp4Time(captureEpochMs))
         }.isSuccess
+        val hashes = if (complete && read != null) {
+            runCatching { read()?.use { sha1BeforeAndAfter(it, planning.patches) } }.getOrNull()
+        } else {
+            null
+        }
+        for ((offset, bytes) in planning.patches) {
+            access.seek(offset)
+            access.write(bytes)
+        }
+        return HashedStamp(complete, hashes?.first, hashes?.second)
+    }
+
+    /** The hex SHA-1 of [input]'s bytes, and of the same bytes with [patches] (offset, bytes) laid over
+     *  them, from one read. Closes nothing. */
+    internal fun sha1BeforeAndAfter(input: InputStream, patches: List<Pair<Long, ByteArray>>): Pair<String, String> {
+        val before = MessageDigest.getInstance("SHA-1")
+        val after = MessageDigest.getInstance("SHA-1")
+        val buffer = ByteArray(64 * 1024)
+        var pos = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (read == 0) continue
+            before.update(buffer, 0, read)
+            val end = pos + read
+            for ((offset, bytes) in patches) {
+                val from = maxOf(offset, pos)
+                val to = minOf(offset + bytes.size, end)
+                for (at in from until to) buffer[(at - pos).toInt()] = bytes[(at - offset).toInt()]
+            }
+            after.update(buffer, 0, read)
+            pos = end
+        }
+        fun hex(digest: MessageDigest) = digest.digest().joinToString("") { "%02x".format(it) }
+        return hex(before) to hex(after)
+    }
 
     /** The capture instant [file] records in its mvhd, in epoch millis, or null when it records
      *  none. Never throws. */
@@ -220,8 +277,39 @@ object Mp4CreationTime {
         fun readInt(): Int
         fun readLong(): Long
         fun readFully(target: ByteArray)
-        fun writeInt(value: Int)
-        fun writeLong(value: Long)
+        fun write(bytes: ByteArray)
+        fun writeInt(value: Int) = write(ByteBuffer.allocate(4).putInt(value).array())
+        fun writeLong(value: Long) = write(ByteBuffer.allocate(8).putLong(value).array())
+    }
+
+    /** Reads through [inner] and keeps every write as an (offset, bytes) patch instead of making it,
+     *  so the walk's writes can be hashed before they land. The walk never reads a field it wrote. */
+    private class PlanningAccess(private val inner: BoxAccess) : BoxAccess {
+        val patches = mutableListOf<Pair<Long, ByteArray>>()
+        private var pos = 0L
+
+        override fun length(): Long = inner.length()
+
+        override fun seek(pos: Long) {
+            this.pos = pos
+            inner.seek(pos)
+        }
+
+        override fun readByte(): Byte = inner.readByte().also { pos += 1 }
+
+        override fun readInt(): Int = inner.readInt().also { pos += 4 }
+
+        override fun readLong(): Long = inner.readLong().also { pos += 8 }
+
+        override fun readFully(target: ByteArray) {
+            inner.readFully(target)
+            pos += target.size
+        }
+
+        override fun write(bytes: ByteArray) {
+            patches += pos to bytes.copyOf()
+            pos += bytes.size
+        }
     }
 
     private class FileAccess(private val raf: RandomAccessFile) : BoxAccess {
@@ -231,8 +319,7 @@ object Mp4CreationTime {
         override fun readInt(): Int = raf.readInt()
         override fun readLong(): Long = raf.readLong()
         override fun readFully(target: ByteArray) = raf.readFully(target)
-        override fun writeInt(value: Int) = raf.writeInt(value)
-        override fun writeLong(value: Long) = raf.writeLong(value)
+        override fun write(bytes: ByteArray) = raf.write(bytes)
     }
 
     /** Positional I/O over a descriptor the caller owns and still has to use after the walk. Every
@@ -259,10 +346,6 @@ object Mp4CreationTime {
 
         override fun readFully(target: ByteArray) = fill(target)
 
-        override fun writeInt(value: Int) = write(ByteBuffer.allocate(4).putInt(value).array())
-
-        override fun writeLong(value: Long) = write(ByteBuffer.allocate(8).putLong(value).array())
-
         private fun read(count: Int): ByteArray = ByteArray(count).also { fill(it) }
 
         /** [target] filled from the current offset. A positional read may answer fewer bytes than it
@@ -279,7 +362,7 @@ object Mp4CreationTime {
         }
 
         /** [bytes] written at the current offset, repeated for the same reason a read is. */
-        private fun write(bytes: ByteArray) {
+        override fun write(bytes: ByteArray) {
             var written = 0
             while (written < bytes.size) {
                 val count = Os.pwrite(fd, bytes, written, bytes.size - written, pos + written)

@@ -186,7 +186,7 @@ class AddToPersonFaceViewModel @Inject constructor(
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val prefs = context.settingsDataStore.data.first()
         val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
-        val named = if (faceOn) AddToPersonFaces.namedPeople(personDao.namedPeopleForUser(account)) else emptyMap()
+        val named = if (faceOn) AddToPersonFaces.namedPeople(personDao.visibleNamedPeopleForUser(account)) else emptyMap()
         return Session(request, userId, account, faceOn, named)
     }
 

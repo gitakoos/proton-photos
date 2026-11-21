@@ -154,7 +154,7 @@ class GifMakerViewModel @Inject constructor(
             val uri = Uri.parse(uriStr)
             val retriever = MediaMetadataRetriever()
             val meta = try {
-                retriever.setDataSource(context, uri)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))
                 val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
                 val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
@@ -236,10 +236,10 @@ class GifMakerViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val uri = Uri.fromFile(file)
+            val uri = file.fileUri
             val retriever = MediaMetadataRetriever()
             val meta = try {
-                retriever.setDataSource(context, uri)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri))
                 val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
                 val rawW = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)

@@ -33,6 +33,7 @@ import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.Companion.KIND_MANU
 import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.Companion.KIND_NOT_PERSON
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
+import eu.akoos.photos.data.db.entity.PersonHiddenEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
@@ -44,6 +45,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.domain.usecase.personNameKey
 import eu.akoos.photos.widget.widgetHiddenSets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -221,6 +223,9 @@ class FaceSnapshotExporter internal constructor(
             }
         }
         if (markersWritten < plan.markers.size) return null
+        for (row in plan.hiddenPeople) {
+            writer.write(MlSnapshotRecord.HiddenPerson(row.name, row.hidden, row.changedAt))
+        }
         // A person renamed or named since the plan would leave its grouped faces under the plan's name.
         if (namedPeople(account) != plan.nameByPersonId) return null
         writer.finish()
@@ -274,6 +279,12 @@ class FaceSnapshotExporter internal constructor(
         for (row in covers) { addKey(row.photoKey); names += row.personName }
         val markers = ArrayList<String>()
         forEachMarker(account, hidden) { photoKey, _ -> markers += addKey(photoKey) }
+        // Every hidden row travels, a shown-again one too, so a show reaches the other devices; a reserved
+        // token name is an ordinary name here and its faces carry it.
+        val hiddenPeople = appDatabase.personHiddenDao().rowsForUser(account)
+            .filter { snapshotName(it.name) != null && it.changedAt >= 0 }
+            .sortedBy { personNameKey(it.name) }
+        for (row in hiddenPeople) names += row.name
         val nameDao = appDatabase.personNameDao()
         val namedAt = nameDao.statesForUser(account).associate { it.name to it.namedAt }
         val nameChanges = nameDao.recentChanges(account, PersonNameLog.MAX_CHANGES)
@@ -298,6 +309,7 @@ class FaceSnapshotExporter internal constructor(
             notPersons = notPersons,
             covers = covers,
             markers = markers,
+            hiddenPeople = hiddenPeople,
         )
     }
 
@@ -345,13 +357,14 @@ class FaceSnapshotExporter internal constructor(
         }
     }
 
-    /** Every scan marker the snapshot carries, in key order: those of the cloud photos not [hidden]. */
+    /** Every scan marker the snapshot carries, in key order: those of the cloud photos not [hidden], leaving out
+     *  the photos this device only gave up on, so no other device takes them as scanned. */
     private suspend inline fun forEachMarker(account: String, hidden: Set<String>, action: (String, Boolean) -> Unit) {
         var after = ""
         while (true) {
             val page = appDatabase.faceScanDao().markersAfter(account, after, HEAD_PAGE)
             for (marker in page) {
-                if (carriesPhotoKey(marker.photoKey) && marker.photoKey !in hidden) action(marker.photoKey, marker.hiResScanned)
+                if (!marker.skipped && carriesPhotoKey(marker.photoKey) && marker.photoKey !in hidden) action(marker.photoKey, marker.hiResScanned)
             }
             if (page.size < HEAD_PAGE) return
             after = page.last().photoKey
@@ -403,6 +416,7 @@ class FaceSnapshotExporter internal constructor(
         val notPersons: List<ExportedMark>,
         val covers: List<PersonCoverEntity>,
         val markers: List<String>,
+        val hiddenPeople: List<PersonHiddenEntity>,
     ) {
         val names: List<String> = nameSet.sorted()
 
@@ -423,6 +437,7 @@ class FaceSnapshotExporter internal constructor(
             scanMarkerCount = markers.size,
             nameChangeCount = nameChanges.size,
             removalCount = removals.size,
+            hiddenPeopleCount = hiddenPeople.size,
             facesWipedAtMillis = origin.facesWipedAtMillis,
         )
 

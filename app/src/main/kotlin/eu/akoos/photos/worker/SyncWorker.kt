@@ -32,6 +32,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -40,8 +41,10 @@ import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.await
 import android.util.Log
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -86,7 +89,9 @@ class SyncWorker @AssistedInject constructor(
     /** Last whole percent the notification showed for a running transcode, null outside one. */
     @Volatile private var lastCompressPercent: Int? = null
 
-    override suspend fun doWork(): Result = coroutineScope {
+    override suspend fun doWork(): Result = finalResult(runPass(), triggered = TAG_TRIGGERED in tags)
+
+    private suspend fun runPass(): Result = coroutineScope {
         // Promote to foreground IMMEDIATELY so the run survives the app being swiped from Recents
         // and the OS doesn't kill an upload partway through. The promotion MUST happen in
         // WorkManager's start-of-work grant window: promoting later (only once an upload starts)
@@ -141,21 +146,22 @@ class SyncWorker @AssistedInject constructor(
         try {
             // ONE reconcile + upload pass. Multi-stage trailing passes inside one worker run
             // cause 90-second "0 of 0 uploaded" notification loops when there's nothing to do.
-            // The OS content-URI trigger (rearmed in finally) fires multiple times during a
-            // camera burst — APPEND_OR_REPLACE coalesces them — so per-worker multi-pass adds
-            // complexity without buying anything the OS isn't already giving.
+            // The OS content-URI trigger fires multiple times during a camera burst, and each fire
+            // queues a run through queueTriggeredRun, which coalesces them into one waiting run, so per-worker
+            // multi-pass adds complexity without buying anything the OS isn't already giving.
             val pass = runSyncPass(userId, firstPass = true)
             val uploadFailed = pass.failed
 
-            // Only stamp a successful sync time. A fully-failed batch that still wrote LAST_SYNC_MS made
-            // Settings show "synced just now" over a broken backup (and reset the resume-refresh gate),
-            // contradicting the allFailed contract in UploadPendingUseCase.
-            if (!uploadFailed) {
+            // A batch that failed in a way a retry can fix leaves LAST_SYNC_MS alone, so Settings never shows
+            // "synced just now" over a broken backup; files Drive refused stay queued and counted as pending.
+            if (syncRunStampsLastSync(uploadFailed, pass.retryWorthwhile)) {
                 context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
             }
-            return@coroutineScope if (uploadFailed && runAttemptCount < 3) Result.retry()
-            else if (uploadFailed) Result.failure()
-            else Result.success()
+            return@coroutineScope when (syncRunVerdict(uploadFailed, pass.retryWorthwhile, runAttemptCount)) {
+                SyncRunVerdict.RETRY -> Result.retry()
+                SyncRunVerdict.FAILURE -> Result.failure()
+                SyncRunVerdict.SUCCESS -> Result.success()
+            }
         } catch (e: IOException) {
             Log.w(TAG, "sync IO error — will retry", e)
             return@coroutineScope if (runAttemptCount < 3) Result.retry() else Result.failure()
@@ -173,9 +179,9 @@ class SyncWorker @AssistedInject constructor(
             runCatching {
                 NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
             }
-            // Content-URI trigger is OneTime; re-arm from finally so it keeps firing
-            // after each capture — but only while backup is effectively on, so an idle
-            // fire (auto-sync on, no folder selected) stops re-arming itself.
+            // Make sure a content trigger is armed while backup is effectively on. The trigger
+            // worker re-arms itself on every fire, so this only covers a trigger that is missing
+            // (or an older build's request that ran this backup) and never replaces a live one.
             runCatching {
                 if (syncEffectivelyEnabled(context)) {
                     val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
@@ -197,7 +203,7 @@ class SyncWorker @AssistedInject constructor(
      */
     /** Outcome of a single sync pass. `attempted = 0` means reconcile saw no pending items —
      *  trailing passes can skip in that case to avoid the "0 of 0 uploaded" notification loop. */
-    private data class PassResult(val failed: Boolean, val attempted: Int)
+    private data class PassResult(val failed: Boolean, val attempted: Int, val retryWorthwhile: Boolean = failed)
 
     private suspend fun runSyncPass(userId: UserId, firstPass: Boolean): PassResult {
         try {
@@ -217,6 +223,7 @@ class SyncWorker @AssistedInject constructor(
             // verdict even when nothing was uploaded, leaving a stale "last sync time" with no
             // indication the backup is broken.
             var uploadFailed = false
+            var retryWorthwhile = false
             var attempted = 0
             try {
                 val uploadResult = upload(userId)
@@ -224,12 +231,14 @@ class SyncWorker @AssistedInject constructor(
                 // Stale-success guard: UploadPendingUseCase catches per-item exceptions and
                 // keeps looping, so an "all N items threw" run reaches us with no exception.
                 if (uploadResult.allFailed) {
-                    Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded — retrying")
+                    Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded")
                     uploadFailed = true
+                    retryWorthwhile = uploadResult.retryWorthwhile
                 }
             } catch (e: IOException) {
                 Log.w(TAG, "upload IO error — will retry", e)
                 uploadFailed = true
+                retryWorthwhile = true
             } catch (e: Exception) {
                 // CancellationException must propagate so structured concurrency cancels the
                 // surrounding coroutineScope correctly; downgrading it to "upload failed"
@@ -237,8 +246,9 @@ class SyncWorker @AssistedInject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "upload failed — sync verdict downgraded", e)
                 uploadFailed = true
+                retryWorthwhile = true
             }
-            return PassResult(uploadFailed, attempted)
+            return PassResult(uploadFailed, attempted, retryWorthwhile)
         } catch (e: IOException) {
             // Re-throw on first pass so the outer catch handles retries; on trailing passes,
             // a transient network blip shouldn't abort the whole worker — log and move on.
@@ -384,32 +394,142 @@ class SyncWorker @AssistedInject constructor(
 
         /**
          * OS-level MediaStore content-URI trigger via WorkManager. The system itself watches
-         * the URIs even when our process is dead and wakes SyncWorker within seconds of a
-         * MediaStore change. Re-armed by [doWork]'s finally block so each fire arms the
-         * NEXT one.
+         * the URIs even when our process is dead and wakes [SyncContentTriggerWorker] within
+         * seconds of a MediaStore change; that worker only queues a backup run ([queueTriggeredRun]) and
+         * arms the next trigger. The backup itself is never the trigger request, so arming the
+         * trigger again (on every activity start, settings change or finished run) can never
+         * cancel an upload in progress.
          */
-        fun scheduleContentObserver(context: Context, wifiOnly: Boolean = true) {
-            // CONNECTED for both modes; the metered-Wi-Fi-aware Wi-Fi-only gate lives in
-            // UploadPendingUseCase (see schedule()). wifiOnly stays in the signature for callers.
-            val networkType = NetworkType.CONNECTED
+        suspend fun scheduleContentObserver(context: Context, wifiOnly: Boolean = true) =
+            armContentTrigger(context, selfRearm = false)
+
+        /**
+         * Enqueues the content trigger under [NAME_CONTENT_OBSERVER] with the policy
+         * [contentTriggerPolicy] picks from what is armed now. [selfRearm] is the trigger worker
+         * arming its successor, the one caller allowed to replace a running request (itself).
+         */
+        internal suspend fun armContentTrigger(context: Context, selfRearm: Boolean) {
+            val workManager = WorkManager.getInstance(context)
+            val policy = if (selfRearm) {
+                ExistingWorkPolicy.REPLACE
+            } else {
+                // A state that cannot be read keeps whatever is armed: KEEP still enqueues when
+                // nothing is, and never stops a running request.
+                runCatching {
+                    val armed = workManager.getWorkInfosForUniqueWorkFlow(NAME_CONTENT_OBSERVER).first()
+                        .map { ArmedTrigger(it.state, TAG_CONTENT_TRIGGER in it.tags) }
+                    contentTriggerPolicy(armed)
+                }.getOrDefault(ExistingWorkPolicy.KEEP)
+            }
+            // The system's own delays are 10 s after the last change and at most 2 min after the first, so a
+            // device that keeps writing media (a long burst, another app saving files) held a new photo back
+            // for up to 2 min. These bound it to a minute; a fire mid-burst only queues a run behind the one going.
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(networkType)
                 .addContentUriTrigger(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
                 .addContentUriTrigger(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
+                .setTriggerContentUpdateDelay(java.time.Duration.ofMillis(CONTENT_TRIGGER_UPDATE_DELAY_MS))
+                .setTriggerContentMaxDelay(java.time.Duration.ofMillis(CONTENT_TRIGGER_MAX_DELAY_MS))
                 .build()
-            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+            val request = OneTimeWorkRequestBuilder<SyncContentTriggerWorker>()
                 .setConstraints(constraints)
                 .addTag(TAG_CONTENT_OBSERVER)
+                .addTag(TAG_CONTENT_TRIGGER)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                NAME_CONTENT_OBSERVER,
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
+            workManager.enqueueUniqueWork(NAME_CONTENT_OBSERVER, policy, request)
         }
+
+        /** One request under [NAME_CONTENT_OBSERVER]: its state, and whether it is a [SyncContentTriggerWorker]. */
+        internal data class ArmedTrigger(val state: WorkInfo.State, val isTriggerWorker: Boolean)
+
+        /**
+         * How to arm the content trigger over what is already under its name.
+         *  - A trigger worker that is waiting or running stays (KEEP); a running one arms its own successor.
+         *  - A request from an older build ran the whole backup as the trigger. A waiting one is
+         *    replaced. A running one is a backup in progress, so the new trigger is queued after it
+         *    (APPEND_OR_REPLACE) instead of stopping it.
+         *  - Nothing unfinished: a fresh trigger (REPLACE, which only drops finished entries).
+         */
+        internal fun contentTriggerPolicy(armed: List<ArmedTrigger>): ExistingWorkPolicy {
+            val open = armed.filterNot { it.state.isFinished }
+            if (open.any { it.isTriggerWorker }) return ExistingWorkPolicy.KEEP
+            if (open.any { it.state == WorkInfo.State.RUNNING }) return ExistingWorkPolicy.APPEND_OR_REPLACE
+            return ExistingWorkPolicy.REPLACE
+        }
+
+        /** How long the content trigger waits for MediaStore to go quiet before it fires. */
+        internal const val CONTENT_TRIGGER_UPDATE_DELAY_MS = 5_000L
+        /** The longest the content trigger waits after the first change, however busy MediaStore stays. */
+        internal const val CONTENT_TRIGGER_MAX_DELAY_MS = 60_000L
+
+        /** The backup runs a new or changed device file asks for, kept apart from [NAME_ONESHOT]. */
+        const val NAME_TRIGGERED = "sync_worker_triggered"
+        /** Marks a run queued by [queueTriggeredRun]. */
+        const val TAG_TRIGGERED = "sync_triggered"
+        /** Retry pause of a triggered run, growing by this much per attempt, so a run held in its
+         *  backoff (which a new trigger waits for) starts again within half a minute. */
+        internal const val TRIGGERED_BACKOFF_SECONDS = 10L
+
+        /**
+         * Queues the backup run a new or changed device file asks for: the MediaStore content trigger
+         * ([SyncContentTriggerWorker]) and the in-app MediaStore observers. It has no battery condition, so
+         * a new capture is backed up promptly, and its own unique name, so it never waits behind a
+         * [NAME_ONESHOT] run that is held for a battery that is not low. Two runs going at once never
+         * upload the same file: every upload pass holds [UploadPendingUseCase]'s lock and reconcile
+         * shares one pass per account.
+         */
+        suspend fun queueTriggeredRun(context: Context) {
+            ensureChannel(context)
+            val workManager = WorkManager.getInstance(context)
+            // A state that cannot be read takes APPEND_OR_REPLACE, which never stops a running run either.
+            val policy = runCatching {
+                val queued = workManager.getWorkInfosForUniqueWorkFlow(NAME_TRIGGERED).first().map { it.state }
+                triggeredRunPolicy(queued)
+            }.getOrDefault(ExistingWorkPolicy.APPEND_OR_REPLACE)
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setBackoffCriteria(BackoffPolicy.LINEAR, TRIGGERED_BACKOFF_SECONDS, TimeUnit.SECONDS)
+                .addTag(TAG_TRIGGERED)
+                .build()
+            // Awaited, so the trigger worker arms its successor (which stops it) only once the run is queued.
+            workManager.enqueueUniqueWork(NAME_TRIGGERED, policy, request).await()
+        }
+
+        /**
+         * How to queue a triggered run over the states under [NAME_TRIGGERED]. Only KEEP and
+         * APPEND_OR_REPLACE, so a run that started a moment ago, after the states were read, is never
+         * stopped: KEEP leaves the queue alone, and APPEND_OR_REPLACE only drops the queue when its last
+         * run failed or was cancelled, and a run behind a running one is never either of those.
+         *  - A run waiting to start (behind a running one, for the network, or in its short retry
+         *    pause): KEEP. It reads the device afresh when it starts, so it already covers the new file,
+         *    and a burst of fires queues no more runs.
+         *  - Otherwise: APPEND_OR_REPLACE. A run going gets one queued after it; with nothing open, or
+         *    after a failed or cancelled run, the new run starts on its own.
+         */
+        internal fun triggeredRunPolicy(states: List<WorkInfo.State>): ExistingWorkPolicy {
+            val open = states.filterNot { it.isFinished }
+            return if (open.any { it != WorkInfo.State.RUNNING }) ExistingWorkPolicy.KEEP
+            else ExistingWorkPolicy.APPEND_OR_REPLACE
+        }
+
+        /**
+         * What a run ends with. A run queued behind a triggered run is failed with it by WorkManager, so a
+         * triggered run never ends failed: its failure is still left out of the last-sync time, the
+         * retries it had are unchanged, and the periodic run picks the files up again.
+         */
+        internal fun finalResult(
+            result: androidx.work.ListenableWorker.Result,
+            triggered: Boolean,
+        ): androidx.work.ListenableWorker.Result =
+            if (triggered && result == androidx.work.ListenableWorker.Result.failure()) {
+                androidx.work.ListenableWorker.Result.success()
+            } else {
+                result
+            }
 
         const val NAME_CONTENT_OBSERVER = "sync_worker_content_observer"
         const val TAG_CONTENT_OBSERVER = "sync_content_observer"
+        /** Marks a content trigger that is a [SyncContentTriggerWorker], not an older build's full backup run. */
+        const val TAG_CONTENT_TRIGGER = "sync_content_trigger"
 
         /**
          * Immediately enqueue a OneTime sync run so the user doesn't have to wait for the next
@@ -490,3 +610,22 @@ class SyncWorker @AssistedInject constructor(
         }
     }
 }
+
+/** What a sync run reports to WorkManager, decided by [syncRunVerdict]. */
+internal enum class SyncRunVerdict { SUCCESS, RETRY, FAILURE }
+
+/**
+ * A run whose upload did not fail succeeds. A failed one is retried, at most three runs in all, only when
+ * a retry can help ([retryWorthwhile]): a batch whose every failure was Drive refusing the file meets the
+ * same refusal minutes later, so it ends the run instead of feeding WorkManager's backoff loop.
+ */
+internal fun syncRunVerdict(uploadFailed: Boolean, retryWorthwhile: Boolean, runAttemptCount: Int): SyncRunVerdict =
+    when {
+        !uploadFailed -> SyncRunVerdict.SUCCESS
+        retryWorthwhile && runAttemptCount < 3 -> SyncRunVerdict.RETRY
+        else -> SyncRunVerdict.FAILURE
+    }
+
+/** Whether a sync run records the last sync time: unless its upload failed in a way a retry can fix. */
+internal fun syncRunStampsLastSync(uploadFailed: Boolean, retryWorthwhile: Boolean): Boolean =
+    !uploadFailed || !retryWorthwhile

@@ -20,8 +20,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.presentation.common.snackbarObstacle
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.app.Activity
 import android.content.Intent
 import androidx.annotation.StringRes
@@ -39,6 +43,10 @@ import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import eu.akoos.photos.presentation.common.GlassBackdrop
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -54,6 +62,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
@@ -214,7 +223,12 @@ fun AlbumDetailScreen(
     LaunchedEffect(albumLinkId) { viewModel.load(albumLinkId, albumName, shareId, sharedByEmail, volumeId) }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val arrangeSession by viewModel.arrange.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val orderSavedMsg = stringResource(R.string.arrange_saved)
+    LaunchedEffect(viewModel) {
+        viewModel.arrangeSaved.collect { snackbarHostState.showSnackbar(orderSavedMsg) }
+    }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
     // rather than a flag is what lets the sheet describe the photos the tap was made on.
@@ -251,21 +265,15 @@ fun AlbumDetailScreen(
     var showSetCoverConfirm by remember { mutableStateOf(false) }
     var showRemoveFromAlbumConfirm by remember { mutableStateOf(false) }
     // Warn before sharing when the selection has cloud-only photos (they download first).
-    var showShareCloudWarning by remember { mutableStateOf(false) }
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val albumActionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
-    // Unified photo-selection share drawer + its manage-link sheet — same as the timeline.
+    // Unified photo-selection share drawer + its manage-link sheet: same as the timeline.
     var showPhotoShareSheet by remember { mutableStateOf(false) }
-    val photoShareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showManageLinkSheet by remember { mutableStateOf(false) }
-    val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
     // Add-to-person flow for the album selection, offered while face recognition is on.
     var showAddToPersonSheet by remember { mutableStateOf(false) }
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
     var showMoveToAlbumSheet by remember { mutableStateOf(false) }
-    var showCreateAlbumForMove by remember { mutableStateOf(false) }
     // True while the album picker is open for an add that keeps the photos here, false for a move.
     var pickerKeepsPhotos by remember { mutableStateOf(false) }
 
@@ -273,39 +281,18 @@ fun AlbumDetailScreen(
     // controller, so a save started in this album shows its progress here rather than only on the feed.
     val cloudSaveVm: CloudSaveDrawerViewModel = hiltViewModel()
     val cloudSaveUi by cloudSaveVm.ui.collectAsStateWithLifecycle()
-
+    val shareCtx = LocalContext.current
+    val linkCopiedMsg = stringResource(R.string.album_link_copied)
+    AlbumEffects(
+        state = state,
+        viewModel = viewModel,
+        snackbarHostState = snackbarHostState,
+        showShareSheet = showShareSheet,
+        onBack = onBack,
+    )
     // In selection mode, system back cancels the selection instead of popping the album.
     androidx.activity.compose.BackHandler(enabled = state.isSelectionMode) {
         viewModel.clearSelection()
-    }
-
-    LaunchedEffect(state.error) {
-        state.error?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearError()
-        }
-    }
-
-    // After a hide moves backed-up photos to the vault, reassure the user their Drive copies are
-    // untouched — the same notice the timeline shows. Mirrors the gallery's hideCloudNoticePending.
-    val hideCloudNotice = stringResource(R.string.hide_cloud_copy_notice)
-    LaunchedEffect(state.hideCloudNoticePending) {
-        if (state.hideCloudNoticePending) {
-            snackbarHostState.showSnackbar(hideCloudNotice)
-            viewModel.clearHideCloudNotice()
-        }
-    }
-
-    // Hand the VM-built share intent to the system chooser. It can arrive under the app lock, once cloud
-    // originals finish downloading, and the chooser would open above the lock, so it waits for the unlock.
-    val shareCtx = LocalContext.current
-    val shareChooserTitle = stringResource(R.string.share_chooser_title)
-    LaunchedEffect(Unit) {
-        viewModel.shareIntent.collect { intent ->
-            appLock.runWhenOpen {
-                runCatching { shareCtx.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareCtx, intent, shareChooserTitle)) }
-            }
-        }
     }
 
     LaunchedEffect(openShareSheet) {
@@ -380,6 +367,325 @@ fun AlbumDetailScreen(
         if (showShareSheet && !state.isSharedWithMe) viewModel.loadInvitations()
     }
 
+    // Prefer a cover chosen in this session (set by runSetCover) so the header flips immediately,
+    // then the nav-arg cover, then the first photo as a fallback for a brand-new album.
+    val coverUrl = state.coverThumbnailUrl ?: coverThumbnailUrl ?: state.photos.firstOrNull()?.thumbnailUrl
+    // The linkId of whichever photo the shown cover belongs to, so a GIF cover animates the right
+    // photo: match the shown still to its loaded member (covers a cover set this session too), else
+    // fall back to the cover linkId the grid handed in.
+    val heroCoverLinkId = remember(coverUrl, coverLinkId, state.photos) {
+        state.photos.firstOrNull { it.thumbnailUrl != null && it.thumbnailUrl == coverUrl }?.linkId
+            ?: coverLinkId
+    }
+    val appColors = AppColors.current
+    val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    val gridState = rememberLazyGridState()
+    val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
+    // The span of dates each header gathers, one choice every album shares. Kept in saved state too:
+    // the grid restores its scroll position as an item index, so on the way back from the viewer it
+    // has to lay out under the headers it was saved with from the first frame, before the preference
+    // has loaded.
+    var photoGrouping by rememberSaveable { mutableStateOf(AlbumPhotoGrouping.Default) }
+    // A pinch on the grid regroups for this visit only, until a drawer pick replaces it. Saved state
+    // for the same reason; a fresh open starts from the saved choice.
+    var visitGrouping by rememberSaveable { mutableStateOf<AlbumPhotoGrouping?>(null) }
+    val shownGrouping = visitGrouping ?: photoGrouping
+    LaunchedEffect(state.albumLinkId) {
+        val albumLinkId = state.albumLinkId
+        shareCtx.settingsDataStore.data
+            .map { PhotoViewChoices.from(it).groupingOfAlbum(albumLinkId) }
+            .collect { photoGrouping = it }
+    }
+    // Group photos under the headers shown, on the same capture time the rest of the app groups that
+    // photo by: a member whose Drive captureTime is sub-floor reads its device twin's date. The twin
+    // comes from the map the ViewModel already holds, so the lambda only does a hash lookup per row.
+    // Each photo keeps its position so the viewer opens the right one.
+    // A hand-made order has no date runs to head, so it is one section without a header.
+    val customOrder = state.photoSortMode == AlbumPhotoSortMode.Custom
+    val photoGroups = remember(state.photos, state.localItemByLinkId, shownGrouping, customOrder) {
+        if (customOrder) {
+            mapOf("" to state.photos.withIndex().toList())
+        } else {
+            photoDateSections(state.photos, shownGrouping) {
+                AlbumPhotoItems.captureTimeMs(it, state.localItemByLinkId[it.linkId])
+            }
+        }
+    }
+    // Scrubber shares the timeline handle. The grid keys photos by raw linkId (see items() below),
+    // so wrap each cloud photo as a gallery item and map back to that same key.
+    val scrubberItems = remember(state.photos, state.localItemByLinkId, state.localUriByLinkId) {
+        state.photos.map {
+            AlbumPhotoItems.galleryItem(it, state.localItemByLinkId[it.linkId], state.localUriByLinkId[it.linkId])
+        }
+    }
+    val scrubberTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
+    // Opt-in floating day pill while the grid scrolls; default off. Shares the scrubber's date mapping.
+    val showScrollDate by remember {
+        shareCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
+    }.collectAsState(initial = false)
+    // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
+    var scrubberDragging by remember { mutableStateOf(false) }
+
+
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.bg0)
+    Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = { viewModel.pullRefresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            AlbumPhotoGrid(
+                state = state,
+                viewModel = viewModel,
+                gridState = gridState,
+                photoGroups = photoGroups,
+                shownGrouping = shownGrouping,
+                onGroupingChange = { visitGrouping = it },
+                coverUrl = coverUrl,
+                heroCoverLinkId = heroCoverLinkId,
+                albumName = albumName,
+                glass = glass,
+                onOverflowClick = { showAlbumOverflow = true },
+                onPhotoClick = onPhotoClick,
+            )
+        }
+
+        AlbumChrome(
+            state = state,
+            viewModel = viewModel,
+            glass = glass,
+            gridState = gridState,
+            albumName = albumName,
+            scrubberItems = scrubberItems,
+            scrubberTopInset = scrubberTopInset,
+            showScrollDate = showScrollDate,
+            scrubberDragging = scrubberDragging,
+            onScrubberDraggingChange = { scrubberDragging = it },
+            showScrollTop = showScrollTop,
+            onBack = onBack,
+            onOverflowClick = { showAlbumOverflow = true },
+            customOrder = customOrder,
+        )
+
+        AlbumSelectionDrawer(
+            state = state,
+            viewModel = viewModel,
+            glass = glass,
+            gridState = gridState,
+            faceEnabled = faceEnabled,
+            snackbarHostState = snackbarHostState,
+            onEditMetadata = onEditMetadata,
+            onShare = { showPhotoShareSheet = true },
+            onAddToPerson = { showAddToPersonSheet = true },
+            onSetCover = { showSetCoverConfirm = true },
+            onHide = { hideConfirmSplit = it },
+            onMoveToAlbum = { keepPhotos ->
+                pickerKeepsPhotos = keepPhotos
+                showMoveToAlbumSheet = true
+            },
+            onRemove = { showRemoveFromAlbumConfirm = true },
+            onDelete = { showDeleteConfirm = true },
+        )
+
+        AlbumOperationOverlays(state = state, viewModel = viewModel)
+
+        arrangeSession?.let { AlbumArrangeMode(state = state, session = it, viewModel = viewModel) }
+
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+            snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
+        )
+    }
+
+    AlbumSelectionSheets(
+        state = state,
+        viewModel = viewModel,
+        snackbarHostState = snackbarHostState,
+        showAddToPerson = showAddToPersonSheet,
+        onDismissAddToPerson = { showAddToPersonSheet = false },
+        showMoveToAlbum = showMoveToAlbumSheet,
+        pickerKeepsPhotos = pickerKeepsPhotos,
+        onDismissMoveToAlbum = { showMoveToAlbumSheet = false },
+        showPhotoShare = showPhotoShareSheet,
+        onDismissPhotoShare = { showPhotoShareSheet = false },
+    )
+
+    AlbumSelectionConfirms(
+        state = state,
+        viewModel = viewModel,
+        showDelete = showDeleteConfirm,
+        onDismissDelete = { showDeleteConfirm = false },
+        hideConfirmSplit = hideConfirmSplit,
+        onDismissHide = { hideConfirmSplit = null },
+        showSetCover = showSetCoverConfirm,
+        onDismissSetCover = { showSetCoverConfirm = false },
+        showRemoveFromAlbum = showRemoveFromAlbumConfirm,
+        onDismissRemoveFromAlbum = { showRemoveFromAlbumConfirm = false },
+    )
+    if (showAlbumOverflow) {
+        // The copy row reports the work it started: a determinate ring where the operation knows its
+        // count, a spinner until then, and no second tap while either runs.
+        val copyBusy = if (state.isSharedWithMe) {
+            state.isSavingToLibrary
+        } else {
+            state.downloadState is AlbumDownloadState.Working
+        }
+        val copyFraction: Float? = if (state.isSharedWithMe) {
+            state.savingTotal.takeIf { it > 0 }?.let { state.savingCopied.toFloat() / it }
+        } else {
+            (state.downloadState as? AlbumDownloadState.Working)
+                ?.takeIf { it.total > 0 }
+                ?.let { it.done.toFloat() / it.total }
+        }
+        AlbumActionsSheet(
+            sheetState = albumActionsSheetState,
+            isSharedWithMe = state.isSharedWithMe,
+            // The album's own sharingShareId, carried in as shareId when the screen opens and
+            // cleared here when the share is deleted.
+            isShared = state.shareId != null,
+            canAddPhotos = state.canAddPhotos,
+            hasPhotos = state.photos.isNotEmpty(),
+            copyBusy = copyBusy,
+            copyFraction = copyFraction,
+            sortMode = state.photoSortMode,
+            grouping = photoGrouping,
+            isHiddenFromTimeline = state.isHiddenFromTimeline,
+            isExcludedFromGrid = state.isExcludedFromGrid,
+            onDismiss = { showAlbumOverflow = false },
+            onAddPhotos = { addPhotos() },
+            onShareOrInfo = { showShareSheet = true },
+            onCopy = {
+                if (state.isSharedWithMe) showSaveToLibraryConfirm = true
+                else showDownloadAllConfirm = true
+            },
+            onEditMetadata = { editAllMetadata() },
+            onRename = { showRenameSheet = true },
+            onToggleHiddenFromTimeline = { viewModel.toggleHiddenFromTimeline() },
+            onHide = { viewModel.hideAlbum() },
+            onToggleExcludedFromGrid = { viewModel.toggleExcludedFromGrid() },
+            onDelete = if (state.isSharedWithMe) null else ({ showDeleteAlbumConfirm = true }),
+            onSlideshow = { playSlideshow() },
+            onSortSelected = { mode ->
+                // Custom with nothing arranged yet starts the arranging: an empty hand-made order
+                // would only show the date order under another name.
+                if (mode == AlbumPhotoSortMode.Custom && !state.hasArrangement) viewModel.startArrange()
+                else viewModel.setPhotoSortMode(mode)
+            },
+            onArrangePhotos = { viewModel.startArrange() },
+            onGroupingSelected = { grouping ->
+                visitGrouping = grouping
+                scope.launch { PhotoViewChoiceStore.setAlbumGrouping(shareCtx, state.albumLinkId, grouping) }
+            },
+            onLeaveAlbum = { showLeaveAlbumConfirm = true },
+        )
+    }
+
+    // The cloud metadata save drawer follows the batch onto this screen, so a whole-album or in-album
+    // edit shows its progress here instead of only on the timeline it closed back through.
+    CloudMetadataSaveDrawer(ui = cloudSaveUi, onDismiss = { cloudSaveVm.dismiss() })
+
+    if (showShareSheet) {
+        AlbumShareSheets(
+            state = state,
+            viewModel = viewModel,
+            albumName = albumName,
+            sheetState = shareSheetState,
+            onHide = { scope.launch { shareSheetState.hide() }.invokeOnCompletion { showShareSheet = false } },
+        )
+    }
+
+    AlbumConfirms(
+        state = state,
+        viewModel = viewModel,
+        showSaveToLibrary = showSaveToLibraryConfirm,
+        onDismissSaveToLibrary = { showSaveToLibraryConfirm = false },
+        showDownloadAll = showDownloadAllConfirm,
+        onDismissDownloadAll = { showDownloadAllConfirm = false },
+        showRename = showRenameSheet,
+        onDismissRename = { showRenameSheet = false },
+        showDeleteAlbum = showDeleteAlbumConfirm,
+        onDismissDeleteAlbum = { showDeleteAlbumConfirm = false },
+        showLeaveAlbum = showLeaveAlbumConfirm,
+        onDismissLeaveAlbum = { showLeaveAlbumConfirm = false },
+    )
+}
+
+/** What a section header's select button is announced as, naming the span of dates [grouping]
+ *  gathers under that header. */
+@StringRes
+internal fun sectionSelectDescriptionRes(grouping: AlbumPhotoGrouping): Int = when (grouping) {
+    AlbumPhotoGrouping.Day -> R.string.cd_select_day
+    AlbumPhotoGrouping.Month -> R.string.cd_select_month
+    AlbumPhotoGrouping.Year -> R.string.cd_select_year
+}
+
+/** The slim line under the album header while [count] photos are still uploading to join it. */
+@Composable
+private fun PendingJoinRow(count: Int) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        androidx.compose.material3.CircularProgressIndicator(
+            color = Accent,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            androidx.compose.ui.res.pluralStringResource(R.plurals.albums_photos_uploading, count, count),
+            color = FgMute,
+            fontSize = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * The album screen's side effects: snackbars for what the work reports back, the share chooser,
+ * the copied link, and the one-shot pops once an album was deleted, left or hidden.
+ */
+@Composable
+private fun AlbumEffects(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    snackbarHostState: SnackbarHostState,
+    showShareSheet: Boolean,
+    onBack: () -> Unit,
+) {
+    val appLock = LocalAppLock.current
+    LaunchedEffect(state.error) {
+        state.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+
+    // After a hide moves backed-up photos to the vault, reassure the user their Drive copies are
+    // untouched: the same notice the timeline shows. Mirrors the gallery's hideCloudNoticePending.
+    val hideCloudNotice = stringResource(R.string.hide_cloud_copy_notice)
+    LaunchedEffect(state.hideCloudNoticePending) {
+        if (state.hideCloudNoticePending) {
+            snackbarHostState.showSnackbar(hideCloudNotice)
+            viewModel.clearHideCloudNotice()
+        }
+    }
+
+    // Hand the VM-built share intent to the system chooser. It can arrive under the app lock, once cloud
+    // originals finish downloading, and the chooser would open above the lock, so it waits for the unlock.
+    val shareCtx = LocalContext.current
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    LaunchedEffect(Unit) {
+        viewModel.shareIntent.collect { intent ->
+            appLock.runWhenOpen {
+                runCatching { shareCtx.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareCtx, intent, shareChooserTitle)) }
+            }
+        }
+    }
+
     val linkCopiedMsg = stringResource(R.string.album_link_copied)
     LaunchedEffect(state.shareLink) {
         val link = state.shareLink ?: return@LaunchedEffect
@@ -412,7 +718,7 @@ fun AlbumDetailScreen(
                 snackbarHostState.showSnackbar("$header\n$lines")
                 viewModel.clearInviteBatchResult()
             }
-            // Sheet open — the inline banner renders the result (dismissed via onDismissInviteResult()).
+            // Sheet open: the inline banner renders the result (dismissed via onDismissInviteResult()).
         }
     }
 
@@ -466,7 +772,7 @@ fun AlbumDetailScreen(
         }
     }
 
-    // Offline pin/un-pin outcome snackbar — mirrors the timeline's batch result.
+    // Offline pin/un-pin outcome snackbar: mirrors the timeline's batch result.
     val offlineRemovedMsg = stringResource(R.string.offline_removed)
     LaunchedEffect(Unit) {
         viewModel.offlineResult.collect { count ->
@@ -509,761 +815,863 @@ fun AlbumDetailScreen(
         if (state.downloadState is AlbumDownloadState.Enqueued) viewModel.resetDownloadState()
     }
 
-    // Prefer a cover chosen in this session (set by runSetCover) so the header flips immediately,
-    // then the nav-arg cover, then the first photo as a fallback for a brand-new album.
-    val coverUrl = state.coverThumbnailUrl ?: coverThumbnailUrl ?: state.photos.firstOrNull()?.thumbnailUrl
-    // The linkId of whichever photo the shown cover belongs to, so a GIF cover animates the right
-    // photo: match the shown still to its loaded member (covers a cover set this session too), else
-    // fall back to the cover linkId the grid handed in.
-    val heroCoverLinkId = remember(coverUrl, coverLinkId, state.photos) {
-        state.photos.firstOrNull { it.thumbnailUrl != null && it.thumbnailUrl == coverUrl }?.linkId
-            ?: coverLinkId
+    androidx.compose.runtime.LaunchedEffect(state.deleteAlbumDone) {
+        if (state.deleteAlbumDone) onBack()
     }
-    val appColors = AppColors.current
-    val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
-    val gridState = rememberLazyGridState()
-    val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
-    // The span of dates each header gathers, one choice every album shares. Kept in saved state too:
-    // the grid restores its scroll position as an item index, so on the way back from the viewer it
-    // has to lay out under the headers it was saved with from the first frame, before the preference
-    // has loaded.
-    var photoGrouping by rememberSaveable { mutableStateOf(AlbumPhotoGrouping.Default) }
-    // A pinch on the grid regroups for this visit only, until a drawer pick replaces it. Saved state
-    // for the same reason; a fresh open starts from the saved choice.
-    var visitGrouping by rememberSaveable { mutableStateOf<AlbumPhotoGrouping?>(null) }
-    val shownGrouping = visitGrouping ?: photoGrouping
-    LaunchedEffect(state.albumLinkId) {
-        val albumLinkId = state.albumLinkId
-        shareCtx.settingsDataStore.data
-            .map { PhotoViewChoices.from(it).groupingOfAlbum(albumLinkId) }
-            .collect { photoGrouping = it }
-    }
-    // Group photos under the headers shown, on the same capture time the rest of the app groups that
-    // photo by: a member whose Drive captureTime is sub-floor reads its device twin's date. The twin
-    // comes from the map the ViewModel already holds, so the lambda only does a hash lookup per row.
-    // Each photo keeps its position so the viewer opens the right one.
-    val photoGroups = remember(state.photos, state.localItemByLinkId, shownGrouping) {
-        photoDateSections(state.photos, shownGrouping) {
-            AlbumPhotoItems.captureTimeMs(it, state.localItemByLinkId[it.linkId])
-        }
-    }
-    // Scrubber shares the timeline handle. The grid keys photos by raw linkId (see items() below),
-    // so wrap each cloud photo as a gallery item and map back to that same key.
-    val scrubberItems = remember(state.photos, state.localItemByLinkId, state.localUriByLinkId) {
-        state.photos.map {
-            AlbumPhotoItems.galleryItem(it, state.localItemByLinkId[it.linkId], state.localUriByLinkId[it.linkId])
-        }
-    }
-    val scrubberTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
-    // Opt-in floating day pill while the grid scrolls; default off. Shares the scrubber's date mapping.
-    val showScrollDate by remember {
-        shareCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
-    }.collectAsState(initial = false)
-    // Which sort chip the drawer marks. The ViewModel reads the same preference for the order itself,
-    // so this only has to say which one is active.
-    val photoSortMode by remember(state.albumLinkId) {
-        val albumLinkId = state.albumLinkId
-        shareCtx.settingsDataStore.data.map { PhotoViewChoices.from(it).sortOfAlbum(albumLinkId) }
-    }.collectAsState(initial = AlbumPhotoSortMode.Default)
-    // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
-    var scrubberDragging by remember { mutableStateOf(false) }
 
-    // The grid as the selection drawer frosts it, when the frosted pills are on.
-    val glass = rememberGlassBackdrop(appColors.bg0)
-    Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
-        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = state.isLoading && state.photos.isNotEmpty(),
-            onRefresh = { viewModel.refresh() },
-            state = pullRefreshState,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-        val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
-        val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
-        // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
-        // Cells are keyed by linkId, so the swept indices map back to the selected linkIds.
-        val selectableLinkIds = remember(state.photos) { state.photos.map { it.linkId } }
-        val linkIdToIndex = remember(state.photos) { state.photos.mapIndexed { i, p -> p.linkId to i }.toMap() }
-        // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
-        // cell back off (otherwise a stationary long-press would select then immediately deselect).
-        val tapGuard = remember { mutableStateOf(false) }
-        val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
-            gridState = gridState,
-            items = selectableLinkIds,
-            indexByKey = linkIdToIndex,
-            selected = state.selectedPhotos,
-            onSelectionChange = viewModel::setSelectedPhotos,
-            tapGuard = tapGuard,
-        )
-        // Land back on the photo the viewer closed on. The hero header is the one slot ahead of the
-        // photos, and each date section carries its own header. Photos open as Synced or CloudOnly,
-        // and both report the cloud linkId back.
-        val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
-        ReturnToViewerPhoto(
-            gridState = gridState,
-            groups = returnGroups,
-            headerPerGroup = true,
-            leadingSlots = 1,
-            keyOf = { it.value.linkId },
-        )
-        // Two fingers step the headers between Year, Month and Day for this visit. Chained after
-        // drag-select, as on the timeline.
-        val groupingPinch = rememberGroupingPinchModifier(
-            gridState = gridState,
-            grouping = shownGrouping,
-            onGroupingChange = { visitGrouping = it },
-            groups = returnGroups,
-            leadingSlots = 1,
-            keyOf = { it.value.linkId },
-        )
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(cols),
-            state = gridState,
-            // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset and
-            // 6.dp gap, so album photos render at the same size and spacing as the Photos page.
-            // Edge-to-edge drops the side inset and rounding and tightens the gap.
-            contentPadding = PaddingValues(
-                start = if (seamless) 0.dp else 20.dp,
-                end = if (seamless) 0.dp else 20.dp,
-                bottom = selectionGridBottomPadding(24.dp, state.isSelectionMode),
-            ),
-            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(groupingPinch),
-        ) {
+    // Once the leave round-trip completes successfully, pop back so the user
+    // lands on the Shared tab instead of staring at a now-orphaned detail.
+    androidx.compose.runtime.LaunchedEffect(state.leaveAlbumDone) {
+        if (state.leaveAlbumDone) onBack()
+    }
+
+    // Hiding takes the album off every grid, so the screen showing it leaves the same way the leave
+    // above does rather than holding a card the user can no longer reach.
+    androidx.compose.runtime.LaunchedEffect(state.hideAlbumDone) {
+        if (state.hideAlbumDone) onBack()
+    }
+}
+
+/** The photo grid of an album: the hero header, then the photos under their date headers. */
+@Composable
+private fun AlbumPhotoGrid(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    gridState: LazyGridState,
+    photoGroups: Map<String, List<IndexedValue<CloudPhoto>>>,
+    shownGrouping: AlbumPhotoGrouping,
+    onGroupingChange: (AlbumPhotoGrouping) -> Unit,
+    coverUrl: String?,
+    heroCoverLinkId: String?,
+    albumName: String,
+    glass: GlassBackdrop?,
+    onOverflowClick: () -> Unit,
+    onPhotoClick: (List<GalleryItem>, Int) -> Unit,
+) {
+    val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+    val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
+    // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
+    // Cells are keyed by linkId, so the swept indices map back to the selected linkIds.
+    val selectableLinkIds = remember(state.photos) { state.photos.map { it.linkId } }
+    val linkIdToIndex = remember(state.photos) { state.photos.mapIndexed { i, p -> p.linkId to i }.toMap() }
+    // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
+    // cell back off (otherwise a stationary long-press would select then immediately deselect).
+    val tapGuard = remember { mutableStateOf(false) }
+    val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
+        gridState = gridState,
+        items = selectableLinkIds,
+        indexByKey = linkIdToIndex,
+        selected = state.selectedPhotos,
+        onSelectionChange = viewModel::setSelectedPhotos,
+        tapGuard = tapGuard,
+    )
+    // Land back on the photo the viewer closed on. The hero header is the one slot ahead of the
+    // photos, and each date section carries its own header. Photos open as Synced or CloudOnly,
+    // and both report the cloud linkId back.
+    val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
+    val customOrder = state.photoSortMode == AlbumPhotoSortMode.Custom
+    ReturnToViewerPhoto(
+        gridState = gridState,
+        groups = returnGroups,
+        headerPerGroup = !customOrder,
+        leadingSlots = 1,
+        keyOf = { it.value.linkId },
+    )
+    // Two fingers step the headers between Year, Month and Day for this visit. Chained after
+    // drag-select, as on the timeline.
+    val groupingPinch = rememberGroupingPinchModifier(
+        gridState = gridState,
+        grouping = shownGrouping,
+        onGroupingChange = onGroupingChange,
+        groups = returnGroups,
+        leadingSlots = 1,
+        keyOf = { it.value.linkId },
+    )
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(cols),
+        state = gridState,
+        // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset and
+        // 6.dp gap, so album photos render at the same size and spacing as the Photos page.
+        // Edge-to-edge drops the side inset and rounding and tightens the gap.
+        contentPadding = PaddingValues(
+            start = if (seamless) 0.dp else 20.dp,
+            end = if (seamless) 0.dp else 20.dp,
+            bottom = selectionGridBottomPadding(24.dp, state.isSelectionMode),
+        ),
+        horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+        modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier)
+            .then(if (customOrder) Modifier else groupingPinch),
+    ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
-                val headerPhotoCount = state.photos.size - headerVideoCount
-                val photosTextRes = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_photos_plural, headerPhotoCount, headerPhotoCount,
+                AlbumHeroItem(
+                    state = state,
+                    viewModel = viewModel,
+                    gridState = gridState,
+                    albumName = albumName,
+                    coverUrl = coverUrl,
+                    heroCoverLinkId = heroCoverLinkId,
+                    seamless = seamless,
+                    onOverflowClick = onOverflowClick,
                 )
-                val videosTextRes = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_videos_plural, headerVideoCount, headerVideoCount,
-                )
-                // Running progress shows in the OperationProgressPill below, so this stays a plain count.
-                val countLabel = when {
-                    state.isLoading -> ""
-                    headerPhotoCount > 0 && headerVideoCount > 0 -> "$photosTextRes, $videosTextRes"
-                    headerVideoCount > 0 -> videosTextRes
-                    else -> photosTextRes
+            }
+
+        when {
+            // Only skeleton an EMPTY grid. Reloading one that already has photos (returning from
+            // the viewer re-runs load(), and so does every undo and pull-to-refresh) must leave
+            // them in place: swapping them for nine placeholders collapses the grid, and a
+            // collapsed grid clamps its restored scroll offset to the top, which is what threw
+            // the user back to the first row. The refresh already shows through the pull-to-
+            // refresh spinner, which is gated on exactly this pair of conditions.
+            state.isLoading && state.photos.isEmpty() -> {
+                items(9, span = { GridItemSpan(1) }) {
+                    eu.akoos.photos.presentation.common.ShimmerSquare(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 4.dp,
+                    )
                 }
-                // Photo tiles bleed to the edge in seamless mode; this cover header keeps the 20.dp inset.
-                Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
-                eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
-                    coverModel = coverUrl,
-                    coverLinkId = heroCoverLinkId,
-                    resolveCoverGif = viewModel::resolveCoverGif,
-                    title = state.albumName.ifBlank { albumName },
-                    photoCountText = countLabel,
-                    coverParallax = {
-                        if (gridState.firstVisibleItemIndex == 0)
-                            gridState.firstVisibleItemScrollOffset.toFloat() else 0f
-                    },
-                    // Sharer avatar (shared-with-me) or members + pending invitees (own album); none for an
-                    // own album nobody shares, so its count does not follow a lone separator.
-                    metaLeading = if (
-                        (state.isSharedWithMe && state.sharedByEmail != null) ||
-                        state.members.isNotEmpty() || state.invitations.isNotEmpty() || state.isLoadingInvitations
-                    ) {
-                        {
-                        val sharerEmail = state.sharedByEmail
-                        if (state.isSharedWithMe && sharerEmail != null) {
-                            // Periwinkle is the dark-mode pick; light mode falls back to accent.
-                            val sharerTint = if (AppColors.current.isLight) Accent else Color(0xFFB0A0FF)
-                            AvatarCircle(letter = sharerEmail.first().uppercase(), tint = sharerTint, size = 24.dp)
-                        } else {
-                            val allEmails = (state.members.map { it.email } + state.invitations.map { it.email }).distinct()
-                            if (allEmails.isEmpty() && state.isLoadingInvitations) {
-                                // Placeholder circles while the fetch is in flight.
-                                repeat(2) {
-                                    eu.akoos.photos.presentation.common.ShimmerBox(
-                                        modifier = Modifier.size(24.dp),
-                                        cornerRadius = 12.dp,
+            }
+            // An album whose photos are all still uploading is not empty: the header's line says
+            // what is on its way instead.
+            state.photos.isEmpty() && state.pendingJoinCount > 0 -> Unit
+            state.photos.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.albums_no_photos), color = FgMute, fontSize = 14.sp)
+                }
+            }
+            else -> photoGroups.forEach { (label, entries) ->
+                if (label.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
+                        AlbumSectionHeader(
+                            label = label,
+                            entries = entries,
+                            seamless = seamless,
+                            isSelectionMode = state.isSelectionMode,
+                            selectedPhotos = state.selectedPhotos,
+                            grouping = shownGrouping,
+                            onToggleGroup = { viewModel.toggleGroupSelection(it) },
+                        )
+                    }
+                items(entries, key = { it.value.linkId }) { entry ->
+                    val index = entry.index
+                    val photo = entry.value
+                    PhotoCell(
+                        photo = photo,
+                        localUri = state.localUriByLinkId[photo.linkId],
+                        isSelected = photo.linkId in state.selectedPhotos,
+                        isSelectionMode = state.isSelectionMode,
+                        isOffline = photo.linkId in state.offlinePinIds,
+                        columns = cols,
+                        seamless = seamless,
+                        // Long-press enters multi-select directly; cover/remove live in the drawer.
+                        showLongPressMenu = false,
+                        onTap = {
+                            // Skip the release-tap that follows a long-press select; it would
+                            // otherwise toggle the just-anchored cell back off.
+                            if (tapGuard.value) {
+                                tapGuard.value = false
+                            } else if (state.isSelectionMode) viewModel.togglePhotoSelection(photo.linkId)
+                            else {
+                                // Wrap as Synced where a local copy exists so the viewer offers device + cloud + both,
+                                // over the device file itself where the merged library paired one, since that is where
+                                // the details sheet reads the name, size and folder, and the categoriser the dimensions.
+                                val viewerItems = state.photos.map { p ->
+                                    AlbumPhotoItems.galleryItem(
+                                        p, state.localItemByLinkId[p.linkId], state.localUriByLinkId[p.linkId],
                                     )
                                 }
-                            } else {
-                                // Cap at 2 — the meta line stays a glance, not a roster.
-                                allEmails.take(2).forEach { email ->
-                                    AvatarCircle(letter = email.first().uppercase(), tint = Accent, size = 24.dp)
-                                }
+                                onPhotoClick(viewerItems, index)
                             }
-                        }
-                        }
-                    } else null,
-                    titleActions = {
-                        // One control at rest. Adding, sharing, downloading, renaming, the
-                        // slideshow, the sort order and leaving all live in the drawer it opens, so
-                        // the count and the button share a single row; a running worker's cancel
-                        // rides the progress pill rather than a header pill of its own.
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(PillBg, CircleShape)
-                                .border(0.5.dp, PillBorder, CircleShape)
-                                .clickable(onClick = { showAlbumOverflow = true }),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                contentDescription = stringResource(R.string.albums_more_actions),
-                                tint = FgPrimary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    },
-                    // Photos queued to upload and then join this album, counted down as each lands.
-                    footer = if (state.pendingJoinCount > 0) {
-                        { PendingJoinRow(state.pendingJoinCount) }
-                    } else null,
-                )
-                }
-            }
-
-            when {
-                // Only skeleton an EMPTY grid. Reloading one that already has photos (returning from
-                // the viewer re-runs load(), and so does every undo and pull-to-refresh) must leave
-                // them in place: swapping them for nine placeholders collapses the grid, and a
-                // collapsed grid clamps its restored scroll offset to the top, which is what threw
-                // the user back to the first row. The refresh already shows through the pull-to-
-                // refresh spinner, which is gated on exactly this pair of conditions.
-                state.isLoading && state.photos.isEmpty() -> {
-                    items(9, span = { GridItemSpan(1) }) {
-                        eu.akoos.photos.presentation.common.ShimmerSquare(
-                            modifier = Modifier.fillMaxWidth(),
-                            cornerRadius = 4.dp,
-                        )
-                    }
-                }
-                // An album whose photos are all still uploading is not empty: the header's line says
-                // what is on its way instead.
-                state.photos.isEmpty() && state.pendingJoinCount > 0 -> Unit
-                state.photos.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.albums_no_photos), color = FgMute, fontSize = 14.sp)
-                    }
-                }
-                else -> photoGroups.forEach { (label, entries) ->
-                    item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
-                        Row(
-                            // Keep the label clear of the screen edge in seamless mode, where the
-                            // tiles below bleed to 0.
-                            modifier = Modifier.fillMaxWidth().padding(
-                                start = if (seamless) 20.dp else 4.dp,
-                                end = if (seamless) 20.dp else 4.dp,
-                                top = 24.dp,
-                                bottom = 10.dp,
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // Tri-state group selector (selecting only): toggles every photo in the section.
-                            if (state.isSelectionMode) {
-                                val groupLinkIds = entries.map { it.value.linkId }
-                                val selectedInGroup = groupLinkIds.count { it in state.selectedPhotos }
-                                val allSelected = groupLinkIds.isNotEmpty() && selectedInGroup == groupLinkIds.size
-                                val partiallySelected = selectedInGroup > 0 && !allSelected
-                                // Named for its span in every state, and announced as a checkbox that is
-                                // checked, partly checked or not, so the state is heard as well as seen.
-                                val selectLabel = stringResource(sectionSelectDescriptionRes(shownGrouping))
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 12.dp)
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .triStateToggleable(
-                                            state = when {
-                                                allSelected -> ToggleableState.On
-                                                partiallySelected -> ToggleableState.Indeterminate
-                                                else -> ToggleableState.Off
-                                            },
-                                            role = Role.Checkbox,
-                                            onClick = { viewModel.toggleGroupSelection(groupLinkIds) },
-                                        )
-                                        .semantics { contentDescription = selectLabel }
-                                        .then(
-                                            if (allSelected || partiallySelected)
-                                                Modifier.background(appColors.accent, CircleShape)
-                                            else Modifier
-                                                .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                                                .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape)
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    when {
-                                        allSelected -> Icon(
-                                            Icons.Default.Check, contentDescription = null,
-                                            tint = Color.White, modifier = Modifier.size(14.dp),
-                                        )
-                                        partiallySelected -> Box(
-                                            modifier = Modifier.size(8.dp).background(Color.White, CircleShape),
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                label,
-                                color = FgPrimary,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = (-0.44).sp,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                    items(entries, key = { it.value.linkId }) { entry ->
-                        val index = entry.index
-                        val photo = entry.value
-                        PhotoCell(
-                            photo = photo,
-                            localUri = state.localUriByLinkId[photo.linkId],
-                            isSelected = photo.linkId in state.selectedPhotos,
-                            isSelectionMode = state.isSelectionMode,
-                            isOffline = photo.linkId in state.offlinePinIds,
-                            columns = cols,
-                            seamless = seamless,
-                            // Long-press enters multi-select directly; cover/remove live in the drawer.
-                            showLongPressMenu = false,
-                            onTap = {
-                                // Skip the release-tap that follows a long-press select; it would
-                                // otherwise toggle the just-anchored cell back off.
-                                if (tapGuard.value) {
-                                    tapGuard.value = false
-                                } else if (state.isSelectionMode) viewModel.togglePhotoSelection(photo.linkId)
-                                else {
-                                    // Wrap as Synced where a local copy exists so the viewer offers device + cloud + both,
-                                    // over the device file itself where the merged library paired one, since that is where
-                                    // the details sheet reads the name, size and folder, and the categoriser the dimensions.
-                                    val viewerItems = state.photos.map { p ->
-                                        AlbumPhotoItems.galleryItem(
-                                            p, state.localItemByLinkId[p.linkId], state.localUriByLinkId[p.linkId],
-                                        )
-                                    }
-                                    onPhotoClick(viewerItems, index)
-                                }
-                            },
-                            // Long-press + drag is handled by the grid-level drag-select; a plain
-                            // long-press there selects this single cell, and the tap-guard keeps the
-                            // release-tap from undoing it.
-                            onLongPress = null,
-                            onSetAsCover = { viewModel.setPhotoAsCover(photo.linkId) },
-                            onRemoveFromAlbum = {
-                                // Reuse the bulk-remove path with a one-photo selection to share error/progress handling.
-                                viewModel.togglePhotoSelection(photo.linkId)
-                                viewModel.removeSelectedPhotosFromAlbum()
-                            },
-                            onRequestThumbnail = viewModel::requestThumbnailDecrypt,
-                            onCancelThumbnail = viewModel::cancelThumbnailDecrypt,
-                        )
-                    }
+                        },
+                        // Long-press + drag is handled by the grid-level drag-select; a plain
+                        // long-press there selects this single cell, and the tap-guard keeps the
+                        // release-tap from undoing it.
+                        onLongPress = null,
+                        onSetAsCover = { viewModel.setPhotoAsCover(photo.linkId) },
+                        onRemoveFromAlbum = {
+                            // Reuse the bulk-remove path with a one-photo selection to share error/progress handling.
+                            viewModel.togglePhotoSelection(photo.linkId)
+                            viewModel.removeSelectedPhotosFromAlbum()
+                        },
+                        onRequestThumbnail = viewModel::requestThumbnailDecrypt,
+                        onCancelThumbnail = viewModel::cancelThumbnailDecrypt,
+                    )
                 }
             }
         }
-        }
+    }
+}
 
-        // Fast-scroll scrubber over the photo grid, the same handle as the timeline. The scrubber
-        // groups by day, so the drag tooltip reads "d MMMM yyyy" whatever span the section headers gather.
-        if (state.photos.isNotEmpty()) {
-            TimelineScrubber(
-                gridState = gridState,
-                items = scrubberItems,
-                grouping = TimelineGrouping.Day,
-                topPadding = scrubberTopInset,
-                bottomPadding = 24.dp,
-                // Both wrappings a member can take report the cloud linkId as their stable id, which
-                // is exactly the key the grid cells above use.
-                keyOf = { it.stableId },
-                onDraggingChange = { scrubberDragging = it },
-            )
+/** The album's cover header: title, photo and video count, who it is shared with, and the actions drawer button. */
+@Composable
+private fun AlbumHeroItem(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    gridState: LazyGridState,
+    albumName: String,
+    coverUrl: String?,
+    heroCoverLinkId: String?,
+    seamless: Boolean,
+    onOverflowClick: () -> Unit,
+) {
+        val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
+        val headerPhotoCount = state.photos.size - headerVideoCount
+        val photosTextRes = androidx.compose.ui.res.pluralStringResource(
+            R.plurals.count_photos_plural, headerPhotoCount, headerPhotoCount,
+        )
+        val videosTextRes = androidx.compose.ui.res.pluralStringResource(
+            R.plurals.count_videos_plural, headerVideoCount, headerVideoCount,
+        )
+        // Running progress shows in the OperationProgressPill below, so this stays a plain count.
+        val countLabel = when {
+            state.isLoading -> ""
+            headerPhotoCount > 0 && headerVideoCount > 0 -> "$photosTextRes, $videosTextRes"
+            headerVideoCount > 0 -> videosTextRes
+            else -> photosTextRes
         }
-
-        // Opt-in floating day pill, top-centre while the grid scrolls, yielding while the scrubber drags.
-        if (showScrollDate) {
-            ScrollDateLabel(
-                gridState = gridState,
-                items = scrubberItems,
-                grouping = TimelineGrouping.Day,
-                topPadding = scrubberTopInset,
-                suppressed = scrubberDragging,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-        }
-
-        // Fixed back button, floats over the hero image until the hero has scrolled away, when the
-        // page's floating header takes over with the album's name and its actions.
-        val heroGone by rememberHeroScrolledAway(gridState)
-        val stickyShown = heroGone && !state.isSelectionMode
-        AnimatedVisibility(
-            visible = !stickyShown,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(start = 12.dp, top = 8.dp),
-        ) {
-            IconBubble(
-                backdrop = glass,
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = if (state.isSelectionMode) stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
-                onClick = { if (state.isSelectionMode) viewModel.clearSelection() else onBack() },
-                diameter = 40.dp,
-                iconSize = 18.dp,
-                background = PillBg,
-                borderColor = PillBorder,
-                tint = appColors.fgPrimary,
-            )
-        }
-        StickyAlbumHeader(
-            backdrop = glass,
-            visible = stickyShown,
+        // Photo tiles bleed to the edge in seamless mode; this cover header keeps the 20.dp inset.
+        Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
+        eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
+            coverModel = coverUrl,
+            coverLinkId = heroCoverLinkId,
+            resolveCoverGif = viewModel::resolveCoverGif,
             title = state.albumName.ifBlank { albumName },
-            onBack = onBack,
-            modifier = Modifier.align(Alignment.TopCenter),
-            trailing = {
-                IconBubble(
-                    icon = Icons.Default.MoreVert,
-                    contentDescription = stringResource(R.string.albums_more_actions),
-                    onClick = { showAlbumOverflow = true },
-                    background = PillBg,
-                    borderColor = PillBorder,
-                    tint = appColors.fgPrimary,
-                )
+            photoCountText = countLabel,
+            coverParallax = {
+                if (gridState.firstVisibleItemIndex == 0)
+                    gridState.firstVisibleItemScrollOffset.toFloat() else 0f
             },
+            // Sharer avatar (shared-with-me) or members + pending invitees (own album); none for an
+            // own album nobody shares, so its count does not follow a lone separator.
+            metaLeading = if (
+                (state.isSharedWithMe && state.sharedByEmail != null) ||
+                state.members.isNotEmpty() || state.invitations.isNotEmpty() || state.isLoadingInvitations
+            ) {
+                {
+                val sharerEmail = state.sharedByEmail
+                if (state.isSharedWithMe && sharerEmail != null) {
+                    // Periwinkle is the dark-mode pick; light mode falls back to accent.
+                    val sharerTint = if (AppColors.current.isLight) Accent else Color(0xFFB0A0FF)
+                    AvatarCircle(letter = sharerEmail.first().uppercase(), tint = sharerTint, size = 24.dp)
+                } else {
+                    val allEmails = (state.members.map { it.email } + state.invitations.map { it.email }).distinct()
+                    if (allEmails.isEmpty() && state.isLoadingInvitations) {
+                        // Placeholder circles while the fetch is in flight.
+                        repeat(2) {
+                            eu.akoos.photos.presentation.common.ShimmerBox(
+                                modifier = Modifier.size(24.dp),
+                                cornerRadius = 12.dp,
+                            )
+                        }
+                    } else {
+                        // Cap at 2: the meta line stays a glance, not a roster.
+                        allEmails.take(2).forEach { email ->
+                            AvatarCircle(letter = email.first().uppercase(), tint = Accent, size = 24.dp)
+                        }
+                    }
+                }
+                }
+            } else null,
+            titleActions = {
+                // One control at rest. Adding, sharing, downloading, renaming, the
+                // slideshow, the sort order and leaving all live in the drawer it opens, so
+                // the count and the button share a single row; a running worker's cancel
+                // rides the progress pill rather than a header pill of its own.
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(PillBg, CircleShape)
+                        .border(0.5.dp, PillBorder, CircleShape)
+                        .clickable(onClick = onOverflowClick),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = stringResource(R.string.albums_more_actions),
+                        tint = FgPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            },
+            // Photos queued to upload and then join this album, counted down as each lands.
+            footer = if (state.pendingJoinCount > 0) {
+                { PendingJoinRow(state.pendingJoinCount) }
+            } else null,
         )
+        }
+}
 
-
-        // Jump-to-top pill: appears once scrolled down, and only outside selection mode so it
-        // never collides with the selection drawer. Tap eases back to the album header.
-        AnimatedVisibility(
-            visible = showScrollTop && !state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
+/** The header over one date section; while selecting it carries the tri-state select button for the section. */
+@Composable
+private fun AlbumSectionHeader(
+    label: String,
+    entries: List<IndexedValue<CloudPhoto>>,
+    seamless: Boolean,
+    isSelectionMode: Boolean,
+    selectedPhotos: Set<String>,
+    grouping: AlbumPhotoGrouping,
+    onToggleGroup: (List<String>) -> Unit,
+) {
+    val appColors = AppColors.current
+Row(
+    // Keep the label clear of the screen edge in seamless mode, where the
+    // tiles below bleed to 0.
+    modifier = Modifier.fillMaxWidth().padding(
+        start = if (seamless) 20.dp else 4.dp,
+        end = if (seamless) 20.dp else 4.dp,
+        top = 24.dp,
+        bottom = 10.dp,
+    ),
+    verticalAlignment = Alignment.CenterVertically,
+) {
+    // Tri-state group selector (selecting only): toggles every photo in the section.
+    if (isSelectionMode) {
+        val groupLinkIds = entries.map { it.value.linkId }
+        val selectedInGroup = groupLinkIds.count { it in selectedPhotos }
+        val allSelected = groupLinkIds.isNotEmpty() && selectedInGroup == groupLinkIds.size
+        val partiallySelected = selectedInGroup > 0 && !allSelected
+        // Named for its span in every state, and announced as a checkbox that is
+        // checked, partly checked or not, so the state is heard as well as seen.
+        val selectLabel = stringResource(sectionSelectDescriptionRes(grouping))
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 24.dp),
-        ) {
-            IconBubble(
-                backdrop = glass,
-                icon = Icons.Default.KeyboardArrowUp,
-                contentDescription = stringResource(R.string.cd_scroll_to_top),
-                onClick = { scope.launch { gridState.animateScrollToItem(0) } },
-                diameter = 40.dp,
-                iconSize = 24.dp,
-                background = PillBg,
-                borderColor = PillBorder,
-                tint = appColors.fgPrimary,
-            )
-        }
-
-        // Selection drawer: the shared surface every multi-select uses, so an album's bulk actions
-        // all sit in one list, in the order every other surface lists them.
-        val isDownloadingSel = state.downloadState is AlbumDownloadState.Working
-        // Download and offline only apply to cloud-only photos; Synced ones already live on the
-        // device, so gate both like the gallery does. Keep Download listed while a download is
-        // mid-flight so its cancel control stays reachable.
-        val anyCloudOnlySelected = state.selectedPhotos.any { it !in state.localUriByLinkId }
-        // Which way the offline row goes, so it names the press rather than the state: a pin while
-        // anything pinnable in the selection is still un-pinned, a removal once none is.
-        val offlinePinsSelection = offlineTurnsOn(
-            state.selectedPhotos.filter { it !in state.localUriByLinkId },
-            state.offlinePinIds,
-        )
-        // Taking a copy is not offered for an album someone else shared: those photos live on the
-        // owner's volume, and the supported route to a copy is saving the album into your own
-        // library, which the header action already offers. Same line the hide and cover affordances
-        // draw.
-        val canTakeCopies = !state.isSharedWithMe
-        // The drawer header's Select all takes in every photo of the album.
-        val selectAllCount = selectAllCountFor(total = state.photos.size, selected = state.selectedPhotos.size)
-        val isSharingPhotos = state.shareState is AlbumShareState.Working
-        val selectedAlbumPhotos = remember(state.photos, state.selectedPhotos) {
-            state.photos.filter { it.linkId in state.selectedPhotos }
-        }
-        val selectedAlbumItems = remember(selectedAlbumPhotos, state.localItemByLinkId, state.localUriByLinkId) {
-            selectedAlbumPhotos.map {
-                AlbumPhotoItems.galleryItem(
-                    it, state.localItemByLinkId[it.linkId], state.localUriByLinkId[it.linkId],
-                )
-            }
-        }
-        // Labels are the user's own notes on their own photos, so a shared-with-me album offers none.
-        val addLabelsAction = rememberAddLabelsAction(
-            items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
-            onDone = { msg ->
-                scope.launch { snackbarHostState.showSnackbar(msg) }
-                viewModel.clearSelection()
-            },
-        )
-        // The photos of a shared-with-me album are the owner's to replace, so it offers no compression.
-        val compressAction = rememberCloudCompressAction(
-            items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
-            isSignedIn = true,
-        )
-        val albumSelectionActions = buildList {
-            add(
-                SelectionAction(
-                    icon = Icons.Default.Share,
-                    label = stringResource(R.string.sel_label_share),
-                    enabled = !isSharingPhotos,
-                    working = isSharingPhotos,
-                    progress = (state.shareState as? AlbumShareState.Working)?.let {
-                        if (it.total > 0) it.done.toFloat() / it.total else 0f
+                .padding(end = 12.dp)
+                .size(22.dp)
+                .clip(CircleShape)
+                .triStateToggleable(
+                    state = when {
+                        allSelected -> ToggleableState.On
+                        partiallySelected -> ToggleableState.Indeterminate
+                        else -> ToggleableState.Off
                     },
-                    onClick = { showPhotoShareSheet = true },
-                    slot = PrimarySlot.Share,
+                    role = Role.Checkbox,
+                    onClick = { onToggleGroup(groupLinkIds) },
                 )
-            )
-            // Edit date + place, placed right after Share so it is reachable without scrolling the
-            // action row. The editor writes a device copy in place and re-uploads a corrected copy for a
-            // cloud image, so it shows off an own album whenever the selection holds something it can
-            // change. It stays off a shared-with-me album, where those fields belong to the owner.
-            if (!state.isSharedWithMe && anyMetadataEditable(selectedAlbumItems)) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.EditNote,
-                        label = stringResource(R.string.metadata_editor_edit_metadata),
-                        onClick = { onEditMetadata(selectedAlbumItems) },
-                    )
+                .semantics { contentDescription = selectLabel }
+                .then(
+                    if (allSelected || partiallySelected)
+                        Modifier.background(appColors.accent, CircleShape)
+                    else Modifier
+                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                allSelected -> Icon(
+                    Icons.Default.Check, contentDescription = null,
+                    tint = Color.White, modifier = Modifier.size(14.dp),
                 )
-            }
-            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
-            // smaller copy is up.
-            compressAction?.let(::add)
-            // Add-to-person runs on-device and can name a new person, so it follows face recognition
-            // alone, the same gate the timeline and Search use.
-            if (faceEnabled) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.PersonAdd,
-                        label = stringResource(R.string.gallery_add_to_person),
-                        onClick = { showAddToPersonSheet = true },
-                    )
-                )
-            }
-            // Favourite the selection. An album is where a set worth favouriting is already
-            // gathered, and the cells carry the heart, so the press shows on the grid it came
-            // from. Off a shared-with-me album: tag 0 belongs to the owner's photo, the same
-            // line hide, delete and cover draw.
-            if (!state.isSharedWithMe) {
-                add(
-                    favoriteSelectionAction(
-                        turnsOn = favoriteTurnsOnForCloudPhotos(selectedAlbumPhotos),
-                        state = state.favoriteState,
-                        onClick = { viewModel.toggleSelectedFavorite() },
-                    )
-                )
-            }
-            addLabelsAction?.let(::add)
-            // Download selected. While the worker runs this row becomes the cancel control: a
-            // determinate ring tracks progress and the label reads "Cancel".
-            if (canTakeCopies && (anyCloudOnlySelected || isDownloadingSel)) {
-                val dl = state.downloadState as? AlbumDownloadState.Working
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.FileDownload,
-                        label = stringResource(R.string.sel_label_download),
-                        working = isDownloadingSel,
-                        progress = dl?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
-                        workingIcon = Icons.Default.Close,
-                        workingLabel = stringResource(R.string.cancel),
-                        clickableWhileWorking = true,
-                        onClick = {
-                            if (isDownloadingSel) viewModel.cancelDownload()
-                            else viewModel.downloadSelectedPhotos()
-                        },
-                    )
-                )
-            }
-            // Make available offline pins the full-res copy into the app so album photos open
-            // with no connection. A tap toggles: pins the selection, or removes it if all pinned.
-            if (canTakeCopies && anyCloudOnlySelected) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.OfflinePin,
-                        label = stringResource(
-                            if (offlinePinsSelection) R.string.offline_make_available
-                            else R.string.offline_remove,
-                        ),
-                        onClick = { viewModel.toggleSelectedOffline() },
-                    )
-                )
-            }
-            if (!state.isSharedWithMe && state.selectedCount == 1) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.PhotoLibrary,
-                        label = stringResource(R.string.album_set_as_cover),
-                        onClick = { showSetCoverConfirm = true },
-                    )
-                )
-            }
-            // The destructive hide + delete affordances stay off shared-with-me albums. Even an
-            // editor recipient can't hide or delete someone else's photo from someone else's album
-            // through this surface, the backend rejects it.
-            if (!state.isSharedWithMe) {
-                // Hide selected: a backed-up member moves into the app's Hidden vault, a cloud-only
-                // member hides client-side by linkId. Mirrors the timeline / search / folder hide.
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.VisibilityOff,
-                        label = stringResource(R.string.sel_label_hide),
-                        enabled = !state.isDeletingPhotos,
-                        // Confirmed exactly as the delete beside it is. The split is read at the tap,
-                        // so the sheet names what THIS selection will have done to it.
-                        onClick = {
-                            hideConfirmSplit = viewModel.hideSplitForSelection().takeIf { !it.isEmpty }
-                        },
-                    )
-                )
-            }
-            // Move the selection into another album: add it there, then take it out of this one.
-            // Own albums only, since a shared-with-me album's photos live on the owner's volume and
-            // this album cannot rewrite that membership. Sits beside Remove, the other membership edit.
-            if (!state.isSharedWithMe && state.canAddPhotos) {
-                add(
-                    SelectionAction(
-                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
-                        label = stringResource(R.string.album_move_to_album),
-                        enabled = !state.isDeletingPhotos,
-                        onClick = {
-                            pickerKeepsPhotos = false
-                            showMoveToAlbumSheet = true
-                        },
-                        slot = PrimarySlot.Organize,
-                    )
-                )
-                // The same picker, but the photos stay in this album as well as joining the other one.
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.LibraryAdd,
-                        label = stringResource(R.string.album_add_to_other_album),
-                        enabled = !state.isDeletingPhotos,
-                        onClick = {
-                            pickerKeepsPhotos = true
-                            showMoveToAlbumSheet = true
-                        },
-                        slot = PrimarySlot.Organize,
-                    )
-                )
-            }
-            // Removing is an edit, so it follows the same right as adding rather than plain
-            // ownership. An editor on a shared album may take photos back out of it, including
-            // ones another member added: album membership records no contributor, so "only your
-            // own" is not answerable, and the official client draws the same line.
-            if (state.canAddPhotos) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.RemoveCircleOutline,
-                        // Named in full, so the row beside Delete cannot be read as destroying the
-                        // photo: this one takes it out of the album and leaves it in the library.
-                        label = stringResource(R.string.album_remove_from_album),
-                        // Taking a photo out of the album is destructive, so it reads red like delete.
-                        tint = ErrorColor,
-                        enabled = !state.isDeletingPhotos,
-                        onClick = { showRemoveFromAlbumConfirm = true },
-                    )
-                )
-            }
-            if (!state.isSharedWithMe) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.DeleteOutline,
-                        label = stringResource(R.string.sel_label_delete),
-                        tint = ErrorColor,
-                        enabled = !state.isDeletingPhotos,
-                        // The busy flag also covers a move, a hide and a remove; only a delete spins
-                        // here. busyOp outlives the delete, so the flag bounds it.
-                        working = state.isDeletingPhotos && state.busyOp == AlbumBusyOp.Deleting,
-                        onClick = { showDeleteConfirm = true },
-                        slot = PrimarySlot.Delete,
-                    )
+                partiallySelected -> Box(
+                    modifier = Modifier.size(8.dp).background(Color.White, CircleShape),
                 )
             }
         }
-        SelectionDrawer(
-            backdrop = glass,
-            visible = state.isSelectionMode,
-            items = selectedAlbumItems,
-            actions = albumSelectionActions,
-            onDismiss = { viewModel.clearSelection() },
-            // Scrolling the album grid collapses the drawer, so reaching past it to carry on
-            // through the photos needs no deliberate pull or tap first.
-            contentScrolling = gridState.isScrollInProgress,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            selectAllCount = selectAllCount,
-            onSelectAll = if (selectAllCount != null) {
-                { viewModel.setSelectedPhotos(state.photos.map { it.linkId }.toSet()) }
-            } else {
-                null
-            },
+    }
+    Text(
+        label,
+        color = FgPrimary,
+        fontSize = 22.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.44).sp,
+        modifier = Modifier.weight(1f),
+    )
+}
+}
+
+/**
+ * What floats over the album's grid: the fast-scroll scrubber, the optional day pill, the back button
+ * and sticky header that trade places as the hero scrolls away, and the jump-to-top pill.
+ */
+@Composable
+private fun BoxScope.AlbumChrome(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    glass: GlassBackdrop?,
+    gridState: LazyGridState,
+    albumName: String,
+    scrubberItems: List<GalleryItem>,
+    scrubberTopInset: Dp,
+    showScrollDate: Boolean,
+    scrubberDragging: Boolean,
+    onScrubberDraggingChange: (Boolean) -> Unit,
+    showScrollTop: Boolean,
+    onBack: () -> Unit,
+    onOverflowClick: () -> Unit,
+    customOrder: Boolean = false,
+) {
+    val appColors = AppColors.current
+    val scope = rememberCoroutineScope()
+    // Fast-scroll scrubber over the photo grid, the same handle as the timeline. The scrubber
+    // groups by day, so the drag tooltip reads "d MMMM yyyy" whatever span the section headers gather.
+    // A hand-made order does not run by date, so it gets the plain position thumb and no date pill.
+    if (customOrder) {
+        ScrollScrubber(
+            gridState = gridState,
+            topPadding = scrubberTopInset,
+            bottomPadding = 24.dp,
+            minItemsToShow = 60,
         )
-
-        // Unified progress pill: one surface for save-to-library and multi-share, matching the
-        // device-folder back-up and gallery bulk actions. Sits at the top edge, clear of the
-        // selection drawer the share runs from. The download and the offline pin are absent: both
-        // register with the TransferCenter, so the Activity screen reports them and cancels them,
-        // and the download's own drawer row already doubles as its cancel here.
-        val savingTpl = stringResource(R.string.shared_save_progress_fmt)
-        val preparingLabel = stringResource(R.string.share_preparing)
-        val sharingTpl = stringResource(R.string.op_sharing_fmt)
-        val shState = state.shareState
-        val opProgress = when {
-            state.isSavingToLibrary && state.savingTotal > 0 ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    state.savingCopied, state.savingTotal,
-                    savingTpl.format(state.savingCopied, state.savingTotal),
-                )
-            // The copy announces itself before it knows how many photos it will move, and this pill
-            // is the only progress surface, so it takes over from the very first tick.
-            state.isSavingToLibrary ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    0, 0, preparingLabel, indeterminate = true,
-                )
-            shState is AlbumShareState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    shState.done, shState.total, sharingTpl.format(shState.done, shState.total),
-                )
-            else -> null
-        }
-        // Cancel travels with the progress it stops, so the save offers its on the surface already
-        // reporting it instead of a header pill. The branches mirror the chain above, so the X
-        // always belongs to the operation on show.
-        val opCancel: (() -> Unit)? = when {
-            state.isSavingToLibrary -> viewModel::cancelSaveToLibrary
-            else -> null
-        }
-        eu.akoos.photos.presentation.common.OperationProgressPill(
-            progress = opProgress,
-            onCancel = opCancel,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 8.dp),
+    } else if (state.photos.isNotEmpty()) {
+        TimelineScrubber(
+            gridState = gridState,
+            items = scrubberItems,
+            grouping = TimelineGrouping.Day,
+            topPadding = scrubberTopInset,
+            bottomPadding = 24.dp,
+            // Both wrappings a member can take report the cloud linkId as their stable id, which
+            // is exactly the key the grid cells above use.
+            keyOf = { it.stableId },
+            onDraggingChange = onScrubberDraggingChange,
         )
-
-        // Delete / remove-from-album take over with a blocking drawer so a second tap can't fire
-        // into a half-finished bulk action; the pill above stays for background downloads/shares.
-        val opDeletingLabel = stringResource(R.string.op_deleting)
-        val opRemovingLabel = stringResource(R.string.op_removing_from_album)
-        val opMovingLabel = stringResource(R.string.op_moving_to_album)
-        val opAddingLabel = stringResource(R.string.op_adding_to_album)
-        val opHidingLabel = stringResource(R.string.op_hiding)
-        val albumBusyProgress = if (state.isDeletingPhotos) {
-            val label = when (state.busyOp) {
-                AlbumBusyOp.Removing -> opRemovingLabel
-                AlbumBusyOp.Moving -> opMovingLabel
-                AlbumBusyOp.Adding -> opAddingLabel
-                AlbumBusyOp.Hiding -> opHidingLabel
-                else -> opDeletingLabel
-            }
-            eu.akoos.photos.presentation.common.OperationProgress(0, 0, label, indeterminate = true)
-        } else null
-        eu.akoos.photos.presentation.common.BlockingOperationSheet(albumBusyProgress)
-
-        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
+    // Opt-in floating day pill, top-centre while the grid scrolls, yielding while the scrubber drags.
+    if (showScrollDate && !customOrder) {
+        ScrollDateLabel(
+            gridState = gridState,
+            items = scrubberItems,
+            grouping = TimelineGrouping.Day,
+            topPadding = scrubberTopInset,
+            suppressed = scrubberDragging,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+    }
+
+    // Fixed back button, floats over the hero image until the hero has scrolled away, when the
+    // page's floating header takes over with the album's name and its actions.
+    val heroGone by rememberHeroScrolledAway(gridState)
+    val stickyShown = heroGone && !state.isSelectionMode
+    AnimatedVisibility(
+        visible = !stickyShown,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier
+            .align(Alignment.TopStart)
+            .statusBarsPadding()
+            .padding(start = 12.dp, top = 8.dp),
+    ) {
+        IconBubble(
+            backdrop = glass,
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = if (state.isSelectionMode) stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
+            onClick = { if (state.isSelectionMode) viewModel.clearSelection() else onBack() },
+            diameter = 40.dp,
+            iconSize = 18.dp,
+            background = PillBg,
+            borderColor = PillBorder,
+            tint = appColors.fgPrimary,
+        )
+    }
+    StickyAlbumHeader(
+        backdrop = glass,
+        visible = stickyShown,
+        title = state.albumName.ifBlank { albumName },
+        onBack = onBack,
+        modifier = Modifier.align(Alignment.TopCenter),
+        trailing = {
+            IconBubble(
+                icon = Icons.Default.MoreVert,
+                contentDescription = stringResource(R.string.albums_more_actions),
+                onClick = onOverflowClick,
+                background = PillBg,
+                borderColor = PillBorder,
+                tint = appColors.fgPrimary,
+            )
+        },
+    )
+
+
+    // Jump-to-top pill: appears once scrolled down, and only outside selection mode so it
+    // never collides with the selection drawer. Tap eases back to the album header.
+    AnimatedVisibility(
+        visible = showScrollTop && !state.isSelectionMode,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(bottom = 24.dp),
+    ) {
+        IconBubble(
+            backdrop = glass,
+            icon = Icons.Default.KeyboardArrowUp,
+            contentDescription = stringResource(R.string.cd_scroll_to_top),
+            onClick = { scope.launch { gridState.animateScrollToItem(0) } },
+            modifier = Modifier.snackbarObstacle(),
+            diameter = 40.dp,
+            iconSize = 24.dp,
+            background = PillBg,
+            borderColor = PillBorder,
+            tint = appColors.fgPrimary,
+        )
+    }
+}
+
+/**
+ * The selection drawer of an album: the shared surface every multi-select uses, so the album's bulk
+ * actions sit in one list in the order every other surface lists them. The sheets and confirmations
+ * the actions open are raised by the caller through the callbacks.
+ */
+@Composable
+private fun BoxScope.AlbumSelectionDrawer(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    glass: GlassBackdrop?,
+    gridState: LazyGridState,
+    faceEnabled: Boolean,
+    snackbarHostState: SnackbarHostState,
+    onEditMetadata: (List<GalleryItem>) -> Unit,
+    onShare: () -> Unit,
+    onAddToPerson: () -> Unit,
+    onSetCover: () -> Unit,
+    onHide: (eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?) -> Unit,
+    onMoveToAlbum: (keepPhotos: Boolean) -> Unit,
+    onRemove: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    // Selection drawer: the shared surface every multi-select uses, so an album's bulk actions
+    // all sit in one list, in the order every other surface lists them.
+    val isDownloadingSel = state.downloadState is AlbumDownloadState.Working
+    // Download and offline only apply to cloud-only photos; Synced ones already live on the
+    // device, so gate both like the gallery does. Keep Download listed while a download is
+    // mid-flight so its cancel control stays reachable.
+    val anyCloudOnlySelected = state.selectedPhotos.any { it !in state.localUriByLinkId }
+    // Which way the offline row goes, so it names the press rather than the state: a pin while
+    // anything pinnable in the selection is still un-pinned, a removal once none is.
+    val offlinePinsSelection = offlineTurnsOn(
+        state.selectedPhotos.filter { it !in state.localUriByLinkId },
+        state.offlinePinIds,
+    )
+    // Taking a copy is not offered for an album someone else shared: those photos live on the
+    // owner's volume, and the supported route to a copy is saving the album into your own
+    // library, which the header action already offers. Same line the hide and cover affordances
+    // draw.
+    val canTakeCopies = !state.isSharedWithMe
+    // The drawer header's Select all takes in every photo of the album.
+    val selectAllCount = selectAllCountFor(total = state.photos.size, selected = state.selectedPhotos.size)
+    val isSharingPhotos = state.shareState is AlbumShareState.Working
+    val selectedAlbumPhotos = remember(state.photos, state.selectedPhotos) {
+        state.photos.filter { it.linkId in state.selectedPhotos }
+    }
+    val selectedAlbumItems = remember(selectedAlbumPhotos, state.localItemByLinkId, state.localUriByLinkId) {
+        selectedAlbumPhotos.map {
+            AlbumPhotoItems.galleryItem(
+                it, state.localItemByLinkId[it.linkId], state.localUriByLinkId[it.linkId],
+            )
+        }
+    }
+    // Labels are the user's own notes on their own photos, so a shared-with-me album offers none.
+    val addLabelsAction = rememberAddLabelsAction(
+        items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
+        onDone = { msg ->
+            scope.launch { snackbarHostState.showSnackbar(msg) }
+            viewModel.clearSelection()
+        },
+    )
+    // The photos of a shared-with-me album are the owner's to replace, so it offers no compression.
+    val compressAction = rememberCloudCompressAction(
+        items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
+        isSignedIn = true,
+    )
+    val albumSelectionActions = buildList {
+        add(
+            SelectionAction(
+                icon = Icons.Default.Share,
+                label = stringResource(R.string.sel_label_share),
+                enabled = !isSharingPhotos,
+                working = isSharingPhotos,
+                progress = (state.shareState as? AlbumShareState.Working)?.let {
+                    if (it.total > 0) it.done.toFloat() / it.total else 0f
+                },
+                onClick = onShare,
+                slot = PrimarySlot.Share,
+            )
+        )
+        // Edit date + place, placed right after Share so it is reachable without scrolling the
+        // action row. The editor writes a device copy in place and re-uploads a corrected copy for a
+        // cloud image, so it shows off an own album whenever the selection holds something it can
+        // change. It stays off a shared-with-me album, where those fields belong to the owner.
+        if (!state.isSharedWithMe && anyMetadataEditable(selectedAlbumItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.EditNote,
+                    label = stringResource(R.string.metadata_editor_edit_metadata),
+                    onClick = { onEditMetadata(selectedAlbumItems) },
+                )
+            )
+        }
+        // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+        // smaller copy is up.
+        compressAction?.let(::add)
+        // Add-to-person runs on-device and can name a new person, so it follows face recognition
+        // alone, the same gate the timeline and Search use.
+        if (faceEnabled) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PersonAdd,
+                    label = stringResource(R.string.gallery_add_to_person),
+                    onClick = onAddToPerson,
+                )
+            )
+        }
+        // Favourite the selection. An album is where a set worth favouriting is already
+        // gathered, and the cells carry the heart, so the press shows on the grid it came
+        // from. Off a shared-with-me album: tag 0 belongs to the owner's photo, the same
+        // line hide, delete and cover draw.
+        if (!state.isSharedWithMe) {
+            add(
+                favoriteSelectionAction(
+                    turnsOn = favoriteTurnsOnForCloudPhotos(selectedAlbumPhotos),
+                    state = state.favoriteState,
+                    onClick = { viewModel.toggleSelectedFavorite() },
+                )
+            )
+        }
+        addLabelsAction?.let(::add)
+        // Download selected. While the worker runs this row becomes the cancel control: a
+        // determinate ring tracks progress and the label reads "Cancel".
+        if (canTakeCopies && (anyCloudOnlySelected || isDownloadingSel)) {
+            val dl = state.downloadState as? AlbumDownloadState.Working
+            add(
+                SelectionAction(
+                    icon = Icons.Default.FileDownload,
+                    label = stringResource(R.string.sel_label_download),
+                    working = isDownloadingSel,
+                    progress = dl?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+                    workingIcon = Icons.Default.Close,
+                    workingLabel = stringResource(R.string.cancel),
+                    clickableWhileWorking = true,
+                    onClick = {
+                        if (isDownloadingSel) viewModel.cancelDownload()
+                        else viewModel.downloadSelectedPhotos()
+                    },
+                )
+            )
+        }
+        // Make available offline pins the full-res copy into the app so album photos open
+        // with no connection. A tap toggles: pins the selection, or removes it if all pinned.
+        if (canTakeCopies && anyCloudOnlySelected) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.OfflinePin,
+                    label = stringResource(
+                        if (offlinePinsSelection) R.string.offline_make_available
+                        else R.string.offline_remove,
+                    ),
+                    onClick = { viewModel.toggleSelectedOffline() },
+                )
+            )
+        }
+        if (!state.isSharedWithMe && state.selectedCount == 1) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PhotoLibrary,
+                    label = stringResource(R.string.album_set_as_cover),
+                    onClick = onSetCover,
+                )
+            )
+        }
+        // The destructive hide + delete affordances stay off shared-with-me albums. Even an
+        // editor recipient can't hide or delete someone else's photo from someone else's album
+        // through this surface, the backend rejects it.
+        if (!state.isSharedWithMe) {
+            // Hide selected: a backed-up member moves into the app's Hidden vault, a cloud-only
+            // member hides client-side by linkId. Mirrors the timeline / search / folder hide.
+            add(
+                SelectionAction(
+                    icon = Icons.Default.VisibilityOff,
+                    label = stringResource(R.string.sel_label_hide),
+                    enabled = !state.isDeletingPhotos,
+                    // Confirmed exactly as the delete beside it is. The split is read at the tap,
+                    // so the sheet names what THIS selection will have done to it.
+                    onClick = {
+                        onHide(viewModel.hideSplitForSelection().takeIf { !it.isEmpty })
+                    },
+                )
+            )
+        }
+        // Move the selection into another album: add it there, then take it out of this one.
+        // Own albums only, since a shared-with-me album's photos live on the owner's volume and
+        // this album cannot rewrite that membership. Sits beside Remove, the other membership edit.
+        if (!state.isSharedWithMe && state.canAddPhotos) {
+            add(
+                SelectionAction(
+                    icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                    label = stringResource(R.string.album_move_to_album),
+                    enabled = !state.isDeletingPhotos,
+                    onClick = {
+                        onMoveToAlbum(false)
+                    },
+                    slot = PrimarySlot.Organize,
+                )
+            )
+            // The same picker, but the photos stay in this album as well as joining the other one.
+            add(
+                SelectionAction(
+                    icon = Icons.Default.LibraryAdd,
+                    label = stringResource(R.string.album_add_to_other_album),
+                    enabled = !state.isDeletingPhotos,
+                    onClick = {
+                        onMoveToAlbum(true)
+                    },
+                    slot = PrimarySlot.Organize,
+                )
+            )
+        }
+        // Removing is an edit, so it follows the same right as adding rather than plain
+        // ownership. An editor on a shared album may take photos back out of it, including
+        // ones another member added: album membership records no contributor, so "only your
+        // own" is not answerable, and the official client draws the same line.
+        if (state.canAddPhotos) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.RemoveCircleOutline,
+                    // Named in full, so the row beside Delete cannot be read as destroying the
+                    // photo: this one takes it out of the album and leaves it in the library.
+                    label = stringResource(R.string.album_remove_from_album),
+                    // Taking a photo out of the album is destructive, so it reads red like delete.
+                    tint = ErrorColor,
+                    enabled = !state.isDeletingPhotos,
+                    onClick = onRemove,
+                )
+            )
+        }
+        if (!state.isSharedWithMe) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.DeleteOutline,
+                    label = stringResource(R.string.sel_label_delete),
+                    tint = ErrorColor,
+                    enabled = !state.isDeletingPhotos,
+                    // The busy flag also covers a move, a hide and a remove; only a delete spins
+                    // here. busyOp outlives the delete, so the flag bounds it.
+                    working = state.isDeletingPhotos && state.busyOp == AlbumBusyOp.Deleting,
+                    onClick = onDelete,
+                    slot = PrimarySlot.Delete,
+                )
+            )
+        }
+    }
+    SelectionDrawer(
+        backdrop = glass,
+        visible = state.isSelectionMode,
+        items = selectedAlbumItems,
+        actions = albumSelectionActions,
+        onDismiss = { viewModel.clearSelection() },
+        // Scrolling the album grid collapses the drawer, so reaching past it to carry on
+        // through the photos needs no deliberate pull or tap first.
+        contentScrollingProvider = { gridState.isScrollInProgress },
+        modifier = Modifier.align(Alignment.BottomCenter),
+        selectAllCount = selectAllCount,
+        onSelectAll = if (selectAllCount != null) {
+            { viewModel.setSelectedPhotos(state.photos.map { it.linkId }.toSet()) }
+        } else {
+            null
+        },
+    )
+}
+
+/**
+ * The album's progress surfaces: the pill for a save to the library or a share, and the blocking
+ * drawer a delete, remove, move, add or hide takes over with.
+ */
+@Composable
+private fun BoxScope.AlbumOperationOverlays(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+) {
+    // Unified progress pill: one surface for save-to-library and multi-share, matching the
+    // device-folder back-up and gallery bulk actions. Sits at the top edge, clear of the
+    // selection drawer the share runs from. The download and the offline pin are absent: both
+    // register with the TransferCenter, so the Activity screen reports them and cancels them,
+    // and the download's own drawer row already doubles as its cancel here.
+    val savingTpl = stringResource(R.string.shared_save_progress_fmt)
+    val preparingLabel = stringResource(R.string.share_preparing)
+    val sharingTpl = stringResource(R.string.op_sharing_fmt)
+    val shState = state.shareState
+    val opProgress = when {
+        state.isSavingToLibrary && state.savingTotal > 0 ->
+            eu.akoos.photos.presentation.common.OperationProgress(
+                state.savingCopied, state.savingTotal,
+                savingTpl.format(state.savingCopied, state.savingTotal),
+            )
+        // The copy announces itself before it knows how many photos it will move, and this pill
+        // is the only progress surface, so it takes over from the very first tick.
+        state.isSavingToLibrary ->
+            eu.akoos.photos.presentation.common.OperationProgress(
+                0, 0, preparingLabel, indeterminate = true,
+            )
+        shState is AlbumShareState.Working ->
+            eu.akoos.photos.presentation.common.OperationProgress(
+                shState.done, shState.total, sharingTpl.format(shState.done, shState.total),
+            )
+        else -> null
+    }
+    // Cancel travels with the progress it stops, so the save offers its on the surface already
+    // reporting it instead of a header pill. The branches mirror the chain above, so the X
+    // always belongs to the operation on show.
+    val opCancel: (() -> Unit)? = when {
+        state.isSavingToLibrary -> viewModel::cancelSaveToLibrary
+        else -> null
+    }
+    eu.akoos.photos.presentation.common.OperationProgressPill(
+        progress = opProgress,
+        onCancel = opCancel,
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .statusBarsPadding()
+            .padding(top = 8.dp),
+    )
+
+    // Delete / remove-from-album take over with a blocking drawer so a second tap can't fire
+    // into a half-finished bulk action; the pill above stays for background downloads/shares.
+    val opDeletingLabel = stringResource(R.string.op_deleting)
+    val opRemovingLabel = stringResource(R.string.op_removing_from_album)
+    val opMovingLabel = stringResource(R.string.op_moving_to_album)
+    val opAddingLabel = stringResource(R.string.op_adding_to_album)
+    val opHidingLabel = stringResource(R.string.op_hiding)
+    val albumBusyProgress = if (state.isDeletingPhotos) {
+        val label = when (state.busyOp) {
+            AlbumBusyOp.Removing -> opRemovingLabel
+            AlbumBusyOp.Moving -> opMovingLabel
+            AlbumBusyOp.Adding -> opAddingLabel
+            AlbumBusyOp.Hiding -> opHidingLabel
+            else -> opDeletingLabel
+        }
+        eu.akoos.photos.presentation.common.OperationProgress(0, 0, label, indeterminate = true)
+    } else null
+    eu.akoos.photos.presentation.common.BlockingOperationSheet(albumBusyProgress)
+}
+
+/**
+ * The sheets the album's selection actions raise: add to a person, move or add to another album, the
+ * photo share drawer with its public-link management, and the warning before sharing cloud-only photos.
+ */
+@Composable
+private fun AlbumSelectionSheets(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    snackbarHostState: SnackbarHostState,
+    showAddToPerson: Boolean,
+    onDismissAddToPerson: () -> Unit,
+    showMoveToAlbum: Boolean,
+    pickerKeepsPhotos: Boolean,
+    onDismissMoveToAlbum: () -> Unit,
+    showPhotoShare: Boolean,
+    onDismissPhotoShare: () -> Unit,
+) {
+    val shareCtx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val linkCopiedMsg = stringResource(R.string.album_link_copied)
+    var showCreateAlbumForMove by remember { mutableStateOf(false) }
+    var showShareCloudWarning by remember { mutableStateOf(false) }
+    val photoShareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showManageLinkSheet by remember { mutableStateOf(false) }
+    val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
     // Add the album selection to a person, the same face-first flow as the timeline's.
-    if (showAddToPersonSheet && state.selectedCount > 0) {
+    if (showAddToPerson && state.selectedCount > 0) {
         // Each photo goes in as the album's own item for it, so it keys on its Drive linkId, the stable
         // id the face index and a person's photos use, as on the timeline.
         val facePhotos = remember(
@@ -1280,17 +1688,17 @@ fun AlbumDetailScreen(
         eu.akoos.photos.presentation.people.AddToPersonFaceSheet(
             photos = facePhotos,
             onDone = {
-                showAddToPersonSheet = false
+                onDismissAddToPerson()
                 viewModel.clearSelection()
             },
-            onDismiss = { showAddToPersonSheet = false },
+            onDismiss = { onDismissAddToPerson() },
         )
     }
 
     // Move the album selection into another album. Reuses the gallery's add-to-album picker: this
     // album is filtered out of the target list, and picking a shared-with-me album makes the #80
     // cross-volume copy, which the move result flags so the collector above can say so.
-    if (showMoveToAlbumSheet && state.selectedCount > 0) {
+    if (showMoveToAlbum && state.selectedCount > 0) {
         // The album list (the gallery's add-to-album sheet, this album filtered out) is observed only
         // while the move sheet is open, so opening an album doesn't load every album until a move.
         val albumsViewModel: AlbumsViewModel = hiltViewModel()
@@ -1310,18 +1718,18 @@ fun AlbumDetailScreen(
             selectedItems = moveItems,
             cloudAlbums = albumsState.addableAlbums.filter { it.linkId != state.albumLinkId },
             onCreateNew = {
-                showMoveToAlbumSheet = false
+                onDismissMoveToAlbum()
                 showCreateAlbumForMove = true
             },
             onCloudAlbumSelected = { album ->
-                showMoveToAlbumSheet = false
+                onDismissMoveToAlbum()
                 if (pickerKeepsPhotos) {
                     viewModel.addSelectedToAlbum(album.linkId, album.name, album.isSharedWithMe)
                 } else {
                     viewModel.moveSelectedToAlbum(album.linkId, album.name, album.isSharedWithMe)
                 }
             },
-            onDismiss = { showMoveToAlbumSheet = false },
+            onDismiss = { onDismissMoveToAlbum() },
             hiddenAlbumIds = albumsState.hiddenAlbumIds,
         )
     }
@@ -1335,9 +1743,9 @@ fun AlbumDetailScreen(
         )
     }
 
-    // Unified share drawer for a photo selection (Send to app / Public link) — mirrors the timeline
+    // Unified share drawer for a photo selection (Send to app / Public link): mirrors the timeline
     // so an album selection shares the same way. "Share with people" is hidden (already in an album).
-    if (showPhotoShareSheet && state.selectedCount > 0) {
+    if (showPhotoShare && state.selectedCount > 0) {
         PhotoShareSheet(
             sheetState = photoShareSheetState,
             canCreateLink = true,
@@ -1347,15 +1755,15 @@ fun AlbumDetailScreen(
             // moves bytes the guest can already see and grants nobody access to the album.
             showPublicLink = state.selectedCount == 1 && !state.isSharedWithMe,
             showShareWithPeople = false,
-            onDismiss = { showPhotoShareSheet = false },
+            onDismiss = { onDismissPhotoShare() },
             onSendToApp = {
-                showPhotoShareSheet = false
+                onDismissPhotoShare()
                 val needsDownload = state.selectedPhotos.any { state.localUriByLinkId[it] == null }
                 if (needsDownload) showShareCloudWarning = true else viewModel.shareSelected()
             },
-            onShareWithPeople = { showPhotoShareSheet = false },
+            onShareWithPeople = { onDismissPhotoShare() },
             onManagePublicLink = {
-                showPhotoShareSheet = false
+                onDismissPhotoShare()
                 viewModel.loadPublicLink()
                 showManageLinkSheet = true
             },
@@ -1379,105 +1787,6 @@ fun AlbumDetailScreen(
         )
     }
 
-    if (showAlbumOverflow) {
-        // The copy row reports the work it started: a determinate ring where the operation knows its
-        // count, a spinner until then, and no second tap while either runs.
-        val copyBusy = if (state.isSharedWithMe) {
-            state.isSavingToLibrary
-        } else {
-            state.downloadState is AlbumDownloadState.Working
-        }
-        val copyFraction: Float? = if (state.isSharedWithMe) {
-            state.savingTotal.takeIf { it > 0 }?.let { state.savingCopied.toFloat() / it }
-        } else {
-            (state.downloadState as? AlbumDownloadState.Working)
-                ?.takeIf { it.total > 0 }
-                ?.let { it.done.toFloat() / it.total }
-        }
-        AlbumActionsSheet(
-            sheetState = albumActionsSheetState,
-            isSharedWithMe = state.isSharedWithMe,
-            // The album's own sharingShareId, carried in as shareId when the screen opens and
-            // cleared here when the share is deleted.
-            isShared = state.shareId != null,
-            canAddPhotos = state.canAddPhotos,
-            hasPhotos = state.photos.isNotEmpty(),
-            copyBusy = copyBusy,
-            copyFraction = copyFraction,
-            sortMode = photoSortMode,
-            grouping = photoGrouping,
-            isHiddenFromTimeline = state.isHiddenFromTimeline,
-            isExcludedFromGrid = state.isExcludedFromGrid,
-            onDismiss = { showAlbumOverflow = false },
-            onAddPhotos = { addPhotos() },
-            onShareOrInfo = { showShareSheet = true },
-            onCopy = {
-                if (state.isSharedWithMe) showSaveToLibraryConfirm = true
-                else showDownloadAllConfirm = true
-            },
-            onEditMetadata = { editAllMetadata() },
-            onRename = { showRenameSheet = true },
-            onToggleHiddenFromTimeline = { viewModel.toggleHiddenFromTimeline() },
-            onHide = { viewModel.hideAlbum() },
-            onToggleExcludedFromGrid = { viewModel.toggleExcludedFromGrid() },
-            onDelete = if (state.isSharedWithMe) null else ({ showDeleteAlbumConfirm = true }),
-            onSlideshow = { playSlideshow() },
-            onSortSelected = { mode ->
-                scope.launch { PhotoViewChoiceStore.setAlbumSort(shareCtx, state.albumLinkId, mode) }
-            },
-            onGroupingSelected = { grouping ->
-                visitGrouping = grouping
-                scope.launch { PhotoViewChoiceStore.setAlbumGrouping(shareCtx, state.albumLinkId, grouping) }
-            },
-            onLeaveAlbum = { showLeaveAlbumConfirm = true },
-        )
-    }
-
-    // The cloud metadata save drawer follows the batch onto this screen, so a whole-album or in-album
-    // edit shows its progress here instead of only on the timeline it closed back through.
-    CloudMetadataSaveDrawer(ui = cloudSaveUi, onDismiss = { cloudSaveVm.dismiss() })
-
-    if (showShareSheet) {
-        if (state.isSharedWithMe) {
-            SharedWithMeInfoSheet(
-                sheetState = shareSheetState,
-                sharedByEmail = state.sharedByEmail ?: "",
-                onDismiss = { scope.launch { shareSheetState.hide() }.invokeOnCompletion { showShareSheet = false } },
-            )
-        } else {
-            ShareAlbumSheet(
-                sheetState = shareSheetState,
-                albumName = state.albumName.ifBlank { albumName },
-                isSharing = state.isSharing,
-                isInvitingBatch = state.isInvitingBatch,
-                isTogglingPublicLink = state.isTogglingPublicLink,
-                publicShareUrl = state.publicShareUrl,
-                ownerEmail = state.ownerEmail,
-                hasShareRecord = state.shareId != null,
-                invitations = state.invitations,
-                externalInvitations = state.externalInvitations,
-                members = state.members,
-                isLoadingInvitations = state.isLoadingInvitations,
-                inviteBatchResult = state.inviteBatchResult,
-                onDismiss = { scope.launch { shareSheetState.hide() }.invokeOnCompletion { showShareSheet = false } },
-                onCopyLink = { viewModel.createShareLink() },
-                onInviteUsers = { emails, message, perms -> viewModel.inviteUsers(emails, message, perms) },
-                onStopSharing = {
-                    viewModel.deleteShare()
-                    scope.launch { shareSheetState.hide() }.invokeOnCompletion { showShareSheet = false }
-                },
-                onRevokeInvitation = { invitationId -> viewModel.revokeInvitation(invitationId) },
-                onRevokeExternalInvitation = { invitationId -> viewModel.revokeExternalInvitation(invitationId) },
-                onRemoveMember = { memberId -> viewModel.removeMember(memberId) },
-                onCreatePublicLink = { viewModel.createPublicLink() },
-                onDisablePublicLink = { viewModel.disablePublicLink() },
-                onChangeMemberPermission = { memberId, perm -> viewModel.changeMemberPermission(memberId, perm) },
-                onChangeInvitationPermission = { invitationId, perm -> viewModel.changeInvitationPermission(invitationId, perm) },
-                onDismissInviteResult = { viewModel.clearInviteBatchResult() },
-            )
-        }
-    }
-
     if (showShareCloudWarning) {
         ConfirmDialog(
             title = stringResource(R.string.gallery_share_cloud_warning_title),
@@ -1491,84 +1800,65 @@ fun AlbumDetailScreen(
             onDismiss = { showShareCloudWarning = false },
         )
     }
-    if (showSaveToLibraryConfirm) {
-        // Confirms the cross-share copy before kicking off the round-trip. The
-        // body explains both what the action does (copy to the recipient's own
-        // library) and the storage-cost framing, so the user understands they
-        // are duplicating photos into their own quota rather than just opening
-        // a viewer. Photo count comes from the live state — the list is in
-        // hand long before this dialog can pop.
-        ConfirmDialog(
-            title = stringResource(R.string.save_to_library_confirm_title),
-            message = stringResource(
-                R.string.save_to_library_confirm_body_fmt,
-                state.photos.size,
-            ),
-            confirmLabel = stringResource(R.string.action_save),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = {
-                showSaveToLibraryConfirm = false
-                viewModel.saveSharedAlbumToOwnLibrary()
-            },
-            onDismiss = { showSaveToLibraryConfirm = false },
-        )
-    }
-    if (showDownloadAllConfirm) {
-        ConfirmDialog(
-            title = stringResource(R.string.album_download_all_confirm_title),
-            message = stringResource(R.string.album_download_all_confirm_body),
-            confirmLabel = stringResource(R.string.albums_download_all),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = {
-                showDownloadAllConfirm = false
-                viewModel.downloadAllPhotos()
-            },
-            onDismiss = { showDownloadAllConfirm = false },
-        )
-    }
-    if (showSetCoverConfirm) {
+}
+
+/** The confirmations of the album's selection actions: set as cover, remove from the album, hide and delete. */
+@Composable
+private fun AlbumSelectionConfirms(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    showDelete: Boolean,
+    onDismissDelete: () -> Unit,
+    hideConfirmSplit: eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?,
+    onDismissHide: () -> Unit,
+    showSetCover: Boolean,
+    onDismissSetCover: () -> Unit,
+    showRemoveFromAlbum: Boolean,
+    onDismissRemoveFromAlbum: () -> Unit,
+) {
+    if (showSetCover) {
         ConfirmDialog(
             title = stringResource(R.string.album_set_cover_confirm_title),
             message = stringResource(R.string.album_set_cover_confirm_body),
             confirmLabel = stringResource(R.string.album_set_as_cover),
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
-                showSetCoverConfirm = false
+                onDismissSetCover()
                 viewModel.setSelectedPhotoAsCover()
             },
-            onDismiss = { showSetCoverConfirm = false },
+            onDismiss = { onDismissSetCover() },
         )
     }
-    if (showRemoveFromAlbumConfirm) {
+    if (showRemoveFromAlbum) {
         ConfirmDialog(
             title = stringResource(R.string.album_remove_confirm_title),
             message = stringResource(R.string.album_remove_confirm_body),
             confirmLabel = stringResource(R.string.action_remove),
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
-                showRemoveFromAlbumConfirm = false
+                onDismissRemoveFromAlbum()
                 viewModel.removeSelectedPhotosFromAlbum()
             },
-            onDismiss = { showRemoveFromAlbumConfirm = false },
+            onDismiss = { onDismissRemoveFromAlbum() },
             destructive = true,
         )
     }
 
-    // Hide confirmation — the shared sheet every hide surface raises, worded from this selection's
+    // Hide confirmation: the shared sheet every hide surface raises, worded from this selection's
     // own split.
     hideConfirmSplit?.let { split ->
         eu.akoos.photos.presentation.common.HideConfirmSheet(
             split = split,
             title = stringResource(R.string.hide_confirm_title),
             onConfirm = {
-                hideConfirmSplit = null
+                onDismissHide()
                 viewModel.hideSelected()
             },
-            onDismiss = { hideConfirmSplit = null },
+            onDismiss = { onDismissHide() },
         )
     }
 
-    if (showDeleteConfirm && state.selectedPhotos.isNotEmpty()) {
+    if (showDelete && state.selectedPhotos.isNotEmpty()) {
         // Same sheet as the gallery and device folders: green-cloud (Synced) photos get the
         // device / cloud / both choice, cloud-only photos get accurate "moved to trash" copy.
         val deleteItems = remember(
@@ -1584,17 +1874,70 @@ fun AlbumDetailScreen(
         }
         eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog(
             selectedItems = deleteItems,
-            onDismiss = { showDeleteConfirm = false },
+            onDismiss = { onDismissDelete() },
             onDelete = { freeUpSpace, deleteFromCloud ->
-                showDeleteConfirm = false
+                onDismissDelete()
                 viewModel.deleteSelectedPhotos(freeUpSpace, deleteFromCloud)
             },
         )
     }
+}
 
-    if (showRenameSheet) {
+/** The confirmations the album's actions drawer leads to: save, download all, rename, delete, leave. */
+@Composable
+private fun AlbumConfirms(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    showSaveToLibrary: Boolean,
+    onDismissSaveToLibrary: () -> Unit,
+    showDownloadAll: Boolean,
+    onDismissDownloadAll: () -> Unit,
+    showRename: Boolean,
+    onDismissRename: () -> Unit,
+    showDeleteAlbum: Boolean,
+    onDismissDeleteAlbum: () -> Unit,
+    showLeaveAlbum: Boolean,
+    onDismissLeaveAlbum: () -> Unit,
+) {
+    if (showSaveToLibrary) {
+        // Confirms the cross-share copy before kicking off the round-trip. The
+        // body explains both what the action does (copy to the recipient's own
+        // library) and the storage-cost framing, so the user understands they
+        // are duplicating photos into their own quota rather than just opening
+        // a viewer. Photo count comes from the live state: the list is in
+        // hand long before this dialog can pop.
+        ConfirmDialog(
+            title = stringResource(R.string.save_to_library_confirm_title),
+            message = stringResource(
+                R.string.save_to_library_confirm_body_fmt,
+                state.photos.size,
+            ),
+            confirmLabel = stringResource(R.string.action_save),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onDismissSaveToLibrary()
+                viewModel.saveSharedAlbumToOwnLibrary()
+            },
+            onDismiss = { onDismissSaveToLibrary() },
+        )
+    }
+    if (showDownloadAll) {
+        ConfirmDialog(
+            title = stringResource(R.string.album_download_all_confirm_title),
+            message = stringResource(R.string.album_download_all_confirm_body),
+            confirmLabel = stringResource(R.string.albums_download_all),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onDismissDownloadAll()
+                viewModel.downloadAllPhotos()
+            },
+            onDismiss = { onDismissDownloadAll() },
+        )
+    }
+
+    if (showRename) {
         // Pre-filled with the current album name. Empty or unchanged input is a no-op
-        // (ViewModel.renameAlbum guards both cases) — the sheet still dismisses cleanly.
+        // (ViewModel.renameAlbum guards both cases): the sheet still dismisses cleanly.
         EditFieldSheet(
             title = stringResource(R.string.album_rename),
             hint = stringResource(R.string.albums_create_album_hint),
@@ -1602,7 +1945,7 @@ fun AlbumDetailScreen(
             singleLine = true,
             confirmLabel = stringResource(R.string.album_rename_confirm),
             canConfirm = { AlbumRenameInput.isAcceptable(it, state.albumName) },
-            onDismiss = { showRenameSheet = false },
+            onDismiss = { onDismissRename() },
             onSave = { viewModel.renameAlbum(it) },
         )
     }
@@ -1611,17 +1954,17 @@ fun AlbumDetailScreen(
     // shared-with-me albums. Destructive styling matches "Delete album" since
     // the entry disappears from the user's library in both flows.
     // Deleting removes the album from Drive and keeps its photos, the same question the Albums grid asks.
-    if (showDeleteAlbumConfirm) {
+    if (showDeleteAlbum) {
         ConfirmDialog(
             title = "\"${state.albumName}\"",
             message = stringResource(R.string.delete_album_container_warning),
             confirmLabel = stringResource(R.string.delete_button_permanently),
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
-                showDeleteAlbumConfirm = false
+                onDismissDeleteAlbum()
                 viewModel.deleteAlbum()
             },
-            onDismiss = { showDeleteAlbumConfirm = false },
+            onDismiss = { onDismissDeleteAlbum() },
             destructive = true,
         )
     }
@@ -1640,66 +1983,67 @@ fun AlbumDetailScreen(
         )
     }
 
-    androidx.compose.runtime.LaunchedEffect(state.deleteAlbumDone) {
-        if (state.deleteAlbumDone) onBack()
-    }
-
-    if (showLeaveAlbumConfirm) {
+    if (showLeaveAlbum) {
         ConfirmDialog(
             title = stringResource(R.string.leave_album_confirm_title),
             message = stringResource(R.string.leave_album_confirm_body),
             confirmLabel = stringResource(R.string.leave_album_confirm_action),
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
-                showLeaveAlbumConfirm = false
+                onDismissLeaveAlbum()
                 viewModel.leaveSharedAlbum()
             },
-            onDismiss = { showLeaveAlbumConfirm = false },
+            onDismiss = { onDismissLeaveAlbum() },
             destructive = true,
         )
     }
-
-    // Once the leave round-trip completes successfully, pop back so the user
-    // lands on the Shared tab instead of staring at a now-orphaned detail.
-    androidx.compose.runtime.LaunchedEffect(state.leaveAlbumDone) {
-        if (state.leaveAlbumDone) onBack()
-    }
-
-    // Hiding takes the album off every grid, so the screen showing it leaves the same way the leave
-    // above does rather than holding a card the user can no longer reach.
-    androidx.compose.runtime.LaunchedEffect(state.hideAlbumDone) {
-        if (state.hideAlbumDone) onBack()
-    }
 }
 
-/** What a section header's select button is announced as, naming the span of dates [grouping]
- *  gathers under that header. */
-@StringRes
-internal fun sectionSelectDescriptionRes(grouping: AlbumPhotoGrouping): Int = when (grouping) {
-    AlbumPhotoGrouping.Day -> R.string.cd_select_day
-    AlbumPhotoGrouping.Month -> R.string.cd_select_month
-    AlbumPhotoGrouping.Year -> R.string.cd_select_year
-}
-
-/** The slim line under the album header while [count] photos are still uploading to join it. */
+/** The sheet behind the album's share action: who it is shared with for an own album, who shared it otherwise. */
 @Composable
-private fun PendingJoinRow(count: Int) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-    ) {
-        androidx.compose.material3.CircularProgressIndicator(
-            color = Accent,
-            strokeWidth = 2.dp,
-            modifier = Modifier.size(14.dp),
+private fun AlbumShareSheets(
+    state: AlbumDetailUiState,
+    viewModel: AlbumDetailViewModel,
+    albumName: String,
+    sheetState: androidx.compose.material3.SheetState,
+    onHide: () -> Unit,
+) {
+    if (state.isSharedWithMe) {
+        SharedWithMeInfoSheet(
+            sheetState = sheetState,
+            sharedByEmail = state.sharedByEmail ?: "",
+            onDismiss = onHide,
         )
-        Text(
-            androidx.compose.ui.res.pluralStringResource(R.plurals.albums_photos_uploading, count, count),
-            color = FgMute,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+    } else {
+        ShareAlbumSheet(
+            sheetState = sheetState,
+            albumName = state.albumName.ifBlank { albumName },
+            isSharing = state.isSharing,
+            isInvitingBatch = state.isInvitingBatch,
+            isTogglingPublicLink = state.isTogglingPublicLink,
+            publicShareUrl = state.publicShareUrl,
+            ownerEmail = state.ownerEmail,
+            hasShareRecord = state.shareId != null,
+            invitations = state.invitations,
+            externalInvitations = state.externalInvitations,
+            members = state.members,
+            isLoadingInvitations = state.isLoadingInvitations,
+            inviteBatchResult = state.inviteBatchResult,
+            onDismiss = onHide,
+            onCopyLink = { viewModel.createShareLink() },
+            onInviteUsers = { emails, message, perms -> viewModel.inviteUsers(emails, message, perms) },
+            onStopSharing = {
+                viewModel.deleteShare()
+                onHide()
+            },
+            onRevokeInvitation = { invitationId -> viewModel.revokeInvitation(invitationId) },
+            onRevokeExternalInvitation = { invitationId -> viewModel.revokeExternalInvitation(invitationId) },
+            onRemoveMember = { memberId -> viewModel.removeMember(memberId) },
+            onCreatePublicLink = { viewModel.createPublicLink() },
+            onDisablePublicLink = { viewModel.disablePublicLink() },
+            onChangeMemberPermission = { memberId, perm -> viewModel.changeMemberPermission(memberId, perm) },
+            onChangeInvitationPermission = { invitationId, perm -> viewModel.changeInvitationPermission(invitationId, perm) },
+            onDismissInviteResult = { viewModel.clearInviteBatchResult() },
         )
     }
 }

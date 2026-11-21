@@ -28,6 +28,7 @@ import kotlinx.coroutines.test.runTest
 import me.proton.drive.sdk.entity.LegacyNodeUid
 import me.proton.drive.sdk.entity.PhotoTag
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -41,6 +42,33 @@ class SdkRoutingTest {
 
     @Before
     fun reset() = SdkDiagnostics.clear()
+
+    @Test
+    fun `a route nobody has switched is on`() {
+        assertTrue(routeSwitchedOn(null))
+    }
+
+    @Test
+    fun `a route switched off stays off and one switched on stays on`() {
+        assertEquals(false, routeSwitchedOn(false))
+        assertTrue(routeSwitchedOn(true))
+    }
+
+    @Test
+    fun `a route off by default stays off until switched on, and an explicit switch wins either way`() {
+        assertEquals(false, routeSwitchedOn(null, defaultOn = false))
+        assertTrue(routeSwitchedOn(true, defaultOn = false))
+        assertEquals(false, routeSwitchedOn(false, defaultOn = true))
+    }
+
+    @Test
+    fun `the seven original routes are on by default`() {
+        val original = listOf(
+            SdkRoute.TAGS, SdkRoute.TRASH, SdkRoute.DOWNLOAD, SdkRoute.UPLOAD,
+            SdkRoute.ALBUMS, SdkRoute.EVENTS, SdkRoute.SHARED,
+        )
+        assertTrue(original.all { it.defaultOn })
+    }
 
     @Test
     fun `a route switched off runs only the app's own path`() = runTest {
@@ -68,6 +96,46 @@ class SdkRoutingTest {
         assertEquals(0, SdkDiagnostics.sdkCount("tags"))
         assertEquals(1, SdkDiagnostics.fallbackCount("tags"))
         assertTrue(SdkDiagnostics.snapshot().contains("lastFallback=tags IllegalStateException"))
+    }
+
+    @Test
+    fun `a fallback records the HTTP status and Proton code of the SDK failure`() = runTest {
+        val http = me.proton.drive.sdk.SdkHttpClientException.Http(400, 2011, null, "Bad request")
+        runRouted<String>("upload", on = true, viaSdk = { throw http }, fallback = { "own" })
+        assertTrue(SdkDiagnostics.snapshot(), SdkDiagnostics.snapshot().contains("lastFallback=upload Http http=400 code=2011"))
+    }
+
+    @Test
+    fun `an SDK error is described by its domain, codes and a redacted message down its causes`() {
+        val sdkError = me.proton.drive.sdk.ProtonSdkError(
+            "Upload of IMG_1234.jpg for someone@example.com failed", "Proton.Api",
+            me.proton.drive.sdk.ProtonSdkError.ErrorDomain.Api, 2011L, 422L, null, null, null,
+        )
+        val error = me.proton.drive.sdk.ProtonDriveSdkException(
+            null, java.io.IOException("connection reset"), sdkError,
+        )
+
+        val described = describeSdkFailure(error)
+
+        assertTrue(described, described.startsWith("ProtonDriveSdkException domain=Api code=2011/422: "))
+        assertTrue(described, described.endsWith(" <- IOException: connection reset"))
+        assertFalse(described, described.contains("IMG_1234"))
+        assertFalse(described, described.contains("someone@example.com"))
+    }
+
+    @Test
+    fun `the log form of an SDK failure carries codes and classes only`() {
+        val sdkError = me.proton.drive.sdk.ProtonSdkError(
+            "Album Summer at Anna's place is full", "Proton.Api",
+            me.proton.drive.sdk.ProtonSdkError.ErrorDomain.Api, 2011L, null, null, null, null,
+        )
+        val http = me.proton.drive.sdk.SdkHttpClientException.Http(422, 2011, null, "photo my cat.dng refused")
+        val error = me.proton.drive.sdk.ProtonDriveSdkException(null, http, sdkError)
+
+        assertEquals(
+            "ProtonDriveSdkException domain=Api code=2011 <- Http http=422 code=2011",
+            describeSdkFailure(error, withMessages = false),
+        )
     }
 
     @Test
@@ -140,7 +208,38 @@ class SdkRoutingTest {
             fail("expected the unknown outcome to pass through")
         } catch (e: SdkOutcomeUnknownException) {
             assertEquals(0, fallbackCalls)
-            assertEquals(1, SdkDiagnostics.fallbackCount("upload"))
+            assertEquals(0, SdkDiagnostics.fallbackCount("upload"))
+            assertEquals(1, SdkDiagnostics.unconfirmedCount("upload"))
+            assertTrue(SdkDiagnostics.snapshot(), SdkDiagnostics.snapshot().startsWith("upload: sdk=0 fallback=0 unconfirmed=1"))
         }
+    }
+
+    @Test
+    fun `every kind of SDK failure is tallied by classes and codes, without its message`() = runTest {
+        val storage = me.proton.drive.sdk.SdkHttpClientException.Http(400, null, null, "block of IMG_1234.jpg refused")
+        repeat(3) { runRouted<String>("upload", on = true, viaSdk = { throw storage }, fallback = { "own" }) }
+        runRouted<String>("upload", on = true, viaSdk = { throw java.io.IOException("reset") }, fallback = { "own" })
+        runRouted("upload", on = true, viaSdk = { "sdk" }, fallback = { "own" })
+
+        val snapshot = SdkDiagnostics.snapshot()
+
+        assertEquals(1, SdkDiagnostics.sdkCount("upload"))
+        assertEquals(4, SdkDiagnostics.fallbackCount("upload"))
+        assertTrue(snapshot, snapshot.contains("upload: sdk=1 fallback=4\n  3 x Http http=400\n  1 x IOException\n"))
+        assertTrue(snapshot, snapshot.endsWith("lastFallback=upload IOException: reset"))
+        assertFalse(snapshot, snapshot.substringBefore("lastFallback=").contains("IMG_1234"))
+    }
+
+    @Test
+    fun `the tally of one route keeps its first kinds and puts the rest under other`() = runTest {
+        for (code in 1..8) {
+            val http = me.proton.drive.sdk.SdkHttpClientException.Http(400 + code, null, null, null)
+            runRouted<String>("download", on = true, viaSdk = { throw http }, fallback = { "own" })
+        }
+
+        val lines = SdkDiagnostics.snapshot().lines()
+
+        assertEquals("download: sdk=0 fallback=8", lines[0])
+        assertEquals((1..6).map { "  1 x Http http=${400 + it}" } + "  2 x other", lines.subList(1, 8))
     }
 }

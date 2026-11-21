@@ -32,7 +32,10 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
+import eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.data.upload.MirrorSourceCheck
+import eu.akoos.photos.data.upload.ShortCopyReplacer
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.data.upload.compression.VideoUploadCompression
@@ -50,12 +53,16 @@ import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.PhotoGpsResolver
+import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.VideoMetadataStripper
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import io.mockk.slot
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
@@ -71,9 +78,11 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import me.proton.core.domain.entity.UserId
 import org.junit.After
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -110,6 +119,7 @@ class UploadBytePreparationTest {
     private data class Sent(val item: LocalMediaItem, val hash: String, val uri: String, val bytes: ByteArray)
 
     private val sent = mutableListOf<Sent>()
+    private val shortCopies = InMemoryShortCloudCopyStore()
     private var uploadThrows: Exception? = null
 
     @Before
@@ -144,6 +154,10 @@ class UploadBytePreparationTest {
         every { compression.compressesVideo(any(), any()) } answers {
             secondArg<CompressionSettings>().videos && firstArg<String>().startsWith("video/")
         }
+        // The stubbed encoders write placeholder bytes, not real media, so the read-back before a mirror
+        // overwrite is accepted here; the tests that pin a refusal stub it to false.
+        mockkObject(MirrorSourceCheck)
+        every { MirrorSourceCheck.accepts(any(), any(), any(), any()) } returns true
         val networkObserver = mockk<NetworkObserver>(relaxed = true)
         coEvery { networkObserver.currentlyOnWifi() } returns true
 
@@ -162,6 +176,7 @@ class UploadBytePreparationTest {
             context = context,
             appScope = appScope,
             albumListEvents = AlbumListEventBus(),
+            shortCopyReplacer = ShortCopyReplacer(cloud, db.albumPhotoMembershipDao(), shortCopies),
         )
     }
 
@@ -216,7 +231,7 @@ class UploadBytePreparationTest {
         val (file, item) = deviceFile("IMG_1.jpg", "image/jpeg", byteArrayOf(1, 2, 3, 4))
         val stripped = byteArrayOf(1, 2, 3)
         mockkObject(ExifHelper)
-        every { ExifHelper.stripFieldsInPlace(any(), any(), any()) } answers { file.writeBytes(stripped); StripResult.Stripped }
+        every { ExifHelper.stripFieldsInPlace(any(), any(), any(), any()) } answers { file.writeBytes(stripped); StripResult.Stripped }
 
         useCase(userId)
 
@@ -227,6 +242,34 @@ class UploadBytePreparationTest {
         assertEquals(SyncStatus.SYNCED, row.status)
         assertEquals(sha1(stripped), row.localHash)
         assertEquals(sha1(stripped), s.hash)
+        // The upload records these bytes itself; the strip must not also be announced as a rewrite of the backup.
+        verify { ExifHelper.stripFieldsInPlace(any(), item.uri, any(), announce = false) }
+    }
+
+    @Test
+    fun `an in-place mirror strip that changes the file's length uploads and records the length it left`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        // The scan measured the file before the rewrite; the rewrite leaves it 484 bytes longer.
+        val (file, item) = deviceFile("IMG_2.jpg", "image/jpeg", ByteArray(10_000) { 5 })
+        val rewritten = ByteArray(10_484) { 6 }
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripFieldsInPlace(any(), any(), any(), any()) } answers { file.writeBytes(rewritten); StripResult.Stripped }
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertEquals(item.uri, s.uri)
+        assertArrayEquals(rewritten, s.bytes)
+        assertEquals(10_484L, s.item.sizeBytes)
+        assertEquals(sha1(rewritten), s.hash)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals(10_484L, row.sizeBytes)
+        assertEquals(sha1(rewritten), row.localHash)
     }
 
     @Test
@@ -266,7 +309,7 @@ class UploadBytePreparationTest {
         val compressedTemp = temp("videocompress_", ".mp4", compressed)
         mockkObject(VideoMetadataStripper)
         every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } answers { thirdArg<File>().writeBytes(remuxed); true }
-        coEvery { compression.video(any(), any(), any(), any(), any()) } returns
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } returns
             VideoUploadCompression.Attempt(compressedTemp, CompressionOutcome.COMPRESSED, null, 50L, "video/avc", 20L)
 
         useCase(userId)
@@ -280,6 +323,283 @@ class UploadBytePreparationTest {
         assertEquals(remuxed.size.toLong(), row.sizeBytes)
         assertFalse(compressedTemp.exists())
         assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a video whose location strip fails is still transcoded without its location`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true
+        }
+        deviceFile("VID_7.mp4", "video/mp4", ByteArray(60) { 3 })
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        val strip = slot<MetadataStripConfig>()
+        coEvery { compression.video(any(), any(), any(), capture(strip), any(), any()) } returns
+            VideoUploadCompression.Attempt(null, CompressionOutcome.SKIPPED, CompressionSkipReason.ALREADY_EFFICIENT)
+
+        useCase(userId)
+
+        assertTrue("the transcode is told to leave the location out", strip.captured.stripGps)
+    }
+
+    @Test
+    fun `a video uploaded without a strip is transcoded keeping its location`() = runTest {
+        prefs { it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true }
+        deviceFile("VID_8.mp4", "video/mp4", ByteArray(60) { 3 })
+        val strip = slot<MetadataStripConfig>()
+        coEvery { compression.video(any(), any(), any(), capture(strip), any(), any()) } returns
+            VideoUploadCompression.Attempt(null, CompressionOutcome.SKIPPED, CompressionSkipReason.ALREADY_EFFICIENT)
+
+        useCase(userId)
+
+        assertFalse("the transcode keeps the location", strip.captured.stripGps)
+    }
+
+    @Test
+    fun `a video remux that does not read back never overwrites the device original`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(60) { 3 }
+        val (file, item) = deviceFile("VID_2.mp4", "video/mp4", original)
+        val remuxed = ByteArray(50) { 4 }
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } answers { thirdArg<File>().writeBytes(remuxed); true }
+        every { MirrorSourceCheck.accepts(any(), MirrorSourceCheck.Kind.VIDEO, any(), item.uri) } returns false
+
+        useCase(userId)
+
+        assertArrayEquals(original, file.readBytes())
+        assertArrayEquals(remuxed, sent.single().bytes)
+    }
+
+    @Test
+    fun `a failed video remux of a file with no readable location uploads the untouched original`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(60) { 3 }
+        val (file, item) = deviceFile("VID_3.webm", "video/webm", original)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        mockkObject(PhotoGpsResolver)
+        every { PhotoGpsResolver.videoGps(any(), any()) } returns null
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertArrayEquals(original, s.bytes)
+        assertEquals(item.uri, s.uri)
+        assertArrayEquals(original, file.readBytes())
+    }
+
+    // ── A location strip that falls back to the original ────────────────────────────────────────────
+
+    private fun box(type: String, vararg children: ByteArray): ByteArray {
+        val payload = children.fold(ByteArray(0)) { acc, b -> acc + b }
+        val size = 8 + payload.size
+        return byteArrayOf((size ushr 24).toByte(), (size ushr 16).toByte(), (size ushr 8).toByte(), size.toByte()) +
+            type.toByteArray(Charsets.ISO_8859_1) + payload
+    }
+
+    private fun mp4WithLocation(): ByteArray = box("ftyp", "isom".toByteArray()) +
+        box("moov", box("mvhd", ByteArray(100)), box("udta", box("©xyz", ByteArray(4) + "+47.4979+019.0402/".toByteArray()))) +
+        box("mdat", ByteArray(32) { 5 })
+
+    private suspend fun stripGpsOnly() = prefs {
+        it[SettingsKeys.STRIP_ON_UPLOAD] = true
+        it[SettingsKeys.STRIP_GPS] = true
+    }
+
+    private suspend fun assertHeldBackInQueue(item: LocalMediaItem) {
+        assertEquals(0, sent.size)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertTrue(row.queued)
+        assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a failed video remux uploads a copy with the location erased in place`() = runTest {
+        stripGpsOnly()
+        val original = mp4WithLocation()
+        val (file, _) = deviceFile("VID_10.mp4", "video/mp4", original)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertEquals(original.size, s.bytes.size)
+        assertFalse(String(s.bytes, Charsets.ISO_8859_1).contains("+47.4979"))
+        assertArrayEquals(original, file.readBytes())
+        assertEquals(emptyList<String>(), uploadTemps())
+    }
+
+    @Test
+    fun `a video whose location cannot be stripped at all is held back in the queue`() = runTest {
+        stripGpsOnly()
+        // An MP4 whose movie box runs past the end of the file: the erase cannot walk it.
+        val broken = box("ftyp", "isom".toByteArray()) + box("moov", box("udta", ByteArray(40) { 1 })).copyOf(30)
+        val (_, item) = deviceFile("VID_11.mp4", "video/mp4", broken)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `a video the platform reads a location from is held back when no strip lands`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("VID_12.webm", "video/webm", ByteArray(60) { 3 })
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        mockkObject(PhotoGpsResolver)
+        every { PhotoGpsResolver.videoGps(any(), item.uri) } returns (47.4979 to 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `a video whose strip failed still uploads once the transcode leaves the location out`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true
+        }
+        val broken = box("ftyp", "isom".toByteArray()) + box("moov", box("udta", ByteArray(40) { 1 })).copyOf(30)
+        deviceFile("VID_13.mp4", "video/mp4", broken)
+        mockkObject(VideoMetadataStripper)
+        every { VideoMetadataStripper.remuxWithoutLocation(any(), any(), any()) } returns false
+        val compressed = ByteArray(20) { 9 }
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } returns
+            VideoUploadCompression.Attempt(temp("videocompress_", ".mp4", compressed), CompressionOutcome.COMPRESSED, null, 30L, "video/avc", 20L)
+
+        useCase(userId)
+
+        assertArrayEquals(compressed, sent.single().bytes)
+    }
+
+    @Test
+    fun `a photo whose strip fails while it carries a fix is held back in the queue`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("IMG_20.jpg", "image/jpeg", ByteArray(30) { 1 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `a photo whose strip fails without a fix uploads the original`() = runTest {
+        stripGpsOnly()
+        val original = ByteArray(30) { 1 }
+        val (_, item) = deviceFile("IMG_21.gif", "image/gif", original)
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata()
+
+        useCase(userId)
+
+        assertArrayEquals(original, sent.single().bytes)
+    }
+
+    @Test
+    fun `an HEIC with a fix whose JPEG transcode fails is held back in the queue`() = runTest {
+        stripGpsOnly()
+        val (_, item) = deviceFile("IMG_22.HEIC", "image/heic", ByteArray(30) { 2 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+        mockkObject(UploadImageCompressor)
+        every { UploadImageCompressor.transcodeStrippedJpeg(any(), item.uri, any()) } returns null
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `an HEIC with a fix that compression leaves as it is is held back in the queue`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.COMPRESS_ON_UPLOAD] = true
+        }
+        val (_, item) = deviceFile("IMG_23.HEIC", "image/heic", ByteArray(30) { 2 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+    }
+
+    @Test
+    fun `an HEIC motion photo with a fix still uploads as it is`() = runTest {
+        stripGpsOnly()
+        val original = ByteArray(30) { 2 }
+        val (_, item) = deviceFile("IMG_24.HEIC", "image/heic", original)
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+        every { ExifHelper.readMetadata(any(), item.uri) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+        every { stripper.isMotionPhotoUpload(item.uri) } returns true
+
+        useCase(userId)
+
+        assertArrayEquals(original, sent.single().bytes)
+    }
+
+    @Test
+    fun `a motion photo whose primary strip left its fix is held back and the device file kept`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = true
+        }
+        val original = ByteArray(40) { 4 }
+        val (file, item) = deviceFile("MVIMG_1.jpg", "image/jpeg", original)
+        every { stripper.stripImagePreservingMotion(item.uri, any()) } returns temp("motion_", ".jpg", original)
+        mockkObject(ExifHelper)
+        every { ExifHelper.readMetadata(any(), any()) } returns PhotoMetadata(gpsLatitude = 47.4979, gpsLongitude = 19.0402)
+
+        useCase(userId)
+
+        assertHeldBackInQueue(item)
+        assertArrayEquals(original, file.readBytes())
+    }
+
+    @Test
+    fun `a compressed image that does not read back is never mirrored onto the device original`() = runTest {
+        prefs {
+            it[SettingsKeys.COMPRESS_ON_UPLOAD] = true
+            it[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] = true
+        }
+        val original = ByteArray(30) { 1 }
+        val (file, item) = deviceFile("IMG_9.jpg", "image/jpeg", original)
+        val compressedTemp = temp("compressed_", ".jpg", ByteArray(10) { 7 })
+        every { compression.photo(item.uri, "image/jpeg", any(), any()) } returns
+            UploadCompressionStep.PhotoResult(compressedTemp, CompressionOutcome.COMPRESSED, null, 30L, false)
+        every { MirrorSourceCheck.accepts(any(), MirrorSourceCheck.Kind.IMAGE, compressedTemp, item.uri) } returns false
+
+        useCase(userId)
+
+        assertArrayEquals(ByteArray(10) { 7 }, sent.single().bytes)
+        assertArrayEquals(original, file.readBytes())
     }
 
     @Test
@@ -395,7 +715,7 @@ class UploadBytePreparationTest {
         prefs { it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = true }
         val (_, item) = deviceFile("VID_3.mp4", "video/mp4", ByteArray(40) { 2 })
         val transcoding = CompletableDeferred<Unit>()
-        coEvery { compression.video(any(), any(), any(), any(), any()) } coAnswers {
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } coAnswers {
             transcoding.complete(Unit)
             awaitCancellation()
         }
@@ -409,11 +729,238 @@ class UploadBytePreparationTest {
         assertTrue(released.queued)
         assertEquals(0, sent.size)
 
-        coEvery { compression.video(any(), any(), any(), any(), any()) } returns
+        coEvery { compression.video(any(), any(), any(), any(), any(), any()) } returns
             VideoUploadCompression.Attempt(null, CompressionOutcome.SKIPPED, CompressionSkipReason.ALREADY_EFFICIENT)
         useCase(userId)
 
         assertEquals(1, sent.size)
         assertEquals(SyncStatus.SYNCED, syncRepo.getByUri(item.uri)!!.status)
+    }
+
+    // ── The device file's own hash beside a stripped upload ─────────────────────────────────────────
+
+    private suspend fun stripWithoutMirror() = prefs {
+        it[SettingsKeys.STRIP_ON_UPLOAD] = true
+        it[SettingsKeys.STRIP_GPS] = true
+    }
+
+    @Test
+    fun `a stripped upload records the device original's own hash beside the uploaded bytes' hash`() = runTest {
+        stripWithoutMirror()
+        val original = ByteArray(30) { 1 }
+        val (file, item) = deviceFile("IMG_O1.jpg", "image/jpeg", original)
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } returns strippedTemp
+
+        useCase(userId)
+
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals(sha1(ByteArray(28) { 6 }), row.localHash)
+        assertEquals(sha1(original), row.originalHash)
+        assertArrayEquals("the device file is left as it was", original, file.readBytes())
+    }
+
+    @Test
+    fun `the original hash is read before the strip, so an edit during it leaves the file unlike the record`() = runTest {
+        stripWithoutMirror()
+        val original = ByteArray(30) { 1 }
+        val edited = ByteArray(30) { 9 }
+        val (file, item) = deviceFile("IMG_O2.jpg", "image/jpeg", original)
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } answers {
+            file.writeBytes(edited)
+            strippedTemp
+        }
+
+        useCase(userId)
+
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(sha1(original), row.originalHash)
+        assertTrue("free-up then sees bytes the backup never read", sha1(file.readBytes()) != row.originalHash)
+    }
+
+    @Test
+    fun `an original that cannot be read before the strip is not uploaded and its claim is released`() = runTest {
+        stripWithoutMirror()
+        val original = ByteArray(30) { 1 }
+        val (file, item) = deviceFile("IMG_O3.jpg", "image/jpeg", original)
+        file.delete()
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        // The file is back by the time the strip reads it, so only the read before the strip failed.
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } answers {
+            file.writeBytes(original)
+            strippedTemp
+        }
+
+        useCase(userId)
+
+        assertEquals(0, sent.size)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertTrue(row.queued)
+    }
+
+    @Test
+    fun `delete after backup keeps a stripped original edited after the upload and queues it again`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true
+        }
+        val original = ByteArray(30) { 1 }
+        val edited = ByteArray(30) { 9 }
+        val (file, item) = deviceFile("IMG_O4.jpg", "image/jpeg", original)
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } returns strippedTemp
+        coEvery { cloud.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            val uri = arg<String>(3)
+            sent += Sent(arg(1), arg(2), uri, context.contentResolver.openInputStream(Uri.parse(uri))!!.use { it.readBytes() })
+            // Another app edits the device file, size and all kept, while the upload finishes.
+            file.writeBytes(edited)
+            "cloud-1"
+        }
+
+        useCase(userId)
+
+        assertArrayEquals("the edited file stays on the device", edited, file.readBytes())
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertNull(row.cloudFileId)
+        assertNull(row.backedUpAtMs)
+        assertEquals(sha1(edited), row.localHash)
+        assertTrue(row.queued)
+        assertEquals(QueueSource.MANUAL, row.queueSource)
+        val pending = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS].orEmpty()
+        assertTrue(item.uri !in pending)
+    }
+
+    @Test
+    fun `delete after backup goes ahead for a stripped original still as the upload read it`() = runTest {
+        prefs {
+            it[SettingsKeys.STRIP_ON_UPLOAD] = true
+            it[SettingsKeys.STRIP_GPS] = true
+            it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true
+        }
+        val (_, item) = deviceFile("IMG_O5.jpg", "image/jpeg", ByteArray(30) { 1 })
+        val strippedTemp = temp("stripped_", ".jpg", ByteArray(28) { 6 })
+        mockkObject(ExifHelper)
+        every { ExifHelper.stripToTempFile(any(), item.uri, any<MetadataStripConfig>()) } returns strippedTemp
+
+        useCase(userId)
+
+        assertEquals(
+            "the trash is asked for",
+            1,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        val row = syncRepo.getByUri(item.uri)!!
+        assertTrue("not queued to be backed up again", row.cloudFileId != null && row.backedUpAtMs != null)
+    }
+
+    @Test
+    fun `a whole re-upload moves the short Drive copy it replaces to the trash and records the new link`() = runTest {
+        prefs { }
+        val (_, item) = deviceFile("IMG_1_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addReplacement(item.uri, "short-1")
+        coEvery { cloud.deleteFiles(userId, listOf("short-1")) } returns CloudTrashOutcome(setOf("short-1"), emptySet())
+
+        useCase(userId)
+
+        val s = sent.single()
+        assertEquals(2048, s.bytes.size)
+        val row = syncRepo.getByUri(item.uri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals("cloud-1", row.cloudFileId)
+        coVerify(exactly = 1) { cloud.deleteFiles(userId, listOf("short-1")) }
+        assertNull(shortCopies.replacedBy(item.uri))
+    }
+
+    @Test
+    fun `a failed re-upload leaves the short Drive copy where it is`() = runTest {
+        prefs { }
+        val (_, item) = deviceFile("IMG_2_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addReplacement(item.uri, "short-2")
+        uploadThrows = IllegalStateException("upload failed")
+
+        useCase(userId)
+
+        coVerify(exactly = 0) { cloud.deleteFiles(any(), any()) }
+        assertEquals("short-2", shortCopies.replacedBy(item.uri))
+    }
+
+    @Test
+    fun `a file the pending delete queue let go for a short copy is deleted once its whole copy is up`() = runTest {
+        // Delete after backup is off now; the file was queued for deletion while it was on.
+        prefs { }
+        val (_, item) = deviceFile("IMG_3_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addDeleteAfterWholeBackup(listOf(item.uri))
+
+        useCase(userId)
+
+        assertEquals(
+            "the trash is asked for",
+            1,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertFalse(shortCopies.deleteAfterWholeBackup(item.uri))
+    }
+
+    @Test
+    fun `without a held-back delete an upload with delete after backup off keeps the device file`() = runTest {
+        prefs { }
+        val (_, item) = deviceFile("IMG_4.jpg", "image/jpeg", ByteArray(64) { 2 })
+
+        useCase(userId)
+
+        assertEquals(
+            0,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertEquals(SyncStatus.SYNCED, syncRepo.getByUri(item.uri)!!.status)
+    }
+
+    @Test
+    fun `an upload that returns the short link itself trashes nothing and keeps the device file`() = runTest {
+        prefs { it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = true }
+        val (file, item) = deviceFile("IMG_5_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addReplacement(item.uri, "short-5")
+        shortCopies.addDeleteAfterWholeBackup(listOf(item.uri))
+        coEvery { cloud.uploadFile(userId, any(), any(), any(), any(), any()) } returns "short-5"
+
+        useCase(userId)
+
+        coVerify(exactly = 0) { cloud.deleteFiles(any(), any()) }
+        assertEquals(
+            0,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertTrue(file.exists())
+        assertEquals("short-5", shortCopies.replacedBy(item.uri))
+        assertTrue(shortCopies.deleteAfterWholeBackup(item.uri))
+    }
+
+    @Test
+    fun `a held-back delete stays recorded when the file changed before its removal`() = runTest {
+        prefs { }
+        val (file, item) = deviceFile("IMG_6_edit_20260801_101500.jpg", "image/jpeg", ByteArray(2048) { 2 })
+        shortCopies.addDeleteAfterWholeBackup(listOf(item.uri))
+        coEvery { cloud.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            // Another app edits the file while the upload finishes.
+            file.writeBytes(ByteArray(2048) { 9 })
+            "cloud-6"
+        }
+
+        useCase(userId)
+
+        assertEquals(
+            0,
+            org.robolectric.Shadows.shadowOf(context.contentResolver).updateStatements.count { it.uri.toString() == item.uri },
+        )
+        assertTrue(shortCopies.deleteAfterWholeBackup(item.uri))
     }
 }

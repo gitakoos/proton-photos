@@ -27,8 +27,10 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import androidx.exifinterface.media.ExifInterface
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.HeifExifStrip
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.UltraHdrUtil
@@ -42,7 +44,7 @@ import javax.inject.Singleton
  * still around its appended trailer, strips the primary image's EXIF, and re-attaches the trailer
  * byte-for-byte so the motion or the gain map survives a metadata strip. Also answers whether an
  * upload URI is a Motion Photo or advertises a gain map, so the compressor can skip a pass that
- * would drop either. Reads only the application [context]'s contentResolver and cacheDir.
+ * would drop either. Reads only the application [context]'s contentResolver and the plaintext staging folder.
  */
 @Singleton
 class UploadStructuralStripper @Inject constructor(
@@ -66,7 +68,7 @@ class UploadStructuralStripper @Inject constructor(
     fun stripImagePreservingMotion(localUri: String, stripConfig: MetadataStripConfig): File? {
         // Materialize the source so the tail scan and the split read real bytes, not a stream.
         val source = try {
-            val tmp = File.createTempFile("motion_src_", ".bin", context.cacheDir)
+            val tmp = File.createTempFile("motion_src_", ".bin", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             context.contentResolver.openInputStream(Uri.parse(localUri))?.use { input ->
                 tmp.outputStream().use { input.copyTo(it) }
             } ?: run { tmp.delete(); return null }
@@ -88,7 +90,7 @@ class UploadStructuralStripper @Inject constructor(
         // destructive plain strip). On any failure fall back to the byte-exact source copy.
         var primary: File? = null
         try {
-            primary = File.createTempFile("motion_primary_", ".jpg", context.cacheDir)
+            primary = File.createTempFile("motion_primary_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             RandomAccessFile(source, "r").use { raf ->
                 primary!!.outputStream().use { out ->
                     val buffer = ByteArray(64 * 1024)
@@ -112,7 +114,7 @@ class UploadStructuralStripper @Inject constructor(
             // we already split so the concatenation still yields an intact motion photo.
             val primaryForJoin = strippedPrimary ?: primary!!
 
-            val joined = File.createTempFile("motion_out_", ".jpg", context.cacheDir)
+            val joined = File.createTempFile("motion_out_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             joined.outputStream().use { out ->
                 primaryForJoin.inputStream().use { it.copyTo(out) }
                 RandomAccessFile(source, "r").use { raf ->
@@ -125,6 +127,11 @@ class UploadStructuralStripper @Inject constructor(
                     }
                 }
             }
+            // A HEIC primary cannot be rewritten by the EXIF writer, so the join above is byte-exact.
+            // Its EXIF is then stripped in place, leaving the clip and every offset where they were.
+            if (strippedPrimary == null && !stripConfig.isNoOp && HeifExifStrip.isHeif(source)) {
+                stripHeifMotionExif(source, joined, info.videoOffset, stripConfig)
+            }
             strippedPrimary?.delete()
             primary?.delete()
             source.delete()
@@ -136,6 +143,77 @@ class UploadStructuralStripper @Inject constructor(
             // Byte-exact fallback: the untouched materialized copy keeps the motion intact.
             return source
         }
+    }
+
+    /**
+     * Strips what [config] asks for from [joined], a byte-exact copy of the HEIF motion photo [source]
+     * whose clip starts at [videoOffset], and keeps the patch only once the copy proves it: the same
+     * length, every byte outside the Exif item unchanged (so the image items and the clip are untouched),
+     * no stripped tag left or read back, and the same image size. True when [joined] now carries none of
+     * them. Otherwise [joined] is restored to [source], one diagnostics line says why, and the photo
+     * uploads as before.
+     */
+    internal fun stripHeifMotionExif(source: File, joined: File, videoOffset: Long, config: MetadataStripConfig): Boolean {
+        val reason = when (val result = HeifExifStrip.strip(joined, config)) {
+            HeifExifStrip.Result.Unchanged -> return true
+            is HeifExifStrip.Result.Unsupported -> result.reason
+            is HeifExifStrip.Result.Stripped -> heifPatchProblem(source, joined, result, videoOffset, config) ?: return true
+        }
+        runCatching { source.copyTo(joined, overwrite = true) }
+        eu.akoos.photos.util.SyncDiagnostics.log("motion photo location patch skipped: $reason")
+        return false
+    }
+
+    /** Why the patched [joined] cannot be kept, or null when every check passes. */
+    private fun heifPatchProblem(
+        source: File,
+        joined: File,
+        stripped: HeifExifStrip.Result.Stripped,
+        videoOffset: Long,
+        config: MetadataStripConfig,
+    ): String? {
+        if (joined.length() != source.length()) return "length changed"
+        if (stripped.exifEnd > videoOffset) return "exif past the clip"
+        if (!sameOutside(source, joined, stripped.exifStart, stripped.exifEnd)) return "bytes outside the exif changed"
+        if (config.stripGps && HeifExifStrip.gpsEntryCount(joined) != 0) return "gps left"
+        if (HeifExifStrip.presentTags(joined, HeifExifStrip.tagsFor(config)) != emptySet<Int>()) return "tags left"
+        val exif = runCatching { ExifInterface(joined.absolutePath) }.getOrNull()
+        if (exif != null) {
+            if (config.stripGps && runCatching { exif.latLong }.getOrNull() != null) return "location read back"
+            if (readBackTags(config).any { runCatching { exif.getAttribute(it) }.getOrNull() != null }) return "tags read back"
+        }
+        if (boundsOf(source) != boundsOf(joined)) return "size changed"
+        return null
+    }
+
+    /** The ExifInterface names read back after a HEIF strip, one or more per stripped group. */
+    private fun readBackTags(config: MetadataStripConfig): List<String> = buildList {
+        if (config.stripCameraInfo) addAll(listOf(ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL, ExifInterface.TAG_LENS_MODEL))
+        if (config.stripTimestamp) addAll(listOf(ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED))
+        if (config.stripSoftwareInfo) add(ExifInterface.TAG_SOFTWARE)
+        if (config.stripAuthorship) addAll(listOf(ExifInterface.TAG_ARTIST, ExifInterface.TAG_COPYRIGHT))
+    }
+
+    /** True when [a] and [b] hold the same bytes everywhere outside [from, to). */
+    private fun sameOutside(a: File, b: File, from: Long, to: Long): Boolean {
+        a.inputStream().buffered().use { ia ->
+            b.inputStream().buffered().use { ib ->
+                var pos = 0L
+                while (true) {
+                    val x = ia.read()
+                    val y = ib.read()
+                    if (x != y && (pos < from || pos >= to)) return false
+                    if (x < 0 || y < 0) return x == y
+                    pos++
+                }
+            }
+        }
+    }
+
+    private fun boundsOf(file: File): Pair<Int, Int> {
+        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts) }
+        return opts.outWidth to opts.outHeight
     }
 
     /**
@@ -156,7 +234,7 @@ class UploadStructuralStripper @Inject constructor(
     fun stripImagePreservingGainMap(localUri: String, stripConfig: MetadataStripConfig): File? {
         // Materialize the source so the marker walk and the split read real bytes, not a stream.
         val source = try {
-            val tmp = File.createTempFile("gainmap_src_", ".bin", context.cacheDir)
+            val tmp = File.createTempFile("gainmap_src_", ".bin", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             context.contentResolver.openInputStream(Uri.parse(localUri))?.use { input ->
                 tmp.outputStream().use { input.copyTo(it) }
             } ?: run { tmp.delete(); return null }
@@ -176,7 +254,7 @@ class UploadStructuralStripper @Inject constructor(
             val splitAt = primaryImageEndOffset(source)
             if (splitAt <= 0L || splitAt >= source.length()) return null
 
-            primary = File.createTempFile("gainmap_primary_", ".jpg", context.cacheDir)
+            primary = File.createTempFile("gainmap_primary_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             RandomAccessFile(source, "r").use { raf ->
                 primary!!.outputStream().use { out ->
                     val buffer = ByteArray(64 * 1024)
@@ -198,7 +276,7 @@ class UploadStructuralStripper @Inject constructor(
                 context, Uri.fromFile(primary).toString(), stripConfig,
             ) ?: return null
 
-            joined = File.createTempFile("gainmap_out_", ".jpg", context.cacheDir)
+            joined = File.createTempFile("gainmap_out_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             joined!!.outputStream().use { out ->
                 strippedPrimary!!.inputStream().use { it.copyTo(out) }
                 RandomAccessFile(source, "r").use { raf ->
@@ -343,7 +421,7 @@ class UploadStructuralStripper @Inject constructor(
         }
         var temp: File? = null
         return try {
-            temp = File.createTempFile("motion_check_", ".bin", context.cacheDir)
+            temp = File.createTempFile("motion_check_", ".bin", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             val copied = context.contentResolver.openInputStream(uri)?.use { input ->
                 temp!!.outputStream().use { input.copyTo(it) }
                 true

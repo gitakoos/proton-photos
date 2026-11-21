@@ -25,20 +25,26 @@ package eu.akoos.photos.domain.usecase
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import eu.akoos.photos.data.api.dto.BatchLinkDto
+import eu.akoos.photos.data.api.dto.LinkCoreDto
+import eu.akoos.photos.data.api.dto.LinkPhotoDto
 import eu.akoos.photos.data.db.AppDatabase
 import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.importer.FolderTestTrees
 import eu.akoos.photos.data.importer.ImportDriveMatcher
 import eu.akoos.photos.data.importer.ImportSource
 import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.importer.ImportAlbumMode
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.util.AlbumListEventBus
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -62,8 +68,9 @@ import java.util.zip.ZipOutputStream
 
 /**
  * A Live Photo in an import is a still and a video that Drive keeps as one photo: the still goes up with the
- * Live Photo tag, then the video goes up joined to the still's link. These tests run the real upload pass over
- * a small archive and a real database, with the Drive upload replaced by a recorder.
+ * Live Photo tag, then the video goes up joined to the still's link, or on its own when the still already keeps
+ * another video. These tests run the real upload pass over a small archive and a real database, with the Drive
+ * upload replaced by a recorder.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -82,6 +89,7 @@ class ImportLivePhotoUploadDbTest {
     private val sent = mutableListOf<Sent>()
     private val userId = UserId("user-1")
     private var failVideoUploads = 0
+    private val links = mockk<LinkDetailHelpers>()
 
     @Before
     fun setUp() {
@@ -89,6 +97,8 @@ class ImportLivePhotoUploadDbTest {
         runBlocking { ctx.settingsDataStore.edit { it.clear() } }
         db = Room.inMemoryDatabaseBuilder(ctx, AppDatabase::class.java).allowMainThreadQueries().build()
         val repo = mockk<DrivePhotoRepository>(relaxed = true)
+        coEvery { repo.getVolumeId(any()) } returns "vol-1"
+        coEvery { links.batchFetchLinkDetails(any(), any(), any(), any()) } returns emptyMap()
         coEvery { repo.cloudContentHash(any()) } answers { "hash-${firstArg<String>()}" }
         coEvery {
             repo.uploadFileLinked(any(), any(), any(), any(), any(), any(), any(), any())
@@ -117,7 +127,7 @@ class ImportLivePhotoUploadDbTest {
             albumListEvents = AlbumListEventBus(),
             appDatabase = db,
             compressionStep = UploadCompressionStep(ctx, UploadStructuralStripper(ctx), mockk(relaxed = true)),
-            driveMatcher = ImportDriveMatcher(repo, db.photoListingDao(), db.importUploadedDao(), mockk(relaxed = true)),
+            driveMatcher = ImportDriveMatcher(repo, db.photoListingDao(), db.importUploadedDao(), links),
         )
     }
 
@@ -125,6 +135,19 @@ class ImportLivePhotoUploadDbTest {
     fun tearDown() = db.close()
 
     private fun zipOf(vararg names: String): ByteArray = zipWithTimes(*names.map { it to null }.toTypedArray())
+
+    /** An archive whose entries hold the given text, so two entries can hold the same bytes. */
+    private fun zipHolding(vararg entries: Pair<String, String>): ByteArray {
+        val bytes = ByteArrayOutputStream()
+        ZipOutputStream(bytes).use { zip ->
+            entries.forEach { (name, text) ->
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(text.toByteArray())
+                zip.closeEntry()
+            }
+        }
+        return bytes.toByteArray()
+    }
 
     private fun zipWithTimes(vararg entries: Pair<String, Long?>): ByteArray {
         val bytes = ByteArrayOutputStream()
@@ -144,14 +167,19 @@ class ImportLivePhotoUploadDbTest {
         uploaded: Boolean = false,
         linkId: String? = null,
         dateMs: Long? = 1_700_000_000_000L,
+        album: String? = null,
     ) =
         ImportStagedEntity(
             zipId = ZIP, entryName = name, title = name.substringAfterLast('/'), dateMs = dateMs,
-            sizeBytes = 20, uploaded = uploaded, stagedAt = 1L, liveOf = liveOf, linkId = linkId,
+            sizeBytes = 20, uploaded = uploaded, stagedAt = 1L, liveOf = liveOf, linkId = linkId, albumName = album,
         )
 
-    private suspend fun upload(zip: ByteArray, onProgress: suspend (ImportProgress) -> Unit = {}) = useCase.uploadStaged(
-        userId = userId, zipId = ZIP, runId = "run-1", albumMode = ImportAlbumMode.NONE,
+    private suspend fun upload(
+        zip: ByteArray,
+        albumMode: ImportAlbumMode = ImportAlbumMode.NONE,
+        onProgress: suspend (ImportProgress) -> Unit = {},
+    ) = useCase.uploadStaged(
+        userId = userId, zipId = ZIP, runId = "run-1", albumMode = albumMode,
         source = ImportSource(TakeoutZipReader { ByteArrayInputStream(zip) }, "export.zip") { zip.size.toLong() },
         onProgress = onProgress,
     )
@@ -184,6 +212,7 @@ class ImportLivePhotoUploadDbTest {
         assertEquals("the undo ledger keeps the video's own row", 3, db.importUploadedDao().pendingByRun("run-1").size)
         assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
         assertEquals(still.link, db.importStagedDao().allForZip(ZIP).single { it.entryName == "Trip/IMG_1.jpg" }.linkId)
+        coVerify(exactly = 0) { links.batchFetchLinkDetails(any(), any(), any(), any()) }
     }
 
     @Test
@@ -236,6 +265,7 @@ class ImportLivePhotoUploadDbTest {
 
         assertEquals("only the video is sent", listOf("IMG_1.mp4"), sent.map { it.name })
         assertEquals("link-earlier", sent.single().mainPhotoLinkId)
+        coVerify(exactly = 1) { links.batchFetchLinkDetails(userId, "vol-1", listOf("link-earlier"), true) }
     }
 
     @Test
@@ -391,6 +421,165 @@ class ImportLivePhotoUploadDbTest {
         assertEquals(1, summary.total)
         assertEquals(1, summary.imported)
         assertTrue(dao.pendingUpload(ZIP).isEmpty())
+    }
+
+    private fun sha1Of(text: String): String =
+        java.security.MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    /** The still of Trip/IMG_1 is in the library, and Drive keeps [related] with it. */
+    private suspend fun stillInDriveWith(vararg related: BatchLinkDto) {
+        db.photoListingDao().insertAll(
+            listOf(
+                PhotoListingEntity(
+                    linkId = "link-still", shareId = "s", volumeId = "vol-1", userId = userId.id, captureTime = 1L,
+                    displayName = "IMG_1.jpg", mimeType = "image/jpeg", sizeBytes = 10, revisionId = "r",
+                    contentHash = "hash-${sha1Of("bytes of Trip/IMG_1.jpg")}",
+                ),
+            ),
+        )
+        val still = BatchLinkDto(
+            link = LinkCoreDto(linkId = "link-still", type = 2, state = 1),
+            photo = LinkPhotoDto(relatedPhotosLinkIds = related.map { it.link.linkId }),
+        )
+        val all = (related.toList() + still).associateBy { it.link.linkId }
+        coEvery { links.batchFetchLinkDetails(userId, "vol-1", any(), any()) } answers {
+            thirdArg<List<String>>().mapNotNull { id -> all[id]?.let { id to it } }.toMap()
+        }
+    }
+
+    private fun relatedVideo(contentHash: String, state: Int = 1) = BatchLinkDto(
+        link = LinkCoreDto(linkId = "link-video", type = 2, state = state),
+        photo = LinkPhotoDto(contentHash = contentHash),
+    )
+
+    @Test
+    fun `a Live Photo whose video Drive already keeps with its still sends nothing`() = runBlocking {
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4")
+        db.importStagedDao().upsert(listOf(row("Trip/IMG_1.jpg"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg")))
+        stillInDriveWith(relatedVideo("hash-${sha1Of("bytes of Trip/IMG_1.mp4")}"))
+
+        val summary = upload(zip)
+
+        assertTrue("neither half is sent again", sent.isEmpty())
+        val rows = db.importStagedDao().allForZip(ZIP).associateBy { it.entryName }
+        assertEquals("link-still", rows.getValue("Trip/IMG_1.jpg").linkId)
+        assertEquals("the video resolves to the one Drive keeps", "link-video", rows.getValue("Trip/IMG_1.mp4").linkId)
+        assertTrue(rows.values.all { it.uploaded })
+        assertEquals("a Live Photo counts once", 1, summary.total)
+        assertEquals(1, summary.alreadyInDrive)
+        assertEquals(0, summary.imported)
+        val ledger = db.importUploadedDao().allByRun("run-1")
+        assertTrue("undo never trashes what was there before", ledger.all { it.alreadyInDrive })
+    }
+
+    @Test
+    fun `a still in Drive whose kept video holds other bytes sends this video as a photo of its own`() = runBlocking {
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4")
+        db.importStagedDao().upsert(listOf(row("Trip/IMG_1.jpg"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg")))
+        stillInDriveWith(relatedVideo("hash-other"))
+
+        upload(zip)
+
+        assertEquals("only the video is sent", listOf("IMG_1.mp4"), sent.map { it.name })
+        assertNull("it joins no still", sent.single().mainPhotoLinkId)
+        assertTrue("it carries no Live Photo tag", sent.single().extraTags.isEmpty())
+        assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
+        val sentRow = db.importUploadedDao().allByRun("run-1").single { it.linkId == "link-1" }
+        assertEquals("undo trashes the video this run sent", false, sentRow.alreadyInDrive)
+    }
+
+    @Test
+    fun `a video sent as a photo of its own joins the export album`() = runBlocking {
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4")
+        db.importStagedDao().upsert(
+            listOf(row("Trip/IMG_1.jpg", album = "Trip"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg", album = "Trip")),
+        )
+        stillInDriveWith(relatedVideo("hash-other"))
+
+        upload(zip, albumMode = ImportAlbumMode.SHELLS_ONLY)
+
+        assertEquals(
+            listOf("link-1", "link-still"),
+            db.importAlbumMemberDao().linkIdsForAlbum("run-1", "Trip").sorted(),
+        )
+    }
+
+    @Test
+    fun `a video joined to its still stays out of the export album`() = runBlocking {
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4")
+        db.importStagedDao().upsert(
+            listOf(row("Trip/IMG_1.jpg", album = "Trip"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg", album = "Trip")),
+        )
+
+        upload(zip, albumMode = ImportAlbumMode.SHELLS_ONLY)
+
+        assertEquals(listOf("link-1"), db.importAlbumMemberDao().linkIdsForAlbum("run-1", "Trip"))
+    }
+
+    @Test
+    fun `a still in Drive whose only kept video is in the trash takes this video`() = runBlocking {
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4")
+        db.importStagedDao().upsert(listOf(row("Trip/IMG_1.jpg"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg")))
+        stillInDriveWith(relatedVideo("hash-${sha1Of("bytes of Trip/IMG_1.mp4")}", state = 2))
+
+        upload(zip)
+
+        assertEquals(listOf("IMG_1.mp4"), sent.map { it.name })
+        assertEquals("link-still", sent.single().mainPhotoLinkId)
+    }
+
+    @Test
+    fun `a still the export holds twice with two different videos keeps both, the second on its own`() = runBlocking {
+        val zip = zipHolding(
+            "A/IMG_1.jpg" to "the still",
+            "B/IMG_1.jpg" to "the still",
+            "A/IMG_1.mp4" to "first video",
+            "B/IMG_1.mp4" to "second video",
+        )
+        db.importStagedDao().upsert(
+            listOf(
+                row("A/IMG_1.jpg"),
+                row("B/IMG_1.jpg"),
+                row("A/IMG_1.mp4", liveOf = "A/IMG_1.jpg"),
+                row("B/IMG_1.mp4", liveOf = "B/IMG_1.jpg"),
+            ),
+        )
+
+        upload(zip)
+
+        val still = sent.single { it.name == "IMG_1.jpg" }
+        assertEquals(
+            "one video joins the still, the other goes up on its own",
+            listOf(null, still.link),
+            sent.filter { it.name == "IMG_1.mp4" }.map { it.mainPhotoLinkId }.sortedBy { it.orEmpty() },
+        )
+        assertEquals(still.link, db.importStagedDao().allForZip(ZIP).single { it.entryName == "B/IMG_1.jpg" }.linkId)
+        coVerify(exactly = 0) { links.batchFetchLinkDetails(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a still the export holds twice with the same video sends that video once`() = runBlocking {
+        val zip = zipHolding(
+            "A/IMG_1.jpg" to "the still",
+            "B/IMG_1.jpg" to "the still",
+            "A/IMG_1.mp4" to "the video",
+            "B/IMG_1.mp4" to "the video",
+        )
+        db.importStagedDao().upsert(
+            listOf(
+                row("A/IMG_1.jpg"),
+                row("B/IMG_1.jpg"),
+                row("A/IMG_1.mp4", liveOf = "A/IMG_1.jpg"),
+                row("B/IMG_1.mp4", liveOf = "B/IMG_1.jpg"),
+            ),
+        )
+
+        upload(zip)
+
+        assertEquals(listOf("IMG_1.jpg", "IMG_1.mp4"), sent.map { it.name }.sorted())
+        val still = sent.single { it.name == "IMG_1.jpg" }
+        assertEquals(still.link, sent.single { it.name == "IMG_1.mp4" }.mainPhotoLinkId)
+        assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
     }
 
     private companion object {

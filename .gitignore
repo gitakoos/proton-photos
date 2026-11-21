@@ -29,3 +29,8 @@ temp*/
 
 # Gradle wrapper except the jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# Local secrets of release tooling (a Nostr signing key, tokens). Never committed.
+.env
+.env.*
+/third_party/sqlcipher/

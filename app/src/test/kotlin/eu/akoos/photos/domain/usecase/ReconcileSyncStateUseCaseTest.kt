@@ -28,6 +28,7 @@ import androidx.datastore.preferences.core.Preferences
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -50,6 +51,7 @@ import eu.akoos.photos.data.db.dao.PhotoPairingRow
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
 import eu.akoos.photos.domain.entity.SyncState
@@ -74,6 +76,7 @@ class ReconcileSyncStateUseCaseTest {
     private lateinit var listingDao: PhotoListingDao
     private lateinit var context: Context
     private lateinit var useCase: ReconcileSyncStateUseCase
+    private val shortCopies = InMemoryShortCloudCopyStore()
 
     // The scope a pass runs on. Unconfined, so a pass with stubbed inputs completes inside the call
     // that starts it.
@@ -102,9 +105,7 @@ class ReconcileSyncStateUseCaseTest {
             firstArg<List<SyncState>>().filter { syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(it, secondArg()) == 0 }
                 .mapTo(HashSet()) { it.localUri }
         }
-        coEvery { syncStateRepo.getLocalOnly(any()) } coAnswers {
-            syncStateRepo.observeAll(firstArg()).first().filter { it.status == SyncStatus.LOCAL_ONLY }
-        }
+        syncStateRepo.answerReadsFromObserveAll()
         // Strict: the pairing rows are the only listing read a pass may make.
         listingDao = mockk()
 
@@ -129,7 +130,7 @@ class ReconcileSyncStateUseCaseTest {
         // cloud-linkId matchers still run, which is what these tests exercise.
         every { mockPrefs.asMap() } returns emptyMap()
 
-        useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope)
+        useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, appScope, shortCopies)
     }
 
     @After
@@ -556,7 +557,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `a listing read that fails once is read again and the pass completes`() = runTest {
         // Virtual time, so the pause before the second read costs nothing.
         val passScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
-        val retrying = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
+        val retrying = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope, shortCopies)
         val local = localItem("uri://1", name = "vacation.jpg", size = 2048L)
         coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } throws
@@ -578,7 +579,7 @@ class ReconcileSyncStateUseCaseTest {
     @Test
     fun `a listing read that keeps failing fails the pass after the last retry and writes nothing`() = runTest {
         val passScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
-        val failing = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
+        val failing = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope, shortCopies)
         coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } throws IllegalStateException("store gone")
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
@@ -612,7 +613,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-known" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-known" &&
+                            it.linkBasis == LinkBasis.PROVEN
+                    }
                 },
                 userId,
             )
@@ -641,7 +644,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-hash" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-hash" &&
+                            it.linkBasis == LinkBasis.PROVEN
+                    }
                 },
                 userId,
             )
@@ -698,7 +703,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-nd" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-nd" &&
+                            it.linkBasis == LinkBasis.NAME
+                    }
                 },
                 userId,
             )
@@ -733,7 +740,8 @@ class ReconcileSyncStateUseCaseTest {
                 match { states ->
                     states.any {
                         it.localUri == "uri://1" && it.status == SyncStatus.SYNCED &&
-                            it.cloudFileId == "link-hashed" && it.backedUpAtMs == null
+                            it.cloudFileId == "link-hashed" && it.backedUpAtMs == null &&
+                            it.linkBasis == LinkBasis.NAME
                     }
                 },
                 userId,
@@ -766,7 +774,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-strip" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-strip" &&
+                            it.linkBasis == LinkBasis.NAME_REWRITTEN
+                    }
                 },
                 userId,
             )
@@ -802,7 +812,9 @@ class ReconcileSyncStateUseCaseTest {
         coVerify {
             syncStateRepo.upsertAll(
                 match { states ->
-                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-compress" }
+                    states.any { it.localUri == "uri://1" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-compress" &&
+                            it.linkBasis == LinkBasis.NAME_REWRITTEN
+                    }
                 },
                 userId,
             )
@@ -1032,6 +1044,52 @@ class ReconcileSyncStateUseCaseTest {
         }
     }
 
+    @Test
+    fun `a file set aside as unuploadable is not queued again while it is unchanged`() = runTest {
+        val local = localItem("uri://empty", size = 0L)
+        val setAside = syncState("uri://empty", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queueSource = eu.akoos.photos.domain.entity.QueueSource.UNUPLOADABLE)
+            .copy(sizeBytes = 0L, queuedAt = SET_ASIDE_AT)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(setAside))
+        coEvery { syncStateRepo.getByUri(any()) } returns setAside
+        coEvery {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(match { it.localUri == "uri://empty" }, userId)
+        } returns 1
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 0) {
+            syncStateRepo.markQueuedAll(match { "uri://empty" in it }, any(), any())
+        }
+    }
+
+    @Test
+    fun `a file set aside as unuploadable is queued again once its size changed`() = runTest {
+        val local = localItem("uri://empty", size = 2_048L)
+        val setAside = syncState("uri://empty", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queueSource = eu.akoos.photos.domain.entity.QueueSource.UNUPLOADABLE)
+            .copy(sizeBytes = 0L, queuedAt = SET_ASIDE_AT)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(setAside))
+        coEvery { syncStateRepo.getByUri(any()) } returns setAside
+        coEvery {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(match { it.localUri == "uri://empty" }, userId)
+        } returns 1
+
+        useCase(userId).toList()
+
+        coVerify {
+            syncStateRepo.markQueuedAll(
+                match { "uri://empty" in it },
+                eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
+                any(),
+            )
+        }
+    }
+
     // ─── explicit-intent queue robustness (piece 5a) ──────────────────────────
 
     @Test
@@ -1246,4 +1304,109 @@ class ReconcileSyncStateUseCaseTest {
             )
         }
     }
+
+    // ── a same-named, same-sized device file of other bytes (the decoy) ─────────────────
+
+    /** The decoy: the name and byte count of the photo just backed up, other bytes, a later file time. */
+    private val decoy = LocalMediaItem(
+        uri = "uri://decoy",
+        dateTaken = 1_763_364_852_000L,
+        displayName = "pfpt_rl.jpg",
+        mimeType = "image/jpeg",
+        sizeBytes = 1_235_348L,
+        bucketName = "Camera",
+    )
+
+    /** The Drive photo the original file became, 98 seconds before the decoy's file time. */
+    private fun uploaded(contentHash: String?) = cloudPhoto(
+        "link-orig", name = "pfpt_rl.jpg", size = 1_235_348L, captureTime = 1_763_364_754L, contentHash = contentHash,
+    )
+
+    /** The original's row once its device file was removed: the photo is on Drive only. */
+    private val originalRow = syncState("uri://orig", cloudId = "link-orig", status = SyncStatus.CLOUD_ONLY, localHash = "sha-orig")
+
+    private fun merger(): GetGalleryItemsUseCase {
+        val hashes = mockk<DrivePhotoRepository>()
+        every { hashes.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
+        return GetGalleryItemsUseCase(mockk(), hashes, mockk(), CoroutineScope(Dispatchers.Unconfined))
+    }
+
+    @Test
+    fun `a same-named same-sized file of other bytes is never linked to a just-uploaded photo with no hash yet`() = runTest {
+        // The upload's own listing row carries the size it sent and no content hash until a refresh, so a
+        // name and size are all a match could go by; the capture second says another photo.
+        val photo = uploaded(contentHash = null)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(decoy))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(photo))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(originalRow))
+        val written = mutableListOf<SyncState>()
+        coEvery { syncStateRepo.upsertAll(any(), userId) } answers { written += firstArg<List<SyncState>>() }
+
+        useCase(userId).toList()
+
+        val row = written.single { it.localUri == "uri://decoy" }
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertEquals(null, row.cloudFileId)
+        coVerify { syncStateRepo.markQueued("uri://decoy", eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, any()) }
+        // The library shows the two apart: the decoy on the device, the photo on Drive.
+        val merged = merger().merge(listOf(decoy), listOf(photo), listOf(originalRow, row))
+        assertEquals(2, merged.size)
+        assertEquals(1, merged.filterIsInstance<eu.akoos.photos.domain.entity.GalleryItem.LocalOnly>().size)
+        assertEquals("link-orig", merged.filterIsInstance<eu.akoos.photos.domain.entity.GalleryItem.CloudOnly>().single().cloud.linkId)
+    }
+
+    @Test
+    fun `a name link whose bytes and capture second differ from its Drive photo is unlinked and queued`() = runTest {
+        val photo = uploaded(contentHash = "hmac-sha-orig")
+        val linked = syncState("uri://decoy", cloudId = "link-orig", localHash = "sha-decoy").copy(linkBasis = LinkBasis.NAME)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(decoy))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(photo))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(originalRow, linked))
+        every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
+        coEvery { syncStateRepo.unlinkNameLink(userId, "uri://decoy", "link-orig") } returns true
+        val guarded = mutableListOf<SyncState>()
+        coEvery { syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(any(), userId) } answers {
+            guarded += firstArg<SyncState>()
+            1
+        }
+
+        useCase(userId).toList()
+
+        coVerifyOrder {
+            syncStateRepo.unlinkNameLink(userId, "uri://decoy", "link-orig")
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(any(), userId)
+        }
+        val row = guarded.single { it.localUri == "uri://decoy" }
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertEquals(null, row.cloudFileId)
+        assertEquals(LinkBasis.PROVEN, row.linkBasis)
+        coVerify { syncStateRepo.markQueued("uri://decoy", eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, any()) }
+        assertEquals(2, merger().merge(listOf(decoy), listOf(photo), listOf(originalRow, row)).size)
+    }
+
+    @Test
+    fun `a name link of other bytes on the Drive photo's own name and second is kept`() = runTest {
+        // A download this app saved and stamped: its bytes no longer hash to Drive's, its name and second do.
+        val stamped = decoy.copy(dateTaken = 1_763_364_754_400L)
+        val photo = uploaded(contentHash = "hmac-sha-orig")
+        val linked = syncState("uri://decoy", cloudId = "link-orig", localHash = "sha-stamped").copy(linkBasis = LinkBasis.NAME)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(stamped))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(photo))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(linked))
+        every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
+        val written = mutableListOf<SyncState>()
+        coEvery { syncStateRepo.upsertAll(any(), userId) } answers { written += firstArg<List<SyncState>>() }
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 0) { syncStateRepo.unlinkNameLink(any(), any(), any()) }
+        val row = written.single { it.localUri == "uri://decoy" }
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals("link-orig", row.cloudFileId)
+        assertEquals(LinkBasis.NAME, row.linkBasis)
+        assertEquals(1, merger().merge(listOf(stamped), listOf(photo), listOf(row)).size)
+    }
 }
+
+/** When the unuploadable rows in these tests were set aside: after the app's install time. */
+private const val SET_ASIDE_AT = 4_000_000_000_000L

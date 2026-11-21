@@ -32,6 +32,8 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import coil.imageLoader
 import eu.akoos.photos.R
+import eu.akoos.photos.util.VideoLocation
+import eu.akoos.photos.util.VideoLocationMetadata
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -91,6 +93,8 @@ internal class VideoReencoder(private val context: Context) {
         onProgress: (Float) -> Unit,
         /** Cooperative cancellation probe checked per loop iteration; false → release codecs and throw. */
         isActive: () -> Boolean = { true },
+        /** The output's location, with the source's own string when it has one; null writes none. */
+        location: VideoLocation? = null,
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var audioPfd: ParcelFileDescriptor? = null
@@ -103,7 +107,7 @@ internal class VideoReencoder(private val context: Context) {
         var outputSurface: OutputSurface? = null
 
         try {
-            sourcePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+            sourcePfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 ?: error("Could not open source video for reading")
             videoExtractor = MediaExtractor().apply { setDataSource(sourcePfd.fileDescriptor) }
             val videoTrackIdx = selectTrack(videoExtractor, "video/")
@@ -142,7 +146,7 @@ internal class VideoReencoder(private val context: Context) {
                 if (fromFormat > 0) return@run fromFormat
                 runCatching {
                     val mmr = android.media.MediaMetadataRetriever()
-                    mmr.setDataSource(context, sourceUri)
+                    mmr.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri))
                     val totalBr = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
                         ?.toIntOrNull() ?: 0
                     mmr.release()
@@ -212,6 +216,7 @@ internal class VideoReencoder(private val context: Context) {
             // Rotation via container orientation hint (matches muxTrimmed); GL pixel-rotation double-rotated.
             val outputRotation = ((rotationDegrees % 360) + 360) % 360
             muxer.setOrientationHint(outputRotation)
+            writeMuxerLocation(muxer, location)
 
             videoExtractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
@@ -271,11 +276,11 @@ internal class VideoReencoder(private val context: Context) {
 
             // Stream-copy extractor (mix path opens its own inside AudioMixer.decodeAudioToPcm).
             if (streamCopyOverlay) {
-                audioPfd = context.contentResolver.openFileDescriptor(audioOverlayUri!!, "r")
+                audioPfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, audioOverlayUri!!), "r")
                     ?: error("Could not open audio overlay for reading")
                 audioExtractor = MediaExtractor().apply { setDataSource(audioPfd.fileDescriptor) }
             } else if (streamCopySource) {
-                val audioPfd2 = context.contentResolver.openFileDescriptor(sourceUri, "r")
+                val audioPfd2 = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 if (audioPfd2 != null) {
                     audioPfd = audioPfd2
                     audioExtractor = MediaExtractor().apply { setDataSource(audioPfd.fileDescriptor) }
@@ -490,6 +495,7 @@ internal class VideoReencoder(private val context: Context) {
             runCatching { sourcePfd?.close() }
             runCatching { audioPfd?.close() }
         }
+        VideoLocationMetadata.carryOver(outputFile, location)
     }
 
     /**
@@ -516,6 +522,8 @@ internal class VideoReencoder(private val context: Context) {
         onProgress: (Float) -> Unit,
         /** Cancellation probe; see [transcode]. */
         isActive: () -> Boolean = { true },
+        /** The output's location, with the source's own string when it has one; null writes none. */
+        location: VideoLocation? = null,
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var videoExtractor: MediaExtractor? = null
@@ -523,7 +531,7 @@ internal class VideoReencoder(private val context: Context) {
         var streamCopyAudioExtractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
         try {
-            sourcePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+            sourcePfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 ?: error("Could not open source for stream-copy")
             videoExtractor = MediaExtractor().apply { setDataSource(sourcePfd.fileDescriptor) }
             val videoTrackIdx = selectTrack(videoExtractor, "video/")
@@ -534,11 +542,12 @@ internal class VideoReencoder(private val context: Context) {
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             val outputRotation = ((rotationDegrees % 360) + 360) % 360
             muxer.setOrientationHint(outputRotation)
+            writeMuxerLocation(muxer, location)
             val videoMuxerTrack = muxer.addTrack(videoFormat)
 
             // Audio decision tree — same logic as transcode's audio path.
             val sourceHasAudio = run {
-                val probePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+                val probePfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 val probe = MediaExtractor()
                 try {
                     probe.setDataSource(probePfd!!.fileDescriptor)
@@ -576,7 +585,7 @@ internal class VideoReencoder(private val context: Context) {
             val mixTargetFormat: Pair<Int, Int>?
 
             if (streamCopySrc) {
-                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 streamCopyAudioExtractor = MediaExtractor().apply {
                     setDataSource(streamCopyAudioPfd!!.fileDescriptor)
                 }
@@ -585,7 +594,7 @@ internal class VideoReencoder(private val context: Context) {
                 audioMuxerTrack = muxer.addTrack(streamCopyAudioExtractor.getTrackFormat(idx))
                 mixTargetFormat = null
             } else if (streamCopyOvl) {
-                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(audioOverlayUri!!, "r")
+                streamCopyAudioPfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, audioOverlayUri!!), "r")
                 streamCopyAudioExtractor = MediaExtractor().apply {
                     setDataSource(streamCopyAudioPfd!!.fileDescriptor)
                 }
@@ -691,6 +700,7 @@ internal class VideoReencoder(private val context: Context) {
             runCatching { streamCopyAudioExtractor?.release() }
             runCatching { streamCopyAudioPfd?.close() }
         }
+        VideoLocationMetadata.carryOver(outputFile, location)
     }
 
     /** Local copy of VideoEditorViewModel.extractorFlagsToBufferFlags to avoid cross-class plumbing. */
@@ -751,7 +761,7 @@ internal class VideoReencoder(private val context: Context) {
         var pfd: ParcelFileDescriptor? = null
         val extractor = MediaExtractor()
         return try {
-            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+            pfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri), "r") ?: return null
             extractor.setDataSource(pfd.fileDescriptor)
             val idx = selectTrack(extractor, "audio/") ?: return null
             extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME)
@@ -821,6 +831,17 @@ internal fun audioNeedsReencode(
     (useOverlayAudio && !overlayIsAac) ||
     overlayHasGaps ||
     overlayDelayed
+
+/**
+ * Writes [location]'s latitude and longitude as [muxer]'s location; the platform muxer writes none unless
+ * told to. Must run before the muxer starts. A null location, or one the muxer refuses as out of range,
+ * writes none. The muxer has no altitude, so the source's own string goes in once the file is closed
+ * ([VideoLocationMetadata.carryOver]).
+ */
+internal fun writeMuxerLocation(muxer: MediaMuxer, location: VideoLocation?) {
+    location ?: return
+    runCatching { muxer.setLocation(location.latitude.toFloat(), location.longitude.toFloat()) }
+}
 
 /**
  * Where a stream copy asked to start at [inPointUs] really begins: [keyframeUs], the sync sample a

@@ -211,6 +211,60 @@ class MlSourceRetryTest {
     }
 
     @Test
+    fun `a Drive photo settles on its eighth transient failure, and a deferral never counts`() {
+        for (prior in 0 until CLOUD_TRANSIENT_ATTEMPTS - 1) {
+            assertEquals(SourceMiss.TRANSIENT, settledCloudMiss(SourceMiss.TRANSIENT, priorAttempts = prior))
+        }
+        assertEquals(SourceMiss.PERMANENT, settledCloudMiss(SourceMiss.TRANSIENT, priorAttempts = CLOUD_TRANSIENT_ATTEMPTS - 1))
+        assertEquals(SourceMiss.OVER_BUDGET, settledCloudMiss(SourceMiss.OVER_BUDGET, priorAttempts = 20))
+        assertEquals(SourceMiss.DEFERRED, settledCloudMiss(SourceMiss.DEFERRED, priorAttempts = 20))
+        assertEquals(SourceMiss.PERMANENT, settledCloudMiss(SourceMiss.PERMANENT, priorAttempts = 0))
+    }
+
+    @Test
+    fun `six recorded failures keep a Drive photo transient and one more settles it`() {
+        val book = SourceRetryBook()
+        val tally = SourcePassTally(book)
+        repeat(6) { tally.stayed("k", SourceMiss.TRANSIENT, nowMs = 0L) }
+        assertEquals(SourceMiss.TRANSIENT, settledCloudMiss(SourceMiss.TRANSIENT, tally.attempts("k")))
+        tally.stayed("k", SourceMiss.TRANSIENT, nowMs = 0L)
+        assertEquals(SourceMiss.PERMANENT, settledCloudMiss(SourceMiss.TRANSIENT, tally.attempts("k")))
+        tally.stayed("o", SourceMiss.OVER_BUDGET, nowMs = 0L)
+        tally.stayed("d", SourceMiss.DEFERRED, nowMs = 0L)
+        assertEquals(0, tally.attempts("o"))
+        assertEquals(0, tally.attempts("d"))
+    }
+
+    @Test
+    fun `a photo settled three times in one process is a loop and not progress`() {
+        val guard = RescanGuard()
+        fun pass(vararg keys: String): SourcePassTally {
+            val tally = SourcePassTally(SourceRetryBook(), guard)
+            keys.forEach { tally.movedOn(it) }
+            return tally
+        }
+        assertEquals(1, pass("a").progress)
+        assertEquals(1, pass("a").progress)
+        val third = pass("a")
+        assertEquals(1, third.moved)
+        assertEquals(1, third.repeats)
+        assertEquals(0, third.progress)
+        val mixed = pass("a", "b", "c")
+        assertEquals(3, mixed.moved)
+        assertEquals(2, mixed.progress)
+        guard.clear()
+        assertEquals(1, pass("a").progress)
+    }
+
+    @Test
+    fun `a tally without a guard counts every move as progress`() {
+        val tally = SourcePassTally(SourceRetryBook())
+        repeat(5) { tally.movedOn("a") }
+        assertEquals(5, tally.progress)
+        assertEquals(0, tally.repeats)
+    }
+
+    @Test
     fun `a device file counts as permanent only when it opened and the decode threw nothing`() {
         assertEquals(SourceMiss.PERMANENT, sourceMissForUndecodedLocal(readable = true, decodeThrew = false))
         assertEquals(SourceMiss.TRANSIENT, sourceMissForUndecodedLocal(readable = false, decodeThrew = false))

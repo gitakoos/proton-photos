@@ -34,8 +34,7 @@ internal const val NAME_PAIR_DATE_SLACK_MS = 24 * 60 * 60 * 1000L
 
 /**
  * The Drive photo each moved file pairs with by name, for the files the backup state does not pair: exactly one
- * photo of the user's own library carries its name, case aside (the name-only pairing of
- * [GetGalleryItemsUseCase.merge]). A name more than one Drive photo carries, or a Drive photo two moved files would
+ * photo of the user's own library carries its name, case aside. A name more than one Drive photo carries, or a Drive photo two moved files would
  * both claim, pairs with nothing. Where both dates are known ([takenMsByUri], the Drive photo's capture time) they
  * must be within a day, so a photo that only shares a camera's file name with the device file is never taken out
  * of an album or put into one in its place; a date either side does not know leaves the name to decide, as a
@@ -59,9 +58,9 @@ internal fun pairByUniqueName(
 private fun sameDayOrUnknown(a: Long, b: Long): Boolean = a <= 0L || b <= 0L || kotlin.math.abs(a - b) <= NAME_PAIR_DATE_SLACK_MS
 
 /**
- * The Drive photo of each device file, paired the way the timeline pairs them for display: the backup state first,
- * then a unique file name ([pairByUniqueName]). So a photo the timeline shows with a green cloud is one this finds,
- * whether this app uploaded it or it reached Drive another way.
+ * The Drive photo of each device file, for keeping a folder's Drive album in step with the folder: the backup state
+ * first, then a unique file name within a day of the device file's date ([pairByUniqueName]), so a photo that
+ * reached Drive another way follows its device file too. The timeline pairs on the backup state alone.
  */
 class DrivePairLookup @Inject constructor(
     private val syncStateRepo: SyncStateRepository,

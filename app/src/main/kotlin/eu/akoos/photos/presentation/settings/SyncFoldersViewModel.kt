@@ -48,9 +48,9 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 
-/** One device folder as the folder pickers list it: its name, its newest item as the cover, and how
- *  many items it holds. */
-internal data class DeviceBucket(val name: String, val coverUri: String?, val itemCount: Int)
+/** One device folder as the folder pickers list it: its name, its newest item as the cover, how many
+ *  items it holds and how many of those are videos. */
+internal data class DeviceBucket(val name: String, val coverUri: String?, val itemCount: Int, val videoCount: Int = 0)
 
 /**
  * The folders [items] fall into, each in the place it first appears, for the folder pickers (backup
@@ -60,7 +60,14 @@ internal data class DeviceBucket(val name: String, val coverUri: String?, val it
 internal fun deviceBuckets(items: List<LocalMediaItem>): List<DeviceBucket> =
     items.filter { it.bucketName != null }
         .groupBy { it.bucketName!! }
-        .map { (name, group) -> DeviceBucket(name, group.maxByOrNull { it.dateTaken }?.uri, group.size) }
+        .map { (name, group) ->
+            DeviceBucket(
+                name = name,
+                coverUri = group.maxByOrNull { it.dateTaken }?.uri,
+                itemCount = group.size,
+                videoCount = group.count { it.mimeType.startsWith("video/") },
+            )
+        }
 
 @HiltViewModel
 class SyncFoldersViewModel @Inject constructor(
@@ -73,6 +80,7 @@ class SyncFoldersViewModel @Inject constructor(
         val name: String,
         val coverUri: String?,
         val itemCount: Int,
+        val videoCount: Int = 0,
         val isSelected: Boolean,
         val isMirrored: Boolean = false,
         /** True for a folder the user typed in by hand that has no real bucket yet — removable. */
@@ -116,6 +124,7 @@ class SyncFoldersViewModel @Inject constructor(
                         name       = bucket.name,
                         coverUri   = bucket.coverUri,
                         itemCount  = bucket.itemCount,
+                        videoCount = bucket.videoCount,
                         isSelected = selectedNames != null && bucket.name in selectedNames!!,
                         isMirrored = bucket.name in mirror,
                     )

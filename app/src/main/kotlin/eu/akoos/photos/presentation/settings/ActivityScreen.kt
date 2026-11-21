@@ -126,11 +126,13 @@ fun ActivityScreen(
         .filter { it.status.inFlight }
         .map { it.uri }
         .toSet()
+    // Photos cancelled one by one leave the card at once, running or still queued.
+    val cancelledUris = state.cancelledUploadUris
     // After a user stop the still-pending photos are suppressed from the active-transfer card (they
     // stay pending in the DB for a later auto-backup); the item in transit keeps showing via
     // uploadEvents until it finishes. Cleared automatically when a new batch starts uploading.
     val queuedUris = if (state.uploadStopped) emptyList()
-        else state.pendingUris.filterNot { it in activeUploadUris }
+        else state.pendingUris.filterNot { it in activeUploadUris || it in cancelledUris }
 
     // The page as its floating header frosts it, when the frosted pills are on.
     val glass = rememberGlassBackdrop(colors.pageBg)
@@ -179,7 +181,9 @@ fun ActivityScreen(
                     // One row per photo: thumbnail on the left, a status pill saying what is happening to
                     // the file, and a live bar, all in this screen's card style. The ones encrypting or
                     // uploading come first, then the ones still waiting; each drops out as it finishes.
-                    val activeUploads = state.uploadEvents.filter { it.status.inFlight }
+                    val activeUploads = state.uploadEvents.filter { it.status.inFlight && it.uri !in cancelledUris }
+                    // Cancelled photos count toward neither side of the header.
+                    val uploadedSoFar = (state.uploadDone - state.uploadCancelled).coerceAtLeast(0)
                     // Why nothing is moving, above the queue rather than below it. The upload workers
                     // require the battery not to be low, so under that floor the system never starts
                     // them and no progress is reported at all: this screen is where the photos are
@@ -222,8 +226,8 @@ fun ActivityScreen(
                                     SettingsCard {
                                         BatchCancelHeader(
                                             label = stringResource(R.string.activity_uploading),
-                                            done = state.uploadDone,
-                                            total = state.uploadDone + activeUploads.size + queuedUris.size,
+                                            done = uploadedSoFar,
+                                            total = uploadedSoFar + activeUploads.size + queuedUris.size,
                                             cancelable = true,
                                             onCancel = { viewModel.cancelUpload() },
                                         )
@@ -241,7 +245,13 @@ fun ActivityScreen(
                                                 UploadEventStatus.Encrypting -> stringResource(R.string.upload_status_encrypting)
                                                 else -> stringResource(R.string.upload_status_uploading)
                                             }
-                                            TransferPhotoRow(uri = evt.uri, stateLabel = label, progress = frac)
+                                            TransferPhotoRow(
+                                                uri = evt.uri,
+                                                stateLabel = label,
+                                                progress = frac,
+                                                onCancel = { viewModel.cancelUploadItem(evt.uri) },
+                                                cancelDescription = stringResource(R.string.activity_cancel_upload_item),
+                                            )
                                             if (i < activeUploads.lastIndex || queuedUris.isNotEmpty()) RowDivider()
                                         }
                                         // Only the next few waiting photos get a row: the card sits in one grid item, so a
@@ -253,6 +263,8 @@ fun ActivityScreen(
                                                 uri = uri,
                                                 stateLabel = stringResource(R.string.upload_status_queued),
                                                 progress = null,
+                                                onCancel = { viewModel.cancelUploadItem(uri) },
+                                                cancelDescription = stringResource(R.string.activity_cancel_upload_item),
                                             )
                                             if (i < shownQueued.lastIndex) RowDivider()
                                         }
@@ -330,8 +342,9 @@ fun ActivityScreen(
                                 // Gallery selection batches with thumbnails: one card per batch, listing
                                 // the photos still in flight as individual rows. The first t.done photos
                                 // are already saved and drop off the front.
+                                val queuedLabel = stringResource(R.string.upload_status_queued)
                                 state.galleryDownloads.filter { it.items.isNotEmpty() }.forEach { t ->
-                                    val remaining = t.items.drop(t.done)
+                                    val remaining = galleryDownloadRows(t, queuedLabel)
                                     if (remaining.isNotEmpty()) {
                                         Spacer(Modifier.height(8.dp))
                                         SettingsCard {
@@ -345,11 +358,19 @@ fun ActivityScreen(
                                                 onCancel = { viewModel.cancelTransfer(t.id) },
                                             )
                                             RowDivider()
-                                            remaining.forEachIndexed { i, item ->
+                                            remaining.forEachIndexed { i, row ->
+                                                val key = row.key
                                                 TransferPhotoRow(
-                                                    uri = item,
-                                                    stateLabel = stringResource(R.string.activity_downloading_state),
+                                                    uri = row.uri,
+                                                    stateLabel = row.status
+                                                        ?: stringResource(R.string.activity_downloading_state),
                                                     progress = null,
+                                                    onCancel = if (key != null) {
+                                                        { viewModel.cancelTransferItem(t.id, key) }
+                                                    } else {
+                                                        null
+                                                    },
+                                                    cancelDescription = stringResource(R.string.activity_cancel_download_item),
                                                 )
                                                 if (i < remaining.lastIndex) RowDivider()
                                             }
@@ -628,6 +649,26 @@ private fun HistoryRow(e: TransferCenter.HistoryEntry) {
     }
 }
 
+/** One row of a gallery download card: the photo's thumbnail, its status (null reads as downloading)
+ *  and, when the batch can stop photos one by one, the key its cancel passes back. */
+private data class DownloadPhotoRow(val uri: String, val status: String?, val key: String?)
+
+/**
+ * The photos of a gallery download still to show. A batch that tracks each photo lists the ones not
+ * yet over, the downloading ones first and then those labelled [queuedLabel], capped like the upload
+ * queue. A batch without per-photo state falls back to the photos past its done count.
+ */
+private fun galleryDownloadRows(t: TransferCenter.Active, queuedLabel: String): List<DownloadPhotoRow> {
+    if (t.itemKeys.isEmpty()) return t.items.drop(t.done).map { DownloadPhotoRow(it, null, null) }
+    val rows = t.items.indices.mapNotNull { i ->
+        val key = t.itemKeys.getOrNull(i) ?: return@mapNotNull null
+        val status = t.itemStatus[key] ?: return@mapNotNull null
+        DownloadPhotoRow(t.items[i], status, key.takeIf { t.itemCancelable })
+    }
+    val (waiting, running) = rows.partition { it.status == queuedLabel }
+    return (running + waiting).take(QUEUED_ROWS_SHOWN)
+}
+
 /** One photo in a transfer batch: thumbnail on the left, a status pill, an optional live bar, and an
  *  optional cancel button. Shared by the Uploads tab and the per-photo gallery downloads. */
 @Composable
@@ -636,6 +677,7 @@ private fun TransferPhotoRow(
     stateLabel: String,
     progress: Float?,
     onCancel: (() -> Unit)? = null,
+    cancelDescription: String = stringResource(R.string.cancel),
 ) {
     val colors = AppColors.current
     Row(
@@ -688,7 +730,7 @@ private fun TransferPhotoRow(
         if (onCancel != null) {
             Icon(
                 Icons.Default.Close,
-                contentDescription = stringResource(R.string.cancel),
+                contentDescription = cancelDescription,
                 tint = colors.fgMute,
                 modifier = Modifier
                     .padding(start = 10.dp)

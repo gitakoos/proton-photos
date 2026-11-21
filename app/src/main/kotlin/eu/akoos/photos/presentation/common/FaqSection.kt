@@ -147,7 +147,7 @@ val faqGroups: List<FaqGroup> = listOf(
             ),
             FaqEntry(
                 R.string.faq_q_where_drive, R.string.faq_a_where_drive,
-                listOf(R.string.settings_more_title, R.string.drive_backup_section, R.string.drive_backup_auto),
+                listOf(R.string.settings_more_title, R.string.drive_backup_section, R.string.drive_backup_switch_title),
             ),
             FaqEntry(
                 R.string.faq_q_where_trash, R.string.faq_a_where_trash,

@@ -255,7 +255,7 @@ private suspend fun extractInto(
             launch {
                 val retriever = MediaMetadataRetriever()
                 try {
-                    val opened = runCatching { retriever.setDataSource(context, uri) }.isSuccess
+                    val opened = runCatching { retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri)) }.isSuccess
                     if (!opened) return@launch
                     // The retriever reports the clip length itself, so the strip no longer waits on
                     // a player preparing. Read it once here; fall back to the caller value only when

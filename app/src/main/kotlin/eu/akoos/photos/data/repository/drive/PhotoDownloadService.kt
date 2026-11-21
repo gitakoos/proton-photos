@@ -22,7 +22,9 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
@@ -47,6 +49,9 @@ import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.data.sdk.sdkDownloadComplete
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.util.isNotExistsApiError
+import eu.akoos.photos.data.localcrypto.CacheFiles
+import eu.akoos.photos.data.localcrypto.CachedOriginal
+import eu.akoos.photos.data.localcrypto.LocalFiles
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -93,6 +98,7 @@ class PhotoDownloadService @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
     private val sdkPhotoDownloadOps: eu.akoos.photos.data.sdk.SdkPhotoDownloadOps,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -113,7 +119,7 @@ class PhotoDownloadService @Inject constructor(
      * entries that might have slipped through (defense-in-depth; should be empty in
      * practice because the finally runs reliably).
      */
-    private val inFlight = ConcurrentHashMap<String, CompletableDeferred<File>>()
+    private val inFlight = ConcurrentHashMap<String, CompletableDeferred<CachedOriginal>>()
     private val inFlightWarnThreshold = 64
 
     /**
@@ -140,7 +146,8 @@ class PhotoDownloadService @Inject constructor(
     }
 
     /**
-     * Downloads the full-resolution bytes for [photo] into the on-disk cache.
+     * Downloads the full-resolution bytes for [photo] into the on-disk cache, where they are kept encrypted
+     * ([CachedOriginal] is the only way to read them).
      *
      * [onProgress] (optional) receives `(doneBytes, totalBytes)` while blocks decrypt. Callback
      * is throttled to ~once per 250 ms (plus a guaranteed final 100% emission) so callers can
@@ -155,9 +162,9 @@ class PhotoDownloadService @Inject constructor(
         photo: CloudPhoto,
         preResolvedLinkDetail: BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
-    ): File {
+    ): CachedOriginal {
         inFlight[photo.linkId]?.takeIf { !it.isCompleted }?.let { return it.await() }
-        val deferred = CompletableDeferred<File>()
+        val deferred = CompletableDeferred<CachedOriginal>()
         val prev = inFlight.putIfAbsent(photo.linkId, deferred)
         if (prev != null && !prev.isCompleted) return prev.await()
         // Bounded backstop: sweep any stale completed entries the finally somehow
@@ -171,8 +178,9 @@ class PhotoDownloadService @Inject constructor(
             }
         }
         try {
-            val file = doDownload(userId, photo, preResolvedLinkDetail, onProgress)
+            val file = CachedOriginal(doDownload(userId, photo, preResolvedLinkDetail, onProgress))
             deferred.complete(file)
+            recordFileFix(userId, photo, file)
             return file
         } catch (t: Throwable) {
             // CancellationException also lands here; completeExceptionally + the finally
@@ -181,6 +189,43 @@ class PhotoDownloadService @Inject constructor(
             throw t
         } finally {
             inFlight.remove(photo.linkId, deferred)
+        }
+    }
+
+    /**
+     * Removes what a stopped download of [linkId] left in the cache: the finished copy a cancel caught
+     * before the save could delete it, the half-stitched `.tmp`, the per-block resume files and their
+     * hash sidecar. Left alone while another caller is still downloading the same photo, since those
+     * files are its working state.
+     */
+    fun discardPartialDownload(linkId: String, mimeType: String) {
+        if (inFlight[linkId]?.isCompleted == false) return
+        val cacheDir = File(context.cacheDir, "fullres")
+        val ext = eu.akoos.photos.util.mimeToFileExtension(mimeType)
+        File(cacheDir, "${safeFileId(linkId)}.$ext").delete()
+        File(cacheDir, "${safeFileId(linkId)}.$ext.tmp").delete()
+        cacheDir.listFiles { _, name -> isBlockEncFileOf(name, linkId) }?.forEach { it.delete() }
+        dropBlockResumeState(cacheDir, linkId)
+    }
+
+    /**
+     * The map reads a cloud photo's place from its Drive attributes, which some uploaders leave without a
+     * Location. Once the file is here its own GPS fills that gap, so the photo is plotted like the rest.
+     * Never fails the download.
+     */
+    private suspend fun recordFileFix(userId: UserId, photo: CloudPhoto, file: CachedOriginal) {
+        try {
+            val existing = photoLocationDao.getById(userId.id, photo.linkId)
+            if (existing != null) return
+            val uri = file.fileUri.toString()
+            val fix = eu.akoos.photos.util.PhotoGpsResolver.localGps(context, uri, photo.mimeType)
+            val row = eu.akoos.photos.util.PhotoGpsResolver.fileFixToStore(existing, fix, userId.id, photo.linkId)
+                ?: return
+            photoLocationDao.upsert(listOf(row))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "file GPS for ${photo.linkId} not recorded: ${e.message}")
         }
     }
 
@@ -194,8 +239,8 @@ class PhotoDownloadService @Inject constructor(
         // Single-source-of-truth MIME→extension mapping (see util/MimeExtensions.kt for
         // the rationale — ExoPlayer / Coil rely on the suffix to infer container/codec).
         val ext = eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)
-        val outputFile = File(cacheDir, "${photo.linkId}.$ext")
-        val tempFile = File(cacheDir, "${photo.linkId}.$ext.tmp")
+        val outputFile = File(cacheDir, "${safeFileId(photo.linkId)}.$ext")
+        val tempFile = File(cacheDir, "${safeFileId(photo.linkId)}.$ext.tmp")
         // Atomic temp-rename: writes go to a `.tmp` sibling and only get renamed to
         // outputFile after the byte stream + manifest verification both finish. Without
         // this, a partial download from process death / network failure / mid-write
@@ -203,6 +248,8 @@ class PhotoDownloadService @Inject constructor(
         // it as complete; ExoPlayer's FileDataSource then opens it, reads the truncated
         // MOOV header, and throws FileDataSourceException → black screen on
         // swipe-back-to-video.
+        // A cached copy sealed with a key this phone no longer has is fetched again.
+        if (outputFile.exists() && eu.akoos.photos.data.localcrypto.VaultFiles.isLocked(context, outputFile)) outputFile.delete()
         if (outputFile.exists() && outputFile.length() > 0) {
             // Size-validate against the cloud metadata so any truncated file (from an
             // older app version without atomic-rename, or any other source) doesn't keep
@@ -210,12 +257,13 @@ class PhotoDownloadService @Inject constructor(
             // resurfaces after first install. photo.sizeBytes is 0 when the server didn't
             // report a size (rare for photos, common for older album-share items); in that
             // case we trust whatever we have.
-            val matches = photo.sizeBytes == 0L || outputFile.length() == photo.sizeBytes
+            val have = LocalFiles.plainLength(outputFile)
+            val matches = have > 0L && (photo.sizeBytes == 0L || have == photo.sizeBytes)
             if (matches) {
-                onProgress?.invoke(outputFile.length(), outputFile.length())
+                onProgress?.invoke(have, have)
                 return@withContext outputFile
             }
-            Log.w(TAG, "downloadFullResPhoto: cached file size mismatch (have=${outputFile.length()} want=${photo.sizeBytes}) — re-downloading")
+            Log.w(TAG, "downloadFullResPhoto: cached file size mismatch (have=$have want=${photo.sizeBytes}), downloading again")
             outputFile.delete()
         }
         // Sweep any stale .tmp from a prior aborted concat so we re-stitch cleanly.
@@ -231,9 +279,9 @@ class PhotoDownloadService @Inject constructor(
             val viaSdk = sdkRouting.run(
                 if (photo.volumeId == ownVolume) SdkRoute.DOWNLOAD else SdkRoute.SHARED,
                 viaSdk = {
-                    sdkPhotoDownloadOps.streamToFile(userId, photo.volumeId, photo.linkId, tempFile, onProgress, photo.sizeBytes)
-                    if (!sdkDownloadComplete(tempFile.length(), photo.sizeBytes)) {
-                        throw SdkDownloadException("got ${tempFile.length()} bytes, Drive says ${photo.sizeBytes}")
+                    val got = sdkPhotoDownloadOps.streamToFile(userId, photo.volumeId, photo.linkId, tempFile, onProgress, photo.sizeBytes)
+                    if (!sdkDownloadComplete(got, photo.sizeBytes)) {
+                        throw SdkDownloadException("got $got bytes, Drive says ${photo.sizeBytes}")
                     }
                     true
                 },
@@ -248,7 +296,8 @@ class PhotoDownloadService @Inject constructor(
                 }
                 // The blocks and sidecar an interrupted download of the app's own left behind are moot now.
                 dropBlockResumeState(cacheDir, photo.linkId)
-                onProgress?.invoke(outputFile.length(), outputFile.length())
+                val size = LocalFiles.plainLength(outputFile)
+                onProgress?.invoke(size, size)
                 return@withContext outputFile
             }
         }
@@ -477,7 +526,8 @@ class PhotoDownloadService @Inject constructor(
         for ((position, block) in blocks.withIndex()) {
             val decFile = blockDecFile(cacheDir, photo.linkId, block.index)
             if (!decFile.exists() || decFile.length() <= 0) continue
-            val bytes = decFile.readBytes()
+            // Kept encrypted; one that does not open is deleted there and fetched again.
+            val bytes = CacheFiles.readBytesOrNull(decFile, context) ?: continue
             val expected = sidecar?.get(position)
             if (expected != null) {
                 val actualDec = cryptoHelper.sha256(bytes)
@@ -648,10 +698,13 @@ class PhotoDownloadService @Inject constructor(
         // We concat in index order so the output is byte-identical to a streamed
         // sequential download. The per-block files survive partial runs (resume),
         // but once the full concat + atomic-rename succeeds we delete them.
-        tempFile.outputStream().use { out ->
+        // Written encrypted as it goes; each block is read back decrypted.
+        CacheFiles.encryptingStream(java.io.FileOutputStream(tempFile), context).use { out ->
             for (block in blocks) {
                 val decFile = blockDecFile(cacheDir, photo.linkId, block.index)
-                decFile.inputStream().use { it.copyTo(out) }
+                val input = LocalFiles.openForRead(context, decFile)
+                    ?: throw java.io.IOException("block ${block.index} of ${photo.linkId} does not open")
+                input.use { it.copyTo(out) }
             }
         }
 
@@ -675,7 +728,7 @@ class PhotoDownloadService @Inject constructor(
         }
         blockHashSidecar(cacheDir, photo.linkId).delete()
 
-        Log.d(TAG, "downloadFullResPhoto: saved ${outputFile.length()} bytes for ${photo.linkId}")
+        Log.d(TAG, "downloadFullResPhoto: saved ${LocalFiles.plainLength(outputFile)} bytes for ${photo.linkId}")
         outputFile
     }
 
@@ -715,33 +768,27 @@ class PhotoDownloadService @Inject constructor(
         val decFile = blockDecFile(cacheDir, linkId, block.index)
         // Disambiguate the encrypted scratch file per-block so two coroutines on
         // adjacent blocks of the same linkId don't collide on the same enc_ path.
-        val encFile = File(cacheDir, "enc_${linkId}_${block.index}.bin")
-        val decryptedBytes: ByteArray = if (sessionKey != null) {
-            encFile.writeBytes(encBytes)
-            val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, decFile) }
-            encFile.delete()
-            if (result.isSuccess) {
-                decFile.readBytes()
+        val encFile = File(cacheDir, "enc_${safeFileId(linkId)}_${block.index}.bin")
+        // The plaintext comes back in memory (through a pipe from :crypto) and is written only encrypted. The
+        // Drive-encrypted input goes through a file so a multi-MB block stays under the binder limit.
+        encFile.writeBytes(encBytes)
+        val decryptedBytes: ByteArray = try {
+            if (sessionKey != null) {
+                val result = runCatching { cryptoServiceClient.decryptWithSessionKey(sessionKey, encFile) }
+                // Binary-PGP as the last resort before giving up.
+                result.getOrNull()
+                    ?: cryptoServiceClient.decryptBinaryFile(encFile, nodeKeyBytes)
+                    ?: error("Block ${block.index} decrypt failed: sessionKey path: ${result.exceptionOrNull()?.message}")
             } else {
-                decFile.delete()
-                // Try binary-PGP as last resort before giving up. File-based so a multi-MB
-                // block stays under the binder limit when the decrypt runs in :crypto.
-                encFile.writeBytes(encBytes)
-                val ok = cryptoServiceClient.decryptBinaryToFile(encFile, decFile, nodeKeyBytes)
-                encFile.delete()
-                if (!ok) error("Block ${block.index} decrypt failed: sessionKey path: ${result.exceptionOrNull()?.message}")
-                decFile.readBytes()
+                // No session key: binary-PGP only works if the block has an embedded PKESK.
+                cryptoServiceClient.decryptBinaryFile(encFile, nodeKeyBytes)
+                    ?: error("Block ${block.index} decrypt failed: no session key and binary-PGP returned null")
             }
-        } else {
-            // No session key — try binary-PGP (only works if block has embedded PKESK).
-            // File-based so a multi-MB block stays under the binder limit in :crypto.
-            encFile.writeBytes(encBytes)
-            val ok = cryptoServiceClient.decryptBinaryToFile(encFile, decFile, nodeKeyBytes)
+        } finally {
             encFile.delete()
-            if (!ok) error("Block ${block.index} decrypt failed: no session key and binary-PGP returned null")
-            decFile.readBytes()
         }
 
+        CacheFiles.write(decFile, decryptedBytes, tempPrefix = "dec_seal_", context = context)
         val decHash = cryptoHelper.sha256(decryptedBytes)
 
         // Atomic-add to the shared accumulator then throttle the emit. The CAS on
@@ -767,14 +814,14 @@ class PhotoDownloadService @Inject constructor(
     private data class BlockHashes(val encrypted: ByteArray, val decrypted: ByteArray)
 
     private fun blockDecFile(cacheDir: File, linkId: String, index: Int): File =
-        File(cacheDir, "dec_${linkId}_${index}.bin")
+        File(cacheDir, "dec_${safeFileId(linkId)}_${index}.bin")
 
     /** Deletes [linkId]'s resume state: every `dec_<linkId>_<index>.bin` (an exact name match, so another
      *  photo whose id starts the same is left alone) and its hash sidecar. */
     private fun dropBlockResumeState(cacheDir: File, linkId: String) {
         cacheDir.listFiles { _, name -> isBlockDecFileOf(name, linkId) }?.forEach { it.delete() }
         blockHashSidecar(cacheDir, linkId).delete()
-        File(cacheDir, "$linkId.hashes.tmp").delete()
+        File(cacheDir, "${safeFileId(linkId)}.hashes.tmp").delete()
     }
 
     /**
@@ -789,12 +836,12 @@ class PhotoDownloadService @Inject constructor(
      * bytes actually stored in `dec_*.bin` and can be recomputed locally on resume.
      */
     private fun blockHashSidecar(cacheDir: File, linkId: String): File =
-        File(cacheDir, "$linkId.hashes")
+        File(cacheDir, "${safeFileId(linkId)}.hashes")
 
     private fun writeBlockHashSidecar(cacheDir: File, linkId: String, hashes: List<BlockHashes>) {
         val sidecar = blockHashSidecar(cacheDir, linkId)
         try {
-            val tmp = File(cacheDir, "$linkId.hashes.tmp")
+            val tmp = File(cacheDir, "${safeFileId(linkId)}.hashes.tmp")
             // Two-step write: only rename a fully-written file into place so a process
             // death mid-write can never leave a half-line sidecar that would silently
             // corrupt the next resume's integrity check.
@@ -816,7 +863,7 @@ class PhotoDownloadService @Inject constructor(
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "writeBlockHashSidecar: $linkId failed: ${e.message}")
             // Best-effort cleanup of any partial write.
-            File(cacheDir, "$linkId.hashes.tmp").delete()
+            File(cacheDir, "${safeFileId(linkId)}.hashes.tmp").delete()
         }
     }
 
@@ -889,7 +936,7 @@ class PhotoDownloadService @Inject constructor(
             val ext = eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)
             if (ext.isEmpty()) return null
             val cacheDir = File(context.cacheDir, "fullres")
-            return File(cacheDir, "${photo.linkId}.$ext")
+            return File(cacheDir, "${safeFileId(photo.linkId)}.$ext")
         }
 
         /**
@@ -900,7 +947,7 @@ class PhotoDownloadService @Inject constructor(
          */
         fun isFullResCached(context: Context, photo: CloudPhoto): Boolean {
             val file = fullResFile(context, photo) ?: return false
-            return file.exists() && file.length() > 0
+            return file.exists() && file.length() > 0 && !eu.akoos.photos.data.localcrypto.VaultFiles.isLocked(context, file)
         }
 
         /**
@@ -965,8 +1012,13 @@ class PhotoDownloadService @Inject constructor(
 }
 
 /** Whether [name] is one of [linkId]'s decrypted block files, `dec_<linkId>_<index>.bin`. */
-internal fun isBlockDecFileOf(name: String, linkId: String): Boolean {
-    val prefix = "dec_${linkId}_"
+internal fun isBlockDecFileOf(name: String, linkId: String): Boolean = isBlockFileOf("dec_", name, linkId)
+
+/** Whether [name] is one of [linkId]'s encrypted block scratch files, `enc_<linkId>_<index>.bin`. */
+internal fun isBlockEncFileOf(name: String, linkId: String): Boolean = isBlockFileOf("enc_", name, linkId)
+
+private fun isBlockFileOf(kind: String, name: String, linkId: String): Boolean {
+    val prefix = "$kind${safeFileId(linkId)}_"
     if (!name.startsWith(prefix) || !name.endsWith(".bin")) return false
     val index = name.substring(prefix.length, name.length - ".bin".length)
     return index.isNotEmpty() && index.all { it.isDigit() }

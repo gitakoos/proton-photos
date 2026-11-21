@@ -55,7 +55,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,6 +66,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -324,7 +324,7 @@ private fun ExcludeRow(
                 maxLines = 2,
             )
             Text(
-                pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
+                photoVideoCountText(folder.itemCount - folder.videoCount, folder.videoCount),
                 color    = FgMute,
                 fontSize = 12.sp,
             )

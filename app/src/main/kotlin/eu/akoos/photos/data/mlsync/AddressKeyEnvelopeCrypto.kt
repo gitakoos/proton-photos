@@ -52,11 +52,12 @@ class AddressKeyEnvelopeCrypto @Inject constructor(
      * Every key of every enabled address, primary address and primary key first, so an envelope still opens
      * after a key rotation or a primary-address change; the trailer verifies against all of their public
      * keys. [refreshAddresses] refetches the address list first, for a key made on another device since this
-     * one cached the list.
+     * one cached the list. [includeDisabled] adds the keys of disabled addresses, for a recovery copy sealed
+     * before the address was disabled.
      */
-    suspend fun openKeys(userId: UserId, refreshAddresses: Boolean = false): EnvelopeOpenKeys {
+    suspend fun openKeys(userId: UserId, refreshAddresses: Boolean = false, includeDisabled: Boolean = false): EnvelopeOpenKeys {
         val addresses = userAddressRepository.getAddresses(userId, refreshAddresses)
-            .filter { it.enabled && it.keys.isNotEmpty() }
+            .filter { (includeDisabled || it.enabled) && it.keys.isNotEmpty() }
             .sortedBy { it.order }
         val decryptionKeys = addresses.flatMap { address ->
             address.keys.sortedByDescending { it.privateKey.isPrimary }.mapNotNull { unlockOrNull(it) }

@@ -104,6 +104,7 @@ class AlbumOrderCodecTest {
     @Test
     fun `a stored arrangement drives the grid order`() {
         // The pair only matters through sortAlbums, so the decoded value is checked where it lands.
+        // "b" is not in the stored order, so it comes first, the way a new album does.
         val albums = listOf(
             Album(linkId = "a", name = "A", photoCount = 0, coverLinkId = null, lastActivityTimeMs = 100L),
             Album(linkId = "b", name = "B", photoCount = 0, coverLinkId = null, lastActivityTimeMs = 300L),
@@ -111,7 +112,7 @@ class AlbumOrderCodecTest {
         )
         val order = decodeAlbumOrder("c||a|c")
         assertEquals(
-            listOf("c", "a", "b"),
+            listOf("b", "c", "a"),
             sortAlbums(albums, AlbumSortMode.Custom, order).map { it.linkId },
         )
     }

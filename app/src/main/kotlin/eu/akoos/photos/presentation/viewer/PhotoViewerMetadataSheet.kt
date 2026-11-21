@@ -25,7 +25,6 @@ package eu.akoos.photos.presentation.viewer
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -34,9 +33,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -96,13 +93,13 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.cardFill
+import eu.akoos.photos.presentation.common.sheetPageTransition
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -171,6 +168,11 @@ internal fun PhotoMetadataSheet(
     labelsSection: (@Composable (onEdit: () -> Unit) -> Unit)? = null,
     /** The Labels page, drawn whole by the caller and handed the way back. */
     labelsPage: (@Composable (onClose: () -> Unit) -> Unit)? = null,
+    /** The Albums section of the main page, above Labels, handed the way to the Albums page. Null leaves it
+     *  out (no account, a vaulted or hidden photo, someone else's album). */
+    albumsSection: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
+    /** The Albums page, drawn whole by the caller and handed the way back. */
+    albumsPage: (@Composable ColumnScope.(onClose: () -> Unit) -> Unit)? = null,
     /** The File name page's form under its title, handed the way back. Null leaves renaming out. */
     renamePage: (@Composable (onClose: () -> Unit) -> Unit)? = null,
     /** Whether the map may show. The caller turns it off for a photo whose place stays private, since
@@ -222,13 +224,7 @@ internal fun PhotoMetadataSheet(
 
     AnimatedContent(
         targetState = page,
-        transitionSpec = {
-            val forward = targetState.depth > initialState.depth
-            val spec = spring<IntOffset>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
-            (slideInHorizontally(spec) { if (forward) it else -it / 3 } + fadeIn())
-                .togetherWith(slideOutHorizontally(spec) { if (forward) -it / 3 else it } + fadeOut())
-                .using(SizeTransform(clip = false) { _, _ -> spring(stiffness = Spring.StiffnessMediumLow) })
-        },
+        transitionSpec = { sheetPageTransition(forward = targetState.depth > initialState.depth) },
         label = "detailsPage",
     ) { shownPage ->
         when (shownPage) {
@@ -264,6 +260,7 @@ internal fun PhotoMetadataSheet(
                 } else if (showMapBox && metadataEditable && mimeType.startsWith("image/")) {
                     DetailsAddLocation(onClick = { push(DetailsPage.Place) })
                 }
+                albumsSection?.invoke { push(DetailsPage.Albums) }
                 labelsSection?.invoke { push(DetailsPage.Labels) }
                 val categoryNames = EDITABLE_CATEGORY_TAGS.filter { it.first in photoTags }.map { stringResource(it.second) }
                 DetailsChipSection(
@@ -290,6 +287,8 @@ internal fun PhotoMetadataSheet(
             )
 
             DetailsPage.Labels -> DetailsPageFrame { labelsPage?.invoke(back) }
+
+            DetailsPage.Albums -> DetailsPageFrame(scroll = false) { albumsPage?.invoke(this, back) }
 
             DetailsPage.Categories -> DetailsPageFrame {
                 DetailsPageHeader(stringResource(R.string.gallery_filter_categories), onBack = back)
@@ -368,7 +367,7 @@ internal fun PhotoMetadataSheet(
 
 /** The pages of the details sheet. [depth] orders them for the slide: a deeper page enters from the end. */
 internal enum class DetailsPage(val depth: Int) {
-    Main(0), Date(1), Place(1), Labels(1), Categories(1), Rename(1), All(1), Private(2),
+    Main(0), Date(1), Place(1), Labels(1), Albums(1), Categories(1), Rename(1), All(1), Private(2),
 }
 
 /** The file a details page belongs to, stable across the item a write refreshes. */
@@ -744,7 +743,7 @@ private fun DetailsSummaryCard(
     onRename: (() -> Unit)?,
     onAllDetails: () -> Unit,
 ) {
-    val locale = Locale.getDefault()
+    val locale = LocalLocale.current.platformLocale
     val is24Hour = eu.akoos.photos.presentation.util.LocalIs24Hour.current
     val day = remember(dateMs, locale) {
         SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(locale, "dMMMMy"), locale).format(Date(dateMs))

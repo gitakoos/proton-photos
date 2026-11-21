@@ -127,3 +127,16 @@ data class PendingMetadataEditEntity(
         }
     }
 }
+
+/**
+ * The corrected copies [userId]'s queued edits sent to Drive whose original is still listed, so the queue
+ * cannot be emptied at sign-out without leaving each photo there twice. A copy whose original is gone has
+ * taken its place and stays. Pure.
+ */
+internal fun sentCopiesBesideOriginals(
+    rows: List<PendingMetadataEditEntity>,
+    userId: String,
+    listedOriginals: Set<String>,
+): List<String> = rows.mapNotNull { row ->
+    row.newLinkId?.takeIf { row.userId == userId && row.linkId in listedOriginals }
+}

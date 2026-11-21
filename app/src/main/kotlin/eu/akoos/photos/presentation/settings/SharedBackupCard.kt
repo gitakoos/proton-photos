@@ -40,11 +40,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -75,6 +77,7 @@ import eu.akoos.photos.data.mlsync.MlDriveStore
 import eu.akoos.photos.data.mlsync.MlSyncController
 import eu.akoos.photos.data.mlsync.MlSyncOperation
 import eu.akoos.photos.data.mlsync.MlSyncState
+import eu.akoos.photos.data.sharedbackup.DriveCopiesMemory
 import eu.akoos.photos.data.sharedbackup.DriveDeviceCopies
 import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
 import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
@@ -90,6 +93,7 @@ import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.SheetBg
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -101,6 +105,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import me.proton.core.accountmanager.domain.AccountManager
 
@@ -115,7 +120,24 @@ internal fun sharedBackupLine(running: Boolean, status: SharedBackupStatus): Sha
     else -> SharedBackupLine.LAST
 }
 
-/** The Drive backup card's automatic switch, its status, and the Back up now and Load from Drive rows. */
+/** How long reading the backups on Drive may take before the list stops waiting for it. */
+internal const val DRIVE_COPIES_READ_TIMEOUT_MS = 60_000L
+
+/**
+ * What the list of the backups on Drive shows once a read ended: the [fresh] list when it came, else the list [kept]
+ * from an earlier read in this app session, else the failure. Pure, so it is unit-tested.
+ */
+internal fun copiesAfterRead(
+    kept: List<DriveDeviceCopies>?,
+    fresh: List<DriveDeviceCopies>?,
+    ownDeviceId: String?,
+): SharedBackupViewModel.Copies = when {
+    fresh != null -> SharedBackupViewModel.Copies.Loaded(ownDeviceId, fresh)
+    kept != null -> SharedBackupViewModel.Copies.Loaded(ownDeviceId, kept)
+    else -> SharedBackupViewModel.Copies.Failed
+}
+
+/** The Drive backup card's switch, its sync status and the Sync now action, and the list of backups on Drive. */
 @HiltViewModel
 class SharedBackupViewModel @Inject constructor(
     private val store: SharedBackupStore,
@@ -123,6 +145,7 @@ class SharedBackupViewModel @Inject constructor(
     private val runner: SharedBackupRunner,
     private val driveStore: MlDriveStore,
     private val accountManager: AccountManager,
+    private val copiesMemory: DriveCopiesMemory,
     controller: MlSyncController,
 ) : ViewModel() {
 
@@ -136,20 +159,26 @@ class SharedBackupViewModel @Inject constructor(
         viewModelScope.launch { scheduler.setEnabled(enabled) }
     }
 
-    fun saveNow() {
+    /** One full round: takes in what the other devices saved, then saves this device's data. */
+    fun syncNow() {
         viewModelScope.launch { scheduler.saveNow() }
     }
 
-    fun loadNow() {
-        viewModelScope.launch { scheduler.loadNow() }
-    }
-
-    /** The list of the backups on Drive while its sheet is open: null closed. */
+    /**
+     * The list of the backups on Drive while its sheet is open: null closed. [Loaded.refreshing] while a list read
+     * earlier in this app session is shown and the list is being read again.
+     */
     internal sealed interface Copies {
         data object Loading : Copies
         data object Failed : Copies
-        data class Loaded(val ownDeviceId: String?, val devices: List<DriveDeviceCopies>) : Copies
+        data class Loaded(
+            val ownDeviceId: String?,
+            val devices: List<DriveDeviceCopies>,
+            val refreshing: Boolean = false,
+        ) : Copies
     }
+
+    private var readJob: Job? = null
 
     private val _copies = MutableStateFlow<Copies?>(null)
     internal val copies: StateFlow<Copies?> = _copies.asStateFlow()
@@ -159,10 +188,11 @@ class SharedBackupViewModel @Inject constructor(
 
     fun openCopies() {
         _copies.value = Copies.Loading
-        viewModelScope.launch { _copies.value = readCopies() }
+        readCopies(showKept = true)
     }
 
     fun closeCopies() {
+        readJob?.cancel()
         _copies.value = null
     }
 
@@ -175,29 +205,47 @@ class SharedBackupViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             if (userId != null && runner.trash(userId, device)) {
+                copiesMemory.drop(userId.id, device.deviceId)
                 (_copies.value as? Copies.Loaded)?.let { loaded ->
                     _copies.value = loaded.copy(devices = loaded.devices.filterNot { it.deviceId == device.deviceId })
                 }
             } else {
                 _trashFailed.tryEmit(Unit)
-                if (_copies.value != null) _copies.value = readCopies()
+                if (_copies.value != null) readCopies(showKept = false)
             }
         }
     }
 
-    private suspend fun readCopies(): Copies {
-        val userId = accountManager.getPrimaryUserId().first() ?: return Copies.Failed
-        val own = runCatching { driveStore.deviceId() }.getOrNull()
-        return runner.devices(userId)?.let { Copies.Loaded(own, it) } ?: Copies.Failed
+    /**
+     * Reads the list of the backups on Drive into the open sheet, for at most [DRIVE_COPIES_READ_TIMEOUT_MS]. With
+     * [showKept] the list read earlier in this app session shows meanwhile. A sheet closed during the read stays
+     * closed.
+     */
+    private fun readCopies(showKept: Boolean) {
+        readJob?.cancel()
+        readJob = viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first()
+            if (userId == null) {
+                if (_copies.value != null) _copies.value = Copies.Failed
+                return@launch
+            }
+            val own = runCatching { driveStore.deviceId() }.getOrNull()
+            val kept = copiesMemory.get(userId.id)
+            if (showKept && kept != null && _copies.value != null) _copies.value = Copies.Loaded(own, kept, refreshing = true)
+            val fresh = withTimeoutOrNull(DRIVE_COPIES_READ_TIMEOUT_MS) { runner.devices(userId) }
+            fresh?.let { copiesMemory.put(userId.id, it) }
+            if (_copies.value != null) _copies.value = copiesAfterRead(kept, fresh, own)
+        }
     }
 }
 
 /**
  * Backup to Proton Drive, on the second settings page: the one place the face and search data, the labels and the
- * hidden items are saved to Drive and loaded back. Automatic backup keeps them the same on every device; Back up now
- * saves at once, whether it is on or not, after taking in what the other devices saved; Load from Drive brings in
- * what the other devices saved. Under the card, the link for a face file an earlier version exported. The caller
- * shows it only to a signed-in account on a device the Drive client runs on.
+ * hidden items are saved to Drive and loaded back. One switch keeps them the same on every device, automatically.
+ * While it is on, a status row shows when the last sync ended, with a button that runs a round at once (takes in what
+ * the other devices saved, then saves). A row opens the list of backups on Drive. Under the card, the link for a face
+ * file an earlier version exported. The caller shows it only to a signed-in account on a device the Drive client runs
+ * on.
  */
 @Composable
 internal fun SharedBackupCard(
@@ -213,13 +261,13 @@ internal fun SharedBackupCard(
     Spacer(Modifier.height(8.dp))
     SettingsCard {
         ToggleRow(
-            label = stringResource(R.string.drive_backup_auto),
-            description = stringResource(R.string.drive_backup_auto_desc),
+            label = stringResource(R.string.drive_backup_switch_title),
+            description = stringResource(R.string.drive_backup_switch_desc),
             checked = state.status.enabled,
             onCheckedChange = { on -> if (on) askTurnOn = true else viewModel.setEnabled(false) },
         )
-        RowDivider()
-        run {
+        if (state.status.enabled) {
+            RowDivider()
             val line = when (sharedBackupLine(state.running, state.status)) {
                 SharedBackupLine.SYNCING -> stringResource(R.string.shared_backup_syncing)
                 SharedBackupLine.NEVER -> stringResource(R.string.shared_backup_never)
@@ -233,22 +281,24 @@ internal fun SharedBackupCard(
                     ),
                 )
             }
-            ActionRow(
-                label = stringResource(R.string.drive_backup_save_now),
-                description = line,
-                icon = Icons.Default.CloudUpload,
-                onClick = viewModel::saveNow,
-                enabled = !state.running,
-            )
+            val colors = AppColors.current
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Cloud, null, tint = colors.fgDim, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(14.dp))
+                Text(line, color = colors.fgMute, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = viewModel::syncNow, enabled = !state.running) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = stringResource(R.string.drive_backup_sync_now),
+                        tint = colors.fgDim,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
-        RowDivider()
-        ActionRow(
-            label = stringResource(R.string.drive_backup_load),
-            description = stringResource(R.string.drive_backup_load_desc),
-            icon = Icons.Default.CloudDownload,
-            onClick = viewModel::loadNow,
-            enabled = !state.running,
-        )
         RowDivider()
         ActionRow(
             label = stringResource(R.string.drive_copies_row),
@@ -351,13 +401,18 @@ private fun DriveCopiesSheet(
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
-            Text(
-                stringResource(R.string.drive_copies_row),
-                color = colors.fgPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 16.dp),
-            )
+            Row(modifier = Modifier.padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.drive_copies_row),
+                    color = colors.fgPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if ((copies as? SharedBackupViewModel.Copies.Loaded)?.refreshing == true) {
+                    Spacer(Modifier.width(10.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = colors.accent)
+                }
+            }
             when (copies) {
                 SharedBackupViewModel.Copies.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)

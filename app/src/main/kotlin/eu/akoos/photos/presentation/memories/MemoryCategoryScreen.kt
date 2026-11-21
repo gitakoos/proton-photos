@@ -99,15 +99,18 @@ fun MemoryCategoryScreen(
         when (category) {
             MemoryCategory.ON_THIS_DAY -> R.string.gallery_on_this_day
             MemoryCategory.SEASONS -> R.string.memories_seasons
+            MemoryCategory.THEMES -> R.string.memories_themes
         },
     )
     // The other categories, surfaced as a dropdown on the title pill for quick switching.
     val otdLabel = stringResource(R.string.gallery_on_this_day)
     val seasonsLabel = stringResource(R.string.memories_seasons)
+    val themesLabel = stringResource(R.string.memories_themes)
     val switchMenu = MemoryCategory.values().filter { it != category }.map { other ->
         val label = when (other) {
             MemoryCategory.ON_THIS_DAY -> otdLabel
             MemoryCategory.SEASONS -> seasonsLabel
+            MemoryCategory.THEMES -> themesLabel
         }
         label to { onSwitchCategory(other) }
     }
@@ -191,6 +194,17 @@ fun MemoryCategoryScreen(
                                 count = bucket.items.size,
                                 modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
                                 onClick = { onPhotoClick(bucket.items, 0) },
+                            )
+                        }
+                    }
+                    MemoryCategory.THEMES -> {
+                        items(state.themes, key = { "theme_${it.id}" }) { theme ->
+                            SeasonCard(
+                                coverItem = theme.cover,
+                                title = theme.title,
+                                count = theme.items.size,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                onClick = { onPhotoClick(theme.items, 0) },
                             )
                         }
                     }

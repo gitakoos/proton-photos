@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.db.dao
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -55,6 +56,8 @@ data class SyncStateLite(
     val localHash: String,
     val status: SyncStatus,
     val queued: Boolean,
+    /** What [cloudFileId] rests on, a [eu.akoos.photos.domain.entity.LinkBasis] value. */
+    val linkBasis: Int = 0,
 )
 
 @Dao
@@ -73,8 +76,14 @@ interface SyncStateDao {
      *  [eu.akoos.photos.data.repository.SyncStateSnapshot] decides when it runs, so a burst of writes
      *  costs one read instead of one per write. One transaction, like [observeAll]. */
     @Transaction
-    @Query("SELECT localUri, cloudFileId, localHash, status, queued FROM sync_state WHERE userId = :userId")
+    @Query("SELECT localUri, cloudFileId, localHash, status, queued, linkBasis FROM sync_state WHERE userId = :userId")
     suspend fun getAllLite(userId: String): List<SyncStateLite>
+
+    /** [userId]'s queued rows plus the rows of [localUris], every column, through the same userId index as
+     *  [observeAll] so they come in the same order. [localUris] must fit the SQL host-variable limit. */
+    @Transaction
+    @Query("SELECT * FROM sync_state WHERE userId = :userId AND (queued = 1 OR localUri IN (:localUris))")
+    suspend fun getQueuedOrIn(userId: String, localUris: List<String>): List<SyncStateEntity>
 
     /** Lean stream of local content hashes for the duplicate finder: two columns, blank hashes
      *  filtered out in SQL, so a 50k library does not materialise the full SyncState list just to build
@@ -105,6 +114,9 @@ interface SyncStateDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(entity: SyncStateEntity): Long
 
+    // Both domain-column updates keep originalHash only while the row keeps the same localHash and
+    // cloudFileId (SQLite reads the old row on the right-hand side), so a hash recorded for one backup
+    // never vouches for another; any other change of either clears it.
     @Query(
         """
         UPDATE sync_state SET
@@ -116,7 +128,10 @@ interface SyncStateDao {
             lastSyncAttemptMs = :lastSyncAttemptMs,
             lastSyncSuccessMs = :lastSyncSuccessMs,
             backedUpAtMs = :backedUpAtMs,
-            sizeBytes = :sizeBytes
+            sizeBytes = :sizeBytes,
+            linkBasis = :linkBasis,
+            originalHash = CASE WHEN localHash = :localHash AND cloudFileId IS :cloudFileId
+                THEN originalHash ELSE NULL END
         WHERE localUri = :localUri
         """
     )
@@ -131,6 +146,7 @@ interface SyncStateDao {
         lastSyncSuccessMs: Long?,
         backedUpAtMs: Long?,
         sizeBytes: Long,
+        linkBasis: Int,
     )
 
     /**
@@ -152,7 +168,10 @@ interface SyncStateDao {
             lastSyncAttemptMs = :lastSyncAttemptMs,
             lastSyncSuccessMs = :lastSyncSuccessMs,
             backedUpAtMs = :backedUpAtMs,
-            sizeBytes = :sizeBytes
+            sizeBytes = :sizeBytes,
+            linkBasis = :linkBasis,
+            originalHash = CASE WHEN localHash = :localHash AND cloudFileId IS :cloudFileId
+                THEN originalHash ELSE NULL END
         WHERE localUri = :localUri AND NOT (status = 'SYNCED' AND cloudFileId IS NOT NULL)
         """
     )
@@ -167,6 +186,7 @@ interface SyncStateDao {
         lastSyncSuccessMs: Long?,
         backedUpAtMs: Long?,
         sizeBytes: Long,
+        linkBasis: Int,
     ): Int
 
     @Transaction
@@ -184,9 +204,39 @@ interface SyncStateDao {
                 lastSyncSuccessMs = entity.lastSyncSuccessMs,
                 backedUpAtMs = entity.backedUpAtMs,
                 sizeBytes = entity.sizeBytes,
+                linkBasis = entity.linkBasis,
             )
         }
     }
+
+    /** Records [originalHash] (or clears it, when null) on [localUri]'s row; see [SyncStateEntity.originalHash]. */
+    @Query("UPDATE sync_state SET originalHash = :originalHash WHERE localUri = :localUri")
+    suspend fun setOriginalHash(localUri: String, originalHash: String?)
+
+    /**
+     * Records [after] as what [localUri]'s device file holds after this app rewrote it itself, on a row
+     * backed up and paired to Drive whose recorded bytes are [before] only; see
+     * [eu.akoos.photos.domain.repository.SyncStateRepository.recordOwnDeviceWrite].
+     */
+    @Query(
+        "UPDATE sync_state SET originalHash = :after WHERE localUri = :localUri AND status = 'SYNCED' " +
+            "AND cloudFileId IS NOT NULL AND backedUpAtMs IS NOT NULL " +
+            "AND (lower(localHash) = lower(:before) OR lower(originalHash) = lower(:before))"
+    )
+    suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String)
+
+    /**
+     * Records [after] as what [localUri]'s device file holds after this app rewrote it itself, on a row
+     * backed up and paired to Drive that recorded no device bytes and is still as it was read: its hash
+     * [localHash] and backup stamp [backedUpAtMs]; see
+     * [eu.akoos.photos.data.upload.OwnDeviceWriteRecorder].
+     */
+    @Query(
+        "UPDATE sync_state SET originalHash = :after WHERE localUri = :localUri AND status = 'SYNCED' " +
+            "AND cloudFileId IS NOT NULL AND backedUpAtMs = :backedUpAtMs AND localHash = :localHash " +
+            "AND (originalHash IS NULL OR originalHash = '')"
+    )
+    suspend fun recordOwnDeviceWriteOverRow(localUri: String, after: String, localHash: String, backedUpAtMs: Long)
 
     @Transaction
     suspend fun upsertAll(entities: List<SyncStateEntity>) {
@@ -210,15 +260,12 @@ interface SyncStateDao {
                 lastSyncSuccessMs = entity.lastSyncSuccessMs,
                 backedUpAtMs = entity.backedUpAtMs,
                 sizeBytes = entity.sizeBytes,
+                linkBasis = entity.linkBasis,
             )
             if (changed == 0) untouched += entity.localUri
         }
         return untouched
     }
-
-    /** [userId]'s rows still to back up. Every queue clean-up step of reconcile reads only these. */
-    @Query("SELECT * FROM sync_state WHERE userId = :userId AND status = 'LOCAL_ONLY'")
-    suspend fun getLocalOnly(userId: String): List<SyncStateEntity>
 
     @Query("SELECT * FROM sync_state WHERE localUri = :localUri LIMIT 1")
     suspend fun getByUri(localUri: String): SyncStateEntity?
@@ -284,7 +331,7 @@ interface SyncStateDao {
      *  the dead cloudFileId right away (no 15-minute grace-window wait). Re-adding the on-device copy
      *  to an album then uploads it fresh instead of trying to re-link the trashed id and doing nothing. */
     @Query(
-        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, queued = 0, " +
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, originalHash = NULL, queued = 0, " +
             "queueSource = 'REMOVED_FROM_DRIVE', queuedAt = NULL WHERE cloudFileId IN (:cloudFileIds) AND status = 'SYNCED'"
     )
     suspend fun demoteSyncedByCloudIds(cloudFileIds: List<String>)
@@ -294,9 +341,13 @@ interface SyncStateDao {
      * the id reconcile saw in its snapshot - returning the rows changed. A twin that genuinely
      * vanished still carries that id and is demoted (returns 1); a row an upload re-promoted in
      * between now carries a DIFFERENT id and is skipped (returns 0), so the newer pairing is not
-     * dropped. Same demotion write as [demoteSyncedByCloudIds]: status + cloudFileId only.
+     * dropped. Same demotion write as [demoteSyncedByCloudIds]: status + cloudFileId (and the
+     * original hash, which belonged to that pairing) only.
      */
-    @Query("UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL WHERE localUri = :localUri AND status = 'SYNCED' AND cloudFileId = :expectedCloudId")
+    @Query(
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, originalHash = NULL " +
+            "WHERE localUri = :localUri AND status = 'SYNCED' AND cloudFileId = :expectedCloudId"
+    )
     suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int
 
     // Only rows this app actually uploaded carry a backedUpAtMs, so requiring it non-null keeps
@@ -349,6 +400,18 @@ interface SyncStateDao {
     @Query("UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL WHERE localUri = :localUri")
     suspend fun clearQueuedForSynced(localUri: String)
 
+    /**
+     * Drops the upload a device photo was given only to join an album (`QueueSource.ALBUM_ADD`), for when it
+     * has no album left to join. The source is cleared with the flag, or reconcile would re-queue the row as a
+     * stranded intent; a photo whose folder is backed up is queued again by that folder's backup. Only a still
+     * pending LOCAL_ONLY row: an UPLOADING claim and a SYNCED row are left alone. Returns the rows changed.
+     */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL " +
+            "WHERE localUri = :localUri AND status = 'LOCAL_ONLY' AND queueSource = 'ALBUM_ADD'"
+    )
+    suspend fun clearAlbumAddIntent(localUri: String): Int
+
     /** Marks a device photo whose Drive copy is gone as removed from Drive on purpose, so the folder
      *  backup does not upload it again (see `QueueSource.REMOVED_FROM_DRIVE`). Only a LOCAL_ONLY row. */
     @Query(
@@ -356,6 +419,14 @@ interface SyncStateDao {
             "WHERE localUri = :localUri AND status = 'LOCAL_ONLY'"
     )
     suspend fun markRemovedFromDrive(localUri: String)
+
+    /** Takes a device file that cannot be backed up as it stands off the queue (see
+     *  `QueueSource.UNUPLOADABLE`), recording [at] as when that was found. Only a LOCAL_ONLY row. */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = 'UNUPLOADABLE', queuedAt = :at " +
+            "WHERE localUri = :localUri AND status = 'LOCAL_ONLY'"
+    )
+    suspend fun markUnuploadable(localUri: String, at: Long): Int
 
     /** [clearQueuedForSynced] for every uri in [localUris] in one statement, writing only a row that still
      *  carries some intent. The caller keeps the list within the host-variable limit. */
@@ -382,6 +453,21 @@ interface SyncStateDao {
             "WHERE queueSource = 'MANUAL' AND status NOT IN ('UPLOADING','SYNCED')"
     )
     suspend fun clearManualQueue(): Int
+
+    /**
+     * Takes the one "back up now" photo [localUri] the user cancelled off the queue and marks it
+     * `QueueSource.CANCELLED`, claimed (UPLOADING) or not, so nothing queues it again until the user asks:
+     * not the claim release, not a restart's claim recovery, not reconcile. A SYNCED row is left alone.
+     */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = 'CANCELLED' " +
+            "WHERE localUri = :localUri AND queueSource = 'MANUAL' AND status != 'SYNCED'"
+    )
+    suspend fun cancelManualFor(localUri: String): Int
+
+    /** Puts the `QueueSource.CANCELLED` mark back on [localUri] after a write that cleared the queue columns. */
+    @Query("UPDATE sync_state SET queued = 0, queueSource = 'CANCELLED' WHERE localUri = :localUri AND status != 'SYNCED'")
+    suspend fun keepCancelled(localUri: String): Int
 
     /** The reason a row was queued (a QueueSource constant), or null when it carries none. Read so a
      *  failure demotion can re-queue the row under its ORIGINAL source instead of guessing one. */
@@ -413,4 +499,68 @@ interface SyncStateDao {
     /** Wipe a user's sync-state on sign-out so a re-login starts from a clean local↔cloud pairing. */
     @Query("DELETE FROM sync_state WHERE userId = :userId")
     suspend fun deleteAll(userId: String)
+
+    /**
+     * Up to [limit] of [userId]'s rows at [status] whose rowid is above [afterRowId], in rowid order, each
+     * with its rowid. The order [observeAll] lists the rows in, read a page at a time: a walk passes the
+     * last rowid of a page on as the next [afterRowId]. The table is never written with REPLACE, so a
+     * row keeps its rowid for as long as it exists.
+     */
+    @Query(
+        "SELECT rowid AS pageKey, * FROM sync_state " +
+            "WHERE userId = :userId AND status = :status AND rowid > :afterRowId ORDER BY rowid LIMIT :limit"
+    )
+    suspend fun pageByStatus(userId: String, status: SyncStatus, afterRowId: Long, limit: Int): List<SyncStatePageRow>
+
+    /** Which of [cloudFileIds] a SYNCED row of [userId]'s is paired to. The caller keeps the list within the
+     *  host-variable limit. */
+    @Query(
+        "SELECT DISTINCT cloudFileId FROM sync_state " +
+            "WHERE userId = :userId AND status = 'SYNCED' AND cloudFileId IN (:cloudFileIds)"
+    )
+    suspend fun syncedCloudIdsAmong(userId: String, cloudFileIds: List<String>): List<String>
+
+    /** The SYNCED rows of [userId]'s paired to one of [cloudFileIds]: each device uri and its cloud id. The
+     *  caller keeps the list within the host-variable limit. */
+    @Query(
+        "SELECT localUri, cloudFileId FROM sync_state " +
+            "WHERE userId = :userId AND status = 'SYNCED' AND cloudFileId IN (:cloudFileIds)"
+    )
+    suspend fun syncedPairsForCloudIds(userId: String, cloudFileIds: List<String>): List<CloudPairRow>
+
+    /** Marks a link reconcile made by name ([eu.akoos.photos.domain.entity.LinkBasis.NAME]) proven, once the
+     *  device file was found to hold the Drive photo's bytes: records Drive's hash and the file's own SHA-1,
+     *  and stamps the backup when none was. Only while the row still links [cloudFileId] at SYNCED. */
+    @Query(
+        "UPDATE sync_state SET linkBasis = 0, cloudHash = :cloudHash, originalHash = :originalHash, " +
+            "backedUpAtMs = COALESCE(backedUpAtMs, :now) " +
+            "WHERE userId = :userId AND localUri = :localUri AND cloudFileId = :cloudFileId " +
+            "AND status = 'SYNCED' AND linkBasis = 1"
+    )
+    suspend fun markLinkProven(
+        userId: String,
+        localUri: String,
+        cloudFileId: String,
+        cloudHash: String,
+        originalHash: String,
+        now: Long,
+    ): Int
+
+    /** Drops a link made by name ([eu.akoos.photos.domain.entity.LinkBasis.NAME]) once the device file was
+     *  found to hold other bytes than the Drive photo: the row goes back to LOCAL_ONLY with no cloud id, so
+     *  the file is backed up as a photo of its own. Only while the row still links [cloudFileId] at SYNCED
+     *  by name. */
+    @Query(
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, cloudHash = NULL, originalHash = NULL, " +
+            "backedUpAtMs = NULL, linkBasis = 0 " +
+            "WHERE userId = :userId AND localUri = :localUri AND cloudFileId = :cloudFileId " +
+            "AND status = 'SYNCED' AND linkBasis = 1"
+    )
+    suspend fun unlinkNameLink(userId: String, localUri: String, cloudFileId: String): Int
 }
+
+/** A row of a [SyncStateDao.pageByStatus] page and its rowid, the key the next page starts after. */
+data class SyncStatePageRow(
+    @Embedded val row: SyncStateEntity,
+    val pageKey: Long,
+)

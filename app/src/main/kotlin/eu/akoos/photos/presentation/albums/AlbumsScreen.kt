@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.albums
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -118,6 +119,7 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ScrollScrubber
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -540,6 +542,7 @@ fun AlbumsScreen(
     // matching album keeps its sorted slot; the fold is accent-insensitive, the rule search uses.
     val foldedQuery = SearchFilter.fold(query.trim())
     val searching = foldedQuery.isNotEmpty()
+    val peopleVisible by viewModel.peopleVisible.collectAsStateWithLifecycle()
     val collectionCardShown = !pickMode && albumsCollectionCardShown(showCollection, searching, displayFilter)
     // Where the cloud cards begin in the grid. Read through state, since the drag handlers outlive
     // the composition that built them: an arrangement opened from a search result is built on a grid
@@ -735,7 +738,7 @@ fun AlbumsScreen(
     ) {
         PullToRefreshBox(
             isRefreshing = state.isLoading,
-            onRefresh = { viewModel.refresh() },
+            onRefresh = { viewModel.pullRefresh() },
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize(),
             indicator = {},
@@ -827,6 +830,7 @@ fun AlbumsScreen(
                             item(key = "library_views", span = { GridItemSpan(maxLineSpan) }) {
                                 LibraryViewsRow(
                                     padded = listView,
+                                    peopleVisible = peopleVisible,
                                     onMemoriesClick = onMemoriesClick,
                                     onMapClick = onMapClick,
                                     onCalendarClick = onCalendarClick,
@@ -906,8 +910,8 @@ fun AlbumsScreen(
                                 gridContent.deviceFolders,
                                 key = { "devfolder_${it.name}" },
                             ) { folder ->
-                                val metaText = pluralStringResource(
-                                    R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+                                val metaText = photoVideoCountText(
+                                    folder.itemCount - folder.videoCount, folder.videoCount,
                                 )
                                 if (listView) {
                                     UnifiedAlbumRow(
@@ -994,8 +998,7 @@ fun AlbumsScreen(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 96.dp),
+                .snackbarAboveBars(96.dp),
         )
     }
 
@@ -1108,7 +1111,7 @@ fun AlbumsScreen(
             sheetState = cloudAlbumSheetState,
             sortMode = state.viewChoices.sortOfAlbum(album.linkId),
             grouping = state.viewChoices.groupingOfAlbum(album.linkId),
-            isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
+            isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId, state.timelineHideAll),
             isExcludedFromGrid = excludedFromGrid,
             onDismiss = { cloudAlbumSheetFor = null },
             onShare = { onAlbumShareClick(album) },
@@ -1504,6 +1507,7 @@ private fun CloudAlbumRow(
 @Composable
 private fun LibraryViewsRow(
     padded: Boolean,
+    peopleVisible: Boolean,
     onMemoriesClick: () -> Unit,
     onMapClick: () -> Unit,
     onCalendarClick: () -> Unit,
@@ -1514,20 +1518,16 @@ private fun LibraryViewsRow(
     onHiddenClick: (() -> Unit)?,
 ) {
     val context = LocalContext.current
-    // People needs face grouping switched on, the same gate the category bar's People chip uses.
-    val faceEnabled by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.FACE_ENABLED] ?: false }
-    }.collectAsState(initial = false)
     val savedOrder by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_ORDER] }
     }.collectAsState(initial = null)
     val hidden by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet() }
     }.collectAsState(initial = emptySet())
-    val tiles = remember(savedOrder, hidden, faceEnabled, onPeopleClick, onOfflineClick, onSharedClick, onHiddenClick) {
+    val tiles = remember(savedOrder, hidden, peopleVisible, onPeopleClick, onOfflineClick, onSharedClick, onHiddenClick) {
         resolveTileOrder(savedOrder).filter { tile ->
             tile.name !in hidden && when (tile) {
-                LibraryTile.People -> faceEnabled && onPeopleClick != null
+                LibraryTile.People -> peopleVisible && onPeopleClick != null
                 LibraryTile.Offline -> onOfflineClick != null
                 LibraryTile.Shared -> onSharedClick != null
                 LibraryTile.Hidden -> onHiddenClick != null

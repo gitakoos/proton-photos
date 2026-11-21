@@ -38,6 +38,8 @@ data class VaultRecords(
     val folders: Set<String>,
     val cloudIds: Set<String>,
     val carried: Set<String> = emptySet(),
+    /** Plain vault uris whose file was changed after the hide, so its recorded Drive copy is out of date. */
+    val edited: Set<String> = emptySet(),
 )
 
 /**
@@ -106,6 +108,7 @@ object HiddenVaultRecords {
         folders = records.folders.rekeyed(oldUri, newUri),
         cloudIds = records.cloudIds.rekeyed(oldUri, newUri),
         carried = records.carried.rekeyed(oldUri, newUri),
+        edited = if (oldUri in records.edited) records.edited - oldUri + newUri else records.edited,
     )
 
     /**
@@ -135,6 +138,7 @@ object HiddenVaultRecords {
             .map { "$copyUri|${it.substringAfter('|')}" },
         cloudIds = records.cloudIds,
         carried = records.carried,
+        edited = records.edited,
     )
 
     /**

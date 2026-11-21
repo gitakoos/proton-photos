@@ -742,37 +742,246 @@ class HiddenVaultDecisionsTest {
     }
 
     @Test
-    fun `an involuntary sign-out saves every vault file that has no Drive copy`() {
-        val saved = HiddenVaultDecisions.deviceOnlyVaultUris(
+    fun `a sign-out saves every vault file that has no Drive copy`() {
+        val plan = HiddenVaultDecisions.signOutPlan(
             blobUris = setOf("file:///v/c", "file:///v/a", "file:///v/b"),
-            pairedUris = setOf("file:///v/b"),
+            cloudIdByUri = mapOf("file:///v/b" to "L-b"),
+            liveCloudIds = setOf("L-b"),
+            busy = emptySet(),
         )
 
-        assertEquals(listOf("file:///v/a", "file:///v/c"), saved)
+        assertEquals(listOf("file:///v/a", "file:///v/c"), plan.rescue)
+        assertEquals(setOf("file:///v/b"), plan.inDrive)
+        assertTrue(plan.unconfirmedInDrive.isEmpty())
     }
 
     @Test
-    fun `a vault of nothing but backed-up photos has nothing to save`() {
-        val saved = HiddenVaultDecisions.deviceOnlyVaultUris(
-            blobUris = setOf("file:///v/a", "file:///v/b"),
-            pairedUris = setOf("file:///v/a", "file:///v/b", "file:///v/gone"),
+    fun `a vault photo edited after its hide is saved at sign-out as the only copy of what it holds`() {
+        // Drive holds the version from before the edit, so its copy no longer stands in for this file.
+        val cloudIds = mapOf("file:///v/edited" to "L-e", "file:///v/kept" to "L-k")
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = setOf("file:///v/edited", "file:///v/kept"),
+            cloudIdByUri = HiddenVaultDecisions.driveBacked(cloudIds, edited = setOf("file:///v/edited")),
+            liveCloudIds = setOf("L-e", "L-k"),
+            busy = emptySet(),
         )
 
-        assertTrue(saved.isEmpty())
+        assertEquals(listOf("file:///v/edited"), plan.rescue)
+        assertEquals(setOf("file:///v/kept"), plan.inDrive)
+    }
+
+    @Test
+    fun `an edited vault photo is not counted as recoverable from Drive`() {
+        assertEquals(
+            setOf("file:///v/kept"),
+            HiddenVaultDecisions.driveBackedUris(setOf("file:///v/edited", "file:///v/kept"), setOf("file:///v/edited")),
+        )
+        assertEquals(mapOf("file:///v/a" to "L-a"), HiddenVaultDecisions.driveBacked(mapOf("file:///v/a" to "L-a"), emptySet()))
+    }
+
+    @Test
+    fun `a vault of nothing but confirmed Drive photos has nothing to save`() {
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = setOf("file:///v/a", "file:///v/b"),
+            cloudIdByUri = mapOf("file:///v/a" to "L-a", "file:///v/b" to "L-b", "file:///v/gone" to "L-g"),
+            liveCloudIds = setOf("L-a", "L-b", "L-g"),
+            busy = emptySet(),
+        )
+
+        assertTrue(plan.rescue.isEmpty())
+        assertEquals(setOf("file:///v/a", "file:///v/b"), plan.inDrive)
+    }
+
+    @Test
+    fun `a Drive copy recorded at hide time but not confirmed now stays in the vault, out of the gallery`() {
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = setOf("file:///v/trashed", "file:///v/live"),
+            cloudIdByUri = mapOf("file:///v/trashed" to "L-t", "file:///v/live" to "L-l"),
+            liveCloudIds = setOf("L-l"),
+            busy = emptySet(),
+        )
+
+        assertTrue("a Drive photo never goes to the gallery or a zip", plan.rescue.isEmpty())
+        assertEquals(setOf("file:///v/live"), plan.inDrive)
+        assertEquals(setOf("file:///v/trashed"), plan.unconfirmedInDrive)
+    }
+
+    @Test
+    fun `a session that cannot answer keeps every recorded Drive photo in the vault`() {
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = setOf("file:///v/a", "file:///v/b"),
+            cloudIdByUri = mapOf("file:///v/a" to "L-a", "file:///v/b" to "L-b"),
+            liveCloudIds = emptySet(),
+            busy = emptySet(),
+        )
+
+        assertTrue(plan.rescue.isEmpty())
+        assertTrue("nothing may be destroyed on a record alone", plan.inDrive.isEmpty())
+        assertEquals(setOf("file:///v/a", "file:///v/b"), plan.unconfirmedInDrive)
+    }
+
+    @Test
+    fun `a file a hide is still moving is neither saved nor offered to the wipe`() {
+        val plan = HiddenVaultDecisions.signOutPlan(
+            blobUris = setOf("file:///v/settled", "file:///v/moving", "file:///v/moving-paired"),
+            cloudIdByUri = mapOf("file:///v/moving-paired" to "L-m"),
+            liveCloudIds = setOf("L-m"),
+            busy = setOf("file:///v/moving", "file:///v/moving-paired"),
+        )
+
+        assertEquals(listOf("file:///v/settled"), plan.rescue)
+        assertTrue(plan.inDrive.isEmpty())
+        assertTrue(plan.unconfirmedInDrive.isEmpty())
     }
 
     @Test
     fun `a vault file no record names is saved, since nothing says Drive holds it`() {
-        val saved = HiddenVaultDecisions.deviceOnlyVaultUris(
+        val plan = HiddenVaultDecisions.signOutPlan(
             blobUris = setOf("file:///v/unnamed"),
-            pairedUris = emptySet(),
+            cloudIdByUri = emptyMap(),
+            liveCloudIds = setOf("L-x"),
+            busy = emptySet(),
         )
 
-        assertEquals(listOf("file:///v/unnamed"), saved)
+        assertEquals(listOf("file:///v/unnamed"), plan.rescue)
     }
 
     @Test
     fun `an empty vault has nothing to save`() {
-        assertTrue(HiddenVaultDecisions.deviceOnlyVaultUris(emptySet(), setOf("file:///v/a")).isEmpty())
+        val plan = HiddenVaultDecisions.signOutPlan(emptySet(), mapOf("file:///v/a" to "L-a"), setOf("L-a"), emptySet())
+        assertTrue(plan.rescue.isEmpty())
+        assertTrue(plan.inDrive.isEmpty())
+    }
+
+    @Test
+    fun `only an active link state confirms a Drive copy`() {
+        val live = HiddenVaultDecisions.liveCloudIds(mapOf("active" to 1, "trashed" to 2, "unknown" to null, "draft" to 0))
+        assertEquals(setOf("active"), live)
+    }
+
+    @Test
+    fun `the recorded pairings read into a map and a blank link id names no Drive copy`() {
+        val map = HiddenVaultDecisions.cloudIdsByUri(setOf("file:///v/a|L-a", "file:///v/b|", "file:///v/c"))
+        assertEquals(mapOf("file:///v/a" to "L-a"), map)
+    }
+
+    @Test
+    fun `a confirmed delete destroys only what the confirmation counted and is still on disk`() {
+        val plan = HiddenVaultDecisions.userDeletePlan(
+            confirmed = setOf("file:///v/a", "file:///v/b", "file:///v/gone"),
+            blobUris = setOf("file:///v/a", "file:///v/b", "file:///v/late"),
+            cloudIdByUri = emptyMap(),
+            liveCloudIds = emptySet(),
+            busy = emptySet(),
+        )
+
+        assertEquals("a photo hidden after the confirmation is never destroyed", setOf("file:///v/a", "file:///v/b"), plan.delete)
+        assertTrue(plan.unconfirmedInDrive.isEmpty())
+    }
+
+    @Test
+    fun `a confirmed delete keeps a photo whose Drive copy Drive cannot confirm`() {
+        val plan = HiddenVaultDecisions.userDeletePlan(
+            confirmed = setOf("file:///v/device", "file:///v/live", "file:///v/trashed"),
+            blobUris = setOf("file:///v/device", "file:///v/live", "file:///v/trashed"),
+            cloudIdByUri = mapOf("file:///v/live" to "L-l", "file:///v/trashed" to "L-t"),
+            liveCloudIds = setOf("L-l"),
+            busy = emptySet(),
+        )
+
+        assertEquals(setOf("file:///v/device", "file:///v/live"), plan.delete)
+        assertEquals(setOf("file:///v/trashed"), plan.unconfirmedInDrive)
+    }
+
+    @Test
+    fun `a confirmed delete never destroys a file a hide is still moving`() {
+        val plan = HiddenVaultDecisions.userDeletePlan(
+            confirmed = setOf("file:///v/a", "file:///v/moving"),
+            blobUris = setOf("file:///v/a", "file:///v/moving"),
+            cloudIdByUri = emptyMap(),
+            liveCloudIds = emptySet(),
+            busy = setOf("file:///v/moving"),
+        )
+
+        assertEquals(setOf("file:///v/a"), plan.delete)
+    }
+
+    @Test
+    fun `a restored row counts as published only when the flag is proven clear`() {
+        assertTrue(HiddenVaultDecisions.restorePublished(updatedRows = 1, pendingAfter = null))
+        assertTrue("an update that reported nothing, yet the flag reads clear", HiddenVaultDecisions.restorePublished(0, 0))
+        assertFalse(HiddenVaultDecisions.restorePublished(0, 1))
+        assertFalse("an unreadable flag is not proof", HiddenVaultDecisions.restorePublished(0, null))
+    }
+
+    @Test
+    fun `a rebuilt database gets a hidden row back for every backed-up photo the vault still holds`() {
+        val rows = HiddenVaultDecisions.rowsToReseed(
+            vaultCloudIds = setOf("file:///v/a|L1", "file:///v/b|L2", "file:///v/gone|L3", "file:///v/c|"),
+            blobExists = { it != "file:///v/gone" },
+            alreadyHidden = setOf("L2"),
+        )
+
+        assertEquals(listOf("file:///v/a" to "L1"), rows)
+    }
+
+    @Test
+    fun `one Drive copy named twice by the vault gets one hidden row`() {
+        val rows = HiddenVaultDecisions.rowsToReseed(
+            vaultCloudIds = setOf("file:///v/a|L1", "file:///v/b|L1"),
+            blobExists = { true },
+            alreadyHidden = emptySet(),
+        )
+
+        assertEquals(1, rows.size)
+    }
+
+    @Test
+    fun `an unhide brings one copy back and drops the other copies of the same photo`() {
+        val copies = HiddenVaultDecisions.revealCopies(
+            listOf("v/b", "v/a", "v/c"),
+            published = setOf("v/c"),
+            busy = setOf("v/b"),
+        )
+
+        // The published copy goes back; the copy a running hide holds is left to that hide.
+        assertEquals("v/c", copies.restore)
+        assertEquals(listOf("v/a"), copies.extras)
+    }
+
+    @Test
+    fun `an unhide with nothing it may touch restores nothing`() {
+        val copies = HiddenVaultDecisions.revealCopies(listOf("v/a"), published = setOf("v/a"), busy = setOf("v/a"))
+
+        assertNull(copies.restore)
+        assertTrue(copies.extras.isEmpty())
+    }
+
+    @Test
+    fun `a pending copy is taken over only while its file is still in the vault`() {
+        val journal = mapOf("v/2" to "src/1", "v/1" to "src/1", "v/3" to "src/3", "v/4" to "src/4")
+
+        val reuse = HiddenVaultDecisions.pendingCopyBySource(journal, blobs = setOf("v/1", "v/2", "v/4"), sources = setOf("src/1", "src/3"))
+
+        assertEquals(mapOf("src/1" to "v/1"), reuse)
+    }
+
+    @Test
+    fun `a declined hide drops a copy only while its original is on the device`() {
+        val journal = mapOf("v/here" to "src/here", "v/gone" to "src/gone", "v/unknown" to "src/unknown")
+        val exists = mapOf("src/here" to true, "src/gone" to false)
+
+        val split = HiddenVaultDecisions.undoSplit(listOf("v/here", "v/gone", "v/unknown", "v/norecord"), journal) { exists[it] }
+
+        assertEquals(listOf("v/here"), split.drop)
+        assertEquals(listOf("v/gone"), split.publish)
+        assertEquals(listOf("v/unknown", "v/norecord"), split.keep)
+    }
+
+    @Test
+    fun `only published vault copies count as a photo the vault already holds`() {
+        val links = HiddenVaultDecisions.vaultedLinks(setOf("v/a|L1", "v/b|L2", "v/c|"), published = setOf("v/a", "v/c"))
+
+        assertEquals(setOf("L1"), links)
     }
 }

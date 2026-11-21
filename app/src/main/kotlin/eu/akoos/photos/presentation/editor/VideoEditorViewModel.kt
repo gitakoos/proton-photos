@@ -813,7 +813,7 @@ class VideoEditorViewModel @Inject constructor(
             // Pull duration + rotation (for the additive rotate) via MediaMetadataRetriever.
             val retriever = MediaMetadataRetriever()
             val result = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
                 val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
@@ -911,7 +911,7 @@ class VideoEditorViewModel @Inject constructor(
             }
             val retriever = MediaMetadataRetriever()
             val result = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                     ?.toLongOrNull() ?: 0L
                 val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
@@ -1022,10 +1022,10 @@ class VideoEditorViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val parsed = Uri.fromFile(file)
+            val parsed = file.fileUri
             val retriever = MediaMetadataRetriever()
             val meta = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 VideoMeta(
                     duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                         ?.toLongOrNull() ?: 0L,
@@ -1257,7 +1257,7 @@ class VideoEditorViewModel @Inject constructor(
                 }
                 val retriever = MediaMetadataRetriever()
                 val m = runCatching {
-                    retriever.setDataSource(context, parsed)
+                    retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                     VideoMeta(
                         duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
                         rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0,
@@ -1318,7 +1318,7 @@ class VideoEditorViewModel @Inject constructor(
                 }
                 return@launch
             }
-            addVideoSource(Uri.fromFile(file).toString(), photo.displayName, galleryKey = photo.linkId)
+            addVideoSource(file.fileUri.toString(), photo.displayName, galleryKey = photo.linkId)
         }
     }
 
@@ -1461,7 +1461,7 @@ class VideoEditorViewModel @Inject constructor(
             val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return@launch
             val retriever = MediaMetadataRetriever()
             val duration = runCatching {
-                retriever.setDataSource(context, parsed)
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, parsed))
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             }.getOrDefault(0L)
             runCatching { retriever.release() }
@@ -1649,7 +1649,7 @@ class VideoEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val retriever = MediaMetadataRetriever()
             val result: FrameGrabResult = try {
-                retriever.setDataSource(context, Uri.parse(sourceUriStr))
+                retriever.setDataSource(context, eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(sourceUriStr)))
                 val bitmap = retriever.getFrameAtTime(
                     positionUs.coerceAtLeast(0L),
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
@@ -1858,7 +1858,8 @@ class VideoEditorViewModel @Inject constructor(
                         val uploadUri = Uri.fromFile(cloudTempFile).toString()
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(uploadUri))
                         try {
-                            uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudCaptureMs, cloudTempFile, userId)
+                            val newLinkId = uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudCaptureMs, cloudTempFile, userId)
+                            EditorSavedCopies.record(setOf(cloudPhoto.linkId), newLinkId, copyIsLocal = false)
                             transferCenter.progress(tid, 1)
                             transferCenter.log(
                                 TransferCenter.Kind.UPLOAD, count = 1,
@@ -1870,12 +1871,13 @@ class VideoEditorViewModel @Inject constructor(
                             if (t is kotlinx.coroutines.CancellationException) throw t
                             // The edit exists nowhere else, so the muxed copy goes into the gallery, where
                             // the normal backup uploads it, and the user is told either way.
-                            val kept = runCatching {
+                            val keptUri = runCatching {
                                 withContext(Dispatchers.IO) {
-                                    insertReencodedCopy(cloudTempFile, cloudPhoto.displayName, s.mimeType, editTimestampMs) != null
+                                    insertReencodedCopy(cloudTempFile, cloudPhoto.displayName, s.mimeType, editTimestampMs)
                                 }
-                            }.getOrDefault(false)
-                            editUploadNotifier.notifyFailed(kept)
+                            }.getOrNull()
+                            keptUri?.let { recordDeviceEditCopy(context.contentResolver, setOf(cloudPhoto.linkId), it) }
+                            editUploadNotifier.notifyFailed(keptUri != null)
                         } finally {
                             transferCenter.finish(tid)
                             cloudTempFile.delete()
@@ -2010,6 +2012,9 @@ class VideoEditorViewModel @Inject constructor(
                 // returned above, so anything here is a device-backed save with a real URI.
                 if (savedUri != null) {
                     invalidateImageCache(savedUri)
+                    if (s.source !is VideoEditorSource.External) {
+                        recordDeviceEditCopy(context.contentResolver, setOfNotNull(s.sourceUri, counterpart?.linkId), savedUri)
+                    }
                 }
                 result
             } catch (e: Exception) {
@@ -2088,8 +2093,10 @@ class VideoEditorViewModel @Inject constructor(
         val multiWindow = windows.size > 1
         val keptWindowsUs = windows.map { it.startMs * 1000L..it.endMs * 1000L }
         val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
+        // Only the re-encodes read it here; the trim path reads its own.
+        val location = if (needsReencode) eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUri.toString()) else null
         when {
-            needsReencode && (needsGl || multiWindow) -> {
+            needsReencode && reencodeRendersFrames(needsGl, multiWindow) { streamCopyStartsOnTime(sourceUri, windows) } -> {
                 val crop = cropInSourcePixels(s)
                 VideoReencoder(context).transcode(
                     sourceUri = sourceUri,
@@ -2111,6 +2118,7 @@ class VideoEditorViewModel @Inject constructor(
                     keptWindowsUs = keptWindowsUs,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                     isActive = { isActive },
+                    location = location,
                 )
             }
             needsReencode -> {
@@ -2128,6 +2136,7 @@ class VideoEditorViewModel @Inject constructor(
                     musicAudioGain = s.musicAudioGain,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                     isActive = { isActive },
+                    location = location,
                 )
             }
             else -> muxTrimmedOrReencode(
@@ -2211,9 +2220,7 @@ class VideoEditorViewModel @Inject constructor(
             // The stripped copy is throwaway; the caller-owned [tempFile] must survive for the device row.
             if (uploadFile !== tempFile) uploadFile.delete()
         }
-        sourceCloudAlbumLinkId?.let { albumId ->
-            runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-        }
+        sourceCloudAlbumLinkId?.let { albumId -> addCopyToSourceAlbum(userId, albumId, newLinkId) }
         newLinkId
     }
 
@@ -2257,6 +2264,7 @@ class VideoEditorViewModel @Inject constructor(
         if (needsReencode) {
             val crop = cropInSourcePixels(s)
             val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
+            val location = eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUriStr)
             VideoReencoder(context).transcode(
                 sourceUri = sourceUri,
                 outputFile = tempFile,
@@ -2277,6 +2285,7 @@ class VideoEditorViewModel @Inject constructor(
                 keptWindowsUs = s.exportWindows().map { it.startMs * 1000L..it.endMs * 1000L },
                 onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                 isActive = { isActive },
+                location = location,
             )
         } else {
             muxTrimmedOrReencode(
@@ -2294,6 +2303,13 @@ class VideoEditorViewModel @Inject constructor(
             )
         }
         tempFile
+    }
+
+    /** Puts the edited copy into the album the video was edited from, and tells the user when it stays out. */
+    private suspend fun addCopyToSourceAlbum(userId: me.proton.core.domain.entity.UserId, albumId: String, linkId: String) {
+        val outcome = runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(linkId)) }
+        if (outcome.exceptionOrNull() is kotlinx.coroutines.CancellationException) return
+        if (!albumAddSucceeded(outcome, linkId)) editUploadNotifier.notifyAlbumAddFailed()
     }
 
     /**
@@ -2337,9 +2353,7 @@ class VideoEditorViewModel @Inject constructor(
             // The stripped copy is throwaway; the caller-owned [tempFile] must survive for its own cleanup.
             if (uploadFile !== tempFile) uploadFile.delete()
         }
-        sourceCloudAlbumLinkId?.let { albumId ->
-            runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-        }
+        sourceCloudAlbumLinkId?.let { albumId -> addCopyToSourceAlbum(userId, albumId, newLinkId) }
         newLinkId
     }
 
@@ -2347,16 +2361,10 @@ class VideoEditorViewModel @Inject constructor(
      * Hex-encodes the SHA-1 of the file's plaintext bytes. The upload pipeline
      * feeds this into `Common.Digests.SHA1` of the encrypted xAttr blob AND into
      * the `HMAC-SHA256(rootNodeHashKey, ...)` that produces the wire ContentHash.
-     * See `PhotoEditorViewModel.sha1` for the cross-client rationale.
+     * See `finishEditFile` for the cross-client rationale.
      */
     private fun sha1(file: File): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-1")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
     }
 
     /** Original stream-copy save path — fast, no decode/encode. Used when only trim
@@ -2444,6 +2452,7 @@ class VideoEditorViewModel @Inject constructor(
         try {
             val crop = cropInSourcePixels(s)
             val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
+            val location = eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUriStr)
             VideoReencoder(context).transcode(
                 sourceUri = sourceUri,
                 outputFile = tempFile,
@@ -2466,6 +2475,7 @@ class VideoEditorViewModel @Inject constructor(
                     _state.update { it.copy(saveProgress = p) }
                 },
                 isActive = { isActive },
+                location = location,
             )
             // The encoder stamps its own run time into the output's mvhd, which is the box MediaStore
             // derives DATE_TAKEN from on scan, so the source's capture instant goes back in before the
@@ -2579,13 +2589,17 @@ class VideoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Trims via the lossless stream-copy muxer, falling back to a re-encode when the muxer rejects the
-     * stream. Some sources (B-frame HEVC clips are the common case) hand the platform MP4 muxer a
-     * non-monotonic decode-order timeline it refuses to write; on any failure the partial output is
-     * deleted and the same kept [windows] are re-encoded through [VideoReencoder.transcode], which lays
-     * down a clean keyframe-led timeline. The lossless path stays first; only a thrown error re-encodes.
+     * Trims the kept [windows] from their exact in-points. When every in-point sits on a keyframe the
+     * lossless stream-copy muxer writes them. Otherwise a stream copy would start at the keyframe before
+     * the in-point, up to a whole keyframe interval early, so [exportExactTrim] clips at the in-point and
+     * re-encodes only the frames ahead of the next keyframe.
+     *
+     * Any failure re-encodes the same windows through [VideoReencoder.transcode], which renders only the
+     * frames inside them. Some sources (B-frame HEVC clips are the common case) hand the platform MP4
+     * muxer a non-monotonic decode-order timeline it refuses to write, which ends up there too. Every
+     * path writes the source's location into the output.
      */
-    private fun muxTrimmedOrReencode(
+    private suspend fun muxTrimmedOrReencode(
         s: VideoEditorUiState,
         sourceUri: Uri,
         outputFile: File,
@@ -2595,17 +2609,33 @@ class VideoEditorViewModel @Inject constructor(
         onProgress: (Float) -> Unit,
         isActive: () -> Boolean,
     ) {
+        val location = eu.akoos.photos.util.VideoLocationMetadata.read(context, sourceUri.toString())
         try {
-            muxTrimmed(
-                sourceUri = sourceUri,
-                outputFile = outputFile,
-                windows = windows,
-                orientationDegrees = finalRotation,
-                stripAudio = stripAudio,
-            )
+            if (windows.isNotEmpty() && !streamCopyStartsOnTime(sourceUri, windows)) {
+                exportExactTrim(
+                    context = context,
+                    sourceUri = eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri),
+                    outputFile = outputFile,
+                    windows = windows,
+                    // The user's turn on top of the source's own rotation, which the export keeps.
+                    rotationDeltaDegrees = normalizedRotation(finalRotation, -sourceRotationDegrees),
+                    removeAudio = stripAudio,
+                    location = location,
+                    onProgress = onProgress,
+                )
+            } else {
+                muxTrimmed(
+                    sourceUri = sourceUri,
+                    outputFile = outputFile,
+                    windows = windows,
+                    orientationDegrees = finalRotation,
+                    stripAudio = stripAudio,
+                    location = location,
+                )
+            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(TAG, "Stream-copy trim rejected by the muxer; re-encoding instead", e)
+            Log.w(TAG, "Trim export failed; re-encoding instead", e)
             outputFile.delete()
             val crop = cropInSourcePixels(s)
             val (musicStartUs, musicEndUs) = s.effectiveAudioTrimUs()
@@ -2629,9 +2659,35 @@ class VideoEditorViewModel @Inject constructor(
                 keptWindowsUs = windows.map { it.startMs * 1000L..it.endMs * 1000L },
                 onProgress = onProgress,
                 isActive = isActive,
+                location = location,
             )
         }
     }
+
+    /**
+     * Whether a stream copy of [windows] starts each one where the user asked, i.e. every in-point lies
+     * within one frame after the keyframe a copy has to begin at ([streamCopyStartsOnTime]). True when
+     * the source cannot be probed, so the lossless copy (and its own fallback) runs as before.
+     */
+    private fun streamCopyStartsOnTime(sourceUri: Uri, windows: List<VideoSegment>): Boolean = runCatching {
+        context.contentResolver.openFileDescriptor(
+            eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r",
+        )?.use { pfd ->
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(pfd.fileDescriptor)
+                val inPointsUs = windows.map { it.startMs * 1000L }
+                val allTracks = IntArray(extractor.trackCount) { it }
+                streamCopyStartsOnTime(
+                    inPointsUs = inPointsUs,
+                    keyframeStartsUs = keyframeStartsUs(extractor, allTracks, inPointsUs),
+                    frameUs = frameDurationUs(videoFrameRate(extractor)),
+                )
+            } finally {
+                extractor.release()
+            }
+        } ?: true
+    }.getOrDefault(true)
 
     /**
      * The core MediaExtractor + MediaMuxer stream-copy pipeline. Writes one or more kept [windows] of
@@ -2657,12 +2713,13 @@ class VideoEditorViewModel @Inject constructor(
         windows: List<VideoSegment>,
         orientationDegrees: Int,
         stripAudio: Boolean = false,
+        location: eu.akoos.photos.util.VideoLocation? = null,
     ) {
         var pfd: ParcelFileDescriptor? = null
         var extractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
         try {
-            pfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
+            pfd = context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, sourceUri), "r")
                 ?: error("Could not open source video for reading")
             extractor = MediaExtractor().apply {
                 setDataSource(pfd.fileDescriptor)
@@ -2696,6 +2753,7 @@ class VideoEditorViewModel @Inject constructor(
             if (maxBufferSize <= 0) maxBufferSize = 1 shl 20 // 1 MB fallback
 
             muxer.setOrientationHint(orientationDegrees)
+            writeMuxerLocation(muxer, location)
             muxer.start()
 
             var buffer = ByteBuffer.allocate(maxBufferSize)
@@ -2796,6 +2854,7 @@ class VideoEditorViewModel @Inject constructor(
             runCatching { extractor?.release() }
             runCatching { pfd?.close() }
         }
+        eu.akoos.photos.util.VideoLocationMetadata.carryOver(outputFile, location)
     }
 
     /**
@@ -2852,7 +2911,7 @@ class VideoEditorViewModel @Inject constructor(
                 if (uri.scheme == "file") {
                     uri.path?.let { File(it).length() } ?: 0L
                 } else {
-                    context.contentResolver.openFileDescriptor(uri, "r")
+                    context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri), "r")
                         ?.use { it.statSize.coerceAtLeast(0L) } ?: 0L
                 }
             }.getOrDefault(0L)
@@ -2883,7 +2942,7 @@ class VideoEditorViewModel @Inject constructor(
      *  through the descriptor the resolver hands out, because under scoped storage that is the only
      *  route to a MediaStore item's bytes. */
     private fun mvhdCaptureMs(uri: Uri): Long? = runCatching {
-        context.contentResolver.openFileDescriptor(uri, "r")?.use {
+        context.contentResolver.openFileDescriptor(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri), "r")?.use {
             eu.akoos.photos.util.Mp4CreationTime.read(it.fileDescriptor)
         }
     }.getOrNull()
@@ -2913,6 +2972,13 @@ class VideoEditorViewModel @Inject constructor(
                 // touching the device copy.
                 tempFile.inputStream().use { input -> out.outputStream().use { input.copyTo(it) } }
             }
+            if (stripGps && !remuxed && !eu.akoos.photos.util.Mp4LocationAtoms.erase(out)) {
+                // The edited copy carries the source's location, so a strip that fails both ways must not
+                // upload it. The callers then keep the edit on the device only, so it reaches Drive through
+                // the backup and that upload's own strip.
+                out.delete()
+                error("Location strip of the edited video failed")
+            }
             // Stamp the mvhd AFTER any remux (MediaMuxer resets the creation time): the ORIGINAL when only
             // GPS was stripped, or "now" when the timestamp is stripped.
             eu.akoos.photos.util.Mp4CreationTime.stamp(out, captureMs)
@@ -2941,10 +3007,16 @@ class VideoEditorViewModel @Inject constructor(
                 val ok = runCatching {
                     VideoMetadataStripper.remuxWithoutLocation(context, Uri.fromFile(file).toString(), tmp)
                 }.getOrDefault(false)
-                if (ok) {
-                    runCatching { tmp.inputStream().use { i -> file.outputStream().use { o -> i.copyTo(o) } } }
-                }
+                // A rename in the same directory replaces the file in one step, so a failure part way can
+                // never leave the edited copy truncated.
+                val replaced = ok && tmp.renameTo(file)
                 tmp.delete()
+                // A remux or rename that fails erases the location atom in place instead, so the device
+                // copy never keeps a location the user asked to strip; a file that refuses both fails the
+                // save rather than keep it.
+                if (!replaced && !eu.akoos.photos.util.Mp4LocationAtoms.erase(file)) {
+                    error("Location strip of the edited video failed")
+                }
             }
             eu.akoos.photos.util.Mp4CreationTime.stamp(
                 file, if (stripTimestamp) System.currentTimeMillis() else originalCaptureMs,

@@ -22,12 +22,14 @@
 
 package eu.akoos.photos.presentation.shared
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -40,6 +42,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -163,15 +167,12 @@ fun SharedScreen(
     var sharedAlbumSheetFor by remember { mutableStateOf<Album?>(null) }
     var leaveAlbumConfirmFor by remember { mutableStateOf<Album?>(null) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Bg0)
-    ) {
-        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
+    // No background of its own: the page under the floating header paints it, so the header and
+    // the content read as one surface.
+    Box(modifier = Modifier.fillMaxSize()) {
         PullToRefreshBox(
             isRefreshing = state.isLoading,
-            onRefresh = { viewModel.refresh() },
+            onRefresh = { viewModel.pullRefresh() },
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize(),
             indicator = {},
@@ -200,20 +201,27 @@ fun SharedScreen(
                     }
 
                 isEmpty ->
-                    EmptyState(
-                        title = if (filter == SharedFilter.SharedWithMe)
-                            stringResource(R.string.shared_empty_with_me_title)
-                        else
-                            stringResource(R.string.shared_empty_by_me_title),
-                        subtitle = if (filter == SharedFilter.SharedWithMe)
-                            stringResource(R.string.shared_empty_with_me_body)
-                        else
-                            stringResource(R.string.shared_empty_by_me_body),
-                        icon = Icons.Default.People,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = topPadding),
-                    )
+                    // Scrollable at the page's own height, so a pull on the empty page still refreshes.
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val pageHeight = maxHeight
+                        Box(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            EmptyState(
+                                title = if (filter == SharedFilter.SharedWithMe)
+                                    stringResource(R.string.shared_empty_with_me_title)
+                                else
+                                    stringResource(R.string.shared_empty_by_me_title),
+                                subtitle = if (filter == SharedFilter.SharedWithMe)
+                                    stringResource(R.string.shared_empty_with_me_body)
+                                else
+                                    stringResource(R.string.shared_empty_by_me_body),
+                                icon = Icons.Default.People,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(pageHeight)
+                                    .padding(top = topPadding),
+                            )
+                        }
+                    }
 
                 else ->
                     LazyVerticalGrid(
@@ -302,6 +310,12 @@ fun SharedScreen(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
+
+        // Last in the box so it draws over the grid, and clear of the navigation bar.
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+            snackbarHost,
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
+        )
     }
 
     BackHandler(enabled = state.isSelectionMode) { viewModel.clearSelection() }
@@ -498,6 +512,7 @@ private fun SharedPhotoCell(
         onLongClick = onLongClick,
         onRequestThumbnail = onRequestThumbnail,
         onCancelThumbnail = onCancelThumbnail,
+        thumbPx = 512,
     )
 }
 

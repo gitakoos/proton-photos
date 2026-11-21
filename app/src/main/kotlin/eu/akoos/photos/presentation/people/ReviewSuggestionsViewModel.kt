@@ -53,9 +53,13 @@ import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.data.face.FaceEditCounter
+import eu.akoos.photos.domain.usecase.HidePersonUseCase
+import eu.akoos.photos.domain.usecase.HiddenPersonToken
 import eu.akoos.photos.domain.usecase.IgnorePeopleUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.isNameableCluster
+import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.UndoController
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import javax.inject.Inject
@@ -78,6 +82,8 @@ class ReviewSuggestionsViewModel @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
     private val ignorePeople: IgnorePeopleUseCase,
+    private val hidePersonUseCase: HidePersonUseCase,
+    private val undoController: UndoController,
     private val faceEdits: FaceEditCounter,
 ) : ViewModel() {
 
@@ -136,7 +142,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
      */
     fun bulkMerge(clusterIds: Set<Long>, rawName: String) {
         val typed = rawName.trim()
-        if (clusterIds.isEmpty() || typed.isEmpty()) return
+        if (clusterIds.isEmpty() || typed.isEmpty() || HiddenPersonToken.isToken(typed)) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
@@ -189,11 +195,32 @@ class ReviewSuggestionsViewModel @Inject constructor(
             try {
                 val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
                 ignorePeople(account, clusterIds)
-                _message.value = R.string.person_msg_dismissed
+                _message.value = R.string.person_msg_not_person
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "bulk not-a-person failed: ${e.message}")
+                _message.value = R.string.name_or_merge_failed
+            }
+        }
+    }
+
+    /**
+     * Hide the selected groups from People and every suggestion ([HidePersonUseCase]); their photos and faces
+     * stay. The hide is offered on the shared undo bar once, for the groups that were hidden, and Undo shows
+     * them again.
+     */
+    fun bulkHide(clusterIds: Set<Long>) {
+        if (clusterIds.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+                val hidden = clusterIds.filter { hidePersonUseCase(account, it) != null }
+                if (hidden.isNotEmpty()) undoController.offer(UndoAction.PersonVisibility(hidden, nowHidden = true))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "bulk hide failed: ${e.message}")
                 _message.value = R.string.name_or_merge_failed
             }
         }

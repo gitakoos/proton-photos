@@ -46,7 +46,7 @@ class SemanticDiagnosticsFormatTest {
         val snapshot = SemanticDiagnostics.snapshot()
         assertTrue(
             snapshot,
-            snapshot.contains("embedFailures=0\npermanentSkipped=0 transientWaiting=0 overBudget=0\nlastPark="),
+            snapshot.contains("embedFailures=0\npermanentSkipped=0 transientWaiting=0 overBudget=0 rescanLoops=0\nlastPark="),
         )
     }
 
@@ -56,7 +56,7 @@ class SemanticDiagnosticsFormatTest {
         SemanticDiagnostics.recordSourceBacklog(transientWaiting = 3, overBudget = 400)
         SemanticDiagnostics.recordSourceBacklog(transientWaiting = 4, overBudget = 336)
         val snapshot = SemanticDiagnostics.snapshot()
-        assertTrue(snapshot, snapshot.contains("permanentSkipped=1 transientWaiting=4 overBudget=336\n"))
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=1 transientWaiting=4 overBudget=336 rescanLoops=0\n"))
     }
 
     @Test
@@ -65,6 +65,6 @@ class SemanticDiagnosticsFormatTest {
         SemanticDiagnostics.recordSourceBacklog(transientWaiting = 3, overBudget = 400)
         SemanticDiagnostics.clear()
         val snapshot = SemanticDiagnostics.snapshot()
-        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0\n"))
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0 rescanLoops=0\n"))
     }
 }

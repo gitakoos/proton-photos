@@ -91,9 +91,12 @@ import coil.compose.AsyncImage
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.ThemePrefsBoot
+import eu.akoos.photos.data.preferences.resolveThemeModeKey
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.presentation.common.SelectionCheckPop
+import eu.akoos.photos.presentation.common.photoVideoCountText
 import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.lock.AppLockGate
 import eu.akoos.photos.presentation.lock.AppLockGateState
@@ -142,19 +145,14 @@ class PhotoWidgetConfigActivity : FragmentActivity() {
         lockGate.followSettings(this)
 
         setContent {
-            // Mirror MainActivity: respect the user's THEME_MODE + THEME_PALETTE so the
+            // Mirror MainHostActivity: respect the user's THEME_MODE + THEME_PALETTE so the
             // widget config screen renders in the same theme/accent as the rest of the app.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->
-                    prefs[SettingsKeys.THEME_MODE]
-                        ?: when (prefs[SettingsKeys.DARK_MODE]) {
-                            true  -> "dark"
-                            false -> "light"
-                            null  -> "dark"
-                        }
+                    resolveThemeModeKey(prefs[SettingsKeys.THEME_MODE], prefs[SettingsKeys.DARK_MODE])
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = "dark")
+            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@PhotoWidgetConfigActivity))
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -925,8 +923,9 @@ private fun AlbumRow(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(album.name, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            val videoCount = remember(album.items) { album.items.count { it.mimeType.startsWith("video/") } }
             Text(
-                stringResource(R.string.sync_photo_count, album.itemCount),
+                photoVideoCountText(album.itemCount - videoCount, videoCount),
                 color = colors.fgMute,
                 fontSize = 12.sp,
             )
@@ -1004,7 +1003,7 @@ private fun CloudAlbumRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(album.name, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
-                stringResource(R.string.sync_photo_count, album.photoCount),
+                pluralStringResource(R.plurals.count_items_plural, album.photoCount, album.photoCount),
                 color = colors.fgMute,
                 fontSize = 12.sp,
             )

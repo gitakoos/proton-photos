@@ -33,7 +33,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Tells the user that the edit of a photo or video they only have in Drive was not uploaded.
+ * Tells the user that the edit of a photo or video they only have in Drive was not uploaded, or that an
+ * edited copy did not make it into the album it was edited from.
  *
  * The editor reports such a save as done the moment the upload starts, so a failure arrives long
  * after the screen is gone and has nowhere else to be seen. Its own channel, so the notice can be
@@ -45,7 +46,22 @@ class EditUploadFailedNotifier @Inject constructor(
 ) {
 
     /** [keptOnDevice] is whether the edited copy reached the gallery, which decides what the user is told to do. */
-    fun notifyFailed(keptOnDevice: Boolean) {
+    fun notifyFailed(keptOnDevice: Boolean) = post(
+        id = NotificationIds.EDIT_UPLOAD_FAILED,
+        title = context.getString(R.string.edit_upload_failed_title),
+        text = context.getString(
+            if (keptOnDevice) R.string.edit_upload_failed_text_kept else R.string.edit_upload_failed_text_lost,
+        ),
+    )
+
+    /** The edited copy was saved, but the album the photo was edited from refused it. */
+    fun notifyAlbumAddFailed() = post(
+        id = NotificationIds.EDIT_ALBUM_ADD_FAILED,
+        title = context.getString(R.string.edit_album_add_failed_title),
+        text = context.getString(R.string.edit_album_add_failed_text),
+    )
+
+    private fun post(id: Int, title: String, text: String) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         ensureNotificationChannel(
             context,
@@ -65,12 +81,9 @@ class EditUploadFailedNotifier @Inject constructor(
             launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val text = context.getString(
-            if (keptOnDevice) R.string.edit_upload_failed_text_kept else R.string.edit_upload_failed_text_lost,
-        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(context.getString(R.string.edit_upload_failed_title))
+            .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
@@ -79,7 +92,7 @@ class EditUploadFailedNotifier @Inject constructor(
             .build()
         // A denied POST_NOTIFICATIONS grant makes the platform drop the post silently rather than
         // throw, so this only guards the rarer failures the manager itself can raise.
-        runCatching { nm.notify(NotificationIds.EDIT_UPLOAD_FAILED, notification) }
+        runCatching { nm.notify(id, notification) }
     }
 
     private companion object {

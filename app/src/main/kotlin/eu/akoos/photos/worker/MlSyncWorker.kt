@@ -37,6 +37,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
@@ -94,6 +95,7 @@ import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
 import eu.akoos.photos.data.sharedbackup.mlCopyPassedOver
 import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
 import eu.akoos.photos.data.sharedbackup.SharedBackupStore
+import eu.akoos.photos.data.sharedbackup.seenRevisions
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.sdk.SdkGate
@@ -194,7 +196,15 @@ class MlSyncWorker @AssistedInject constructor(
      * Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. Held under the
      * Drive job lock, so it never runs beside a label save or restore.
      */
-    override suspend fun doWork(): Result = signOut.track {
+    override suspend fun doWork(): Result {
+        // While the settings are held back they read as an empty file: no hidden list, no settings of this
+        // device. Nothing is saved to or merged from Drive on that; the run waits until they read again.
+        eu.akoos.photos.data.localcrypto.SettingsLock.attach(applicationContext)
+        if (eu.akoos.photos.data.localcrypto.SettingsLock.isHeldBack) return Result.retry()
+        return runTracked()
+    }
+
+    private suspend fun runTracked(): Result = signOut.track {
         DriveJobLock.mutex.withLock {
             runStartedMs = System.currentTimeMillis()
             try {
@@ -540,12 +550,20 @@ class MlSyncWorker @AssistedInject constructor(
         walks.standDownFaces()
         val mode = if (step.replace) FaceSnapshotMode.Replace else FaceSnapshotMode.Merge
         walks.faceImportStarted = true
+        val ownDeviceId = runCatching { driveStore.deviceId() }.getOrNull()
         // Inside the scheduler's import fence as well: a walk the user resumes from the face card meanwhile, or
         // one a stand-down that could not be written left running, writes nothing over the imported faces.
         val result = faceIndexingScheduler.withImportFence {
             FileInputStream(file).use { input ->
                 // Opened and verified, the download is spent: deleted before the import writes, freeing its space.
-                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId, knownWipeAtMillis = roundWipeAtMs) {
+                faceImporter.import(
+                    userId,
+                    input,
+                    mode,
+                    expectedDeviceId = step.file.deviceId,
+                    knownWipeAtMillis = roundWipeAtMs,
+                    ownDeviceId = ownDeviceId,
+                ) {
                     runCatching { input.close() }
                     file.delete()
                 }
@@ -628,10 +646,10 @@ class MlSyncWorker @AssistedInject constructor(
     // ---- Shared backup round -------------------------------------------------------------------------
 
     /**
-     * One round of the shared backup. Reads first: the three Drive folders are listed (a listing that fails ends the
+     * One round of the shared backup. Reads first: the four Drive folders are listed (a listing that fails ends the
      * round with nothing written), the other installs' face and search files newer than the copy taken in last are
      * imported filling gaps only, the way a Merge restore does (a face file's scan markers mark its photos as
-     * scanned here, so each photo is scanned once), and their label copies and hidden lists are merged. Then this
+     * scanned here, so each photo is scanned once), and their label copies, hidden lists and settings are merged. Then this
      * install's own copy of each kind is written when its read went through and something in it changed. Ends with
      * the round's outcome recorded for the settings row.
      */
@@ -659,8 +677,9 @@ class MlSyncWorker @AssistedInject constructor(
         val knownWipe = sharedBackupStore.facesWipedAt()
         roundWipeAtMs = knownWipe
         roundAfterFreshStart = takesOwnCopy
+        val seen = runCatching { sharedBackupStore.seen() }.getOrDefault(emptyMap())
         val plan = planRestore(
-            sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake, facesWiped = knownWipe > 0L),
+            sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake, facesWiped = knownWipe > 0L, seen),
             FaceSnapshotMode.Merge,
         )
         if (plan.isNotEmpty()) {
@@ -687,13 +706,19 @@ class MlSyncWorker @AssistedInject constructor(
                 withContext(NonCancellable) { walks.handBack(userId) }
             }
         }
-        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake)
-        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake)
-        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead) sharedBackupStore.markOwnCopyTaken()
+        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake, seen)
+        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake, seen)
+        val settingsRead = sharedBackupRunner.takeInSettings(userId, listing, readsAs, ownDeviceId, retake, seen)
+        val albumOrderRead = sharedBackupRunner.takeInAlbumOrder(userId, listing, readsAs, ownDeviceId, retake, seen)
+        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead && settingsRead && albumOrderRead) {
+            sharedBackupStore.markOwnCopyTaken()
+        }
         val failedParts = ArrayList<String>()
         unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
         if (!labelsRead) failedParts += "read labels"
         if (!hiddenRead) failedParts += "read hidden"
+        if (!settingsRead) failedParts += "read settings"
+        if (!albumOrderRead) failedParts += "read album order"
 
         val writes = mode == RoundMode.SAVE_NOW || (mode == RoundMode.AUTO && sharedBackupStore.isEnabled())
         if (writes) {
@@ -727,8 +752,15 @@ class MlSyncWorker @AssistedInject constructor(
             val now = System.currentTimeMillis()
             if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failedParts += "save labels"
             if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failedParts += "save hidden"
+            if (settingsRead && sharedBackupRunner.saveSettings(userId, ownDeviceId, now) == null) failedParts += "save settings"
+            if (albumOrderRead && sharedBackupRunner.saveAlbumOrder(userId, ownDeviceId, now) == null) failedParts += "save album order"
         }
         val failed = failedParts.isNotEmpty()
+        // Every other device's copy in the listing was taken in or passed over, or is the revision a round saw
+        // before (a changed revision is taken in whatever its time says), so the check made while the app is open
+        // starts a round again only once one of them is replaced. Only the first round, with nothing seen yet, goes
+        // by the listing's times alone.
+        if (!failed) runCatching { sharedBackupStore.recordSeen(seenRevisions(listing)) }
         return endRound(
             tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS),
             failed,
@@ -974,7 +1006,7 @@ class MlSyncWorker @AssistedInject constructor(
         private const val READ_FAILURE = "ReadFailed"
 
         /** The install id a round reads as while it takes this install's own copies in: no copy carries it. */
-        private const val EARLIER_INSTALL = ""
+        internal const val EARLIER_INSTALL = ""
 
         /** How long a restore waits for a stood-down walk to put its model session away before importing
          *  anyway; the import's single transaction still holds the walk's writes back until it commits. */
@@ -1000,7 +1032,8 @@ class MlSyncWorker @AssistedInject constructor(
          * [anyNetwork], otherwise on an unmetered one. Under [ExistingWorkPolicy.KEEP] a job already queued or
          * running stays and this request is dropped, unless [replaceWaiting], for a round the user asked for that
          * takes the place of an automatic one still waiting for its network. The operation also rides as a tag,
-         * so a reader knows it while the job is still queued.
+         * so a reader knows it while the job is still queued. An [expedited] round starts ahead of other work, as an
+         * ordinary one once the app's quota of such work is used up.
          */
         fun enqueueRound(
             context: Context,
@@ -1008,6 +1041,7 @@ class MlSyncWorker @AssistedInject constructor(
             anyNetwork: Boolean,
             replaceWaiting: Boolean,
             mode: RoundMode = RoundMode.AUTO,
+            expedited: Boolean = false,
         ): UUID {
             ensureChannel(context)
             val request = MlSyncRequest.Round(userId.id, mode)
@@ -1017,6 +1051,7 @@ class MlSyncWorker @AssistedInject constructor(
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
                 .addTag(TAG)
                 .addTag(MlSyncWorkData.operationTag(request.operation))
+                .apply { if (expedited) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
                 .build()
             val policy = if (replaceWaiting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
             WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK_NAME, policy, work)

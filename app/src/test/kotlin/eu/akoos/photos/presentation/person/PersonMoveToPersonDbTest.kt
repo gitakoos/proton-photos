@@ -106,6 +106,8 @@ class PersonMoveToPersonDbTest {
             assignPersonName = mockk(relaxed = true),
             faceIndexingScheduler = scheduler,
             ignorePeople = mockk(relaxed = true),
+            hidePersonUseCase = mockk(relaxed = true),
+            undoController = mockk(relaxed = true),
             renamePerson = mockk(relaxed = true),
             assignFacesToPerson = AssignFacesToPersonUseCase(
                 db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.personCoverDao(), db.notPersonDao(),
@@ -114,6 +116,7 @@ class PersonMoveToPersonDbTest {
             faceEdits = edits,
             personCentroids = mockk(relaxed = true),
             selectionFactory = mockk(relaxed = true),
+            peopleVisibility = eu.akoos.photos.presentation.people.PeopleVisibility(accounts, db.personDao(), context),
             context = context,
         )
     }

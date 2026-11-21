@@ -59,6 +59,8 @@ import eu.akoos.photos.domain.entity.compression.VideoCodec
 import eu.akoos.photos.domain.entity.compression.VideoCompressionPlan
 import eu.akoos.photos.domain.entity.compression.VideoSourceInfo
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.VideoLocation
+import eu.akoos.photos.util.VideoLocationMetadata
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
@@ -105,8 +107,9 @@ object VideoUploadCompressor {
 
     /**
      * Carry out [plan] on the clip at [sourceUri], already probed as [source]. [sourceDateEpochMs],
-     * when positive, is written into the output's container timestamps. A cancellation of the calling
-     * coroutine cancels the export, deletes the temp and propagates.
+     * when positive, is written into the output's container timestamps. The output carries the
+     * source's location unless [stripLocation] is set, in which case it carries none. A cancellation
+     * of the calling coroutine cancels the export, deletes the temp and propagates.
      */
     @OptIn(UnstableApi::class)
     suspend fun transcode(
@@ -114,13 +117,18 @@ object VideoUploadCompressor {
         sourceUri: Uri,
         source: VideoSourceInfo,
         plan: VideoCompressionPlan.Transcode,
+        stripLocation: Boolean,
         sourceDateEpochMs: Long = 0L,
-        tempDir: File = context.applicationContext.cacheDir,
+        tempDir: File = eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context),
         onProgress: ((Progress) -> Unit)? = null,
     ): Outcome {
         val appContext = context.applicationContext
+        val location = OutputLocation(
+            source = if (stripLocation) null else VideoLocationMetadata.read(appContext, sourceUri.toString()),
+            strip = stripLocation,
+        )
         suspend fun export(hdrMode: Int, cbr: Boolean) =
-            runAttempt(appContext, sourceUri, source, plan, hdrMode, cbr, tempDir, onProgress)
+            runAttempt(appContext, sourceUri, source, plan, hdrMode, cbr, location, tempDir, onProgress)
 
         val toneMaps = plan.hdr == HdrHandling.TONE_MAP_TO_SDR
         var hdrMode = if (toneMaps) Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL else Composition.HDR_MODE_KEEP_HDR
@@ -143,12 +151,15 @@ object VideoUploadCompressor {
         val produced = attempt.file
             ?: return Outcome(null, CompressionOutcome.FAILED, CompressionSkipReason.ENCODER_ERROR, detail = attempt.error)
         val outputMime = attempt.outputMime ?: plan.codec.mimeType
-        val outputBytes = produced.length()
         if (verdict != TranscodeAcceptance.Verdict.ACCEPT) {
-            Log.d(TAG, "discarding output: $verdict (src=${source.sizeBytes} out=$outputBytes)")
+            val discardedBytes = produced.length()
+            Log.d(TAG, "discarding output: $verdict (src=${source.sizeBytes} out=$discardedBytes)")
             produced.delete()
-            return Outcome(null, CompressionOutcome.SKIPPED, TranscodeAcceptance.reasonFor(verdict), outputMime, outputBytes)
+            return Outcome(null, CompressionOutcome.SKIPPED, TranscodeAcceptance.reasonFor(verdict), outputMime, discardedBytes)
         }
+        // The muxer writes the fix as two numbers; the source's own string (with its altitude) replaces them.
+        VideoLocationMetadata.carryOver(produced, location.source)
+        val outputBytes = produced.length()
         // The capture date the upload uses can differ from the source container's creation time, which
         // InAppMp4Muxer copies, so stamp it explicitly. Then read the file back: a muxer or stamp problem
         // must never reach Drive.
@@ -168,6 +179,9 @@ object VideoUploadCompressor {
         )
     }
 
+    /** The location the output is written with: the [source]'s fix, or none at all when [strip]. */
+    private class OutputLocation(val source: VideoLocation?, val strip: Boolean)
+
     /** One export: the finished temp (not yet judged) and its codec, or the [error] that stopped it. */
     private class Attempt(val file: File?, val outputMime: String?, val error: String?) {
         fun verdict(sourceBytes: Long): TranscodeAcceptance.Verdict =
@@ -182,6 +196,7 @@ object VideoUploadCompressor {
         plan: VideoCompressionPlan.Transcode,
         hdrMode: Int,
         cbr: Boolean,
+        location: OutputLocation,
         tempDir: File,
         onProgress: ((Progress) -> Unit)?,
     ): Attempt {
@@ -195,7 +210,7 @@ object VideoUploadCompressor {
             val target = outFile
             return suspendCancellableCoroutine { cont ->
                 handler.post {
-                    startTransform(context, sourceUri, source, plan, hdrMode, cbr, target, handler, onProgress, cont)
+                    startTransform(context, sourceUri, source, plan, hdrMode, cbr, location, target, handler, onProgress, cont)
                 }
             }
         } catch (ce: kotlin.coroutines.cancellation.CancellationException) {
@@ -218,6 +233,7 @@ object VideoUploadCompressor {
         plan: VideoCompressionPlan.Transcode,
         hdrMode: Int,
         cbr: Boolean,
+        location: OutputLocation,
         outFile: File,
         handler: Handler,
         onProgress: ((Progress) -> Unit)?,
@@ -264,7 +280,13 @@ object VideoUploadCompressor {
                 // MP4 player, and InAppMp4Muxer 1.8.0 writes an Opus header nothing can read back.
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)
                 .setEncoderFactory(encoderFactory)
-                .setMuxerFactory(InAppMp4Muxer.Factory())
+                // The muxer writes the location chosen here rather than the extractor's, which loses a
+                // fix that carries an altitude and would keep one a strip fallback left in the source.
+                .setMuxerFactory(
+                    InAppMp4Muxer.Factory { entries ->
+                        VideoLocationMetadata.apply(entries, location.source, location.strip)
+                    }
+                )
                 .apply { if (!plan.hardware) setMaxDelayBetweenMuxerSamplesMs(SOFTWARE_MUXER_WATCHDOG_MS) }
                 .addListener(object : Transformer.Listener {
                     override fun onCompleted(composition: Composition, result: ExportResult) {

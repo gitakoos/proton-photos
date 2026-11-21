@@ -464,6 +464,7 @@ fun PhotoEditorScreen(
     // before navigating, otherwise the screen pops back while the system prompt is still
     // building and the user never sees the Allow/Deny choice.
     val saveContext = androidx.compose.ui.platform.LocalContext.current
+    val saveResources = androidx.compose.ui.platform.LocalResources.current
     androidx.compose.runtime.LaunchedEffect(state.saveResult, state.pendingDeleteIntent) {
         if (state.pendingDeleteIntent != null) return@LaunchedEffect
         when (state.saveResult) {
@@ -474,7 +475,7 @@ fun PhotoEditorScreen(
             is SaveResult.SuccessAsCopy -> {
                 android.widget.Toast.makeText(
                     saveContext,
-                    saveContext.getString(
+                    saveResources.getString(
                         (state.saveResult as? SaveResult.SuccessAsCopy)?.messageRes
                             ?: R.string.editor_saved_as_copy_toast,
                     ),
@@ -495,7 +496,7 @@ fun PhotoEditorScreen(
         if (state.savedAsCopy) {
             android.widget.Toast.makeText(
                 saveContext,
-                saveContext.getString(R.string.editor_saved_as_copy),
+                saveResources.getString(R.string.editor_saved_as_copy),
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
         }
@@ -964,7 +965,7 @@ private fun SaveSheet(
     // device-side phrasing.
     val isSynced = !isCloud && hasCloudCounterpart
     // Export options for a COPY. The format picker is offered only for a device-only, non-synced photo:
-    // a cloud or synced copy stays JPEG so reconcile pairs the two sides by an identical name.
+    // a cloud copy is JPEG, and a synced photo's copy keeps the source's format on the device and on Drive.
     val formatPickable = !isCloud && !isSynced
     // Default a copy to the source's own format (a PNG stays a lossless PNG, a WebP stays WebP) instead of
     // silently re-encoding it as JPEG; the user can still switch in the picker. HEIC/RAW/GIF fall to JPEG.

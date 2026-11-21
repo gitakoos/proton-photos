@@ -31,11 +31,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.domain.entity.LinkBasis
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.FreeUpUncheckedStore
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.data.preferences.ShortCloudCopyStoreImpl
+import eu.akoos.photos.domain.repository.DriveCopyClaimedSize
+import eu.akoos.photos.domain.repository.DriveCopyXAttr
+import eu.akoos.photos.domain.repository.ShortCloudCopyStore
 import javax.inject.Inject
 
 class FreeUpSpaceUseCase @Inject constructor(
@@ -43,21 +51,74 @@ class FreeUpSpaceUseCase @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val linkDetailHelpers: LinkDetailHelpers,
+    private val localRepo: LocalMediaRepository,
+    private val uncheckedStore: FreeUpUncheckedStore,
+    private val shortCopies: ShortCloudCopyStore = ShortCloudCopyStoreImpl(context),
+    private val claimedSizes: DriveCopyClaimedSize? = null,
 ) {
+    /** What a device copy is, measured against the backup it is about to be deleted on. */
+    enum class DeviceCopyCheck {
+        /** The bytes are the ones backed up, or are on Drive as they are: safe to delete. */
+        UNCHANGED,
+
+        /** The file changed since its backup: kept, and queued to be backed up again. */
+        CHANGED,
+
+        /**
+         * Drive's copy holds fewer bytes than the device file it claims to be: kept, the Drive copy recorded
+         * as short ([ShortCloudCopyStore]) so nothing pairs with it again, and the file queued to be backed up
+         * again whole.
+         */
+        SHORT_ON_DRIVE,
+
+        /** The file could not be read just now: kept as it is, and checked again next run. */
+        UNREADABLE,
+
+        /**
+         * The file was read, but nothing tells whether it still holds what was backed up: kept, left
+         * out of the free-up list until the file changes ([FreeUpUncheckedStore]), and not backed up
+         * again, since that could put a second copy of the same photo on Drive.
+         */
+        UNCHECKED,
+    }
+
     sealed class FreeUpResult {
         /** [skipped] counts device copies this app could not delete itself on Android 10 and older,
-         *  where there is no system dialog to ask for them. */
-        data class Done(val freed: Int, val skipped: Int = 0) : FreeUpResult()
+         *  where there is no system dialog to ask for them. [unchecked] counts the copies kept because
+         *  they could not be checked against their backup ([DeviceCopyCheck.UNREADABLE],
+         *  [DeviceCopyCheck.UNCHECKED]). */
+        data class Done(val freed: Int, val skipped: Int = 0, val unchecked: Int = 0) : FreeUpResult()
 
         /** Android 11+: the system delete dialog must be shown for [localUris], at most
          *  [DELETE_REQUEST_MAX_URIS] of them. [remaining] are the confirmed copies still waiting for a
-         *  dialog of their own, asked for through [consentFor] once this one is answered. */
+         *  dialog of their own, asked for through [consentFor] once this one is answered. [unchecked]
+         *  is as in [Done], for the copies checked so far. */
         data class NeedsPermission(
             val pendingIntent: PendingIntent,
             val localUris: List<String>,
             val remaining: List<SyncState> = emptyList(),
+            val unchecked: Int = 0,
         ) : FreeUpResult()
     }
+
+    /** The rows a device check let through for deletion, and how many it kept unchecked. */
+    private class Checked(
+        val deletable: List<SyncState>,
+        val unchecked: Int,
+        /** Rows kept because their Drive copy is short, each queued to be backed up again whole. */
+        val short: List<SyncState> = emptyList(),
+        /** Rows kept because a copy the photo editor may have cut short could not be told apart now. */
+        val unsettled: List<SyncState> = emptyList(),
+    )
+
+    /** [confirmPendingDeletes]'s answer: the rows that may be deleted now, the ones kept because their
+     *  Drive copy is short, which are deleted once their whole backup is up, and the ones a later check
+     *  must look at again ([Checked.unsettled]). */
+    data class PendingDeleteCheck(
+        val deletable: List<SyncState>,
+        val afterWholeBackup: List<SyncState>,
+        val checkAgain: List<SyncState> = emptyList(),
+    )
 
     /**
      * Exactly the rows [invoke] would act on, for a caller that has to show the user what is about to
@@ -67,14 +128,78 @@ class FreeUpSpaceUseCase @Inject constructor(
      *
      * Every row is `SYNCED`, so every photo in it has a Drive copy. That is what makes the backed-up
      * badge on each cell a check the user can make rather than a decoration.
+     *
+     * A copy an earlier run kept unchecked ([DeviceCopyCheck.UNCHECKED]) stays out while its file is
+     * as it was then; one written since comes back to be checked again.
+     *
+     * Nothing the deletion check keeps whatever it measures is listed either: a copy linked by a name rule
+     * alone ([keptForNameLink]), one whose Drive copy is recorded as short or as unable to vouch for it
+     * ([ShortCloudCopyStore]), and a copy the photo editor saved whose bytes nothing proves on Drive
+     * ([withoutUnprovenEditorCopies]). What only the deletion can tell (a file changed since its backup, a
+     * Drive copy gone since) is still measured there.
      */
     suspend fun candidates(
         userId: UserId,
         olderThanMs: Long,
         protectDownloaded: Boolean = false,
     ): List<SyncState> = withContext(Dispatchers.IO) {
-        syncStateRepo.getSyncedBefore(userId, olderThanMs)
+        val rows = syncStateRepo.getSyncedBefore(userId, olderThanMs)
             .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) }
+        val keptIds = if (rows.isEmpty()) emptySet() else shortCopies.all() + shortCopies.unverifiable()
+        withoutUnprovenEditorCopies(
+            withoutUnchecked(rows.filter { it.linkBasis == LinkBasis.PROVEN && it.cloudFileId !in keptIds }),
+        )
+    }
+
+    /**
+     * [rows] without the copies the photo editor saved that record no backed-up device bytes and whose file
+     * does not hold the bytes their row says were uploaded: the deletion check keeps those
+     * ([deviceCopyVerdict]'s editorCopy), so they are not offered. A file whose name or bytes cannot be read
+     * now is left out too. Names come from one device scan when one is needed.
+     */
+    private suspend fun withoutUnprovenEditorCopies(rows: List<SyncState>): List<SyncState> {
+        val unrecorded = rows.filter { it.originalHash.isNullOrEmpty() }
+        if (unrecorded.isEmpty()) return rows
+        val scanned = try {
+            localRepo.freshMedia().associate { it.uri to it.displayName }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        val left = HashSet<String>()
+        for (row in unrecorded) {
+            val name = scanned[row.localUri] ?: localRepo.queryByUri(row.localUri)?.displayName
+            val keep = name != null && (!isEditorCopyName(name) || holdsUploadedBytes(row))
+            if (!keep) left += row.localUri
+        }
+        return if (left.isEmpty()) rows else rows.filter { it.localUri !in left }
+    }
+
+    /** Whether [row]'s device file holds the bytes its row records as uploaded. */
+    private suspend fun holdsUploadedBytes(row: SyncState): Boolean =
+        row.localHash.isNotEmpty() && localRepo.sha1(row.localUri)?.equals(row.localHash, ignoreCase = true) == true
+
+    /** What of [row] its UNCHECKED verdict was read from, so a row backed up or recorded again is checked again. */
+    private fun uncheckedRowKey(row: SyncState): String =
+        listOf(row.sizeBytes, row.localHash, row.originalHash, row.cloudFileId, row.backedUpAtMs)
+            .joinToString("/").hashCode().toUInt().toString(16)
+
+    private suspend fun withoutUnchecked(rows: List<SyncState>): List<SyncState> {
+        val kept = uncheckedStore.all()
+        if (kept.isEmpty()) return rows
+        val changed = mutableListOf<String>()
+        val result = rows.filter { row ->
+            val mark = kept[row.localUri] ?: return@filter true
+            if (mark.rowKey == uncheckedRowKey(row) && localRepo.fileStamp(row.localUri) == mark.stamp) {
+                false
+            } else {
+                changed += row.localUri
+                true
+            }
+        }
+        uncheckedStore.unmark(changed)
+        return result
     }
 
     /**
@@ -97,18 +222,197 @@ class FreeUpSpaceUseCase @Inject constructor(
         candidates: List<SyncState>,
     ): List<SyncState> = withContext(Dispatchers.IO) {
         if (candidates.none { !it.cloudFileId.isNullOrBlank() }) return@withContext emptyList<SyncState>()
-        confirmActive(userId, cloudRepo.getVolumeId(userId), candidates)
+        confirmActive(userId, cloudRepo.getVolumeId(userId), candidates).map { it.first }
     }
 
-    private suspend fun confirmActive(userId: UserId, volumeId: String, rows: List<SyncState>): List<SyncState> {
+    /**
+     * The rows of [rows] whose device copy may be deleted right now: the Drive link is active
+     * ([verifyActiveBackups]) and the device file still holds what was backed up ([checkDeviceCopy]).
+     * A file changed since its backup is kept and queued to be backed up again; one that cannot be
+     * measured is kept. A failed Drive lookup throws, as in [verifyActiveBackups].
+     */
+    suspend fun confirmForDeletion(userId: UserId, rows: List<SyncState>): List<SyncState> =
+        withContext(Dispatchers.IO) {
+            checkedForDeletion(userId, rows).deletable
+        }
+
+    /**
+     * [confirmForDeletion] for the pending delete queue: also names the rows kept because their Drive copy
+     * is short, so the queue can delete them once their whole backup is up.
+     */
+    suspend fun confirmPendingDeletes(userId: UserId, rows: List<SyncState>): PendingDeleteCheck =
+        withContext(Dispatchers.IO) {
+            val checked = checkedForDeletion(userId, rows)
+            PendingDeleteCheck(checked.deletable, checked.short, checked.unsettled)
+        }
+
+    private suspend fun checkedForDeletion(userId: UserId, rows: List<SyncState>): Checked {
+        if (rows.none { !it.cloudFileId.isNullOrBlank() }) return Checked(emptyList(), 0)
+        val volumeId = cloudRepo.getVolumeId(userId)
+        return confirmUnchanged(userId, volumeId, confirmActive(userId, volumeId, rows))
+    }
+
+    private suspend fun confirmActive(
+        userId: UserId,
+        volumeId: String,
+        rows: List<SyncState>,
+    ): List<Pair<SyncState, BatchLinkDto>> {
         val checkable = rows.filter { !it.cloudFileId.isNullOrBlank() }
         if (checkable.isEmpty()) return emptyList()
         val linkIds = checkable.mapNotNull { it.cloudFileId }.distinct()
         val details = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, linkIds, strict = true)
-        return checkable.filter { row ->
-            val linkId = row.cloudFileId ?: return@filter false
-            details[linkId]?.link?.state == ACTIVE_LINK_STATE
+        return checkable.mapNotNull { row ->
+            val link = row.cloudFileId?.let { details[it] } ?: return@mapNotNull null
+            if (link.link.state == ACTIVE_LINK_STATE) row to link else null
         }
+    }
+
+    /** The rows of [confirmed] whose device file still holds what was backed up; see [checkDeviceCopy]. */
+    private suspend fun confirmUnchanged(
+        userId: UserId,
+        volumeId: String,
+        confirmed: List<Pair<SyncState, BatchLinkDto>>,
+    ): Checked {
+        var unchecked = 0
+        val short = ArrayList<SyncState>()
+        val unsettled = ArrayList<SyncState>()
+        val shortIds = if (confirmed.isEmpty()) emptySet() else shortCopies.all()
+        val unverifiableIds = if (confirmed.isEmpty()) emptySet() else shortCopies.unverifiable()
+        // Until reconcile has looked for the photo editor's short copies, each row is looked at here.
+        val editorLookSince = if (confirmed.isEmpty() || shortCopies.editorCopiesChecked(userId.id)) {
+            null
+        } else {
+            shortCopies.editorCopiesCheckStartedMs(userId.id, System.currentTimeMillis())
+        }
+        val deletable = confirmed.mapNotNull { (row, link) ->
+            when (checkDeviceCopy(userId, volumeId, row, link, shortIds, unverifiableIds, editorLookSince, unsettled)) {
+                DeviceCopyCheck.UNCHANGED -> row
+                DeviceCopyCheck.UNREADABLE, DeviceCopyCheck.UNCHECKED -> {
+                    unchecked++
+                    null
+                }
+                DeviceCopyCheck.SHORT_ON_DRIVE -> {
+                    short += row
+                    null
+                }
+                DeviceCopyCheck.CHANGED -> null
+            }
+        }
+        return Checked(deletable, unchecked, short, unsettled)
+    }
+
+    /**
+     * Measures [row]'s device file against its backup just before it is deleted. Reconcile notices a
+     * file another app edited in place only by its size, and only for so many files a pass, so a row
+     * can read backed up while the device holds an edit Drive never saw. Here the file is read in full;
+     * [deviceCopyVerdict] decides. A CHANGED file is queued to be backed up again as a photo of its own
+     * (the Drive copy stays as it is); an UNCHECKED one is recorded with its file's stamp so the list
+     * leaves it out until the file changes.
+     *
+     * Drive's content hash is what the uploading app said the bytes hash to, so a match alone does not
+     * prove Drive holds them. An upload reads exactly the size it declares in its XAttr ([claimedSizes]),
+     * so a copy whose declared size is below the device file's while its hash claims those very bytes is
+     * SHORT_ON_DRIVE; with no declared size readable from the listing's cached XAttr, Drive's stored size
+     * (encrypted, so never below a whole copy) stands in. So is a copy recorded as short ([shortIds]). It is
+     * recorded as short and its file queued to be backed up again whole.
+     *
+     * While reconcile's look for the photo editor's short copies has not run ([editorLookSince] set), a
+     * suspect ([maybeShortEditorCopy]) is told apart here ([editorCopyVerdict]): a copy whose size cannot be
+     * read now is kept for a later run (and added to [unsettled]), and one whose length cannot be known is
+     * kept for good, as is any copy recorded so ([unverifiableIds]). The declared size is read from [link]'s
+     * own XAttr first, which the batch lookup just returned.
+     */
+    private suspend fun checkDeviceCopy(
+        userId: UserId,
+        volumeId: String,
+        row: SyncState,
+        link: BatchLinkDto,
+        shortIds: Set<String>,
+        unverifiableIds: Set<String>,
+        editorLookSince: Long?,
+        unsettled: MutableList<SyncState>,
+    ): DeviceCopyCheck {
+        keptForNameLink(row)?.let { return it }
+        val stamp = localRepo.fileStamp(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
+        val sha1 = localRepo.sha1(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
+        val linkId = row.cloudFileId
+        val driveHash = link.photo?.contentHash
+        val onDrive = !driveHash.isNullOrEmpty() && cloudRepo.cloudContentHash(sha1) == driveHash
+        var keptForGood = linkId != null && linkId in unverifiableIds
+        var driveShort = linkId != null && linkId in shortIds
+        if (!keptForGood && !driveShort && editorLookSince != null && linkId != null) {
+            val file = localRepo.queryByUri(row.localUri) ?: return DeviceCopyCheck.UNREADABLE
+            if (maybeShortEditorCopy(row, file.displayName, file.mimeType, editorLookSince)) {
+                val claimed = claimedSizes?.claimedSize(userId, linkId, fetchIfUncached = true, fresh = link.freshXAttr(volumeId))
+                when (editorCopyVerdict(row, claimed, sha1, stamp.sizeBytes)) {
+                    EditorCopyVerdict.SHORT -> driveShort = true
+                    EditorCopyVerdict.WHOLE -> Unit
+                    EditorCopyVerdict.UNVERIFIABLE -> {
+                        runCatching { shortCopies.addUnverifiable(listOf(linkId)) }
+                        keptForGood = true
+                    }
+                    EditorCopyVerdict.UNRESOLVED -> {
+                        unsettled += row
+                        return DeviceCopyCheck.UNREADABLE
+                    }
+                }
+            }
+        }
+        if (!keptForGood && !driveShort && onDrive && linkId != null) {
+            val claimed = claimedSizes?.claimedSize(userId, linkId, fetchIfUncached = false, fresh = link.freshXAttr(volumeId))
+            driveShort = if (claimed != null) claimed < stamp.sizeBytes else driveCopyShortOf(link.link.size, stamp.sizeBytes)
+        }
+        // The name is read only for a file whose bytes nothing recorded proves on Drive.
+        val editorCopy = !keptForGood && !driveShort && !onDrive && row.originalHash.isNullOrEmpty() &&
+            !sha1.equals(row.localHash, ignoreCase = true) &&
+            isEditorCopyName(localRepo.queryByUri(row.localUri)?.displayName ?: return DeviceCopyCheck.UNREADABLE)
+        val verdict = if (keptForGood) {
+            DeviceCopyCheck.UNCHECKED
+        } else {
+            deviceCopyVerdict(row, stamp.sizeBytes, stamp.modifiedSec, sha1, onDrive, driveHash, driveShort, editorCopy)
+        }
+        try {
+            when (verdict) {
+                DeviceCopyCheck.CHANGED ->
+                    syncStateRepo.requeueChangedDeviceCopy(userId, row, sha1, stamp.sizeBytes)
+                DeviceCopyCheck.SHORT_ON_DRIVE -> {
+                    if (linkId != null) {
+                        shortCopies.add(listOf(linkId))
+                        shortCopies.addReplacement(row.localUri, linkId)
+                    }
+                    syncStateRepo.requeueChangedDeviceCopy(userId, row, sha1, stamp.sizeBytes)
+                }
+                DeviceCopyCheck.UNCHECKED ->
+                    uncheckedStore.mark(row.localUri, FreeUpUncheckedStore.Kept(stamp, uncheckedRowKey(row)))
+                DeviceCopyCheck.UNCHANGED, DeviceCopyCheck.UNREADABLE -> Unit
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The file stays on the device either way; the next run looks at it again.
+        }
+        return verdict
+    }
+
+    /**
+     * Keeps [row]'s device file when its link to the Drive photo rests on a name rule alone
+     * ([LinkBasis]), however it was stamped: nothing showed the Drive photo holds these bytes. It is
+     * kept UNCHECKED, recorded with its file's stamp like any unchecked copy, so it is reported once and
+     * stays out of the list until the file or its row changes. Null for a proven link, which is checked
+     * as usual.
+     */
+    private suspend fun keptForNameLink(row: SyncState): DeviceCopyCheck? {
+        if (row.linkBasis == LinkBasis.PROVEN) return null
+        try {
+            localRepo.fileStamp(row.localUri)?.let { stamp ->
+                uncheckedStore.mark(row.localUri, FreeUpUncheckedStore.Kept(stamp, uncheckedRowKey(row)))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The file stays on the device either way; the next run keeps it again.
+        }
+        return DeviceCopyCheck.UNCHECKED
     }
 
     /**
@@ -163,16 +467,19 @@ class FreeUpSpaceUseCase @Inject constructor(
         if (candidates.isEmpty()) return@withContext FreeUpResult.Done(0)
         val volumeId = cloudRepo.getVolumeId(userId)
         var freed = 0
+        var unchecked = 0
         val needsDialog = mutableListOf<SyncState>()
         var done = 0
         for (slice in candidates.chunked(VERIFY_CHUNK)) {
-            for (row in confirmActive(userId, volumeId, slice)) {
+            val checked = confirmUnchanged(userId, volumeId, confirmActive(userId, volumeId, slice))
+            unchecked += checked.unchecked
+            for (row in checked.deletable) {
                 if (deleteDeviceCopy(row)) freed++ else needsDialog += row
             }
             done += slice.size
             onProgress(done, total)
         }
-        consentFor(userId, needsDialog, freed)
+        consentFor(userId, needsDialog, freed, deviceChecked = true, unchecked = unchecked)
     }
 
     /**
@@ -181,21 +488,44 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [DELETE_REQUEST_MAX_URIS] per dialog, the most one request may carry. [freed] is what the
      * caller already reclaimed, reported back when no dialog is needed. Below Android 11 there is no
      * dialog, so the rows are reported as skipped and stay on the device.
+     *
+     * Each device file in the dialog is measured again too ([confirmForDeletion]), unless
+     * [deviceChecked] says the caller measured these rows a moment ago. The rows handed back for a
+     * later dialog are measured when that dialog comes. [unchecked] is what the caller already kept
+     * unchecked, reported back together with what this check keeps.
      */
-    suspend fun consentFor(userId: UserId, rows: List<SyncState>, freed: Int = 0): FreeUpResult =
+    suspend fun consentFor(
+        userId: UserId,
+        rows: List<SyncState>,
+        freed: Int = 0,
+        deviceChecked: Boolean = false,
+        unchecked: Int = 0,
+    ): FreeUpResult =
         withContext(Dispatchers.IO) {
-            if (rows.isEmpty()) return@withContext FreeUpResult.Done(freed)
+            if (rows.isEmpty()) return@withContext FreeUpResult.Done(freed, unchecked = unchecked)
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-                return@withContext FreeUpResult.Done(freed, skipped = rows.size)
+                return@withContext FreeUpResult.Done(freed, skipped = rows.size, unchecked = unchecked)
             }
-            val (batch, rest) = splitForConsent(verifyActiveBackups(userId, rows))
-            if (batch.isEmpty()) return@withContext FreeUpResult.Done(freed)
+            var kept = unchecked
+            var batch: List<SyncState> = emptyList()
+            var rest = rows
+            // A dialog's worth that comes back empty after the checks moves on to the next one.
+            while (batch.isEmpty() && rest.isNotEmpty()) {
+                val (first, later) = splitForConsent(rest)
+                batch = if (deviceChecked) {
+                    verifyActiveBackups(userId, first)
+                } else {
+                    checkedForDeletion(userId, first).also { kept += it.unchecked }.deletable
+                }
+                rest = later
+            }
+            if (batch.isEmpty()) return@withContext FreeUpResult.Done(freed, unchecked = kept)
             // Building the consent request can throw on some OEMs for a foreign batch; fall through to
             // Done rather than letting it escape uncaught.
             val pi = runCatching {
                 MediaStore.createDeleteRequest(context.contentResolver, batch.map { Uri.parse(it.localUri) })
-            }.getOrNull() ?: return@withContext FreeUpResult.Done(freed)
-            FreeUpResult.NeedsPermission(pi, batch.map { it.localUri }, rest)
+            }.getOrNull() ?: return@withContext FreeUpResult.Done(freed, unchecked = kept)
+            FreeUpResult.NeedsPermission(pi, batch.map { it.localUri }, rest, kept)
         }
 
     /** Deletes [state]'s device copy and marks its row CLOUD_ONLY; false when the system has to ask. */
@@ -274,6 +604,98 @@ class FreeUpSpaceUseCase @Inject constructor(
         fun <T> splitForConsent(rows: List<T>, max: Int = DELETE_REQUEST_MAX_URIS): Pair<List<T>, List<T>> =
             rows.take(max) to rows.drop(max)
 
+        /** DATE_MODIFIED is in whole seconds while the backup stamp is in milliseconds. */
+        private const val MODIFIED_SLACK_MS = 2_000L
+
+        /** How long before its row was linked a download's copy may have been written: the save and the
+         *  link run back to back, a large video's copy included. */
+        private const val LINKED_WRITE_WINDOW_MS = 10 * 60_000L
+
+        /**
+         * Whether a device copy still holds what was backed up, from what was measured of it: its size
+         * [deviceSizeBytes] and DATE_MODIFIED [deviceModifiedSec] (0 when the device keeps none), its
+         * SHA-1 [deviceSha1] (null when it could not be read), whether those bytes are on Drive as they
+         * are [deviceOnDrive], and the Drive copy's content hash [driveHash]. Pure.
+         *
+         * A wrong CHANGED puts a second copy of the photo on Drive and a wrong UNCHANGED deletes the only
+         * copy of an edit, so CHANGED needs evidence of a write, and a copy that cannot be told apart is
+         * UNCHECKED: kept, and neither deleted nor backed up again.
+         *
+         * In order:
+         * - bytes that could not be read are UNREADABLE;
+         * - a Drive copy that holds fewer bytes than the device file it claims to be ([driveShort]) is
+         *   SHORT_ON_DRIVE, whatever the hashes say: the device copy may be the only whole one;
+         * - bytes Drive holds as they are are UNCHANGED, and so are bytes with the hash the row recorded,
+         *   on a row from before device bytes were recorded only when written as the row was stamped;
+         * - a Drive copy whose content hash is no longer the one paired is UNCHECKED: the device copy may
+         *   be the only one of what was backed up;
+         * - a row that recorded what the device file held ([SyncState.originalHash]: as the backup read
+         *   it, or as this app last wrote it itself) is decided by that alone;
+         * - a copy the photo editor saved ([editorCopy]) is UNCHECKED: its backup is the editor's own upload
+         *   of a second encoding of the edit, which may hold other bytes (another format, other metadata),
+         *   so neither size nor time tells that Drive holds these;
+         * - otherwise the row's hash may be that of rewritten upload bytes, so size and modified time
+         *   decide: a file written after the backup is CHANGED. At a size other than the recorded one it is
+         *   CHANGED for an uploaded row, which records the device size, and UNCHECKED for a download, whose
+         *   row recorded the Drive size before the app stamped a date or place into the saved copy. At the
+         *   recorded size, written before the backup, it is UNCHANGED, except that a download row with no
+         *   recorded bytes is UNCHANGED only when its file was written just before the row was linked: an
+         *   older version linked a gallery file it found by name and size alone, which can be a different
+         *   photo. No size to compare, or no modified time to tell the same size apart by, is UNCHECKED.
+         */
+        fun deviceCopyVerdict(
+            row: SyncState,
+            deviceSizeBytes: Long,
+            deviceModifiedSec: Long,
+            deviceSha1: String?,
+            deviceOnDrive: Boolean,
+            driveHash: String?,
+            driveShort: Boolean = false,
+            editorCopy: Boolean = false,
+        ): DeviceCopyCheck {
+            if (deviceSha1 == null) return DeviceCopyCheck.UNREADABLE
+            if (driveShort) return DeviceCopyCheck.SHORT_ON_DRIVE
+            if (deviceOnDrive) return DeviceCopyCheck.UNCHANGED
+            val pairedHash = row.cloudHash
+            if (!pairedHash.isNullOrEmpty() && !driveHash.isNullOrEmpty() && pairedHash != driveHash) {
+                return DeviceCopyCheck.UNCHECKED
+            }
+            if (row.localHash.isNotEmpty() && deviceSha1.equals(row.localHash, ignoreCase = true)) {
+                if (!row.originalHash.isNullOrEmpty()) return DeviceCopyCheck.UNCHANGED
+                // Rows from before device bytes were recorded: an older version adopted the file's own
+                // hash for a download row, also for a file it had linked by name and size alone, so the
+                // match counts only for a file written as its row was stamped.
+                val stampedAt = row.backedUpAtMs ?: return DeviceCopyCheck.UNCHECKED
+                return if (deviceModifiedSec > 0L && deviceModifiedSec * 1000L >= stampedAt - LINKED_WRITE_WINDOW_MS) {
+                    DeviceCopyCheck.UNCHANGED
+                } else {
+                    DeviceCopyCheck.UNCHECKED
+                }
+            }
+            val originalHash = row.originalHash
+            if (!originalHash.isNullOrEmpty()) {
+                return if (deviceSha1.equals(originalHash, ignoreCase = true)) {
+                    DeviceCopyCheck.UNCHANGED
+                } else {
+                    DeviceCopyCheck.CHANGED
+                }
+            }
+            if (editorCopy) return DeviceCopyCheck.UNCHECKED
+            val backedUpAtMs = row.backedUpAtMs ?: return DeviceCopyCheck.UNCHECKED
+            if (deviceModifiedSec > 0L && deviceModifiedSec * 1000L > backedUpAtMs + MODIFIED_SLACK_MS) {
+                return DeviceCopyCheck.CHANGED
+            }
+            if (row.sizeBytes <= 0L || deviceSizeBytes <= 0L) return DeviceCopyCheck.UNCHECKED
+            if (deviceSizeBytes != row.sizeBytes) {
+                return if (row.localHash.isNotEmpty()) DeviceCopyCheck.CHANGED else DeviceCopyCheck.UNCHECKED
+            }
+            if (deviceModifiedSec <= 0L) return DeviceCopyCheck.UNCHECKED
+            if (row.localHash.isEmpty() && deviceModifiedSec * 1000L < backedUpAtMs - LINKED_WRITE_WINDOW_MS) {
+                return DeviceCopyCheck.UNCHECKED
+            }
+            return DeviceCopyCheck.UNCHANGED
+        }
+
         /**
          * Whether free-up-space may reclaim the device copy behind [state]: true only for a photo
          * whose cloud copy is confirmed, i.e. a SYNCED row carrying a real backedUpAtMs stamp that
@@ -303,4 +725,16 @@ class FreeUpSpaceUseCase @Inject constructor(
                 (!protectDownloaded || state.localHash.isNotEmpty())
         }
     }
+}
+
+/** [this] link's XAttr with the keys that open it, or null when the lookup left any of them out. */
+private fun BatchLinkDto.freshXAttr(volumeId: String): DriveCopyXAttr? {
+    val armored = link.fileProperties?.activeRevision?.xAttr ?: link.activeRevision?.xAttr ?: return null
+    return DriveCopyXAttr(
+        armoredXAttr = armored,
+        nodeKey = link.nodeKey ?: return null,
+        nodePassphrase = link.nodePassphrase ?: return null,
+        parentLinkId = link.parentLinkId ?: return null,
+        volumeId = volumeId,
+    )
 }

@@ -99,7 +99,70 @@ enum class VaultedRowFix {
  * row still speaks for, expressed without Android so they can be reasoned about and tested on their
  * own.
  */
+/** Where a sign-out rescue puts the vault's device-only photos. */
+enum class RescueRoute {
+    /** No password: back into the gallery. */
+    GALLERY,
+
+    /** Into a zip protected with the password. */
+    ZIP,
+
+    /** A password is set but cannot be read: they stay in the vault, never in the gallery unprotected. */
+    KEEP_IN_VAULT,
+}
+
 object HiddenVaultDecisions {
+
+    fun rescueRoute(stored: StoredVaultPassword): RescueRoute = when (stored) {
+        StoredVaultPassword.None -> RescueRoute.GALLERY
+        is StoredVaultPassword.Readable -> RescueRoute.ZIP
+        StoredVaultPassword.Unreadable -> RescueRoute.KEEP_IN_VAULT
+    }
+
+    /** A sign-out rescue that leaves every one of [targets] in the vault, because a password is set and
+     *  cannot be read for the protected zip. [wipeable] are the files Drive was confirmed to hold. */
+    fun keptForPassword(targets: Collection<String>, wipeable: Set<String> = emptySet()): HiddenRescue =
+        HiddenRescue(moved = 0, stillInVault = targets.toSet(), keptForPassword = true, wipeable = wipeable)
+
+    /** A sign-out rescue that leaves every one of [targets] in the vault, because the protected zip could
+     *  not be written, checked or put in Downloads with a password that reads fine. */
+    fun zipFailed(targets: Collection<String>, wipeable: Set<String> = emptySet()): HiddenRescue =
+        HiddenRescue(moved = 0, stillInVault = targets.toSet(), zipFailed = true, wipeable = wipeable)
+
+    /**
+     * Whether a restored MediaStore row is published: the update clearing its pending flag touched the
+     * one row ([updatedRows]), or the flag read back afterwards ([pendingAfter]) is clear. A row whose
+     * flag cannot be read is not taken as published, since the vault copy is deleted on this answer.
+     */
+    fun restorePublished(updatedRows: Int, pendingAfter: Int?): Boolean = updatedRows == 1 || pendingAfter == 0
+
+    /** The link ids among [states] (link id to the Link.State the server reported) that are in Drive and
+     *  not in its trash. A state the server did not report confirms nothing. */
+    fun liveCloudIds(states: Map<String, Int?>): Set<String> =
+        states.filterValues { it == LINK_STATE_ACTIVE }.keys
+
+    /**
+     * The recorded Drive link ids ([cloudIdByUri]) a sign-out may count on: every file changed since its hide
+     * ([edited]) is left out, since its Drive copy holds only the version before the change. Such a file is
+     * then handled as the only copy of what it holds.
+     */
+    fun driveBacked(cloudIdByUri: Map<String, String>, edited: Set<String>): Map<String, String> =
+        if (edited.isEmpty()) cloudIdByUri else cloudIdByUri.filterKeys { it !in edited }
+
+    /**
+     * The vault uris whose Drive copy still holds what the vault file holds: [paired] less every file
+     * changed since its hide ([edited]). Only these may be told to the user as recoverable from Drive.
+     */
+    fun driveBackedUris(paired: Set<String>, edited: Set<String>): Set<String> =
+        if (edited.isEmpty()) paired else paired - edited
+
+    /** The Drive link id each vault uri was recorded with, from the stored `vaultUri|linkId` pairs. */
+    fun cloudIdsByUri(entries: Set<String>): Map<String, String> =
+        entries.mapNotNull { entry ->
+            val linkId = entry.substringAfter('|', "")
+            if (linkId.isBlank()) null else entry.substringBefore('|') to linkId
+        }.toMap()
+
 
     /**
      * The photo keys a published hide drops the labels of: for each of [vaultUris] the device uri it was hidden
@@ -145,6 +208,63 @@ object HiddenVaultDecisions {
         copiedBytes != storedBytes -> false
         expectedBytes < 0L -> true
         else -> storedBytes == expectedBytes
+    }
+
+    /**
+     * How a hide that did not land undoes its vault copies: [drop] the ones whose original is still on the device,
+     * [publish] the ones whose original is gone (each is the photo's only copy now), [keep] the ones whose original
+     * cannot be checked. [exists] answers for a source uri, null when it cannot tell.
+     */
+    data class UndoSplit(val drop: List<String>, val publish: List<String>, val keep: List<String>)
+
+    fun undoSplit(
+        privateUris: List<String>,
+        sourceByVaultUri: Map<String, String>,
+        exists: (String) -> Boolean?,
+    ): UndoSplit {
+        val drop = mutableListOf<String>()
+        val publish = mutableListOf<String>()
+        val keep = mutableListOf<String>()
+        for (uri in privateUris.distinct()) {
+            val source = sourceByVaultUri[uri]?.takeIf { it.isNotBlank() }
+            when (source?.let(exists)) {
+                true -> drop += uri
+                false -> publish += uri
+                null -> keep += uri
+            }
+        }
+        return UndoSplit(drop, publish, keep)
+    }
+
+    /**
+     * The pending vault copy of each of [sources], from the journal ([journal], vault uri to source uri) and the
+     * vault files on disk ([blobs]). A journal entry whose file is gone names nothing to move. With more than one
+     * copy left for a source the first in uri order is taken, so every caller picks the same one.
+     */
+    fun pendingCopyBySource(journal: Map<String, String>, blobs: Set<String>, sources: Set<String>): Map<String, String> {
+        val out = HashMap<String, String>()
+        for ((vaultUri, source) in journal.entries.sortedBy { it.key }) {
+            if (source in sources && vaultUri in blobs && source !in out) out[source] = vaultUri
+        }
+        return out
+    }
+
+    /** The Drive link ids of the vault photos [published] holds, from the stored `"uri|linkId"` [cloudIdEntries]. */
+    fun vaultedLinks(cloudIdEntries: Set<String>, published: Set<String>): Set<String> =
+        cloudIdsByUri(cloudIdEntries).filterKeys { it in published }.values.toSet()
+
+    /**
+     * What showing again one photo the vault holds more than once does: [restore] is the copy that goes back to
+     * the device, [extras] the copies of the same photo that go with it, so only one device file comes back.
+     * [copies] are the vault uris recorded with the photo's Drive link id; a copy a hide is moving now ([busy])
+     * is left to that hide. A published copy is preferred, then the first in uri order.
+     */
+    data class RevealCopies(val restore: String?, val extras: List<String>)
+
+    fun revealCopies(copies: Collection<String>, published: Set<String>, busy: Set<String>): RevealCopies {
+        val free = copies.filter { it !in busy }.distinct().sorted()
+        val restore = free.firstOrNull { it in published } ?: free.firstOrNull()
+        return RevealCopies(restore, free.filter { it != restore })
     }
 
     /**
@@ -207,16 +327,57 @@ object HiddenVaultDecisions {
     fun revealNeedsRowRepair(move: HiddenPairingMove): Boolean = move != HiddenPairingMove.MOVED
 
     /**
-     * The vault files an involuntary sign-out has to take back to the device, from the files on disk
-     * ([blobUris]) and the uris the vault records a Drive copy for ([pairedUris]).
+     * What a sign-out does with each vault file before the vault is emptied, from the files on disk
+     * ([blobUris]), the Drive link id each was recorded with at hide time ([cloudIdByUri]), the link ids
+     * Drive has just confirmed it holds outside its trash ([liveCloudIds]) and the files a hide is still
+     * moving ([busy]).
      *
-     * A paired file is a device copy of a photo Drive still holds, so losing it costs nothing the
-     * account cannot return. Every other file is the only copy of its photo, the hide having deleted
-     * the original, and a file no record names counts here too: it is the safe direction, the same one
-     * [HiddenVaultLeftovers.vaultedUris] takes for the sign-out warning.
+     * A file with no recorded Drive copy is the only copy of its photo and is taken back to the device,
+     * and a file no record names counts the same way. A file with a recorded Drive copy belongs in the
+     * cloud and never goes to the gallery or a zip: only Drive's own answer, given now, makes it safe to
+     * destroy, and one Drive does not confirm (trashed, missing, or a session that cannot answer) stays
+     * in the vault with its records. A busy file is neither taken back nor destroyed: its original may
+     * still be deleted, after which it is the only copy.
      */
-    fun deviceOnlyVaultUris(blobUris: Set<String>, pairedUris: Set<String>): List<String> =
-        blobUris.filter { it !in pairedUris }.sorted()
+    fun signOutPlan(
+        blobUris: Set<String>,
+        cloudIdByUri: Map<String, String>,
+        liveCloudIds: Set<String>,
+        busy: Set<String>,
+    ): SignOutVaultPlan {
+        val settled = blobUris - busy
+        val paired = settled.filterTo(HashSet()) { it in cloudIdByUri }
+        val inDrive = paired.filterTo(HashSet()) { cloudIdByUri.getValue(it) in liveCloudIds }
+        return SignOutVaultPlan(
+            rescue = (settled - paired).sorted(),
+            inDrive = inDrive,
+            unconfirmedInDrive = paired - inDrive,
+        )
+    }
+
+    /**
+     * The vault files a sign-out the user confirmed with "delete" may destroy: the ones the confirmation
+     * counted ([confirmed]) that are still on disk ([blobUris]), less any a hide is still moving ([busy]),
+     * and less any the user was told Drive holds when Drive could not confirm it now. Those last were
+     * never agreed to as lost, so they stay in the vault ([UserDeletePlan.unconfirmedInDrive]).
+     */
+    fun userDeletePlan(
+        confirmed: Set<String>,
+        blobUris: Set<String>,
+        cloudIdByUri: Map<String, String>,
+        liveCloudIds: Set<String>,
+        busy: Set<String>,
+    ): UserDeletePlan {
+        val candidates = confirmed.intersect(blobUris) - busy
+        val unconfirmed = candidates.filterTo(HashSet()) { uri ->
+            val linkId = cloudIdByUri[uri]
+            linkId != null && linkId !in liveCloudIds
+        }
+        return UserDeletePlan(delete = candidates - unconfirmed, unconfirmedInDrive = unconfirmed)
+    }
+
+    /** The Link.State the Proton API reports for a photo outside the trash. */
+    private const val LINK_STATE_ACTIVE = 1
 
     /**
      * The uris a reveal looks its photo's vaulted row up under, in the order they are tried.
@@ -306,6 +467,29 @@ object HiddenVaultDecisions {
         !ownFileExists -> VaultedRowFix.LEAVE
         hasCloudCopy -> VaultedRowFix.REVEAL_SYNCED
         else -> VaultedRowFix.REVEAL_LOCAL_ONLY
+    }
+
+    /**
+     * The HIDDEN rows a rebuilt, empty database is missing: one per vault record `vaultUri|linkId` whose file the
+     * vault still holds and whose Drive copy no HIDDEN row names yet, keyed on the vault uri. Without them the Drive
+     * copy of every vaulted backed-up photo would show in the timeline again.
+     */
+    fun rowsToReseed(
+        vaultCloudIds: Set<String>,
+        blobExists: (vaultUri: String) -> Boolean,
+        alreadyHidden: Set<String>,
+    ): List<Pair<String, String>> {
+        val seen = HashSet<String>()
+        val out = ArrayList<Pair<String, String>>()
+        for (entry in vaultCloudIds) {
+            val vaultUri = entry.substringBefore('|')
+            val linkId = entry.substringAfter('|', "")
+            if (vaultUri.isBlank() || linkId.isBlank()) continue
+            if (linkId in alreadyHidden || !seen.add(linkId)) continue
+            if (!blobExists(vaultUri)) continue
+            out += vaultUri to linkId
+        }
+        return out
     }
 
     /** How [confirmSplit] divides a hide batch: the vault uris to publish as hidden, and the ones whose
@@ -401,3 +585,16 @@ object HiddenVaultDecisions {
      *  that claims a device copy the index can find. */
     private const val MEDIA_STORE_URI_PREFIX = "content://"
 }
+
+/** [rescue]: the vault files a sign-out takes back to the device; [inDrive]: the ones Drive was just
+ *  confirmed to hold, which the vault wipe may destroy; [unconfirmedInDrive]: the ones recorded with a Drive
+ *  copy that Drive did not confirm, which stay in the vault. */
+data class SignOutVaultPlan(
+    val rescue: List<String>,
+    val inDrive: Set<String>,
+    val unconfirmedInDrive: Set<String> = emptySet(),
+)
+
+/** [delete]: the vault files a confirmed "delete" sign-out destroys; [unconfirmedInDrive]: the ones it
+ *  keeps because Drive could not confirm the copy the user was told it holds. */
+data class UserDeletePlan(val delete: Set<String>, val unconfirmedInDrive: Set<String>)

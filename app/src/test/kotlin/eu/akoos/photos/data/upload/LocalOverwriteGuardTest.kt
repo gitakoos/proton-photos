@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.upload
 
 import android.content.Context
+import eu.akoos.photos.data.localcrypto.PlainContent
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
@@ -55,7 +56,18 @@ class LocalOverwriteGuardTest {
         photo = File(context.cacheDir, "guarded.jpg").also { it.writeBytes(original) }
         journalDir().deleteRecursively()
         LocalRewrites.clear()
+        announced.clear()
+        stamps.clear()
+        OwnDeviceWrites.install { announced += Triple(it.uri, it.before, it.after); stamps += it.beforeStamp }
     }
+
+    @org.junit.After
+    fun tearDown() {
+        OwnDeviceWrites.clear()
+    }
+
+    private val announced = mutableListOf<Triple<String, String, String>>()
+    private val stamps = mutableListOf<eu.akoos.photos.domain.entity.DeviceFileStamp?>()
 
     private fun journalDir() = File(context.filesDir, MirrorOverwriteJournal.DIR_NAME)
 
@@ -146,5 +158,41 @@ class LocalOverwriteGuardTest {
         assertTrue(thrown is MirrorOverwriteJournal.StagingFailedException)
         assertFalse(ran)
         assertEquals(0, journalFiles())
+    }
+
+    @Test
+    fun `a metadata rewrite that lands is announced so its bytes are recorded`() {
+        guard().run(uri) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("stamped".toByteArray()) }
+        }
+        assertEquals(
+            "announced with the bytes it started from and the bytes it left",
+            listOf(Triple(uri, PlainContent.sha1Hex(original.inputStream()), PlainContent.sha1Hex("stamped".toByteArray().inputStream()))),
+            announced,
+        )
+        assertEquals("with the size the file had before it", original.size.toLong(), stamps.single()?.sizeBytes)
+    }
+
+    @Test
+    fun `a pixel edit is not announced, so it reads as a change to back up`() {
+        guard().run(uri, announce = false) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("edited".toByteArray()) }
+        }
+        assertEquals(emptyList<Triple<String, String, String>>(), announced)
+    }
+
+    @Test
+    fun `a rewrite that fails is not announced`() {
+        runCatching { guard().run<Unit>(uri) { throw SecurityException("needs consent") } }
+        assertEquals(emptyList<Triple<String, String, String>>(), announced)
+    }
+
+    @Test
+    fun `nothing is hashed or announced while nothing listens`() {
+        OwnDeviceWrites.clear()
+        guard().run(uri) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("stamped".toByteArray()) }
+        }
+        assertEquals(emptyList<Triple<String, String, String>>(), announced)
     }
 }

@@ -123,6 +123,35 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `an unuploadable device file leaves the queue with the moment it was set aside`() = runTest {
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://local", "AUTO_FOLDER", 1L)
+        dao.upsert(entity("uri://synced", status = SyncStatus.SYNCED, cloudFileId = "c"))
+
+        assertEquals(1, dao.markUnuploadable("uri://local", 5_000L))
+        assertEquals(0, dao.markUnuploadable("uri://synced", 5_000L))
+
+        val row = dao.getByUri("uri://local")!!
+        assertEquals("UNUPLOADABLE", row.queueSource)
+        assertEquals(false, row.queued)
+        assertEquals(5_000L, row.queuedAt)
+        assertEquals(null, dao.getByUri("uri://synced")?.queueSource)
+    }
+
+    @Test
+    fun `a reconcile write over a file set aside as unuploadable keeps it set aside`() = runTest {
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+        dao.markUnuploadable("uri://local", 5_000L)
+
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+
+        val row = dao.getByUri("uri://local")!!
+        assertEquals("UNUPLOADABLE", row.queueSource)
+        assertEquals(false, row.queued)
+        assertEquals(5_000L, row.queuedAt)
+    }
+
+    @Test
     fun `only a device-only row is marked removed from Drive`() = runTest {
         dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
         dao.upsert(entity("uri://synced", status = SyncStatus.SYNCED, cloudFileId = "c"))
@@ -392,6 +421,44 @@ class SyncStateDaoTest {
         assertNull(dao.getQueueSource("uri://1"))
     }
 
+    // ── a link reconcile made by name ──
+
+    @Test
+    fun `a name link is marked proven only while its row still links that photo at SYNCED`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "c1").copy(linkBasis = 1))
+        dao.upsert(entity("uri://2", status = SyncStatus.SYNCED, cloudFileId = "c2").copy(linkBasis = 1))
+        dao.upsert(entity("uri://3", status = SyncStatus.LOCAL_ONLY, cloudFileId = "c3").copy(linkBasis = 1))
+        dao.upsert(entity("uri://4", status = SyncStatus.SYNCED, cloudFileId = "c4", backedUpAtMs = 7L).copy(linkBasis = 1))
+
+        assertEquals(1, dao.markLinkProven("user1", "uri://1", "c1", "drive-1", "sha-1", now = 100L))
+        assertEquals("another photo", 0, dao.markLinkProven("user1", "uri://2", "c-other", "d", "s", now = 100L))
+        assertEquals("not SYNCED", 0, dao.markLinkProven("user1", "uri://3", "c3", "d", "s", now = 100L))
+        assertEquals("another account", 0, dao.markLinkProven("user2", "uri://1", "c1", "d", "s", now = 100L))
+        assertEquals(1, dao.markLinkProven("user1", "uri://4", "c4", "drive-4", "sha-4", now = 100L))
+        assertEquals("already proven", 0, dao.markLinkProven("user1", "uri://1", "c1", "d", "s", now = 200L))
+
+        val one = dao.getByUri("uri://1")!!
+        assertEquals(0, one.linkBasis)
+        assertEquals("drive-1", one.cloudHash)
+        assertEquals("sha-1", one.originalHash)
+        assertEquals(100L, one.backedUpAtMs)
+        assertEquals(1, dao.getByUri("uri://2")!!.linkBasis)
+        assertEquals("a backup stamp already there stays", 7L, dao.getByUri("uri://4")!!.backedUpAtMs)
+    }
+
+    @Test
+    fun `the synced pairs of a cloud id list every device file that holds it`() = runTest {
+        dao.upsert(entity("uri://a", status = SyncStatus.SYNCED, cloudFileId = "c1"))
+        dao.upsert(entity("uri://b", status = SyncStatus.SYNCED, cloudFileId = "c1"))
+        dao.upsert(entity("uri://c", status = SyncStatus.CLOUD_ONLY, cloudFileId = "c1"))
+        dao.upsert(entity("uri://d", userId = "user2", status = SyncStatus.SYNCED, cloudFileId = "c1"))
+        dao.upsert(entity("uri://e", status = SyncStatus.SYNCED, cloudFileId = "c2"))
+
+        val pairs = dao.syncedPairsForCloudIds("user1", listOf("c1"))
+
+        assertEquals(setOf("uri://a", "uri://b"), pairs.map { it.localUri }.toSet())
+    }
+
     // ── updateDomainColumnsIfNotSyncedWithCloud: reconcile cannot clobber a just-promoted upload ──
 
     /** The guarded domain write reconcile uses for a demotion: same columns as updateDomainColumns,
@@ -412,6 +479,7 @@ class SyncStateDaoTest {
         lastSyncSuccessMs = null,
         backedUpAtMs = null,
         sizeBytes = 1024L,
+        linkBasis = 0,
     )
 
     @Test
@@ -573,5 +641,245 @@ class SyncStateDaoTest {
         assertEquals(SyncStatus.HIDDEN, rows.getValue("uri://hidden").status)
         assertTrue(listOf("uri://claimed", "uri://done", "uri://hidden").none { rows.getValue(it).queued })
         assertTrue(rows.getValue("uri://new").queued)
+    }
+
+    @Test
+    fun `clearAlbumAddIntent drops only a pending album-add upload`() = runTest {
+        dao.upsert(entity("uri://album"))
+        dao.markQueued("uri://album", source = "ALBUM_ADD", at = 5L)
+        dao.upsert(entity("uri://manual"))
+        dao.markQueued("uri://manual", source = "MANUAL", at = 5L)
+        dao.upsert(entity("uri://uploading", status = SyncStatus.UPLOADING))
+        dao.markQueued("uri://uploading", source = "ALBUM_ADD", at = 5L)
+
+        assertEquals(1, dao.clearAlbumAddIntent("uri://album"))
+        assertEquals(0, dao.clearAlbumAddIntent("uri://manual"))
+        assertEquals(0, dao.clearAlbumAddIntent("uri://uploading"))
+
+        val album = dao.getByUri("uri://album")!!
+        assertEquals(false, album.queued)
+        assertNull(album.queueSource)
+        assertNull(album.queuedAt)
+        assertEquals("MANUAL", dao.getByUri("uri://manual")?.queueSource)
+        assertTrue(dao.getByUri("uri://manual")!!.queued)
+        assertTrue(dao.getByUri("uri://uploading")!!.queued)
+    }
+    @Test
+    fun `a cancelled manual upload whose claim a process death stranded is not queued after the restart`() = runTest {
+        dao.upsert(entity("uri://cancelled", status = SyncStatus.UPLOADING))
+        dao.markQueued("uri://cancelled", source = "MANUAL", at = 5L)
+        dao.upsert(entity("uri://auto", status = SyncStatus.UPLOADING))
+        dao.markQueued("uri://auto", source = "AUTO_FOLDER", at = 5L)
+
+        // The user cancels while both are claimed; only the manual one is marked.
+        assertEquals(1, dao.cancelManualFor("uri://cancelled"))
+        assertEquals(0, dao.cancelManualFor("uri://auto"))
+        // The process dies here; the next start recovers the stranded claims.
+        dao.resetStaleUploadingClaims(SyncStatus.UPLOADING.name, SyncStatus.LOCAL_ONLY.name)
+
+        val cancelled = dao.getByUri("uri://cancelled")!!
+        assertEquals(SyncStatus.LOCAL_ONLY, cancelled.status)
+        assertEquals(false, cancelled.queued)
+        assertEquals("CANCELLED", cancelled.queueSource)
+        val auto = dao.getByUri("uri://auto")!!
+        assertTrue("an automatic backup keeps its queued intent", auto.queued)
+    }
+
+    // ─── getQueuedOrIn (the upload pass's candidate read) ─────────────────────
+
+    private suspend fun seedCandidates() {
+        for (n in 1..8) dao.upsert(entity("uri://$n"))
+        dao.upsert(entity("uri://other", userId = "user2"))
+        dao.markQueued("uri://2", "AUTO_FOLDER", 1L)
+        dao.markQueued("uri://5", "MANUAL", 1L)
+        dao.markQueued("uri://other", "MANUAL", 1L)
+    }
+
+    @Test
+    fun `getQueuedOrIn returns the queued rows and the listed rows of the user in table order`() = runTest {
+        seedCandidates()
+
+        val rows = dao.getQueuedOrIn("user1", listOf("uri://7", "uri://3", "uri://missing"))
+
+        assertEquals(listOf("uri://2", "uri://3", "uri://5", "uri://7"), rows.map { it.localUri })
+        val expected = dao.observeAll("user1").first()
+            .filter { it.queued || it.localUri in setOf("uri://7", "uri://3") }
+        assertEquals(expected, rows)
+    }
+
+    @Test
+    fun `getQueuedOrIn with no listed uris returns only the queued rows`() = runTest {
+        seedCandidates()
+        assertEquals(listOf("uri://2", "uri://5"), dao.getQueuedOrIn("user1", emptyList()).map { it.localUri })
+    }
+
+    @Test
+    fun `the repository candidate read matches the full read on both sides of the bind limit`() = runTest {
+        seedCandidates()
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+        val user = me.proton.core.domain.entity.UserId("user1")
+        val full = dao.observeAll("user1").first()
+
+        val few = setOf("uri://4")
+        assertEquals(
+            full.filter { it.queued || it.localUri in few }.map { it.localUri },
+            repo.getQueuedOrIn(user, few).map { it.localUri },
+        )
+        // Past one statement's bind limit the repository falls back to the full read, filtered.
+        val many = (1..1200).map { "uri://none$it" }.toSet() + "uri://6"
+        assertEquals(
+            full.filter { it.queued || it.localUri in many }.map { it.localUri },
+            repo.getQueuedOrIn(user, many).map { it.localUri },
+        )
+    }
+
+    private fun backedUp(uri: String, localHash: String = "up", cloudFileId: String? = "cloud-1") =
+        entity(uri, status = SyncStatus.SYNCED, cloudFileId = cloudFileId, backedUpAtMs = 5L).copy(localHash = localHash)
+
+    @Test
+    fun `a recorded original hash is read back and a new row starts without one`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+
+        dao.setOriginalHash("uri://1", "orig")
+
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a domain row written back never writes an original hash it carries`() = runTest {
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+        val user = me.proton.core.domain.entity.UserId("user1")
+        // A copy of a row read before, carrying a hash that belonged to an older backup.
+        repo.upsert(backedUp("uri://1").toDomain().copy(originalHash = "stale"), user)
+
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `the original hash survives a write that keeps the row's hash and pairing`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+
+        // A reconcile pass rewrites the same pairing with a fresh attempt time and no original hash of its own.
+        dao.upsert(backedUp("uri://1").copy(lastSyncAttemptMs = 99L))
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+
+        assertEquals(1, dao.updateDomainColumnsIfNotSyncedWithCloudAll(listOf(backedUp("uri://1"))).size)
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a new hash or a new pairing clears the original hash`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+        dao.upsert(backedUp("uri://1", localHash = "edited"))
+        assertNull("a new device hash", dao.getByUri("uri://1")!!.originalHash)
+
+        dao.setOriginalHash("uri://1", "orig")
+        dao.upsert(backedUp("uri://1", localHash = "edited", cloudFileId = "cloud-2"))
+        assertNull("a new Drive pairing", dao.getByUri("uri://1")!!.originalHash)
+
+        dao.setOriginalHash("uri://1", "orig")
+        dao.upsert(backedUp("uri://1", localHash = "edited", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
+        assertNull("the pairing taken off", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `the guarded update clears the original hash of a row it rewrites with a new hash`() = runTest {
+        dao.upsert(backedUp("uri://1", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
+        dao.setOriginalHash("uri://1", "orig")
+
+        val untouched = dao.updateDomainColumnsIfNotSyncedWithCloudAll(
+            listOf(backedUp("uri://1", localHash = "edited", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY)),
+        )
+
+        assertTrue(untouched.isEmpty())
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a demotion off Drive clears the original hash`() = runTest {
+        dao.upsert(backedUp("uri://1", cloudFileId = "cloud-1"))
+        dao.upsert(backedUp("uri://2", cloudFileId = "cloud-2"))
+        dao.setOriginalHash("uri://1", "orig-1")
+        dao.setOriginalHash("uri://2", "orig-2")
+
+        dao.demoteSyncedByCloudIds(listOf("cloud-1"))
+        assertEquals(1, dao.demoteToLocalIfCloudIdMatches("uri://2", "cloud-2"))
+
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+        assertNull(dao.getByUri("uri://2")!!.originalHash)
+    }
+
+    @Test
+    fun `clearing the original hash takes it off`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+
+        dao.setOriginalHash("uri://1", null)
+
+        assertNull(dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a rewrite this app made is recorded only on a backed-up row paired to Drive`() = runTest {
+        dao.upsert(backedUp("uri://synced"))
+        dao.upsert(backedUp("uri://local", cloudFileId = null).copy(status = SyncStatus.LOCAL_ONLY))
+        dao.upsert(entity("uri://paired-only", status = SyncStatus.SYNCED, cloudFileId = "cloud-2", backedUpAtMs = null))
+
+        dao.recordOwnDeviceWrite("uri://synced", "up", "written")
+        dao.recordOwnDeviceWrite("uri://local", "up", "written")
+        dao.recordOwnDeviceWrite("uri://paired-only", "", "written")
+
+        assertEquals("written", dao.getByUri("uri://synced")!!.originalHash)
+        assertNull(dao.getByUri("uri://local")!!.originalHash)
+        assertNull(dao.getByUri("uri://paired-only")!!.originalHash)
+    }
+
+    @Test
+    fun `a recorded own write survives a reconcile pass that keeps the row's hash and pairing`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.recordOwnDeviceWrite("uri://1", "up", "written")
+
+        dao.upsert(backedUp("uri://1").copy(sizeBytes = 2048L))
+
+        assertEquals("written", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `a rewrite of a file edited since its backup is not recorded`() = runTest {
+        dao.upsert(backedUp("uri://1"))
+        dao.setOriginalHash("uri://1", "orig")
+
+        dao.recordOwnDeviceWrite("uri://1", "edited-elsewhere", "written")
+
+        assertEquals("orig", dao.getByUri("uri://1")!!.originalHash)
+    }
+
+    @Test
+    fun `an own rewrite over a row that recorded no device bytes lands only while the row is as it was read`() = runTest {
+        dao.upsert(backedUp("uri://1", localHash = "uploaded"))
+        dao.upsert(backedUp("uri://2", localHash = "uploaded"))
+        dao.upsert(backedUp("uri://3", localHash = "uploaded"))
+        dao.setOriginalHash("uri://3", "orig")
+
+        dao.recordOwnDeviceWriteOverRow("uri://1", "written", "uploaded", 5L)
+        dao.recordOwnDeviceWriteOverRow("uri://2", "written", "uploaded", 6L)
+        dao.recordOwnDeviceWriteOverRow("uri://3", "written", "uploaded", 5L)
+
+        assertEquals("written", dao.getByUri("uri://1")!!.originalHash)
+        assertNull("backed up again since it was read", dao.getByUri("uri://2")!!.originalHash)
+        assertEquals("a recorded hash decides alone", "orig", dao.getByUri("uri://3")!!.originalHash)
+    }
+
+    @Test
+    fun `a second own rewrite chains on the bytes the first one recorded`() = runTest {
+        dao.upsert(backedUp("uri://1", localHash = "UP"))
+
+        dao.recordOwnDeviceWrite("uri://1", "up", "first")
+        dao.recordOwnDeviceWrite("uri://1", "FIRST", "second")
+
+        assertEquals("second", dao.getByUri("uri://1")!!.originalHash)
     }
 }

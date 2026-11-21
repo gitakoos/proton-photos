@@ -52,7 +52,7 @@ import javax.inject.Singleton
  * Idempotent and cheap (one row probe per queued URI). Called from two places:
  *  - [UploadPendingUseCase] at the end of every sync run, to surface the
  *    notification immediately after a successful upload batch.
- *  - `MainActivity.onResume`, so files the user deleted externally while we
+ *  - `MainHostActivity.onResume`, so files the user deleted externally while we
  *    were not running still get reconciled the moment they open the app —
  *    even without network connectivity to fire the worker's content URI
  *    trigger.

@@ -20,5 +20,27 @@
                 <action android:name="eu.akoos.photos.FACE_FILE_CHECK" />
             </intent-filter>
         </receiver>
+        <!-- Debug-only Drive SDK read timings (reads only). DUMP keeps it to adb. -->
+        <receiver
+            android:name="eu.akoos.photos.sdkbench.SdkReadBenchReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.SDK_READ_BENCH" />
+            </intent-filter>
+        </receiver>
+        <!-- Debug-only Hidden screen unlock for automated tests. DUMP keeps it to adb. -->
+        <receiver
+            android:name="eu.akoos.photos.hiddenunlock.HiddenUnlockReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.DEBUG_UNLOCK_HIDDEN" />
+            </intent-filter>
+        </receiver>
+        <provider
+            android:name="eu.akoos.photos.hiddenunlock.HiddenUnlockTrackerProvider"
+            android:authorities="${applicationId}.hiddenunlock"
+            android:exported="false" />
     </application>
 </manifest>

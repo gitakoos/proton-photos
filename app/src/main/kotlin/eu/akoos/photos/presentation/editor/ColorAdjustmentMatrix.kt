@@ -132,16 +132,15 @@ fun colorAdjustmentMatrix(
         )
     }
 
-    // Highlights: scale RGB by (1 - h/200) plus a small offset, pulling brights down without crushing
-    // midtones, a ColorMatrix approximation of a per-pixel highlight curve.
+    // Highlights: a gain anchored at black, so positive brightens and negative pulls back the bright end
+    // most while black stays black. Linear, because the video preview and export only take a matrix.
     if (highlights != 0) {
-        val hScale = 1f - highlights / 200f
-        val hOffset = -highlights * 0.3f
+        val hScale = 1f + highlights / 400f
         combined = postConcat4x5(
             floatArrayOf(
-                hScale, 0f, 0f, 0f, hOffset,
-                0f, hScale, 0f, 0f, hOffset,
-                0f, 0f, hScale, 0f, hOffset,
+                hScale, 0f, 0f, 0f, 0f,
+                0f, hScale, 0f, 0f, 0f,
+                0f, 0f, hScale, 0f, 0f,
                 0f, 0f, 0f, 1f, 0f,
             ),
             combined,

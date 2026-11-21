@@ -34,7 +34,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.FaceDao
@@ -44,6 +46,7 @@ import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.gallery.FaceBox
+import eu.akoos.photos.presentation.gallery.PersonUi
 import javax.inject.Inject
 
 /** One excluded face reduced to what a tile needs: which face, its photo, and the box to crop to. */
@@ -70,8 +73,8 @@ data class FaceExclusionsUiState(
 }
 
 /**
- * Backs [eu.akoos.photos.presentation.people.FaceExclusionsScreen]: the two kinds of face-recognition
- * exclusion the user can undo. A "Not this person" removal recorded a `not_person` row against the
+ * Backs [eu.akoos.photos.presentation.people.FaceExclusionsScreen]: the kinds of face-recognition
+ * exclusion the user can undo (plus the hidden people, shown again here). A "Not this person" removal recorded a `not_person` row against the
  * person's name; a "Not a person" dismissal set `rejected` on a cluster's faces. Both are listed here
  * with a face crop, and each undo reverses the underlying DB state so the face is re-evaluated on the
  * next clustering pass. Read once and re-read after an undo; gated like the People surfaces, so with the
@@ -85,11 +88,21 @@ class FaceExclusionsViewModel @Inject constructor(
     private val faceCurationTimeDao: FaceCurationTimeDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val faceEdits: FaceEditCounter,
+    private val hiddenPeopleSource: HiddenPeople,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FaceExclusionsUiState())
     val uiState: StateFlow<FaceExclusionsUiState> = _uiState.asStateFlow()
+
+    /** The people the user hid, live; null until the first read, so the screen is not called empty meanwhile. */
+    val hiddenPeople: StateFlow<List<PersonUi>?> = hiddenPeopleSource.observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
+
+    /** Show a hidden person again; the list follows on its own. */
+    fun showPerson(personId: Long) {
+        viewModelScope.launch(Dispatchers.IO) { hiddenPeopleSource.show(personId) }
+    }
 
     /** Read both kinds of exclusion. A no-op (empty, not loading) with face recognition off, matching
      *  how the People screen gates on the same two switches. */

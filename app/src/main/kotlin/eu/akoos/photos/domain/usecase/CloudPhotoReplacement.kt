@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
@@ -35,6 +36,10 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 
@@ -122,7 +127,7 @@ class CloudPhotoReplacement(
         // The download lands in the full-res cache the viewer shares. One that was not there before stays
         // only as long as this replacement needs it, and one whose photo is gone (trashed below) goes with
         // it, so a batch of thousands never fills the phone with originals.
-        val cached = File(context.cacheDir, "fullres/${photo.linkId}.${mimeToFileExtension(photo.mimeType)}")
+        val cached = File(context.cacheDir, "fullres/${safeFileId(photo.linkId)}.${mimeToFileExtension(photo.mimeType)}")
         val wasCached = cached.exists()
         var replaced = false
         var newLinkId: String? = null
@@ -159,16 +164,14 @@ class CloudPhotoReplacement(
             val toAdd: Set<String>
             val copyLink: String
             if (resume == null) {
-                val original = cloudRepo.downloadFullResPhoto(userId, photo)
-                // A preparation that writes gets a private copy: the download cache file is shared with the
-                // viewer and swept by age, so nothing here may change it in place.
-                val source = if (prepareWrites) {
-                    File(workDir, "cloud_${photo.linkId.take(24)}_${System.currentTimeMillis()}").also { file ->
-                        working = file
-                        original.inputStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
-                    }
-                } else {
-                    original
+                val cachedOriginal = cloudRepo.downloadFullResPhoto(userId, photo)
+                val original = cachedOriginal.storedFile
+                // Every preparation gets a plaintext private copy: the download cache file is shared with the
+                // viewer, swept by age and kept encrypted (a plain one may be encrypted in place at any start),
+                // so nothing here reads or changes it by its path.
+                val source = File(workDir, "cloud_${photo.linkId.take(24)}_${System.currentTimeMillis()}").also { file ->
+                    working = file
+                    cachedOriginal.copyPlainTo(file, context)
                 }
 
                 val copy = prepare.prepare(source) ?: return Result.Skipped
@@ -282,6 +285,7 @@ class CloudPhotoReplacement(
                 return Result.Failed("the original could not be moved to the trash", true, copyLink, carriedOver = true)
             }
             replaced = true
+            Replaced.record(photo.linkId, copyLink)
             return Result.Success(copyLink)
         } catch (e: CancellationException) {
             throw e
@@ -296,13 +300,7 @@ class CloudPhotoReplacement(
     }
 
     private fun sha1(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(file)
     }
 
     companion object {
@@ -319,6 +317,27 @@ class CloudPhotoReplacement(
 
         fun release(linkId: String) {
             held.remove(linkId)
+        }
+    }
+
+    /** The photos this process has replaced, original link to the copy that took its place. A screen that
+     *  still holds the original (an open viewer) follows it to the copy; the original is in the trash. */
+    object Replaced {
+        /** Enough for any one session; the oldest go first. */
+        private const val KEEP = 200
+
+        private val links = MutableStateFlow<Map<String, String>>(emptyMap())
+        val map: StateFlow<Map<String, String>> = links.asStateFlow()
+
+        fun record(original: String, copy: String) {
+            if (original == copy || copy.isBlank()) return
+            links.update { held ->
+                val next = LinkedHashMap(held)
+                next.remove(original)
+                next[original] = copy
+                while (next.size > KEEP) next.remove(next.keys.first())
+                next
+            }
         }
     }
 }

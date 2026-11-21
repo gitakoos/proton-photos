@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Photos for Proton
+  ~ Copyright (C) 2026 Akoos <https://akoos.eu>
+  ~
+  ~ Source:  https://github.com/gitakoos/proton-photos
+  ~ Website: https://www.photosforproton.eu
+  ~
+  ~ This file is part of Photos for Proton.
+  ~
+  ~ Photos for Proton is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU General Public License version 3 as
+  ~ published by the Free Software Foundation.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  ~ GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License
+  ~ along with this program. If not, see <https://www.gnu.org/licenses/>.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path
+        android:pathData="M64,42 h64 a10,10 0 0 1 10,10 v72 a10,10 0 0 1 -10,10 h-64 a10,10 0 0 1 -10,-10 v-72 a10,10 0 0 1 10,-10 z M66,50 h60 a6,6 0 0 1 6,6 v12 a6,6 0 0 1 -6,6 h-60 a6,6 0 0 1 -6,-6 v-12 a6,6 0 0 1 6,-6 z M64,82 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M83,82 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M102,82 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M121,82 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M64,99 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M83,99 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M102,99 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M121,99 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M64,116 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M83,116 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M102,116 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z M121,116 h7 a4,4 0 0 1 4,4 v5 a4,4 0 0 1 -4,4 h-7 a4,4 0 0 1 -4,-4 v-5 a4,4 0 0 1 4,-4 z"
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"/>
+</vector>

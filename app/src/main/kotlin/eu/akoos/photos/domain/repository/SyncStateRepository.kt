@@ -39,6 +39,35 @@ interface SyncStateRepository {
     suspend fun upsert(state: SyncState, userId: UserId)
     suspend fun upsertAll(states: List<SyncState>, userId: UserId)
 
+    /** Writes [state] only when no row holds its uri yet; true when it was written. A row an upload,
+     *  a download or reconcile wrote first is never replaced. */
+    suspend fun insertIfAbsent(state: SyncState, userId: UserId): Boolean {
+        if (getByUri(state.localUri) != null) return false
+        upsert(state, userId)
+        return true
+    }
+
+    /** Device uris of [userId]'s SYNCED rows, by the cloud id of [cloudFileIds] each is paired to. */
+    suspend fun syncedUrisByCloudId(userId: UserId, cloudFileIds: Collection<String>): Map<String, List<String>> =
+        observeAll(userId).first()
+            .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null && it.cloudFileId in cloudFileIds }
+            .groupBy({ it.cloudFileId!! }, { it.localUri })
+
+    /** Marks [localUri]'s link to [cloudFileId], made by name, proven by the file's bytes; see
+     *  [eu.akoos.photos.data.db.dao.SyncStateDao.markLinkProven]. True when the row was changed. */
+    suspend fun markLinkProven(
+        userId: UserId,
+        localUri: String,
+        cloudFileId: String,
+        cloudHash: String,
+        originalHash: String,
+        now: Long,
+    ): Boolean = false
+
+    /** Drops [localUri]'s link to [cloudFileId], made by name, once its bytes were found to differ; see
+     *  [eu.akoos.photos.data.db.dao.SyncStateDao.unlinkNameLink]. True when the row was changed. */
+    suspend fun unlinkNameLink(userId: UserId, localUri: String, cloudFileId: String): Boolean = false
+
     /** Guarded domain-column write for reconcile: rewrites [state]'s domain columns UNLESS the row is
      *  already a finished upload (SYNCED with a cloud id), returning the rows changed. Reconcile derives
      *  a demotion from a snapshot that can go stale before it writes, so this leaves a row an upload
@@ -106,9 +135,37 @@ interface SyncStateRepository {
         states.filterTo(ArrayList()) { updateDomainColumnsIfNotSyncedWithCloud(it, userId) == 0 }
             .mapTo(HashSet()) { it.localUri }
 
-    /** [userId]'s LOCAL_ONLY rows, the ones still to back up. */
-    suspend fun getLocalOnly(userId: UserId): List<SyncState> =
-        observeAll(userId).first().filter { it.status == SyncStatus.LOCAL_ONLY }
+    /**
+     * Up to [limit] of [userId]'s rows at [status] that come after [afterKey] in the order [observeAll]
+     * lists them, with the key of the last one. A walk starts at [Long.MIN_VALUE] and passes each page's
+     * [SyncStatePage.lastKey] on, so a pass over every row holds one page at a time, not the whole table.
+     */
+    suspend fun pageByStatus(userId: UserId, status: SyncStatus, afterKey: Long, limit: Int): SyncStatePage {
+        val rows = observeAll(userId).first().filter { it.status == status }
+        val from = afterKey.coerceIn(0L, rows.size.toLong())
+        val page = rows.drop(from.toInt()).take(limit)
+        return SyncStatePage(page, from + page.size)
+    }
+
+    /** [userId]'s own rows for [localUris]: a uri with no row, or with another account's row, is absent.
+     *  The caller keeps the list within the host-variable limit. */
+    suspend fun getOwnByUris(userId: UserId, localUris: List<String>): List<SyncState> {
+        val wanted = localUris.toHashSet()
+        return observeAll(userId).first().filter { it.localUri in wanted }
+    }
+
+    /** Which of [cloudFileIds] a SYNCED row of [userId]'s is paired to. The caller keeps the list within
+     *  the host-variable limit. */
+    suspend fun syncedCloudIdsAmong(userId: UserId, cloudFileIds: Collection<String>): Set<String> =
+        observeAll(userId).first().asSequence()
+            .filter { it.status == SyncStatus.SYNCED }
+            .mapNotNull { it.cloudFileId }
+            .filterTo(HashSet()) { it in cloudFileIds }
+
+    /** [userId]'s rows that are queued or whose uri is in [extraUris], in the order [observeAll] lists them:
+     *  the only rows an upload pass selects from, without reading every row of a large library. */
+    suspend fun getQueuedOrIn(userId: UserId, extraUris: Set<String>): List<SyncState> =
+        observeAll(userId).first().filter { it.queued || it.localUri in extraUris }
 
     /** The rows for [localUris] (a uri with no row is absent), in as few reads as the SQL limit allows. */
     suspend fun getByUris(localUris: List<String>): List<SyncState> = localUris.mapNotNull { getByUri(it) }
@@ -126,8 +183,36 @@ interface SyncStateRepository {
     /** Unguarded queued clear for the success / pairing path, where the row is known backed up. */
     suspend fun clearQueuedForSynced(localUri: String)
 
+    /** Records the device file's SHA-1 as the backup that just landed read it ([SyncState.originalHash]),
+     *  or clears it when null. Called right after that backup's SYNCED write. */
+    suspend fun setOriginalHash(localUri: String, originalHash: String?) {}
+
+    /**
+     * Records [after] as what [localUri]'s device file holds right after this app rewrote it itself (the
+     * date or place the metadata editor writes into it, a metadata strip), so free-up and reconcile take
+     * those bytes as the backed-up photo rather than as an edit to back up again. Only a row that is backed
+     * up, paired to Drive and recorded as holding [before] (the bytes the rewrite started from) takes it;
+     * any other row is left as it is, so a rewrite of a file edited since its backup still reads as changed.
+     */
+    suspend fun recordOwnDeviceWrite(localUri: String, before: String, after: String) {}
+
+    /**
+     * Records [after] as what [localUri]'s device file holds right after this app rewrote it itself, on a
+     * backed-up row that recorded no device bytes, only while its hash is still [localHash] and its backup
+     * stamp still [backedUpAtMs]: the caller has judged the bytes the rewrite started from backed up by
+     * that row as it read it.
+     */
+    suspend fun recordOwnDeviceWriteOverRow(localUri: String, after: String, localHash: String, backedUpAtMs: Long) {}
+
+    /** Drops the upload a device photo was given only to join an album, once no album is left for it to join.
+     *  Only a still pending LOCAL_ONLY row queued for an album add. */
+    suspend fun clearAlbumAddIntent(localUri: String) {}
+
     /** The device photo's Drive copy is gone: keep the folder backup from uploading it again. */
     suspend fun markRemovedFromDrive(localUri: String)
+    /** The device file cannot be backed up as it stands: off the queue until it changes, found at [at]
+     *  (see `QueueSource.UNUPLOADABLE`). Only a LOCAL_ONLY row. */
+    suspend fun markUnuploadable(localUri: String, at: Long) {}
     /** [clearQueuedForSynced] for every one of [localUris], in as few writes as the SQL limit allows. */
     suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
         for (uri in localUris) clearQueuedForSynced(uri)
@@ -140,4 +225,15 @@ interface SyncStateRepository {
      *  leaving ALBUM_ADD / AUTO_FOLDER / EDITOR rows queued and never touching an UPLOADING or SYNCED
      *  row. Returns the rows changed. Called from the user-cancel path only. */
     suspend fun clearManualQueue(): Int
+
+    /** A single cancelled "back up now" upload of [localUri]: de-queued and marked `QueueSource.CANCELLED`,
+     *  claimed or not, so no claim release, restart recovery or reconcile queues it again until the user
+     *  asks. Never touches a SYNCED row. Returns the rows changed. */
+    suspend fun clearManualQueueFor(localUri: String): Int = 0
+
+    /** Puts the `QueueSource.CANCELLED` mark back on [localUri] after a write that cleared the queue columns. */
+    suspend fun keepCancelled(localUri: String) {}
 }
+
+/** One page of a [SyncStateRepository.pageByStatus] walk: its rows, and the key the next page starts after. */
+class SyncStatePage(val rows: List<SyncState>, val lastKey: Long)

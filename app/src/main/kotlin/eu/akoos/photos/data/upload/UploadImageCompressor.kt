@@ -180,7 +180,7 @@ object UploadImageCompressor {
             // the cap. A cap of 0 (or an already-smaller image) keeps the decoded dimensions.
             scaled = if (cap > 0) scaleToLongEdge(oriented, cap) else oriented
 
-            out = File.createTempFile("compressed_", ".jpg", context.cacheDir)
+            out = File.createTempFile("compressed_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             val encoded = FileOutputStream(out).use { fos ->
                 scaled.compress(Bitmap.CompressFormat.JPEG, tier.quality, fos)
             }
@@ -272,10 +272,13 @@ object UploadImageCompressor {
         isMotionPhoto: () -> Boolean = { false },
     ): Boolean {
         if (!stripOnUpload || compressWillRun) return false
-        val normalized = mimeType.substringBefore(';').trim().lowercase(Locale.ROOT)
-        if (normalized !in EXIF_UNWRITABLE_IMAGE_MIMES) return false
+        if (!isExifUnwritable(mimeType)) return false
         return !isMotionPhoto()
     }
+
+    /** True for an image container whose EXIF the strip cannot rewrite (the HEIC family and AVIF). */
+    fun isExifUnwritable(mimeType: String): Boolean =
+        mimeType.substringBefore(';').trim().lowercase(Locale.ROOT) in EXIF_UNWRITABLE_IMAGE_MIMES
 
     /**
      * Pure decision: must the image compressor be SKIPPED for this upload because the bytes carry an
@@ -371,7 +374,7 @@ object UploadImageCompressor {
             val orientation = ExifHelper.readOrientation(context, sourceUri)
             oriented = ExifHelper.applyOrientation(decoded, orientation)
 
-            out = File.createTempFile("stripped_", ".jpg", context.cacheDir)
+            out = File.createTempFile("stripped_", ".jpg", eu.akoos.photos.data.localcrypto.VaultFiles.plainStagingDir(context))
             val encoded = FileOutputStream(out).use { fos ->
                 oriented.compress(Bitmap.CompressFormat.JPEG, STRIP_TRANSCODE_JPEG_QUALITY, fos)
             }

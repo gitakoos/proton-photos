@@ -328,6 +328,14 @@ internal fun isDirectAlbumChild(
     return wireSaysChild || parentLinkId in albumLinkIds
 }
 
+/**
+ * Whether the listing's IsChildOfAlbum flag can change [isDirectAlbumChild]'s answer for a photo whose link
+ * names [parentLinkId]. Only a parent that is neither missing, the photos root, nor a known album leaves the
+ * flag to decide; for any other parent the flag is redundant.
+ */
+internal fun wireDecidesAlbumChild(parentLinkId: String?, albumLinkIds: Set<String>, photosRootLinkId: String?): Boolean =
+    parentLinkId != null && parentLinkId != photosRootLinkId && parentLinkId !in albumLinkIds
+
 internal fun guessMimeType(name: String): String = when (name.substringAfterLast('.').lowercase()) {
     "mp4", "m4v", "3gp", "ts" -> "video/mp4"
     "mov"                      -> "video/quicktime"

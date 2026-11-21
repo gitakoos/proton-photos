@@ -57,6 +57,10 @@ interface AlbumPhotoMembershipDao {
     @Query("SELECT albumLinkId, photoLinkId FROM album_photo_membership WHERE photoLinkId IN (:photoLinkIds)")
     fun observeAlbumIdsForPhotos(photoLinkIds: Set<String>): Flow<List<AlbumPhotoMembershipLite>>
 
+    /** Whether any album holds [photoLinkId]. Rides the photoLinkId index. */
+    @Query("SELECT EXISTS(SELECT 1 FROM album_photo_membership WHERE photoLinkId = :photoLinkId)")
+    suspend fun isInAnyAlbum(photoLinkId: String): Boolean
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun upsertAll(entries: List<AlbumPhotoMembershipEntity>)
 

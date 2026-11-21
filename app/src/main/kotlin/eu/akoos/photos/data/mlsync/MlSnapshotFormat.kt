@@ -41,7 +41,7 @@ import java.io.IOException
  * Header
  *
  *     magic                 8 bytes  ASCII "PPMLSNAP"
- *     version               u32      6 for FACES, 4 for SEARCH (a reader takes 4 to 6 for either kind)
+ *     version               u32      7 for FACES, 4 for SEARCH (a reader takes 4 to 7 for either kind)
  *     kind                  u8       1 = FACES, 2 = SEARCH
  *     deviceId              str      the writing device's id
  *     deviceLabel           str      the writing device's human-readable name
@@ -53,8 +53,9 @@ import java.io.IOException
  *     embeddingDim          u32      components per face embedding
  *     facesWipedAt          i64      when the account's face data was last deleted on every device, epoch
  *                                    milliseconds, 0 when never (versions 4 and 5 carry no such field)
- *     9 x u32 counts: keys, people, nameChanges, removals, faces, manualPhotos, notPersons, covers,
- *     scanMarkers (version 4: 7 counts, no nameChanges or removals)
+ *     10 x u32 counts: keys, people, nameChanges, removals, faces, manualPhotos, notPersons, covers,
+ *     scanMarkers, hiddenPeople (versions 5 and 6: the first 9, version 4: 7 counts, no nameChanges or
+ *     removals)
  *   SEARCH continues with
  *     searchModelId         str      the embedding space; vectors compare only under an equal id
  *     embeddingDim          u32      components per search embedding
@@ -63,7 +64,7 @@ import java.io.IOException
  * Records
  *
  * Every record is a u8 tag and a body. Records come in sections, one per count above and in the same
- * order (FACES: KEY, PERSON, NAME_CHANGE, REMOVAL, FACE, MANUAL_PHOTO, NOT_PERSON, COVER, SCAN_MARKER; SEARCH: KEY,
+ * order (FACES: KEY, PERSON, NAME_CHANGE, REMOVAL, FACE, MANUAL_PHOTO, NOT_PERSON, COVER, SCAN_MARKER, HIDDEN_PERSON; SEARCH: KEY,
  * SEARCH_EMBEDDING), each holding exactly its count of records. The END tag follows the last section and
  * is the final byte of the stream.
  *
@@ -79,6 +80,7 @@ import java.io.IOException
  *     0x08 SEARCH_EMBEDDING  u32 key, u8 flags, then embeddingDim x f16 unless the tombstone flag is set
  *     0x09 NAME_CHANGE       str from, str to, i64 changedAt
  *     0x0A REMOVAL           u8 kind, str person, str photoKey, u32 faceIndex, i64 removedAt
+ *     0x0B HIDDEN_PERSON     u32 person, u8 flags, i64 changedAt (version 7)
  *     0xFF END
  *
  * Meaning
@@ -118,6 +120,19 @@ import java.io.IOException
  * - COVER: the photo picked as the person's cover.
  * - SCAN_MARKER: a photo the face indexer finished, whether or not it held a face, so an importing device
  *   skips it. Flags: bit 0 set once the high-resolution "find more" sweep has checked it too.
+ * - HIDDEN_PERSON: whether the person is hidden from People, by name, as of changedAt (epoch milliseconds, the
+ *   time of the hide or show on the device that made it). Flags: bit 0 set = hidden, clear = shown again; every
+ *   other bit is refused. The name is listed in the PERSON table like any other name a record uses. Last
+ *   writer wins per case-folded name: an importer applies a record whose changedAt is later than the row it
+ *   holds for that name and passes over an older or equal one. A NAME_CHANGE moves a hidden row from its from
+ *   to its to, and an empty to drops it, as it does the other name-keyed curation. One record per hidden row
+ *   of the account, a shown-again row too, so a show crosses devices, sorted by case-folded name.
+ * - Unnamed hidden groups: hiding a group that has no name labels its faces with a reserved name token,
+ *   U+E000, "hidden", U+E000 and 32 lowercase hex digits ([eu.akoos.photos.domain.usecase.HiddenPersonToken]). It
+ *   travels as an ordinary PERSON name and confirmedPerson on its faces, so the group stays together on
+ *   every device. A reader never shows a token: it reads as the ordinary "unnamed" label. Showing the group
+ *   again takes the token off its faces (a NAME_CHANGE from the token to empty) and writes a HIDDEN_PERSON
+ *   with bit 0 clear.
  * - SEARCH_EMBEDDING: a photo's image embedding at half precision. Flags: bit 0 marks a tombstone, a
  *   photo the indexer could not decode and keeps as the zero vector; a tombstone carries no components.
  *
@@ -130,9 +145,9 @@ import java.io.IOException
 object MlSnapshotFormat {
 
     /** The version this build writes for a face snapshot, and the newest it reads. */
-    const val FACES_VERSION = 6
+    const val FACES_VERSION = 7
 
-    /** The version this build writes for a search snapshot, whose layout versions 5 and 6 left as it was. */
+    /** The version this build writes for a search snapshot, whose layout versions 5 to 7 left as it was. */
     const val SEARCH_VERSION = 4
 
     /** The oldest version this build reads. */
@@ -160,6 +175,7 @@ object MlSnapshotFormat {
     internal const val TAG_SEARCH_EMBEDDING = 0x08
     internal const val TAG_NAME_CHANGE = 0x09
     internal const val TAG_REMOVAL = 0x0A
+    internal const val TAG_HIDDEN_PERSON = 0x0B
 
     /** The kinds of a REMOVAL, the same numbers the curation times keep. */
     const val REMOVAL_MANUAL_PHOTO = 1
@@ -171,6 +187,7 @@ object MlSnapshotFormat {
     internal const val FACE_BLUR_KNOWN = 0x02
     internal const val SCAN_HI_RES = 0x01
     internal const val SEARCH_TOMBSTONE = 0x01
+    internal const val HIDDEN_FLAG = 0x01
 
     /** A person reference naming nobody, 0xFFFFFFFF on the wire. */
     internal const val NO_REFERENCE = -1
@@ -236,6 +253,7 @@ object MlSnapshotFormat {
             Section(TAG_NOT_PERSON, header.notPersonCount),
             Section(TAG_COVER, header.coverCount),
             Section(TAG_SCAN_MARKER, header.scanMarkerCount),
+            Section(TAG_HIDDEN_PERSON, header.hiddenPeopleCount),
         )
         is MlSnapshotHeader.Search -> listOf(
             Section(TAG_KEY, header.keyCount),
@@ -254,6 +272,7 @@ object MlSnapshotFormat {
         TAG_SEARCH_EMBEDDING -> "SEARCH_EMBEDDING"
         TAG_NAME_CHANGE -> "NAME_CHANGE"
         TAG_REMOVAL -> "REMOVAL"
+        TAG_HIDDEN_PERSON -> "HIDDEN_PERSON"
         TAG_END -> "END"
         else -> "tag $tag"
     }
@@ -295,6 +314,7 @@ sealed interface MlSnapshotHeader {
         val scanMarkerCount: Int,
         val nameChangeCount: Int = 0,
         val removalCount: Int = 0,
+        val hiddenPeopleCount: Int = 0,
         /** When the account's face data was last deleted on every device, 0 when never. */
         val facesWipedAtMillis: Long = 0L,
     ) : MlSnapshotHeader {
@@ -426,6 +446,9 @@ sealed interface MlSnapshotRecord {
 
     /** The photo picked as [personName]'s cover, at [setAtMillis] (0 when unknown). */
     data class Cover(val personName: String, val photoKey: String, val setAtMillis: Long = 0L) : MlSnapshotRecord
+
+    /** Whether the person called [personName] is hidden ([hidden]) or shown again, as of [changedAtMillis]. */
+    data class HiddenPerson(val personName: String, val hidden: Boolean, val changedAtMillis: Long) : MlSnapshotRecord
 
     /** A photo the face indexer finished, with or without faces. */
     data class ScanMarker(val photoKey: String, val hiResScanned: Boolean) : MlSnapshotRecord

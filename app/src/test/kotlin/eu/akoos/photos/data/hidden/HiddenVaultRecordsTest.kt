@@ -94,6 +94,15 @@ class HiddenVaultRecordsTest {
     }
 
     @Test
+    fun `a rename carries the edit mark onto the new uri, and a copy gains none`() {
+        val marked = records().copy(edited = setOf(old))
+
+        assertEquals(setOf(new), HiddenVaultRecords.renamed(marked, old, new, null).edited)
+        assertEquals(setOf(old), HiddenVaultRecords.copied(marked, old, new, "Copy.jpg").edited)
+        assertEquals(setOf(old), HiddenVaultRecords.renamed(marked, other, new, null).edited)
+    }
+
+    @Test
     fun `a rename leaves every other photo's records untouched`() {
         val after = HiddenVaultRecords.renamed(records(), old, new, "Beach trip.jpg")
 

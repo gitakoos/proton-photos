@@ -103,7 +103,8 @@ class AutoMergePeopleUseCase @Inject constructor(
         account: String,
         writeAllowed: () -> Boolean = { true },
     ): Int = withContext(Dispatchers.Default) {
-        val named = personDao.namedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
+        // A hidden person never takes a group in: it stays as the user left it.
+        val named = personDao.visibleNamedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
         if (named.isEmpty()) return@withContext 0
         val namedIds = named.mapTo(HashSet()) { it.id }
         val nameById = named.associate { it.id to it.displayName!!.trim() }

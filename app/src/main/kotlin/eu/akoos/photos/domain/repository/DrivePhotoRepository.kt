@@ -146,7 +146,7 @@ interface DrivePhotoRepository {
      * to ~250 ms by the implementation, plus a guaranteed final emission at 100%. Used by the
      * photo viewer to render a percentage instead of an opaque spinner on multi-MB videos.
      *
-     * Cached output lives in `cacheDir/fullres/` and survives across screens. Eviction is
+     * Cached output lives in `cacheDir/fullres/`, encrypted, and survives across screens. Eviction is
      * handled by a TTL sweeper ([PhotoDownloadService.pruneStaleFullResCache]) — files older
      * than the TTL are reclaimed when the device is online. The sweeper holds off while
      * offline so cached photos stay viewable until the network returns.
@@ -156,7 +156,7 @@ interface DrivePhotoRepository {
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
-    ): File
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal
     /**
      * [uploadUri] overrides [item].uri — used when metadata has been stripped to a temp file.
      *
@@ -210,6 +210,9 @@ interface DrivePhotoRepository {
      * invisible orphan node wasting Drive quota. Cheap no-op when the queue is empty.
      */
     suspend fun retryPendingOrphanDeletes(userId: UserId)
+
+    /** Drops the partial and resume files a stopped download of [photo] left in the cache. */
+    fun discardPartialDownload(photo: CloudPhoto) {}
 
     /**
      * Adds photos to an album. Returns an explicit breakdown of per-photo crypto failures so
@@ -511,7 +514,7 @@ interface DrivePhotoRepository {
      *
      * [vault] says how much of the hidden vault goes with it; see [VaultWipe].
      */
-    suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe = VaultWipe.All)
+    suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe)
 
     // ── Lazy thumbnail decrypt ────────────────────────────────────────────
     //

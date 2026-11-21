@@ -27,7 +27,7 @@ base {
 
 android {
     namespace = "eu.akoos.photos"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         // applicationId is intentionally OUTSIDE the me.proton.* namespace — this is an
@@ -40,8 +40,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 279
-        versionName = "2.6.0-test7"
+        versionCode = 285
+        versionName = "2.6.0-test9"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -125,6 +125,12 @@ android {
         }
     }
 
+    // The dependency list Google embeds in the signing block is readable only by Google Play.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -136,6 +142,11 @@ android {
         // AIDL stub for ICryptoService — the cross-process binder that lets the
         // :crypto process expose its thumbnail-decrypt methods to the main process.
         aidl = true
+    }
+
+    // The device tests build databases at the versions earlier releases shipped from the exported schemas.
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
 
     testOptions {
@@ -247,6 +258,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    implementation(libs.sqlcipher.android) { artifact { type = "aar" } }
+    implementation(libs.androidx.sqlite)
     // The unit tests declare their own small @Database classes; Room generates them from the test sources too.
     kspTest(libs.room.compiler)
 
@@ -271,6 +284,7 @@ dependencies {
     // Video playback
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    implementation(libs.media3.inspector)
 
     // Video upload compression (opt-in transcode)
     implementation(libs.media3.transformer)
@@ -280,13 +294,13 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp)
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
 
     // WorkManager
     implementation(libs.work.runtime.ktx)
 
     // AppCompat (for language/locale switching)
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.8.0")
 
     // EXIF reading/writing
     implementation(libs.exifinterface)

@@ -305,4 +305,39 @@ class TakeoutZipReaderTest {
 
         assertEquals(listOf(MediaEntry("dated.jpg", modified), MediaEntry("zeroed.jpg", null)), seen)
     }
+
+    @Test fun `a Dropbox-style zip with a slash entry of its own hands back its root and folder photos`() {
+        val bytes = buildZip(
+            listOf(
+                "/" to null,
+                "IMG_1.jpg" to payload(1, 32),
+                "Trip/IMG_2.jpg" to payload(2, 32),
+            ),
+        )
+
+        val seen = mutableListOf<String>()
+        val walk = reader(bytes).forEachMediaEntry { entry, _ -> seen += entry.name }
+
+        assertEquals(listOf("IMG_1.jpg", "Trip/IMG_2.jpg"), seen)
+        assertEquals(false, walk.endedEarly)
+        assertNull(TakeoutSidecar.albumFolderOf("IMG_1.jpg"))
+        assertEquals("Trip", TakeoutSidecar.albumFolderOf("Trip/IMG_2.jpg"))
+    }
+
+    @Test fun `an entry that steps up with dot-dot is skipped and the walk goes on`() {
+        val bytes = buildZip(
+            listOf(
+                "../escaped.jpg" to payload(1, 32),
+                "kept.jpg" to payload(2, 32),
+            ),
+        )
+
+        val r = reader(bytes)
+        val seen = mutableListOf<String>()
+        val walk = r.forEachMediaEntry { entry, _ -> seen += entry.name }
+
+        assertEquals(listOf("kept.jpg"), seen)
+        assertEquals(false, walk.endedEarly)
+        assertEquals(1, r.scan().mediaCount)
+    }
 }

@@ -41,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,6 +63,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.BuildConfig
@@ -83,7 +85,9 @@ import eu.akoos.photos.presentation.common.LocalViewerReturnKey
 import eu.akoos.photos.presentation.common.ViewerReturnTarget
 import eu.akoos.photos.presentation.common.resolve
 import eu.akoos.photos.presentation.common.MapStyleChooserDialog
+import eu.akoos.photos.presentation.gallery.GridThumbnailRequester
 import eu.akoos.photos.presentation.gallery.LocalCoverThumbnailRequester
+import eu.akoos.photos.presentation.gallery.LocalGridThumbnailRequester
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import androidx.compose.runtime.CompositionLocalProvider
 import eu.akoos.photos.domain.entity.Album
@@ -168,8 +172,6 @@ import eu.akoos.photos.presentation.news.NewsScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewHistoryScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewScreen
 import javax.inject.Inject
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -178,6 +180,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ThemedSnackbarHost
+import eu.akoos.photos.presentation.common.LocalSnackbarClearance
+import eu.akoos.photos.presentation.common.SnackbarClearance
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.presentation.common.UndoBarViewModel
 import kotlinx.coroutines.withTimeoutOrNull
@@ -235,6 +240,7 @@ sealed class Screen(val route: String) {
     data object AppearanceSettings : Screen("appearance_settings")
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
+    data object AppIcon : Screen("app_icon_settings")
     data object LanguageSettings : Screen("language_settings")
     data object ViewerSettings : Screen("viewer_settings")
     data object ClockFormatSettings : Screen("clock_format_settings")
@@ -357,8 +363,18 @@ class ThumbnailUrlsViewModel @Inject constructor(
     store: ThumbnailUrlStore,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val accountManager: AccountManager,
+    private val drivePhotoRepository: eu.akoos.photos.domain.repository.DrivePhotoRepository,
 ) : ViewModel() {
     val urls: StateFlow<Map<String, String>> = store.urls
+
+    private val signedInUser: StateFlow<me.proton.core.domain.entity.UserId?> =
+        accountManager.getPrimaryUserId().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The timeline's own request path, for the grids that have no view model wired to it. Nothing for a guest. */
+    val gridRequester = GridThumbnailRequester(
+        request = { linkId -> signedInUser.value?.let { drivePhotoRepository.requestThumbnailDecrypt(it, linkId) } },
+        cancel = { linkId -> drivePhotoRepository.cancelThumbnailDecrypt(linkId) },
+    )
 
     /** Decrypt and keep a face cover's thumbnail. A guest has no cloud photos, so nothing to ask for. */
     fun requestCover(linkId: String) {
@@ -371,6 +387,13 @@ class ThumbnailUrlsViewModel @Inject constructor(
 
 /** Encodes a single trash viewer action as the "action|kind|key" string the Trash screen parses and
  *  runs. A Synced item never appears in trash, so it maps to an empty no-op. */
+/** The route argument naming a Collection grouping's see-all page. */
+private fun memoryCategoryRouteType(category: MemoryCategory): String = when (category) {
+    MemoryCategory.ON_THIS_DAY -> "onthisday"
+    MemoryCategory.SEASONS -> "seasons"
+    MemoryCategory.THEMES -> "themes"
+}
+
 private fun trashActionString(action: String, item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "$action|device|${item.local.uri}"
     is GalleryItem.CloudOnly -> "$action|cloud|${item.cloud.linkId}"
@@ -386,22 +409,22 @@ private sealed interface GifMakerSource {
 @Composable
 fun NavGraph(
     onStartLogin: () -> Unit = {},
-    /** Set by MainActivity when the user taps the home-screen photo widget. The Gallery
+    /** Set by MainHostActivity when the user taps the home-screen photo widget. The Gallery
      *  composable receives this and (once the items flow has populated) navigates straight
      *  to the viewer for the matching photo. Null on regular cold starts. */
     widgetPhotoUri: String? = null,
     onWidgetPhotoConsumed: () -> Unit = {},
-    /** Forwarded to [SettingsScreen]'s "Check for updates" row. MainActivity owns the
+    /** Forwarded to [SettingsScreen]'s "Check for updates" row. MainHostActivity owns the
      *  call into the singleton UpdateOrchestrator + the Toast feedback so the UI layer
      *  doesn't need to hold an Activity reference. */
     onCheckForUpdates: () -> Unit = {},
-    /** Set by MainActivity when the user opens an external image/video via the system
+    /** Set by MainHostActivity when the user opens an external image/video via the system
      *  "Open with" / "Edit with" chooser. After we reach the Ready startup state, the
      *  request is captured into Nav-scope state and the editor route is pushed on top
      *  of Gallery so the back press lands the user on their gallery. */
     externalEditRequest: ExternalEditRequest? = null,
     onExternalEditConsumed: () -> Unit = {},
-    /** Set by MainActivity when another app asks for a photo (GET_CONTENT / PICK). The album picker
+    /** Set by MainHostActivity when another app asks for a photo (GET_CONTENT / PICK). The album picker
      *  opens as the only screen, and [onExternalPickDone] hands its photos back. */
     externalPickRequest: eu.akoos.photos.presentation.picker.PickRequest? = null,
     externalPickWorking: Boolean = false,
@@ -531,7 +554,7 @@ fun NavGraph(
     var pendingLocalFolderName by remember { mutableStateOf<String?>(null) }
     var localFolderPicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
 
-    // Captured from the MainActivity-owned request once we reach the Ready startup state.
+    // Captured from the MainHostActivity-owned request once we reach the Ready startup state.
     // Held in Nav scope so the PhotoEditor composable can read it without piping the value
     // through every screen on the back stack.
     var pendingExternalEdit by remember { mutableStateOf<ExternalEditRequest?>(null) }
@@ -621,7 +644,7 @@ fun NavGraph(
         }
     }
 
-    // Mirror the MainActivity-held request into Nav scope, then clear the Activity-side
+    // Mirror the MainHostActivity-held request into Nav scope, then clear the Activity-side
     // reference so a re-creation (config change) doesn't replay it.
     LaunchedEffect(externalEditRequest) {
         val req = externalEditRequest ?: return@LaunchedEffect
@@ -695,11 +718,16 @@ fun NavGraph(
         }
     }
 
+    // The bottom bars of whichever screen is up report here, so no snackbar (the undo bar included)
+    // lands on a control the next tap was meant for.
+    val snackbarClearance = remember { SnackbarClearance() }
     Box(modifier = Modifier.fillMaxSize()) {
     CompositionLocalProvider(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalCoverThumbnailRequester provides coverThumbnailRequester,
+        LocalGridThumbnailRequester provides thumbnailUrlsViewModel.gridRequester,
         LocalViewerReturnKey provides viewerReturnKey,
+        LocalSnackbarClearance provides snackbarClearance,
     ) {
     // Routes that open with their own full-width slide from the side (Search, the third tab of the dock), so
     // the screen behind them holds still and is covered or uncovered by it, instead of moving too.
@@ -795,6 +823,8 @@ fun NavGraph(
             // session and renders nothing of its own until there is actually a queue
             // to surface to the user.
             PendingDeleteHandler()
+            // Once, after the first start that found every hidden photo encrypted: what local encryption covers.
+            eu.akoos.photos.presentation.settings.LocalEncryptionNotice()
             // One-time post-update highlights. The startup router only lands here once the user is
             // fully Ready (logged in AND onboarded), so reaching this composable already implies
             // that gate. We read the seen-version pref once and, if this build's versionCode is
@@ -929,11 +959,7 @@ fun NavGraph(
                     navController.navigate(Screen.Viewer.route)
                 },
                 onSeeAll = { cat ->
-                    navController.navigate(
-                        Screen.MemoryCategory.create(
-                            if (cat == MemoryCategory.ON_THIS_DAY) "onthisday" else "seasons",
-                        ),
-                    )
+                    navController.navigate(Screen.MemoryCategory.create(memoryCategoryRouteType(cat)))
                 },
                 onPersonClick = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
                 onSeeAllPeople = { navController.navigate(Screen.People.route) },
@@ -963,10 +989,10 @@ fun NavGraph(
             Screen.MemoryCategory.route,
             arguments = listOf(navArgument("type") { type = NavType.StringType }),
         ) { backStackEntry ->
-            val category = if (backStackEntry.arguments?.getString("type") == "seasons") {
-                MemoryCategory.SEASONS
-            } else {
-                MemoryCategory.ON_THIS_DAY
+            val category = when (backStackEntry.arguments?.getString("type")) {
+                "seasons" -> MemoryCategory.SEASONS
+                "themes" -> MemoryCategory.THEMES
+                else -> MemoryCategory.ON_THIS_DAY
             }
             MemoryCategoryScreen(
                 category = category,
@@ -980,8 +1006,7 @@ fun NavGraph(
                     navController.navigate(Screen.Viewer.route)
                 },
                 onSwitchCategory = { cat ->
-                    val type = if (cat == MemoryCategory.ON_THIS_DAY) "onthisday" else "seasons"
-                    navController.navigate(Screen.MemoryCategory.create(type)) {
+                    navController.navigate(Screen.MemoryCategory.create(memoryCategoryRouteType(cat))) {
                         popUpTo(Screen.MemoryCategory.route) { inclusive = true }
                     }
                 },
@@ -1020,9 +1045,10 @@ fun NavGraph(
             val mergeSuggestion by personVm.mergeSuggestion.collectAsStateWithLifecycle()
             val personMessage by personVm.message.collectAsStateWithLifecycle()
             val personCtx = androidx.compose.ui.platform.LocalContext.current
+            val personResources = androidx.compose.ui.platform.LocalResources.current
             LaunchedEffect(personMessage) {
                 personMessage?.let {
-                    android.widget.Toast.makeText(personCtx, personCtx.getString(it), android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(personCtx, personResources.getString(it), android.widget.Toast.LENGTH_SHORT).show()
                     personVm.clearMessage()
                 }
             }
@@ -1032,6 +1058,7 @@ fun NavGraph(
                 onLoadMergeCandidates = { personVm.loadMergeCandidates(personId) },
                 onMergeName = { name -> personVm.mergeWith(personId, name); navController.popBackStack() },
                 onIgnorePerson = { personVm.ignorePerson(personId) { navController.popBackStack() } },
+                onHidePerson = { personVm.hidePerson(personId) { navController.popBackStack() } },
                 onBack = { navController.popBackStack() },
                 onOpenPhoto = { item ->
                     // Same viewer the timeline / location detail open, over this person's whole set
@@ -1142,9 +1169,10 @@ fun NavGraph(
             val personActions = viewerPerson?.let { hiltViewModel<PersonDetailViewModel>(backStackEntry) }
             val personActionMessage = personActions?.message?.collectAsStateWithLifecycle()?.value
             val personActionCtx = androidx.compose.ui.platform.LocalContext.current
+            val personActionResources = androidx.compose.ui.platform.LocalResources.current
             LaunchedEffect(personActionMessage) {
                 personActionMessage?.let {
-                    android.widget.Toast.makeText(personActionCtx, personActionCtx.getString(it), android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(personActionCtx, personActionResources.getString(it), android.widget.Toast.LENGTH_SHORT).show()
                     personActions.clearMessage()
                 }
             }
@@ -1201,6 +1229,18 @@ fun NavGraph(
                     navController.navigate(Screen.MetadataEditor.route)
                 },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onOpenAlbum = { album ->
+                    selectedAlbum = album
+                    albumOpenedToShare = false
+                    albumOpenAction = null
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
+                onOpenDeviceFolder = { bucketName ->
+                    selectedDeviceFolder = bucketName
+                    deviceFolderOpenAction = null
+                    deviceFolderFromVault = false
+                    navController.navigate(Screen.DeviceFolderDetail.route)
+                },
                 onSetPersonCover = if (viewerPerson != null && personActions != null) {
                     { item -> personActions.setCover(viewerPerson.personId, item.stableId) }
                 } else null,
@@ -1695,6 +1735,7 @@ fun NavGraph(
             AppearanceSettingsScreen(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
+                onAppIconClick = { navController.navigate(Screen.AppIcon.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
                 onTimeFormatClick = { navController.navigate(Screen.ClockFormatSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
@@ -1730,6 +1771,7 @@ fun NavGraph(
             } else {
                 val labelsVm = hiltViewModel<eu.akoos.photos.presentation.common.AddLabelsViewModel>()
                 val pickerContext = LocalContext.current
+                val pickerResources = LocalResources.current
                 var alreadyLabelled by remember(targets) { mutableStateOf<Set<String>>(emptySet()) }
                 LaunchedEffect(targets) {
                     alreadyLabelled = eu.akoos.photos.presentation.settings.photosCarryingAll(
@@ -1738,9 +1780,9 @@ fun NavGraph(
                 }
                 AlbumPhotoPickerScreen(
                     title = if (targets.size == 1) {
-                        pickerContext.getString(R.string.label_picker_title, targets.single())
+                        pickerResources.getString(R.string.label_picker_title, targets.single())
                     } else {
-                        pickerContext.getString(R.string.label_picker_title_many)
+                        pickerResources.getString(R.string.label_picker_title_many)
                     },
                     showUnfiledFilter = false,
                     excludeKeys = alreadyLabelled,
@@ -1765,6 +1807,12 @@ fun NavGraph(
 
         composable(Screen.ThemeSettings.route) {
             eu.akoos.photos.presentation.settings.ThemeSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.AppIcon.route) {
+            eu.akoos.photos.presentation.settings.appicon.AppIconSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }
@@ -1854,11 +1902,14 @@ fun NavGraph(
             val exclusionsVm = hiltViewModel<eu.akoos.photos.presentation.people.FaceExclusionsViewModel>()
             LaunchedEffect(Unit) { exclusionsVm.load() }
             val exclusionsState by exclusionsVm.uiState.collectAsStateWithLifecycle()
+            val hiddenPeople by exclusionsVm.hiddenPeople.collectAsStateWithLifecycle()
             eu.akoos.photos.presentation.people.FaceExclusionsScreen(
                 state = exclusionsState,
                 onBack = { navController.popBackStack() },
                 onUndoNotThisPerson = { name, faceId -> exclusionsVm.undoNotThisPerson(name, faceId) },
                 onUndoIgnored = { faceId -> exclusionsVm.undoIgnored(faceId) },
+                hiddenPeople = hiddenPeople,
+                onShowPerson = { personId -> exclusionsVm.showPerson(personId) },
             )
         }
 
@@ -1944,7 +1995,10 @@ fun NavGraph(
         }
 
         composable(Screen.DeviceFolderDetail.route) {
-            val bucketName = selectedDeviceFolder
+            // Each folder screen keeps the folder it was opened on, so a folder opened over it (from a
+            // viewer's Folder box) does not repoint it.
+            val bucketName = rememberSaveable { mutableStateOf(selectedDeviceFolder) }.value
+            val fromVault = rememberSaveable { deviceFolderFromVault }
             if (bucketName == null) {
                 navController.popBackStack()
             } else {
@@ -1952,7 +2006,7 @@ fun NavGraph(
                     bucketName = bucketName,
                     openAction = deviceFolderOpenAction,
                     onOpenActionConsumed = { deviceFolderOpenAction = null },
-                    fromVault = deviceFolderFromVault,
+                    fromVault = fromVault,
                     onPhotoClick = { items, index ->
                         selectedViewerItems = items
                         selectedViewerIndex = index
@@ -1963,7 +2017,7 @@ fun NavGraph(
                         // gets the same FLAG_SECURE window the vault grid's own viewer gets. The flag
                         // has to be set on both branches: it survives across navigations, so leaving
                         // it alone would hand a hidden photo whichever value the last viewer used.
-                        viewerSecure = deviceFolderFromVault
+                        viewerSecure = fromVault
                         navController.navigate(Screen.Viewer.route)
                     },
                     onEditMetadata = { selection ->
@@ -1982,7 +2036,7 @@ fun NavGraph(
                         viewerFromAlbum = false
                         viewerTrashMode = false
                         viewerAutoplay = true
-                        viewerSecure = deviceFolderFromVault
+                        viewerSecure = fromVault
                         navController.navigate(Screen.Viewer.route)
                     },
                     onBack = { navController.popBackStack() },
@@ -2251,6 +2305,9 @@ fun NavGraph(
     }
     }
 
+        // Once, after a guest without a Hidden password hides a photo, on whichever screen the hide ran.
+        eu.akoos.photos.presentation.settings.GuestHideWarning()
+
         // First-run map-style chooser, raised by either map entry point before the style has ever
         // been picked and then never again. A choice mirrors into the Settings map-style toggle and
         // opens that map; a dismiss keeps the globe default. Both mark the prompt answered so it stays
@@ -2321,13 +2378,16 @@ fun NavGraph(
 
         // One app-wide undo bar: any screen's reversible action shows here, over whatever route is
         // on top, and a route change consumes it so it never lingers or re-appears elsewhere.
-        UndoSnackbarHost(
-            navController = navController,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 24.dp),
-        )
+        // Above the screen's own bottom bar when it shows one (the viewer's controls, the dock, the
+        // selection drawer), so deleting one photo after another never taps Undo by mistake.
+        CompositionLocalProvider(LocalSnackbarClearance provides snackbarClearance) {
+            UndoSnackbarHost(
+                navController = navController,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .snackbarAboveBars(24.dp),
+            )
+        }
     }
 }
 
@@ -2344,13 +2404,14 @@ private fun UndoSnackbarHost(
     undoBarViewModel: UndoBarViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val pending by undoBarViewModel.pending.collectAsStateWithLifecycle()
     val hostState = remember { SnackbarHostState() }
 
     // A destination change consumes the pending action so a stale bar cannot reappear on another
     // screen when the user comes back.
     DisposableEffect(navController) {
-        val listener = NavController.OnDestinationChangedListener { _, _, _ -> undoBarViewModel.dismiss() }
+        val listener = NavController.OnDestinationChangedListener { _, _, _ -> undoBarViewModel.onNavigated() }
         navController.addOnDestinationChangedListener(listener)
         onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
@@ -2364,11 +2425,13 @@ private fun UndoSnackbarHost(
                 R.plurals.gallery_moved_to_trash_snackbar, action.count, action.count)
             is UndoAction.AlbumRemove -> context.resources.getQuantityString(
                 R.plurals.album_removed_undo_snackbar, action.count, action.count)
+            is UndoAction.PersonVisibility -> resources.getString(
+                if (action.nowHidden) R.string.person_hidden_snackbar else R.string.person_shown_snackbar)
         }
         val result = withTimeoutOrNull(5000L) {
             hostState.showSnackbar(
                 message = message,
-                actionLabel = context.getString(R.string.gallery_undo),
+                actionLabel = resources.getString(R.string.gallery_undo),
                 duration = SnackbarDuration.Indefinite,
             )
         }

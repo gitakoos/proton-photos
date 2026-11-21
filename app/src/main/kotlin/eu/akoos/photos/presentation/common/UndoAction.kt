@@ -61,13 +61,52 @@ sealed class UndoAction {
          * backup would upload a fresh cloud duplicate.
          */
         val syncedRelinks: List<Relink> = emptyList(),
+        /**
+         * How many photos the delete moved to trash, each counted once whether one copy or both went:
+         * the number the bar reports. A photo whose device and Drive copies both went is in both lists,
+         * so neither list's size is the count once a delete mixes paired, device-only and Drive-only
+         * photos. Taken from the lists, a photo in both being one [syncedRelinks] names.
+         */
+        val itemCount: Int = trashedPhotoCount(cloudLinkIds, localTrashedUris, syncedRelinks),
     ) : UndoAction() {
-        data class Relink(val localUri: String, val cloudLinkId: String, val sizeBytes: Long)
-        override val count: Int get() = maxOf(cloudLinkIds.size, localTrashedUris.size)
+        data class Relink(
+            val localUri: String,
+            val cloudLinkId: String,
+            val sizeBytes: Long,
+            /** Drive's content hash of the cloud copy, when the listing carries one. */
+            val contentHash: String? = null,
+        )
+        override val count: Int get() = itemCount
+
+        companion object {
+            /** The photos in [cloudLinkIds] or [localTrashedUris], one whose [Relink] pairs a uri of the
+             *  one with a link of the other counted once. */
+            fun trashedPhotoCount(
+                cloudLinkIds: List<String>,
+                localTrashedUris: List<String>,
+                syncedRelinks: List<Relink>,
+            ): Int {
+                val links = cloudLinkIds.toHashSet()
+                val uris = localTrashedUris.toHashSet()
+                val both = syncedRelinks.asSequence()
+                    .filter { it.cloudLinkId in links && it.localUri in uris }
+                    .distinctBy { it.cloudLinkId }
+                    .count()
+                return links.size + uris.size - both
+            }
+        }
     }
 
     /** Undo an album removal: re-add each photo linkId to the album it was taken out of. */
     data class AlbumRemove(val albumLinkId: String, val photoLinkIds: List<String>) : UndoAction() {
         override val count: Int get() = photoLinkIds.size
+    }
+
+    /**
+     * Undo a change of who is hidden from People: [personIds] were just hidden ([nowHidden]) or shown again,
+     * and the undo does the opposite to each, through the same use cases that made the change.
+     */
+    data class PersonVisibility(val personIds: List<Long>, val nowHidden: Boolean) : UndoAction() {
+        override val count: Int get() = personIds.size
     }
 }

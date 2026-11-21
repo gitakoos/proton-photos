@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import eu.akoos.photos.util.SignOutCleanup
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.telemetry.domain.usecase.IsTelemetryEnabled
 import me.proton.core.user.domain.usecase.GetUser
@@ -75,11 +76,13 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
 import eu.akoos.photos.data.face.FaceModelAssets
+import eu.akoos.photos.data.face.FaceReattachSnapshot
 import eu.akoos.photos.data.face.FaceIndexingProgress
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlSyncFacePause
 import eu.akoos.photos.data.mlsync.MlSyncSignOut
 import eu.akoos.photos.data.ocr.OcrModelComponent
@@ -190,6 +193,7 @@ class SettingsViewModel @Inject constructor(
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val hiddenVaultRestorer: eu.akoos.photos.data.hidden.HiddenVaultRestorer,
+    private val vaultRescueNotifier: eu.akoos.photos.data.hidden.VaultRescueNotifier,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val deviceHealth: DeviceHealthPolicy,
     private val personDao: PersonDao,
@@ -200,6 +204,7 @@ class SettingsViewModel @Inject constructor(
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
     private val observePeopleUseCase: ObservePeopleUseCase,
+    private val peopleListCache: eu.akoos.photos.domain.usecase.PeopleListCache,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val newsRepository: NewsRepository,
     private val networkObserver: NetworkObserver,
@@ -209,6 +214,8 @@ class SettingsViewModel @Inject constructor(
     private val mlSyncSignOut: MlSyncSignOut,
     private val videoEncoderCapabilities: VideoEncoderCapabilities,
     private val faceDataDelete: FaceDataDelete,
+    private val firstScanGate: eu.akoos.photos.data.sharedbackup.FirstScanDriveGate,
+    @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -227,63 +234,6 @@ class SettingsViewModel @Inject constructor(
     private val faceModelManager by lazy { FaceModelManager(context) }
     private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
     private val semanticModelManager by lazy { SemanticModelManager(context) }
-
-    init {
-        // The codec chips need this device's encoders: a one-off scan, cached for the process.
-        viewModelScope.launch(Dispatchers.Default) {
-            val caps = runCatching { videoEncoderCapabilities.snapshot() }.getOrNull()
-            _uiState.update { it.copy(encoderCapabilities = caps) }
-        }
-        // The per-feature enable toggles mirror their durable prefs, so a download that finished on
-        // ModelDownloadService (which sets the pref) flips the row on live on whichever settings page is
-        // open, and because the pref is the source of truth a stale finished-state can never re-enable a
-        // feature the user has since turned off. OCR keeps its "on when the models are already present"
-        // default when its pref was never written (matching the load path and the viewer's own gate), so
-        // the disk check runs off the main thread.
-        viewModelScope.launch {
-            context.settingsDataStore.data
-                .map {
-                    Triple(
-                        it[SettingsKeys.FACE_ENABLED] == true,
-                        it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
-                        it[SettingsKeys.SEMANTIC_ENABLED] == true,
-                    ) to (it[SettingsKeys.SHARED_BACKUP_ENABLED] == true)
-                }
-                .distinctUntilChanged()
-                .flowOn(Dispatchers.IO)
-                .collect { (switches, backupOn) ->
-                    val (face, ocr, semantic) = switches
-                    _uiState.update {
-                        it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic, sharedBackupOn = backupOn)
-                    }
-                }
-        }
-        // Reflect the shared model-download progress into the per-feature rows, derived fresh from the
-        // whole snapshot on each emit rather than accumulated: a cleared or absent entry reads as
-        // not-downloading (so a stopped or torn-down download can never leave a row wedged at a frozen
-        // bar), and a terminal state lingering in the process-lived map is harmless. The enable itself
-        // rides the prefs above; only the transient spinner, byte count and failure flag come from here.
-        viewModelScope.launch {
-            modelDownloadState.status.collect { s ->
-                val face = s[ModelDownloadKind.FACE]
-                val ocr = s[ModelDownloadKind.OCR]
-                val semantic = s[ModelDownloadKind.SEMANTIC]
-                _uiState.update {
-                    it.copy(
-                        faceModelDownloading = face?.phase == ModelDownloadPhase.DOWNLOADING,
-                        faceModelDownloadFailed = face?.phase == ModelDownloadPhase.FAILED,
-                        faceModelDownloadedBytes = if (face?.phase == ModelDownloadPhase.DOWNLOADING) (face?.downloadedBytes ?: 0L) else 0L,
-                        faceRecognitionAvailable = if (face?.phase == ModelDownloadPhase.DONE) true else it.faceRecognitionAvailable,
-                        ocrModelDownloading = ocr?.phase == ModelDownloadPhase.DOWNLOADING,
-                        ocrModelDownloadFailed = ocr?.phase == ModelDownloadPhase.FAILED,
-                        semanticModelDownloading = semantic?.phase == ModelDownloadPhase.DOWNLOADING,
-                        semanticModelDownloadFailed = semantic?.phase == ModelDownloadPhase.FAILED,
-                        semanticModelDownloadProgress = if (semantic?.phase == ModelDownloadPhase.DOWNLOADING) (semantic?.downloadedBytes ?: 0L) else 0L,
-                    )
-                }
-            }
-        }
-    }
 
     /** Where the background face indexer stands, surfaced verbatim from the scheduler so the AI
      *  settings panel can label its state and offer pause / resume. */
@@ -374,7 +324,10 @@ class SettingsViewModel @Inject constructor(
      *  Live, so the row grows as a walk runs. */
     val faceGroups: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
+            peopleListCache.remembered(
+                userId,
+                observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)),
+            )
                 .map { list ->
                     list.filter { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
                         .mapNotNull { it.toPersonUi() }
@@ -398,6 +351,98 @@ class SettingsViewModel @Inject constructor(
     val faceCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId -> faceDao.observeFaceCountForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
+
+    private val faceNamesCheck = MutableStateFlow(0)
+
+    /** Whether the shared backup brought names this phone cannot put on faces yet: the scan is off while
+     *  the shared backup is on and names wait in the reattach file. A snapshot from a device with another
+     *  face model stages only its names there, and they land once this phone scans. Re-read on every
+     *  entry to the face page ([resumeFaceIndexingIfNeeded]). */
+    val faceNamesNeedScan: StateFlow<Boolean> = combine(
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+            .distinctUntilChanged(),
+        context.settingsDataStore.data.map { it[SettingsKeys.SHARED_BACKUP_ENABLED] == true }.distinctUntilChanged(),
+        faceNamesCheck,
+    ) { scanning, backupOn, _ -> !scanning && backupOn }
+        .map { possible ->
+            possible && withContext(Dispatchers.IO) {
+                FaceReattachSnapshot.stamp(FaceReattachSnapshot.file(File(context.filesDir, FaceModelAssets.DIRECTORY))) != null
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
+
+    /** The vault files behind [SettingsUiState.vaultedPhotoCount], the count the sign-out confirmation
+     *  names: a sign-out the user confirms with "delete" destroys these and never a file added after. */
+    @Volatile
+    private var countedVaultUris: Set<String> = emptySet()
+
+    /** Whether the face and photo-search scans are limited to when the phone is charging. */
+    val mlOnlyWhileCharging: StateFlow<Boolean> = deviceHealth.mlChargingOnly
+
+    /** The condition standing the on-device scans down right now, so the photo-search rows can name it
+     *  the way the face card does instead of reading as a plain "scanning". */
+    val mlBlockReason: StateFlow<HealthBlockReason> =
+        combine(deviceHealth.snapshot, deviceHealth.mlChargingOnly) { snap, chargingOnly ->
+            heavyMlBlockReason(snap, chargingOnly = chargingOnly)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), HealthBlockReason.NONE)
+
+    init {
+        // The codec chips need this device's encoders: a one-off scan, cached for the process.
+        viewModelScope.launch(Dispatchers.Default) {
+            val caps = runCatching { videoEncoderCapabilities.snapshot() }.getOrNull()
+            _uiState.update { it.copy(encoderCapabilities = caps) }
+        }
+        // The per-feature enable toggles mirror their durable prefs, so a download that finished on
+        // ModelDownloadService (which sets the pref) flips the row on live on whichever settings page is
+        // open, and because the pref is the source of truth a stale finished-state can never re-enable a
+        // feature the user has since turned off. OCR keeps its "on when the models are already present"
+        // default when its pref was never written (matching the load path and the viewer's own gate), so
+        // the disk check runs off the main thread.
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map {
+                    Triple(
+                        it[SettingsKeys.FACE_ENABLED] == true,
+                        it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
+                        it[SettingsKeys.SEMANTIC_ENABLED] == true,
+                    ) to (it[SettingsKeys.SHARED_BACKUP_ENABLED] == true)
+                }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.IO)
+                .collect { (switches, backupOn) ->
+                    val (face, ocr, semantic) = switches
+                    _uiState.update {
+                        it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic, sharedBackupOn = backupOn)
+                    }
+                }
+        }
+        // Reflect the shared model-download progress into the per-feature rows, derived fresh from the
+        // whole snapshot on each emit rather than accumulated: a cleared or absent entry reads as
+        // not-downloading (so a stopped or torn-down download can never leave a row wedged at a frozen
+        // bar), and a terminal state lingering in the process-lived map is harmless. The enable itself
+        // rides the prefs above; only the transient spinner, byte count and failure flag come from here.
+        viewModelScope.launch {
+            modelDownloadState.status.collect { s ->
+                val face = s[ModelDownloadKind.FACE]
+                val ocr = s[ModelDownloadKind.OCR]
+                val semantic = s[ModelDownloadKind.SEMANTIC]
+                _uiState.update {
+                    it.copy(
+                        faceModelDownloading = face?.phase == ModelDownloadPhase.DOWNLOADING,
+                        faceModelDownloadFailed = face?.phase == ModelDownloadPhase.FAILED,
+                        faceModelDownloadedBytes = if (face?.phase == ModelDownloadPhase.DOWNLOADING) (face?.downloadedBytes ?: 0L) else 0L,
+                        faceRecognitionAvailable = if (face?.phase == ModelDownloadPhase.DONE) true else it.faceRecognitionAvailable,
+                        ocrModelDownloading = ocr?.phase == ModelDownloadPhase.DOWNLOADING,
+                        ocrModelDownloadFailed = ocr?.phase == ModelDownloadPhase.FAILED,
+                        semanticModelDownloading = semantic?.phase == ModelDownloadPhase.DOWNLOADING,
+                        semanticModelDownloadFailed = semantic?.phase == ModelDownloadPhase.FAILED,
+                        semanticModelDownloadProgress = if (semantic?.phase == ModelDownloadPhase.DOWNLOADING) (semantic?.downloadedBytes ?: 0L) else 0L,
+                    )
+                }
+            }
+        }
+    }
 
     /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
      *  dropped, matching how the People rail maps them. */
@@ -449,13 +494,13 @@ class SettingsViewModel @Inject constructor(
      * Count what a sign-out takes with it: the photos the vault holds FILES for.
      *
      * Only a vault entry counts. An entry hiding a photo that is still on the device or on Drive is a
-     * filter, and sign-out only drops the filter — nothing of the photo is lost, so warning about it
+     * filter, and sign-out only drops the filter - nothing of the photo is lost, so warning about it
      * would be a warning the user cannot act on.
      *
      * Three things together keep the figure from ever sitting below what the wipe destroys.
      * Reconciliation is awaited first, so a hide interrupted between removing its original and
-     * recording its entry is already settled — published as a vault entry, or dropped because its
-     * original is proven to still be on the device — before any number reaches the screen. The count
+     * recording its entry is already settled - published as a vault entry, or dropped because its
+     * original is proven to still be on the device - before any number reaches the screen. The count
      * itself then comes from the files on disk as well as the index, because the wipe takes the vault
      * directory whole whether or not anything refers to a file in it. And
      * [SettingsUiState.vaultedCountSettled] holds the confirmation back until the first real figure
@@ -464,13 +509,18 @@ class SettingsViewModel @Inject constructor(
      * Both the reconciliation and the directory listing run off the main thread, and the listing is
      * repeated only when the index itself changes.
      */
+
     private fun observeVaultedCount() {
         viewModelScope.launch {
             hiddenVaultJournal.reconcile()
             context.settingsDataStore.data
                 .map { prefs ->
+                    // A file changed since its hide is not recoverable from Drive as it is now.
                     (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
-                        HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+                        eu.akoos.photos.data.hidden.HiddenVaultDecisions.driveBackedUris(
+                            HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()),
+                            edited = prefs[SettingsKeys.HIDDEN_URI_EDITED] ?: emptySet(),
+                        )
                 }
                 .distinctUntilChanged()
                 // An unreadable preference store leaves the count at zero, but the confirmation is
@@ -490,6 +540,7 @@ class SettingsViewModel @Inject constructor(
                         android.util.Log.w("SettingsViewModel", "vault count: directory unreadable", e)
                         recorded
                     }
+                    countedVaultUris = everything
                     _uiState.update {
                         it.copy(
                             vaultedPhotoCount = everything.size,
@@ -523,12 +574,12 @@ class SettingsViewModel @Inject constructor(
      * the on-disk app cache. Called once at init and again from [refresh] / after [clearAppCache].
      *
      * StatFs is cheap (a single statvfs syscall), but the cache walk can touch hundreds of files
-     * — keep it off the main thread via Dispatchers.IO.
+     * - keep it off the main thread via Dispatchers.IO.
      */
     fun refreshLocalStorage() {
         viewModelScope.launch {
             val measured = withContext(Dispatchers.IO) {
-                // /data partition — same partition where cacheDir lives, so it's the relevant
+                // /data partition - same partition where cacheDir lives, so it's the relevant
                 // "free space" number for users worrying about the app filling their device.
                 val statFs = StatFs(Environment.getDataDirectory().absolutePath)
                 val total = statFs.totalBytes
@@ -549,7 +600,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Walks [dir] and sums file lengths. Defensive against deletions racing with the walk —
+     * Walks [dir] and sums file lengths. Defensive against deletions racing with the walk -
      * dead File handles return length() == 0. Skips symlinks implicitly because File.length()
      * follows links and returns the target size (we never create symlinks in cacheDir).
      */
@@ -563,12 +614,12 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Wipes the three subdirs we manage under cacheDir:
-     * - `thumbnails/` — decrypted photo thumbnails
-     * - `fullres/`    — full-res photo + streamed video downloads
-     * - `upload_<id>/` — temp encrypted block dirs from in-flight uploads
+     * - `thumbnails/` - decrypted photo thumbnails
+     * - `fullres/`    - full-res photo + streamed video downloads
+     * - `upload_<id>/` - temp encrypted block dirs from in-flight uploads
      *
      * Everything else under cacheDir (including OkHttp's HTTP cache and Android's `code_cache/`)
-     * is left alone — those are managed by their owners and silently rebuilt, but blindly nuking
+     * is left alone - those are managed by their owners and silently rebuilt, but blindly nuking
      * them risks interfering with concurrent IO. After delete we recompute `appCacheBytes` so
      * the UI reflects the new value.
      */
@@ -584,7 +635,7 @@ class SettingsViewModel @Inject constructor(
                     val sub = File(cache, name)
                     if (sub.exists()) sub.deleteRecursively()
                 }
-                // upload_<fileId> dirs are siblings — enumerate.
+                // upload_<fileId> dirs are siblings - enumerate.
                 cache.listFiles()?.forEach { f ->
                     if (f.isDirectory && f.name.startsWith("upload_")) {
                         f.deleteRecursively()
@@ -601,7 +652,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Wipes the offline-pinned full-res blobs ([OfflineStorageManager.clearAll]) AND drops the
-     * pin set ([SettingsKeys.OFFLINE_PIN_IDS]) so the two stay consistent — deleting blobs while
+     * pin set ([SettingsKeys.OFFLINE_PIN_IDS]) so the two stay consistent - deleting blobs while
      * leaving the set would leave "pinned" photos with no blob backing them. Recomputes
      * `offlineBytes` afterwards so the row reflects the cleared figure.
      */
@@ -616,7 +667,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Manual refresh hook — currently invoked by the storage-card refresh affordance.
+     * Manual refresh hook - currently invoked by the storage-card refresh affordance.
      * Also re-pulls cloud usage from the Drive API so the Proton bar reflects fresh usage.
      */
     fun refresh() {
@@ -641,10 +692,10 @@ class SettingsViewModel @Inject constructor(
      */
     private fun observeUploadProgress() {
         viewModelScope.launch {
-            // Local batch-window state — only the observer touches it, so plain
+            // Local batch-window state - only the observer touches it, so plain
             // vals are fine. Reset on Idle, accumulated as files progress.
             var batchStartMs = 0L
-            // Live per-URI byte counter — Stage 3 plumbed `evt.doneBytes` via the
+            // Live per-URI byte counter - Stage 3 plumbed `evt.doneBytes` via the
             // per-block onProgress callback. Tracking each file's *current* upload
             // bytes (not just file-completion totals) means the MB/s read-out
             // tracks the real network throughput LIVE during one large upload
@@ -652,7 +703,7 @@ class SettingsViewModel @Inject constructor(
             // no longer reads as "150 KB/s" just because the per-file overhead
             // dominates the cumulative average.
             val uploadedBytesByUri = mutableMapOf<String, Long>()
-            // Use `collect` (NOT `collectLatest`) — with parallel uploads two or
+            // Use `collect` (NOT `collectLatest`) - with parallel uploads two or
             // three events can arrive in the same millisecond, and `collectLatest`
             // would cancel the in-flight `_uiState.update` block before its copy()
             // returned, leaving the Sync card stuck on a stale row.
@@ -677,10 +728,19 @@ class SettingsViewModel @Inject constructor(
                                 uploadDeferReason = null,
                             )
                         }
+                        // A photo the user stopped on its own leaves the list; its bytes stop counting.
+                        UploadStatus.Cancelled -> {
+                            uploadedBytesByUri.remove(evt.uri)
+                            current.copy(
+                                uploadDoneCount = evt.doneIdx,
+                                uploadTotalCount = evt.totalCount,
+                                uploadEvents = current.uploadEvents.filter { it.uri != evt.uri },
+                            )
+                        }
                         UploadStatus.WaitingForWifi,
                         UploadStatus.PreparingBackup,
                         UploadStatus.StorageFull -> {
-                            // Deferral frame — no per-file payload. Surface the reason as a
+                            // Deferral frame - no per-file payload. Surface the reason as a
                             // one-line note in the Sync card without touching the events list
                             // or byte counters. StorageFull also ends the batch, so it clears the
                             // live counters the way Idle does; the reason itself has to survive,
@@ -709,7 +769,8 @@ class SettingsViewModel @Inject constructor(
                                 UploadStatus.Idle,
                                 UploadStatus.WaitingForWifi,
                                 UploadStatus.PreparingBackup,
-                                UploadStatus.StorageFull -> UploadEventStatus.Done // unreachable
+                                UploadStatus.StorageFull,
+                                UploadStatus.Cancelled -> UploadEventStatus.Done // unreachable
                             }
                             // New-batch detection: a fresh Uploading/Encrypting event that
                             // arrives when the previous batch fully completed (done == total > 0)
@@ -738,13 +799,13 @@ class SettingsViewModel @Inject constructor(
                             )).takeLast(30)
 
                             // Start the batch timer on the FIRST per-file signal of the run
-                            // — Encrypting fires before Uploading so a CPU-bound first phase
+                            // - Encrypting fires before Uploading so a CPU-bound first phase
                             // doesn't get hidden from the bytes/sec window.
                             if (batchStartMs == 0L && firstPerFileStatus) {
                                 batchStartMs = System.currentTimeMillis()
                             }
 
-                            // Live byte counter — only Uploading + Done contribute to the
+                            // Live byte counter - only Uploading + Done contribute to the
                             // NETWORK byte count. Encrypting is CPU-only work; counting its
                             // doneBytes would inflate the speed during the pre-network phase.
                             // Done overrides the live counter with the full file size so a
@@ -761,7 +822,7 @@ class SettingsViewModel @Inject constructor(
                                     uploadedBytesByUri[evt.uri] = evt.sizeBytes.coerceAtLeast(0L)
                                 }
                                 UploadStatus.Failed -> {
-                                    // Leave the partial count — bytes that already left the
+                                    // Leave the partial count - bytes that already left the
                                     // wire still count toward the realised speed.
                                 }
                                 else -> Unit
@@ -951,7 +1012,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Pull the Drive trash list and surface its size in UiState. There's no count-only
-     * endpoint, so we fetch the full list and read `.size` — same approach the Trash
+     * endpoint, so we fetch the full list and read `.size` - same approach the Trash
      * screen takes. Failures (offline, network error) leave `cloudTrashCount` at its
      * prior value or null; the UI then falls back to the device-only subtitle.
      *
@@ -1081,14 +1142,14 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(autoSync = enabled) }
             // One place arms or tears down ALL background triggers (periodic worker, content
             // observer, opt-in keep-alive service) from the just-written prefs. On disable it also
-            // cancels the content observer — leaving it armed would keep firing SyncWorker on every
+            // cancels the content observer - leaving it armed would keep firing SyncWorker on every
             // photo write and burn wake-ups even though nothing uploads.
             SyncWorker.reconcileBackgroundWork(context)
         }
     }
 
     /** Flip the global "back up every MediaStore image/video" mode. When ON, the
-     *  reconcile + upload pipeline ignores the folder selection — handy for users who
+     *  reconcile + upload pipeline ignores the folder selection - handy for users who
      *  don't want to micromanage which buckets sync. Off keeps the existing per-folder
      *  picker behaviour. */
     fun setBackupEverything(enabled: Boolean) {
@@ -1121,7 +1182,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** Persist the Wi-Fi-only-for-fullres preference. Affects only the viewer's auto
-     *  download — explicit user actions (Save to device, Edit) ignore this setting. */
+     *  download - explicit user actions (Save to device, Edit) ignore this setting. */
     fun setFullresWifiOnly(wifiOnly: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FULLRES_WIFI_ONLY] = wifiOnly }
@@ -1147,7 +1208,7 @@ class SettingsViewModel @Inject constructor(
             // ("Couldn't reconcile" vs "Couldn't upload") instead of one generic "Sync failed".
             var failedPhaseRes = R.string.settings_sync_failed
             try {
-                // 0. Fresh cloud photo listing — pulls the current Photos stream and DELETES
+                // 0. Fresh cloud photo listing - pulls the current Photos stream and DELETES
                 //    `photo_listing` rows for items no longer on Drive. Without this step the
                 //    subsequent reconcile would see stale SYNCED entries (cloud-deleted items
                 //    still mapped from a previous refresh) and keep them green in the UI.
@@ -1246,10 +1307,10 @@ class SettingsViewModel @Inject constructor(
             // We DELIBERATELY skip AppCompatDelegate.setDefaultNightMode here. That call
             // forces an Activity recreate (visible as a scale-from-center animation) any
             // time the new mode differs from the currently-applied one. The Compose tree
-            // re-themes via the DataStore flow MainActivity collects, so the in-app
+            // re-themes via the DataStore flow MainHostActivity collects, so the in-app
             // surfaces flip instantly without a recreate. ProtonCore login Activities
             // pick up the right theme at the next cold start through
-            // App.applyStoredThemeMode — they don't re-launch within the same session.
+            // App.applyStoredThemeMode - they don't re-launch within the same session.
             _uiState.update { it.copy(themeMode = mode) }
         }
     }
@@ -1257,7 +1318,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * Persist the chosen accent palette and update the in-memory state so the active
      * `ProtonPhotosTheme` re-collects the new key. Note: NOT mirrored to ThemePrefsBoot
-     * and does NOT touch AppCompatDelegate — palette is purely an in-Compose accent
+     * and does NOT touch AppCompatDelegate - palette is purely an in-Compose accent
      * swap and doesn't affect light/dark, system-bar styling, or cold-start theming.
      */
     fun setThemePalette(palette: ThemePalette) {
@@ -1271,7 +1332,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Persist the AMOLED pure-black switch. Like the palette, this is a pure in-Compose surface
-     * swap: MainActivity re-collects the key and re-themes live, so no boot mirror and no
+     * swap: MainHostActivity re-collects the key and re-themes live, so no boot mirror and no
      * AppCompatDelegate recreate are needed.
      */
     fun setLiquidGlass(enabled: Boolean) {
@@ -1322,15 +1383,6 @@ class SettingsViewModel @Inject constructor(
      * editor and viewer observe [SettingsKeys.AI_FEATURES_ENABLED] directly, so flipping it takes
      * effect the next time either surface is opened.
      */
-    /** Whether the face and photo-search scans are limited to when the phone is charging. */
-    val mlOnlyWhileCharging: StateFlow<Boolean> = deviceHealth.mlChargingOnly
-
-    /** The condition standing the on-device scans down right now, so the photo-search rows can name it
-     *  the way the face card does instead of reading as a plain "scanning". */
-    val mlBlockReason: StateFlow<HealthBlockReason> =
-        combine(deviceHealth.snapshot, deviceHealth.mlChargingOnly) { snap, chargingOnly ->
-            heavyMlBlockReason(snap, chargingOnly = chargingOnly)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), HealthBlockReason.NONE)
 
     fun setMlOnlyWhileCharging(enabled: Boolean) {
         viewModelScope.launch {
@@ -1345,7 +1397,7 @@ class SettingsViewModel @Inject constructor(
             if (enabled) {
                 // Opt-in begins indexing straight away, so there is no separate manual start step: new
                 // photos are then picked up automatically by the library's own indexing trigger.
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+                startFirstFaceScan()
             } else {
                 // Turning AI off stands any running scan down promptly rather than waiting for its next
                 // per-photo check to notice the flag.
@@ -1447,6 +1499,13 @@ class SettingsViewModel @Inject constructor(
         if (enabled) enableFace() else disableFace()
     }
 
+    /** Starts the face scan once the faces other devices saved on Drive are in, so they are not scanned again. */
+    private suspend fun startFirstFaceScan() {
+        val userId = accountManager.getPrimaryUserId().first()
+        val scheduler = faceIndexingScheduler
+        firstScanGate.startFirstScan(MlDriveFileKind.FACES, userId) { scheduler.requestIndex(userId) }
+    }
+
     /** Both models on disk already: flip face recognition on and start a scan. Otherwise hold it off and
      *  ask to fetch the models first, so the switch never turns on against models that are not there. */
     private fun enableFace() {
@@ -1464,7 +1523,7 @@ class SettingsViewModel @Inject constructor(
                         faceModelDownloadFailed = false,
                     )
                 }
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+                startFirstFaceScan()
             } else {
                 // Note the connection now so the drawer can say the fetch will use mobile data when
                 // Wi-Fi is not there, the same gate sync applies before it moves large data.
@@ -1596,16 +1655,20 @@ class SettingsViewModel @Inject constructor(
                         semanticModelDownloadFailed = false,
                     )
                 }
-                cloudRepo.backfillSemantic(accountManager.getPrimaryUserId().first())
+                val userId = accountManager.getPrimaryUserId().first()
+                val repo = cloudRepo
+                firstScanGate.startFirstScan(MlDriveFileKind.SEARCH, userId) { repo.backfillSemantic(userId) }
             } else {
                 // Note the connection now so the drawer can say the fetch will use mobile data when
                 // Wi-Fi is not there, the same gate sync applies before it moves large data.
                 val onWifi = networkObserver.currentlyOnWifi()
+                val missing = withContext(Dispatchers.IO) { semanticModelManager.missingDownloadBytes() }
                 _uiState.update {
                     it.copy(
                         semanticModelPrompt = SemanticModelPrompt.Download,
                         semanticModelDownloadFailed = false,
                         semanticModelOnWifi = onWifi,
+                        semanticModelDownloadBytes = missing,
                     )
                 }
             }
@@ -1713,6 +1776,7 @@ class SettingsViewModel @Inject constructor(
      * no-op. Guest-safe: a null userId scans the local partition, exactly like the gallery's guest kick.
      */
     fun resumeFaceIndexingIfNeeded() {
+        faceNamesCheck.update { it + 1 }
         viewModelScope.launch {
             try {
                 val prefs = context.settingsDataStore.data.first()
@@ -1849,12 +1913,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Language switch — canonical DataStore write plus boot-mirror update so the
+     * Language switch - canonical DataStore write plus boot-mirror update so the
      * next cold start hands the right locale to ProtonCore login Activities.
      * Does NOT call `AppCompatDelegate.setApplicationLocales`: that triggers an
      * Activity recreate which loses navigation state, bounces the user back to
      * Gallery, and plays a reload animation. The in-app Compose tree re-resolves
-     * strings via `LocaleOverride` in `MainActivity` — DataStore change → flow
+     * strings via `LocaleOverride` in `MainHostActivity` - DataStore change → flow
      * re-emits → override key changes → recomposition picks up the new locale.
      */
     fun setLanguage(lang: String) {
@@ -2123,79 +2187,170 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Signs the current account out, dealing with the vault as [vault] says. Runs on the app scope, so leaving
+     * Settings never stops it half way, and keeps a marker from its first step to its last, so a process that
+     * dies part way has the next launch finish the sign-out rather than leave the account signed in with its
+     * vault and caches already partly emptied (see [SignOutCleanup.userSignOutReplayPlan]). A marker that cannot
+     * be saved starts nothing: the account, the vault and the caches stay as they are, and a short message asks
+     * the user to try again.
+     */
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun signOut(vault: eu.akoos.photos.data.hidden.SignOutVaultChoice = eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE) {
-        viewModelScope.launch {
-            accountManager.getPrimaryUserId().firstOrNull()?.let { userId ->
-                // 0. Before anything else, and awaited: stop an ML sync save or restore. It calls into
-                //    this account's Drive client and writes its face data, and the account stays the
-                //    signed-in one until the very end below, so the run would not stop on its own before
-                //    the client is freed and the faces are wiped. Then cancel the widget updates, so none
-                //    draws this account's photo onto the home screen while the account is leaving; the
-                //    widgets get them back once the account is gone (PhotoWidgetSignOut).
-                runCatching { mlSyncSignOut.stopFor(userId) }
-                runCatching { PhotoWidgetUpdateWorker.cancelAll(context) }
-                // 1. Stop anything that could re-decrypt content back into the caches we are about
-                //    to wipe, and stop the persistent process-keeper service.
-                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context, workManager)
-                // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
-                //    token disappears (heap can't recover keys; the re-login starts from a clean
-                //    fetch instead of replaying stale rows that showed up with black thumbnails).
-                // The photos the user chose to keep go to the gallery before the vault is emptied; the
-                // wipe then spares any that could not be moved.
-                val vaultFiles = runCatching { hiddenStorage.vaultBlobUris().size }.getOrDefault(0)
-                var vaultNote = "vault deleted ($vaultFiles files)"
-                val vaultWipe = when (vault) {
-                    eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE -> eu.akoos.photos.domain.repository.VaultWipe.All
-                    eu.akoos.photos.data.hidden.SignOutVaultChoice.MOVE_OUT -> {
-                        val rescued = runCatching {
-                            hiddenVaultRestorer.rescueDeviceOnly(
-                                eu.akoos.photos.data.hidden.HiddenRescue.SIGN_OUT_FOLDER,
-                            )
-                        }.getOrNull()
-                        vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
-                        eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued)
-                    }
-                }
-                cloudRepo.clearCacheForSignOut(userId, vaultWipe)
-                // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
-                //    thumbnail of the signed-out user stays readable, and drop the diagnostics
-                //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
-                //    a different user. The offline blobs, the hidden vault, the widgets' bitmaps and
-                //    the key material are wiped inside clearCacheForSignOut above so EVERY sign-out
-                //    route (including a server-side force-logout) covers them; MediaStore originals
-                //    and the encrypted in-flight upload spill are left alone.
-                runCatching {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        eu.akoos.photos.util.SignOutCleanup.clearDecryptedCaches(context)
-                        eu.akoos.photos.util.SyncDiagnostics.clear()
-                        eu.akoos.photos.util.PerfDiagnostics.clear()
-                        eu.akoos.photos.util.ImportDiagnostics.clear()
-                        File(context.filesDir, "diagnostics").deleteRecursively()
-                    }
-                }
-                // 4. Clear account-tied DataStore state so a sign-in as a different user can't
-                //    inherit the previous account's sync state, folder selection, recent upload
-                //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
-                //    machine-level flags (onboarding-complete, app-lock, update throttle).
-                runCatching { AccountScopedPreferences.clear(context, userId) }
-                // The line goes in after the buffers were emptied above, so it opens the next session's log.
-                eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote")
-                // The handler every sign-out reaches must know this one was asked for.
-                eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id)
-                // End the app lock's post-unlock grace in AppLockSession, which holds the lock
-                // timestamps, BEFORE disableAccount triggers the route change, so the stop and
-                // start of the sign-in flow is judged by the lock timeout alone.
-                appLockManager.notifyResetLockTimestamps()
-                accountManager.disableAccount(userId)
+        // Read now: the count the confirmation named is the one the user agreed to.
+        val confirmedVault = countedVaultUris
+        appScope.launch {
+            val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
+            SignOutCleanup.startUserSignOut(context, userId.id, onNotStarted = ::showSignOutNotStarted) {
+                runUserSignOut(userId, vault, confirmedVault)
             }
+        }
+    }
+
+    /** Posted to the main thread, since the sign-out runs on the app scope and Settings may be gone by then. */
+    private fun showSignOutNotStarted() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, R.string.sign_out_not_started, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Posted to the main thread, as [showSignOutNotStarted] is. */
+    private fun showSignOutFailed() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, R.string.sign_out_failed, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** One step of the sign-out that may fail on its own without stopping the rest; a cancellation still stops it. */
+    private inline fun <T> attempt(block: () -> T): T? = try {
+        block()
+    } catch (e: Exception) {
+        if (e is CancellationException) throw e
+        null
+    }
+
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    private suspend fun runUserSignOut(
+        userId: me.proton.core.domain.entity.UserId,
+        vault: eu.akoos.photos.data.hidden.SignOutVaultChoice,
+        confirmedVault: Set<String>,
+    ) {
+        // 0. Before anything else, and awaited: stop an ML sync save or restore. It calls into
+        //    this account's Drive client and writes its face data, and the account stays the
+        //    signed-in one until the very end below, so the run would not stop on its own before
+        //    the client is freed and the faces are wiped. Then cancel the widget updates, so none
+        //    draws this account's photo onto the home screen while the account is leaving; the
+        //    widgets get them back once the account is gone (PhotoWidgetSignOut).
+        attempt { mlSyncSignOut.stopFor(userId) }
+        attempt { PhotoWidgetUpdateWorker.cancelAll(context) }
+        // 1. Stop anything that could re-decrypt content back into the caches we are about
+        //    to wipe, and stop the persistent process-keeper service.
+        SignOutCleanup.stopBackgroundWork(context, workManager)
+        // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
+        //    token disappears (heap can't recover keys; the re-login starts from a clean
+        //    fetch instead of replaying stale rows that showed up with black thumbnails).
+        // The photos the user chose to keep go to the gallery before the vault is emptied; the
+        // wipe then destroys only what is safe elsewhere or what the confirmation counted. No hide
+        // is admitted until the account is gone, and the ones already admitted are spared.
+        val busy = hiddenVaultJournal.beginSignOut()
+        try {
+            val vaultFiles = attempt { hiddenStorage.vaultBlobUris().size } ?: 0
+            var vaultNote = "vault deleted ($vaultFiles files)"
+            val vaultWipe = when (vault) {
+                eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE -> {
+                    val plan = attempt { hiddenVaultRestorer.userDeletePlan(confirmedVault, userId, busy) }
+                    if (plan == null) {
+                        vaultNote = "vault delete not planned, vault left alone"
+                        eu.akoos.photos.domain.repository.VaultWipe.None
+                    } else {
+                        vaultNote = "vault deleted ${plan.delete.size}, ${plan.unconfirmedInDrive.size} kept, not confirmed in Drive"
+                        if (plan.unconfirmedInDrive.isNotEmpty()) {
+                            attempt {
+                                vaultRescueNotifier.notify(
+                                    eu.akoos.photos.data.hidden.RescueNotice.KeptUnconfirmedInDrive,
+                                    afterUserSignOut = true,
+                                )
+                            }
+                        }
+                        eu.akoos.photos.domain.repository.VaultWipe.Only(plan.delete)
+                    }
+                }
+                eu.akoos.photos.data.hidden.SignOutVaultChoice.MOVE_OUT -> {
+                    val rescued = attempt {
+                        hiddenVaultRestorer.rescueDeviceOnly(
+                            eu.akoos.photos.data.hidden.HiddenRescue.SIGN_OUT_FOLDER,
+                            userId = userId,
+                            busy = busy,
+                        )
+                    }
+                    vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
+                    eu.akoos.photos.data.hidden.VaultSignOutPolicy.userSignOutNotice(rescued, vaultFiles)?.let { notice ->
+                        attempt { vaultRescueNotifier.notify(notice, afterUserSignOut = true) }
+                    }
+                    if (!rescued?.keptForDrive.isNullOrEmpty()) {
+                        attempt {
+                            vaultRescueNotifier.notify(
+                                eu.akoos.photos.data.hidden.RescueNotice.KeptUnconfirmedInDrive,
+                                afterUserSignOut = true,
+                            )
+                        }
+                    }
+                    eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued, busy)
+                }
+            }
+            attempt { cloudRepo.clearCacheForSignOut(userId, vaultWipe) }
+            // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
+            //    thumbnail of the signed-out user stays readable, and drop the diagnostics
+            //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
+            //    a different user. The offline blobs, the hidden vault, the widgets' bitmaps and
+            //    the key material are wiped inside clearCacheForSignOut above so EVERY sign-out
+            //    route (including a server-side force-logout) covers them; MediaStore originals
+            //    and the encrypted in-flight upload spill are left alone.
+            attempt {
+                withContext(Dispatchers.IO) {
+                    SignOutCleanup.clearDecryptedCaches(context)
+                    SignOutCleanup.clearDiagnostics(context)
+                }
+            }
+            // 4. Clear account-tied DataStore state so a sign-in as a different user can't
+            //    inherit the previous account's sync state, folder selection, recent upload
+            //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
+            //    machine-level flags (onboarding-complete, app-lock, update throttle).
+            // The vault files still on disk keep their records, so the Hidden screen still reaches them.
+            attempt {
+                val kept = if (vaultWipe is eu.akoos.photos.domain.repository.VaultWipe.None) null
+                else withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
+                AccountScopedPreferences.clear(context, userId, keptVaultUris = kept)
+            }
+            val left = SignOutCleanup.closeUserSignOut(
+                steps = listOf(
+                    // The line goes in after the buffers were emptied above, so it opens the next session's log.
+                    { eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote") },
+                    // The handler every sign-out reaches must know this one was asked for.
+                    { eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id) },
+                    // End the app lock's post-unlock grace in AppLockSession, which holds the lock
+                    // timestamps, BEFORE disableAccount triggers the route change, so the stop and
+                    // start of the sign-in flow is judged by the lock timeout alone.
+                    { appLockManager.notifyResetLockTimestamps() },
+                ),
+                letGo = { accountManager.disableAccount(userId) },
+            )
+            if (!left) {
+                // Still signed in: the work stopped above starts again, and the user is told to try again.
+                attempt { eu.akoos.photos.data.hidden.UserSignOut.consume(userId.id) }
+                attempt { eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, account not let go, still signed in") }
+                attempt { SignOutCleanup.restartBackgroundWork(context) }
+                showSignOutFailed()
+            }
+        } finally {
+            hiddenVaultJournal.endSignOut()
         }
     }
 }
 
 /**
  * Internal aggregate used inside [SettingsViewModel.observeBackedUpBytes] so the combine block
- * can return one strongly-typed value instead of a 4-element Tuple — keeps the upsert site
+ * can return one strongly-typed value instead of a 4-element Tuple - keeps the upsert site
  * readable when there are more than 3 derived counters.
  */
 private data class BackedUpSnapshot(
@@ -2206,7 +2361,7 @@ private data class BackedUpSnapshot(
 )
 
 /**
- * Off-thread measurement bundle for [SettingsViewModel.refreshLocalStorage] — folds the four
+ * Off-thread measurement bundle for [SettingsViewModel.refreshLocalStorage] - folds the four
  * storage figures into one strongly-typed value instead of a Tuple.
  */
 private data class LocalStorage(

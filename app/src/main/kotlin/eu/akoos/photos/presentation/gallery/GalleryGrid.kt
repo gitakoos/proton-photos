@@ -72,7 +72,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -148,7 +150,8 @@ internal fun PhotoGrid(
     offlinePinIds: Set<String> = emptySet(),
     // linkId → freshly-decrypted thumbnail URL from ThumbnailUrlStore. A cloud cell reads its own entry
     // so a decrypt landing mid-scroll repaints only that tile (the timeline model no longer re-emits).
-    thumbnailUrls: Map<String, String> = emptyMap(),
+    // A State, read only inside cell scopes, so the grid body does not recompose per decrypt.
+    thumbnailUrls: State<Map<String, String>> = EMPTY_THUMBNAIL_URLS,
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
     denseGridWarningDismissed: Boolean = false,
@@ -231,15 +234,7 @@ internal fun PhotoGrid(
     // projection no longer carries thumbnailUrl on the row, so "needs decrypt" is now "the store has no
     // URL for this linkId (and the item carries none)". Rows already in the store return null so the
     // driver below neither requests nor cancels them; the scheduler also short-circuits warm rows.
-    val pendingCloudLinkIdOf: (GalleryItem) -> String? = { item ->
-        when (item) {
-            is GalleryItem.CloudOnly -> item.cloud.linkId
-                .takeIf { thumbnailUrls[it] == null && item.cloud.thumbnailUrl == null }
-            is GalleryItem.Synced    -> item.cloud.linkId
-                .takeIf { thumbnailUrls[it] == null && item.cloud.thumbnailUrl == null }
-            is GalleryItem.LocalOnly -> null
-        }
-    }
+    val pendingCloudLinkIdOf: (GalleryItem) -> String? = { item -> pendingCloudThumbnailLinkId(item, thumbnailUrls.value) }
 
     // ── Visible-range thumbnail decrypt driver ────────────────────────────────
     // Requests decrypts for the cloud cells actually in the viewport, in viewport order, plus a
@@ -252,23 +247,23 @@ internal fun PhotoGrid(
     if (mosaicGrid) {
         LaunchedEffect(staggeredState, orderedItems) {
             visibleRangeDecrypt(
-                orderedItems = orderedItems,
-                indexByKey = indexByKey,
-                pendingCloudLinkIdOf = pendingCloudLinkIdOf,
+                items = orderedItems,
+                indexOfKey = { key -> (key as? String)?.let { indexByKey[it] } },
+                pendingLinkIdOf = pendingCloudLinkIdOf,
                 onRequestThumbnail = onRequestThumbnail,
                 onCancelThumbnail = onCancelThumbnail,
-                visibleKeys = { staggeredState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } },
+                visibleKeys = { staggeredState.layoutInfo.visibleItemsInfo.map { it.key } },
             )
         }
     } else {
         LaunchedEffect(gridState, orderedItems) {
             visibleRangeDecrypt(
-                orderedItems = orderedItems,
-                indexByKey = indexByKey,
-                pendingCloudLinkIdOf = pendingCloudLinkIdOf,
+                items = orderedItems,
+                indexOfKey = { key -> (key as? String)?.let { indexByKey[it] } },
+                pendingLinkIdOf = pendingCloudLinkIdOf,
                 onRequestThumbnail = onRequestThumbnail,
                 onCancelThumbnail = onCancelThumbnail,
-                visibleKeys = { gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } },
+                visibleKeys = { gridState.layoutInfo.visibleItemsInfo.map { it.key } },
             )
         }
     }
@@ -592,14 +587,16 @@ internal fun PhotoGrid(
             // truly flat thumbnail wall. The single placeholder "bucket" produced above
             // is still iterated to render its items.
             if (effectiveGrouping != TimelineGrouping.None) {
-                val selectedInGroup = monthItems.count { it in selectedItems }
+                val headerSelectable = isSelectionMode && groupSelectable
                 item(span = { GridItemSpan(columnCount) }, contentType = "header") {
                     MonthHeader(
                         month = month,
                         photoCount = monthPhotos,
                         videoCount = monthVideos,
-                        isSelectionMode = isSelectionMode && groupSelectable,
-                        selectedInGroup = selectedInGroup,
+                        isSelectionMode = headerSelectable,
+                        // Counted here, for a header on screen, and only while it shows a tick: counting
+                        // every group up front walked the whole library on each selection change.
+                        selectedInGroup = if (headerSelectable) monthItems.count { it in selectedItems } else 0,
                         groupSize = monthItems.size,
                         onToggleGroup = { onToggleGroup(monthItems) },
                         modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
@@ -615,7 +612,7 @@ internal fun PhotoGrid(
                 // The freshly-decrypted URL for this cell's cloud row, read from the store map. Reading
                 // it per-cell (rather than passing the whole map to PhotoCell) keeps the cell skippable:
                 // only cells whose own URL changed re-run this remember and rebind.
-                val cellThumbUrl = cloudId?.let { thumbnailUrls[it] }
+                val cellThumbUrl by remember(cloudId, thumbnailUrls) { derivedStateOf { cloudId?.let { thumbnailUrls.value[it] } } }
                 // PhotoCell's inputs are resolved to primitives here in item scope so the cell stays
                 // skippable: an unstable Set/GalleryItem param would force EVERY visible cell to
                 // recompose on any selection toggle or thumbnail-decrypt re-emission.
@@ -692,35 +689,8 @@ internal fun PhotoGrid(
     }
 }
 
-/**
- * Shared visible-range decrypt loop for both grid layouts. The fixed and staggered grids expose
- * the visible cell keys through different layout-info types, so the caller passes a snapshot
- * [visibleKeys] lambda; everything downstream (the leading-margin range walk + cancel of cells that
- * left the window) is identical. Suspends for the lifetime of the owning LaunchedEffect.
- */
-private suspend fun visibleRangeDecrypt(
-    orderedItems: List<GalleryItem>,
-    indexByKey: Map<String, Int>,
-    pendingCloudLinkIdOf: (GalleryItem) -> String?,
-    onRequestThumbnail: (String) -> Unit,
-    onCancelThumbnail: (String) -> Unit,
-    visibleKeys: () -> List<String>,
-) {
-    var requested = emptySet<String>()
-    snapshotFlow { visibleKeys() }.distinctUntilChanged().collect { keys ->
-        val firstIdx = keys.firstNotNullOfOrNull { indexByKey[it] }
-        val lastIdx = keys.asReversed().firstNotNullOfOrNull { indexByKey[it] }
-        val nowRequested = LinkedHashSet<String>()
-        if (firstIdx != null && lastIdx != null) {
-            val to = (lastIdx + 1 + 12).coerceAtMost(orderedItems.size)
-            for (i in firstIdx until to) pendingCloudLinkIdOf(orderedItems[i])?.let {
-                if (nowRequested.add(it)) onRequestThumbnail(it)
-            }
-        }
-        requested.forEach { if (it !in nowRequested) onCancelThumbnail(it) }
-        requested = nowRequested
-    }
-}
+/** Default for [PhotoGrid]'s URL map: a grid with no store behind it shows only the URLs its rows carry. */
+private val EMPTY_THUMBNAIL_URLS: State<Map<String, String>> = mutableStateOf(emptyMap())
 
 /** Clamp band for a mosaic tile's aspect ratio, kept to a moderate portrait-to-landscape range (2:3 to
  *  3:2). The staggered grid packs into whichever lane is shortest and a date header re-levels the lanes,
@@ -778,7 +748,7 @@ private fun MosaicPhotoGrid(
     downloadedCloudLinkIds: Set<String>,
     favoriteIds: Set<String>,
     offlinePinIds: Set<String>,
-    thumbnailUrls: Map<String, String>,
+    thumbnailUrls: State<Map<String, String>>,
     keyOf: (GalleryItem) -> String,
     indexByKey: GalleryKeyIndex,
     dragSelectModifier: Modifier,
@@ -849,14 +819,14 @@ private fun MosaicPhotoGrid(
                 // block rather than whitespace.
                 val sparseSection = monthItems.size < columnCount
                 if (effectiveGrouping != TimelineGrouping.None) {
-                    val selectedInGroup = monthItems.count { it in selectedItems }
+                    val headerSelectable = isSelectionMode && groupSelectable
                     item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
                         MonthHeader(
                             month = month,
                             photoCount = monthPhotos,
                             videoCount = monthVideos,
-                            isSelectionMode = isSelectionMode && groupSelectable,
-                            selectedInGroup = selectedInGroup,
+                            isSelectionMode = headerSelectable,
+                            selectedInGroup = if (headerSelectable) monthItems.count { it in selectedItems } else 0,
                             groupSize = monthItems.size,
                             onToggleGroup = { onToggleGroup(monthItems) },
                             modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
@@ -869,7 +839,7 @@ private fun MosaicPhotoGrid(
                     contentType = { "photo" },
                 ) { item ->
                     val cloudId = cloudLinkIdOfMosaic(item)
-                    val cellThumbUrl = cloudId?.let { thumbnailUrls[it] }
+                    val cellThumbUrl by remember(cloudId, thumbnailUrls) { derivedStateOf { cloudId?.let { thumbnailUrls.value[it] } } }
                     val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl) {
                         photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl)
                     }

@@ -105,8 +105,14 @@ internal class UploadDeviceFiles(private val context: Context) {
      *  truncates and rewrites the file. A copy that throws (I/O error, eject) is rolled back in place
      *  from the staged backup, and a process killed mid-truncate is rolled back from the same backup
      *  on the next launch, so the original is never left partial. A write the OS refuses is logged and
-     *  skipped (the original stays intact); a staging failure returns false without touching the file. */
-    fun overwriteLocalInPlace(uri: String, src: File): Boolean {
+     *  skipped (the original stays intact); a staging failure returns false without touching the file.
+     *  Before any of that, [src] must read back as [kind] (see [MirrorSourceCheck]); a replacement that
+     *  does not is refused and the original is never touched. */
+    fun overwriteLocalInPlace(uri: String, src: File, kind: MirrorSourceCheck.Kind): Boolean {
+        if (!MirrorSourceCheck.accepts(context, kind, src, uri)) {
+            Log.w(UPLOAD_TAG, "Mirror overwrite refused for $uri: the replacement does not read back as $kind")
+            return false
+        }
         val parsed = Uri.parse(uri)
         var backup: File? = null
         val outcome = eu.akoos.photos.data.upload.MirrorOverwriteJournal.guardedOverwrite(
@@ -171,25 +177,17 @@ internal class UploadDeviceFiles(private val context: Context) {
      * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
      */
     fun computeSha1(uri: String): String? {
-        val digest = MessageDigest.getInstance("SHA-1")
-        try {
+        return try {
             // A null stream (or a read error below) means the content is unreadable this pass. Return
             // null rather than the SHA-1 of empty/partial input: a bogus hash persisted as localHash
             // and sent as the content hash never content-pairs on reconcile, so the file uploads as a
             // silent Drive duplicate (and multiple failures would even share one hash). The caller
-            // treats null as a hard per-file failure and retries the row next pass.
-            val stream = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
-            stream.use { s ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (s.read(buffer).also { read = it } != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            }
+            // treats null as a hard per-file failure and retries the row next pass. Local encrypted
+            // bytes are refused the same way.
+            eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            return null
+            null
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

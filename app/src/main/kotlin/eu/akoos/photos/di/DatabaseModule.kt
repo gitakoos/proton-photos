@@ -32,6 +32,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.Multibinds
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
+import eu.akoos.photos.data.db.dao.LocalExifCheckDao
+import eu.akoos.photos.data.db.dao.AlbumOrderDao
 import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import me.proton.core.eventmanager.domain.EventListener
 import me.proton.core.account.data.db.AccountDatabase
@@ -51,6 +53,7 @@ import me.proton.core.usersettings.data.db.OrganizationDatabase
 import me.proton.core.usersettings.data.db.UserSettingsDatabase
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.Migrations
+import eu.akoos.photos.data.db.encryption.EncryptedOpenHelperFactory
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.ClusterSummaryDao
@@ -70,6 +73,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PersonHiddenDao
 import eu.akoos.photos.data.db.dao.PersonNameDao
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
 import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
@@ -140,6 +144,7 @@ abstract class DatabaseModule {
         @Singleton
         fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
+                .openHelperFactory(EncryptedOpenHelperFactory(context))
                 .addMigrations(*Migrations.ALL)
                 .build()
 
@@ -249,7 +254,19 @@ abstract class DatabaseModule {
 
         @Provides
         @Singleton
+        fun providePersonHiddenDao(db: AppDatabase): PersonHiddenDao = db.personHiddenDao()
+
+        @Provides
+        @Singleton
         fun provideFaceCurationTimeDao(db: AppDatabase): FaceCurationTimeDao = db.faceCurationTimeDao()
+
+        @Provides
+        @Singleton
+        fun provideLocalExifCheckDao(db: AppDatabase): LocalExifCheckDao = db.localExifCheckDao()
+
+        @Provides
+        @Singleton
+        fun provideAlbumOrderDao(db: AppDatabase): AlbumOrderDao = db.albumOrderDao()
 
         @Provides
         @Singleton

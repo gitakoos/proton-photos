@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import eu.akoos.photos.data.ml.BACKGROUND_ML_INTRA_OP_THREADS
 
 /**
  * Finds where the faces are in a still bitmap by running the YOLOv5-face detector network once.
@@ -91,6 +92,7 @@ class FaceDetector(
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
 
     private val sessionOptions = OrtSession.SessionOptions().apply {
+        setIntraOpNumThreads(BACKGROUND_ML_INTRA_OP_THREADS)
         // Full graph optimizations (fusions, constant folding) over the default BASIC level; still on the
         // CPU at full fp32, so the calibrated thresholds are unaffected. The XNNPACK provider is not built
         // into this Runtime package (requesting it aborts at session creation), so the default CPU kernels

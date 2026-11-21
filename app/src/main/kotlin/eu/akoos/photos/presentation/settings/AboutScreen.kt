@@ -243,6 +243,13 @@ fun AboutScreen(
             RowDivider()
             LinkRow(
                 colors = colors,
+                title = "SQLCipher",
+                subtitle = stringResource(R.string.about_lib_sqlcipher),
+                onClick = { openUrl("https://github.com/sqlcipher/sqlcipher-android") },
+            )
+            RowDivider()
+            LinkRow(
+                colors = colors,
                 title = "GoOpenPGP",
                 subtitle = stringResource(R.string.about_lib_gopenpgp),
                 onClick = { openUrl("https://github.com/ProtonMail/gopenpgp") },

@@ -38,7 +38,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** The kinds of data the shared backup keeps a copy of, with the name each is recorded under. */
-enum class SharedBackupKind(val key: String) { FACES("faces"), SEARCH("search"), LABELS("labels"), HIDDEN("hidden") }
+enum class SharedBackupKind(val key: String) {
+    FACES("faces"), SEARCH("search"), LABELS("labels"), HIDDEN("hidden"), SETTINGS("settings"),
+    ALBUM_ORDER("albumOrder")
+}
 
 /** How the shared backup stands, for the settings row. */
 data class SharedBackupStatus(val enabled: Boolean, val lastAtMs: Long, val lastFailed: Boolean)
@@ -67,6 +70,13 @@ internal const val ML_SAVE_GAP_MS = 60L * 60_000L
  */
 internal fun mlSaveDue(changedAt: Long, userChangedAt: Long, savedAt: Long, nowMs: Long): Boolean =
     changedAt > savedAt && (savedAt == 0L || userChangedAt > savedAt || nowMs - savedAt >= ML_SAVE_GAP_MS)
+
+/** [SharedBackupStore.recordSeen]'s files (node to active revision) as kept in the settings store, and back. */
+internal fun encodeSeen(revisions: Map<String, String>): Set<String> =
+    revisions.mapTo(HashSet()) { (node, revision) -> "$node|$revision" }
+
+internal fun decodeSeen(entries: Set<String>): Map<String, String> =
+    entries.associate { it.substringBefore('|') to it.substringAfter('|', "") }
 
 class SharedBackupStore @Inject constructor(@ApplicationContext private val context: Context) {
 
@@ -195,6 +205,17 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
             val saved = savedFingerprints(prefs).toMutableMap()
             saved[kind.key] = fingerprint(content)
             prefs[SettingsKeys.SHARED_BACKUP_SAVED] = saved.mapTo(HashSet()) { (k, v) -> "$k|$v" }
+        }
+    }
+
+    /** What the last round that went through saw of the backup folders: each file's node and its active revision. */
+    suspend fun seen(): Map<String, String> =
+        decodeSeen(context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_SEEN] ?: emptySet())
+
+    /** Remembers [revisions] (node to active revision) as what a round that went through saw, in place of the last. */
+    suspend fun recordSeen(revisions: Map<String, String>) {
+        context.settingsDataStore.edit { prefs ->
+            prefs[SettingsKeys.SHARED_BACKUP_SEEN] = encodeSeen(revisions)
         }
     }
 

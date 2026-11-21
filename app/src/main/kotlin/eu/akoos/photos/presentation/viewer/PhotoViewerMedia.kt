@@ -96,6 +96,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
@@ -136,6 +137,21 @@ private fun displaySizeOf(v: androidx.media3.common.VideoSize): IntSize {
     return if (rotated) IntSize(v.height, w) else IntSize(w, v.height)
 }
 
+/** True when a layout gave the video surface a non-empty size it did not have before. */
+internal fun surfaceGainedSize(oldWidth: Int, oldHeight: Int, newWidth: Int, newHeight: Int): Boolean =
+    newWidth > 0 && newHeight > 0 && (newWidth != oldWidth || newHeight != oldHeight)
+
+/**
+ * A SurfaceView creates its surface only in a pre-draw pass that finds it with a size. Inside Compose the PlayerView
+ * is laid out in the frame that adds it, after that frame's pre-draw, so on a screen where nothing else redraws (an
+ * inline motion clip over its still) no later pass comes: the clip decodes to no surface and the page stays black
+ * until something else repaints. Once the surface has its size, one more frame is asked for, posted so it lands after
+ * the current pass, so the SurfaceView makes its surface at once.
+ */
+private val surfaceFrameRequest = android.view.View.OnLayoutChangeListener { v, l, t, r, b, ol, ot, or, ob ->
+    if (surfaceGainedSize(or - ol, ob - ot, r - l, b - t)) v.post { v.rootView.invalidate() }
+}
+
 /**
  * Plays a video file or content URI using ExoPlayer (Media3).
  * Released automatically when the composable leaves the composition.
@@ -164,12 +180,17 @@ internal fun VideoPlayer(
      *  layer. The same shared center-pivot scale/offset the still image uses; 1f / Zero = no zoom. */
     scale: Float = 1f,
     offset: androidx.compose.ui.geometry.Offset = androidx.compose.ui.geometry.Offset.Zero,
+    /** Letterbox and shutter fill — matches the viewer page (theme Bg0, or pitch black while
+     *  immersive). The PlayerView paints these itself, so Compose's page background alone cannot
+     *  reach the bars beside a landscape clip. */
+    pageBackground: Color = Bg0,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val loop = onEnded == null
     val exoPlayer = remember(uri, reloadKey) {
         ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, uri)))
             prepare()
             playWhenReady = autoPlay
             repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ONE else ExoPlayer.REPEAT_MODE_OFF
@@ -193,7 +214,7 @@ internal fun VideoPlayer(
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 android.widget.Toast.makeText(
                     context,
-                    context.getString(R.string.viewer_video_play_failed),
+                    resources.getString(R.string.viewer_video_play_failed),
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
             }
@@ -228,9 +249,10 @@ internal fun VideoPlayer(
     // video so its aspect ratio is preserved instead of stretched. The controller stays off; our own pill
     // and the ExoPlayer listeners drive playback.
     // Fill the PlayerView shutter (shown until the first frame) and its letterbox with the viewer page
-    // background (Bg0) in both themes, instead of the XML's opaque black, so a video opens without a white
-    // flash or a white-to-black jump and matches the surrounding viewer and the photo path.
-    val shutterColor = Bg0.toArgb()
+    // background, instead of the XML's opaque black, so a video opens without a white flash or a
+    // white-to-black jump and matches the surrounding viewer and the photo path — including the
+    // fade to pitch black when the chrome hides.
+    val shutterColor = pageBackground.toArgb()
     AndroidView(
         factory = { ctx ->
             (android.view.LayoutInflater.from(ctx)
@@ -239,6 +261,7 @@ internal fun VideoPlayer(
                     player = exoPlayer
                     setShutterBackgroundColor(shutterColor)
                     setBackgroundColor(shutterColor)
+                    videoSurfaceView?.addOnLayoutChangeListener(surfaceFrameRequest)
                 }
         },
         update = { view ->

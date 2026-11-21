@@ -92,6 +92,18 @@ fun parsePhotoDuration(xAttrJson: String): Long? = runCatching {
     Math.round(seconds * 1000.0)
 }.getOrNull()
 
+/**
+ * The plaintext size an upload declared for its file, the Common.Size of a plaintext XAttr JSON blob: the
+ * byte count the uploading client set out to send (the SDK reports it as the revision's claimed size). Drive
+ * stores the encrypted blocks apart from it, and the link's own Size counts encrypted storage. A missing,
+ * malformed or non-positive value returns null. Pure and main-process safe.
+ */
+fun parseXAttrClaimedSize(xAttrJson: String): Long? = runCatching {
+    val common = JSONObject(xAttrJson).optJSONObject("Common") ?: return@runCatching null
+    if (!common.has("Size")) return@runCatching null
+    common.getLong("Size").takeIf { it > 0L }
+}.getOrNull()
+
 data class NodeKeyMaterial(
     val armoredPrivateKey: String,
     val passphraseBytes: ByteArray,
@@ -359,13 +371,11 @@ class DriveCryptoHelper @Inject constructor(
         }
     }
 
-    fun decryptFileToDestination(sessionKey: SessionKey, encryptedFile: File, destFile: File): File = cryptoLock.withLock {
-        // Empty/missing bytes trigger the same [:-1] Go panic/SIGABRT — validate in Kotlin first.
-        require(encryptedFile.exists() && encryptedFile.length() > 0) {
-            "decryptFileToDestination: encryptedFile is empty or missing"
-        }
-        val result = cryptoContext.pgpCrypto.decryptFile(encryptedFile, destFile, sessionKey)
-        result.file
+    /** Decrypts [data] (a Drive block or thumbnail) with [sessionKey] in memory, writing no file. */
+    fun decryptWithSessionKey(sessionKey: SessionKey, data: ByteArray): ByteArray = cryptoLock.withLock {
+        // Empty bytes trigger the same [:-1] Go panic/SIGABRT, so they are refused in Kotlin first.
+        require(data.isNotEmpty()) { "decryptWithSessionKey: encrypted bytes are empty" }
+        cryptoContext.pgpCrypto.decryptData(data, sessionKey)
     }
 
     /**

@@ -41,9 +41,12 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
@@ -76,6 +79,7 @@ import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.StripResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -103,6 +107,11 @@ class UploadPendingUseCaseTest {
         // skips on a 0 (another pass got it first); the relaxed mock would otherwise return 0 and
         // skip every item. A test modelling a lost claim can override this per URI.
         coEvery { syncStateRepo.claimForUpload(any()) } returns 1
+        // The pass reads only its candidate rows; answered from each test's observeAll fixture with the
+        // repository contract (queued, or owed to an album), so every fixture keeps meaning the whole table.
+        coEvery { syncStateRepo.getQueuedOrIn(any(), any()) } coAnswers {
+            syncStateRepo.observeAll(firstArg()).first().filter { it.queued || it.localUri in secondArg<Set<String>>() }
+        }
         localRepo = mockk()
         cloudRepo = mockk(relaxed = true)
         networkObserver = mockk(relaxed = true)
@@ -291,12 +300,10 @@ class UploadPendingUseCaseTest {
     }
 
     @Test
-    fun `a Sync now that defers for Wi-Fi still counts on the next run`() = runTest {
-        // The flag is consumed past the early returns, not alongside the other prefs. A tap that lands
-        // on a batch which defers (Wi-Fi-only on, no Wi-Fi) must not be spent on a run that uploaded
-        // nothing: the rows would then be held by the switch on every later trigger, which is the same
-        // silent nothing the flag exists to prevent.
-        every { mockPrefsRef[SettingsKeys.AUTO_SYNC] } returns false
+    fun `Sync now uploads on mobile data with Wi-Fi only on, and the next automatic run waits again`() = runTest {
+        // A tap on Sync now is asked for by hand, like a photo backed up by hand, so the Wi-Fi-only
+        // switch does not hold it. The tap covers that one run: an automatic trigger after it waits for
+        // Wi-Fi as before.
         every { mockPrefsRef[SettingsKeys.SYNC_WIFI_ONLY] } returns true
         coEvery { networkObserver.currentlyOnWifi() } returns false
         every { syncStateRepo.observeAll(userId) } returns
@@ -304,12 +311,16 @@ class UploadPendingUseCaseTest {
         coEvery { localRepo.queryByUri(any()) } returns localItem("uri://1")
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
 
-        useCase.requestManualRun()
         useCase(userId)
         coVerify(exactly = 0) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
 
-        // Wi-Fi is back. The tap is still owed, so this run honours it.
-        coEvery { networkObserver.currentlyOnWifi() } returns true
+        useCase.requestManualRun()
+        useCase(userId)
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(listOf(syncState("uri://2", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri(any()) } returns localItem("uri://2")
         useCase(userId)
         coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
     }
@@ -515,6 +526,73 @@ class UploadPendingUseCaseTest {
             )
         }
     }
+
+    @Test
+    fun `an empty file leaves the queue and the batch does not count it as attempted`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://empty", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://empty") } returns localItem("uri://empty")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } throws
+            eu.akoos.photos.data.repository.drive.EmptySourceFileException()
+
+        val result = useCase(userId)
+
+        coVerify(exactly = 1) { syncStateRepo.markUnuploadable("uri://empty", any()) }
+        assertEquals(0, result.attempted)
+        assertFalse(result.allFailed)
+    }
+
+    @Test
+    fun `a file Drive refuses in three batches where another photo uploads leaves the queue`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(
+            listOf(syncState("uri://bad", SyncStatus.LOCAL_ONLY), syncState("uri://good", SyncStatus.LOCAL_ONLY)),
+        )
+        coEvery { localRepo.queryByUri("uri://bad") } returns localItem("uri://bad")
+        coEvery { localRepo.queryByUri("uri://good") } returns localItem("uri://good")
+        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://bad" }, any(), any(), any(), any()) } throws
+            perFileRefusal()
+        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://good" }, any(), any(), any(), any()) } returns "cloud-good"
+
+        useCase(userId)
+        useCase(userId)
+        coVerify(exactly = 0) { syncStateRepo.markUnuploadable("uri://bad", any()) }
+        useCase(userId)
+
+        coVerify(exactly = 1) { syncStateRepo.markUnuploadable("uri://bad", any()) }
+    }
+
+    @Test
+    fun `a refusal no photo of the batch gets past never takes a file off the queue`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://bad", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://bad") } returns localItem("uri://bad")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } throws perFileRefusal()
+
+        repeat(4) { useCase(userId) }
+        val result = useCase(userId)
+
+        coVerify(exactly = 0) { syncStateRepo.markUnuploadable(any(), any()) }
+        assertTrue(result.allFailed)
+        assertFalse(result.retryWorthwhile)
+    }
+
+    @Test
+    fun `a batch that failed for any other reason is worth retrying`() = runTest {
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://1", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } throws RuntimeException("network error")
+
+        val result = useCase(userId)
+
+        coVerify(exactly = 0) { syncStateRepo.markUnuploadable(any(), any()) }
+        assertTrue(result.retryWorthwhile)
+    }
+
+    private fun perFileRefusal() = me.proton.core.network.domain.ApiException(
+        me.proton.core.network.domain.ApiResult.Error.Http(
+            httpCode = 422,
+            message = "http 422",
+            proton = me.proton.core.network.domain.ApiResult.Error.ProtonData(code = 2001, error = "refused"),
+        ),
+    )
 
     @Test
     fun `item with no local file is silently skipped`() = runTest {
@@ -774,7 +852,7 @@ class UploadPendingUseCaseTest {
         coEvery { cloudRepo.uploadFile(userId, capture(sent), any(), any(), any(), any()) } returns "cloud-id"
         val temp = java.io.File.createTempFile("videocompress_", ".mp4").apply { writeBytes(ByteArray(10)) }
         coEvery {
-            videoCompression.compress(any(), any(), any(), any(), any())
+            videoCompression.compress(any(), any(), any(), any(), any(), any())
         } returns VideoUploadCompression.Attempt(temp, CompressionOutcome.COMPRESSED, null, 10_000_000L, "video/avc", 10L)
         mockkStatic(Uri::class)
         every { Uri.fromFile(any()) } answers {
@@ -800,7 +878,7 @@ class UploadPendingUseCaseTest {
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
         val profile = slot<VideoCompressionProfile>()
         coEvery {
-            videoCompression.compress(any(), capture(profile), any(), any(), any())
+            videoCompression.compress(any(), capture(profile), any(), any(), any(), any())
         } returns skippedAttempt()
 
         useCase(userId)
@@ -823,7 +901,7 @@ class UploadPendingUseCaseTest {
 
         val transcodeRelease = CompletableDeferred<Unit>()
         coEvery {
-            videoCompression.compress(any(), any(), any(), any(), any())
+            videoCompression.compress(any(), any(), any(), any(), any(), any())
         } coAnswers {
             transcodeRelease.await()
             skippedAttempt()
@@ -840,7 +918,11 @@ class UploadPendingUseCaseTest {
         }
 
         val batch = launch { useCase(userId) }
-        withTimeout(10_000L) { allPhotosInFlight.await() }
+        // The uploads run on real worker threads, so the wait is measured in real time: a virtual-time
+        // timeout under runTest fires at once whenever the test scheduler has nothing else to run.
+        withContext(Dispatchers.Default.limitedParallelism(1)) {
+            withTimeout(10_000L) { allPhotosInFlight.await() }
+        }
         // The photos made it through while the transcode was still running.
         assertTrue(!transcodeRelease.isCompleted)
         transcodeRelease.complete(Unit)
@@ -857,10 +939,10 @@ class UploadPendingUseCaseTest {
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
         val temp = java.io.File.createTempFile("videocompress_", ".mp4").apply { writeBytes(ByteArray(10)) }
         coEvery {
-            videoCompression.compress(any(), any(), any(), any(), any())
+            videoCompression.compress(any(), any(), any(), any(), any(), any())
         } coAnswers {
-            val onPlanned = arg<(VideoCompressionPlan.Transcode) -> Unit>(3)
-            val onProgress = arg<(VideoUploadCompressor.Progress) -> Unit>(4)
+            val onPlanned = arg<(VideoCompressionPlan.Transcode) -> Unit>(4)
+            val onProgress = arg<(VideoUploadCompressor.Progress) -> Unit>(5)
             onPlanned(transcodePlan())
             onProgress(VideoUploadCompressor.Progress(0.5f, VideoCodec.HEVC, 1.8f))
             VideoUploadCompression.Attempt(temp, CompressionOutcome.COMPRESSED, null, 10_000_000L, "video/hevc", 10L)
@@ -921,7 +1003,7 @@ class UploadPendingUseCaseTest {
         mockkObject(ExifHelper) {
             every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
             every {
-                ExifHelper.stripFieldsInPlace(any(), any(), any<MetadataStripConfig>())
+                ExifHelper.stripFieldsInPlace(any(), any(), any<MetadataStripConfig>(), any())
             } returns StripResult.Failed
             block()
         }

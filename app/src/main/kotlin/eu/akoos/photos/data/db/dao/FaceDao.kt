@@ -131,6 +131,12 @@ data class FaceHead(
     val embeddingBytes: Int,
 )
 
+/** A photo one of a person's kept faces appears in. */
+data class PersonPhotoKey(
+    val personId: Long,
+    val photoKey: String,
+)
+
 /**
  * One face reduced to its photo, its stored box, its detection [score] and the person it is grouped
  * under ([personId], null while it waits to be clustered). The embedding blob is left out, so listing
@@ -274,6 +280,17 @@ interface FaceDao {
     )
     suspend fun facesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceOnPhoto>
 
+    /** Every face on the given photos, removed ones included, with its vector, so a merging import can
+     *  bring two devices' sets of the same photos together. Chunked for the SQL host-variable limit. */
+    suspend fun allFacesOnPhotos(userId: String, photoKeys: Collection<String>): List<FaceEntity> {
+        val out = ArrayList<FaceEntity>()
+        photoKeys.toSet().forEachSqlChunk { out += allFacesOnPhotosChunk(userId, it) }
+        return out
+    }
+
+    @Query("SELECT * FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId ORDER BY photoKey, id")
+    suspend fun allFacesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceEntity>
+
     /** The account's faces among the given ids with their current person, so an assignment writes only
      *  this account's faces and knows which people it takes them from. Removed faces are included, since
      *  assigning one brings it back. Chunked for the SQL host-variable limit. The account term is written
@@ -341,6 +358,14 @@ interface FaceDao {
      *  the manually attached photos rather than counting faces (a photo can hold several faces). */
     @Query("SELECT DISTINCT photoKey FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
     suspend fun distinctPhotoKeysForPerson(userId: String, personId: Long): List<String>
+
+    /** [distinctPhotoKeysForPerson] for many people in a few statements, as (person, photo) pairs, so a list of
+     *  people can be counted without a query per person. Chunked for the host-variable limit. */
+    suspend fun distinctPhotoKeysForPeople(userId: String, personIds: Collection<Long>): List<PersonPhotoKey> =
+        personIds.toList().flatMapSqlChunks { distinctPhotoKeysForPeopleChunk(userId, it) }
+
+    @Query("SELECT DISTINCT personId, photoKey FROM face WHERE personId IN (:personIds) AND +userId = :userId AND rejected = 0")
+    suspend fun distinctPhotoKeysForPeopleChunk(userId: String, personIds: List<Long>): List<PersonPhotoKey>
 
     /** The clearest remaining face of a person, so a removal that takes out the old cover can repoint
      *  it to a face that still belongs. Null once none remain. */

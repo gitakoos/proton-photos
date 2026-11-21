@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Photos for Proton
+  ~ Copyright (C) 2026 Akoos <https://akoos.eu>
+  ~
+  ~ Source:  https://github.com/gitakoos/proton-photos
+  ~ Website: https://www.photosforproton.eu
+  ~
+  ~ This file is part of Photos for Proton.
+  ~
+  ~ Photos for Proton is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU General Public License version 3 as
+  ~ published by the Free Software Foundation.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  ~ GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License
+  ~ along with this program. If not, see <https://www.gnu.org/licenses/>.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path
+        android:pathData="M66,46 h60 a8,8 0 0 1 8,8 v72 a8,8 0 0 1 -8,8 h-60 a8,8 0 0 1 -8,-8 v-72 a8,8 0 0 1 8,-8 z M58,64.5 h76 v3.5 h-76 z M70,78 h52 a2,2 0 0 1 2,2 v0 a2,2 0 0 1 -2,2 h-52 a2,2 0 0 1 -2,-2 v-0 a2,2 0 0 1 2,-2 z M70,90 h52 a2,2 0 0 1 2,2 v0 a2,2 0 0 1 -2,2 h-52 a2,2 0 0 1 -2,-2 v-0 a2,2 0 0 1 2,-2 z M70,102 h52 a2,2 0 0 1 2,2 v0 a2,2 0 0 1 -2,2 h-52 a2,2 0 0 1 -2,-2 v-0 a2,2 0 0 1 2,-2 z M70,114 h28 a2,2 0 0 1 2,2 v0 a2,2 0 0 1 -2,2 h-28 a2,2 0 0 1 -2,-2 v-0 a2,2 0 0 1 2,-2 z"
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"/>
+</vector>

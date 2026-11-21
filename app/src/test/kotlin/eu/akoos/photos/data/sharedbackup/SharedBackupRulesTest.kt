@@ -131,6 +131,41 @@ class SharedBackupRulesTest {
         assertEquals(70L, copies.single().madeAtMs)
     }
 
+    @Test
+    fun `a copy whose revision changed is taken in even when its time looks no newer than the one taken in`() {
+        // Drive gave the copy taken in last a time an hour behind what it carried, so the next copy looks older.
+        val next = file(LabelDriveNaming.fileName(pc), claimed = 90, uid = "pc-labels").copy(activeRevisionUid = "r2")
+        val applied = mapOf(pc to 100L)
+        assertTrue(newerCopies(listOf(next), LabelDriveNaming::parse, own, applied).isEmpty())
+        val seenBefore = mapOf("pc-labels" to "r1")
+        val taken = newerCopies(listOf(next), LabelDriveNaming::parse, own, applied, seenBefore)
+        assertEquals(listOf(pc), taken.map { it.deviceId })
+        // The same revision seen before stays taken in.
+        val again = newerCopies(listOf(next), LabelDriveNaming::parse, own, applied, mapOf("pc-labels" to "r2"))
+        assertTrue(again.isEmpty())
+    }
+
+    @Test
+    fun `a file a round never saw counts as changed only once a round saw the folders`() {
+        val file = file(HiddenDriveNaming.fileName(pc), claimed = 50, uid = "pc-hidden")
+        assertFalse(changedSinceSeen(file, emptyMap()))
+        assertTrue(changedSinceSeen(file, mapOf("other" to "rev-other")))
+        assertFalse(changedSinceSeen(file, mapOf("pc-hidden" to "rev-pc-hidden")))
+    }
+
+    @Test
+    fun `a face or search file whose revision changed is fetched although its time looks taken in`() = runTest {
+        val seen = mlListing.ml.associate { it.nodeUid to "older" }
+        val files = runner(facesHere = true, embeddingsHere = 5, appliedFaces = 100)
+            .mlFilesToTake(UserId("u"), mlListing, own, seen = seen)
+        assertEquals(setOf(MlDriveFileKind.FACES, MlDriveFileKind.SEARCH), files.map { it.kind }.toSet())
+
+        val unchanged = mlListing.ml.associate { it.nodeUid to it.activeRevisionUid }
+        val none = runner(facesHere = true, embeddingsHere = 5, appliedFaces = 100)
+            .mlFilesToTake(UserId("u"), mlListing, own, seen = unchanged)
+        assertTrue(none.isEmpty())
+    }
+
     private fun runner(facesHere: Boolean, embeddingsHere: Int, appliedFaces: Long): SharedBackupRunner {
         val appliedDao = mockk<DriveCopyAppliedDao>()
         coEvery { appliedDao.forKind("u", SharedBackupKind.FACES.key) } returns
@@ -147,6 +182,9 @@ class SharedBackupRulesTest {
             envelopeCrypto = mockk(relaxed = true),
             labels = mockk(relaxed = true),
             hidden = mockk(relaxed = true),
+            settings = mockk(relaxed = true),
+            albumOrder = mockk(relaxed = true),
+            cloudAlbumDao = mockk(relaxed = true),
             appliedDao = appliedDao,
             store = mockk(relaxed = true),
             faceScanDao = faceScanDao,

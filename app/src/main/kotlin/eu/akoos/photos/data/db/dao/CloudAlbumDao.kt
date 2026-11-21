@@ -89,6 +89,11 @@ interface CloudAlbumDao {
     @Query("DELETE FROM cloud_albums WHERE linkId = :linkId")
     suspend fun deleteByLinkId(linkId: String)
 
+    /** A rename made here, so the cached paint and the album pickers show the new name before the
+     *  next full refresh. */
+    @Query("UPDATE cloud_albums SET name = :name WHERE linkId = :linkId")
+    suspend fun rename(linkId: String, name: String)
+
     /**
      * Whether the cached row for [linkId] is an album someone else shared with this user.
      *

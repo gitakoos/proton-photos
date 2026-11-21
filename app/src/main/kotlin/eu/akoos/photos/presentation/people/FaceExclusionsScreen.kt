@@ -42,6 +42,8 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.Icon
@@ -54,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,13 +70,15 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.FaceCropTransformation
+import eu.akoos.photos.presentation.gallery.PersonRow
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.rememberFaceCoverModel
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.pillShape
 
 /**
- * The face-recognition exclusions the user can undo: faces removed from a named person ("Not this
- * person", one section per name) and faces dismissed as "not a person" (one "Ignored" section). Each
+ * The face-recognition exclusions the user can undo: the people hidden from People (rows with Show), faces
+ * removed from a named person ("Not this person", one section per name) and faces dismissed as "not a person". Each
  * face shows as a cropped thumbnail with an Undo control that reverses the underlying exclusion so the
  * face is re-evaluated on the next clustering pass. Reuses the People rail's cover resolution
  * ([rememberFaceCoverModel]) and [FaceCropTransformation], so no new decrypt path is introduced.
@@ -84,6 +89,9 @@ fun FaceExclusionsScreen(
     onBack: () -> Unit,
     onUndoNotThisPerson: (name: String, faceId: String) -> Unit,
     onUndoIgnored: (faceId: String) -> Unit,
+    /** The people the user hid, or null while they are still being read. */
+    hiddenPeople: List<PersonUi>? = emptyList(),
+    onShowPerson: (personId: Long) -> Unit = {},
 ) {
     val colors = AppColors.current
     // The page as its floating header frosts it, when the frosted pills are on.
@@ -94,7 +102,8 @@ fun FaceExclusionsScreen(
             .background(colors.pageBg),
     ) {
         Box(Modifier.fillMaxSize().glassSource(glass)) {
-            if (!state.isLoading && state.isEmpty) {
+            val hidden = hiddenPeople.orEmpty()
+            if (!state.isLoading && hiddenPeople != null && state.isEmpty && hidden.isEmpty()) {
                 Text(
                     text = stringResource(R.string.face_excluded_empty),
                     color = colors.fgMute,
@@ -117,6 +126,27 @@ fun FaceExclusionsScreen(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
+                    if (hidden.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "hidden-header") {
+                            SectionHeader(stringResource(R.string.people_hidden_section))
+                        }
+                        items(hidden, key = { "hidden-${it.personId}" }, span = { GridItemSpan(maxLineSpan) }) { person ->
+                            PersonRow(
+                                person = person,
+                                hidden = true,
+                                onClick = { onShowPerson(person.personId) },
+                                trailing = {
+                                    Text(
+                                        stringResource(R.string.person_show_confirm),
+                                        color = colors.accent,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(end = 12.dp),
+                                    )
+                                },
+                            )
+                        }
+                    }
                     state.notThisPerson.forEach { group ->
                         item(span = { GridItemSpan(maxLineSpan) }, key = "np-header-${group.name}") {
                             SectionHeader(stringResource(R.string.face_excluded_not_person_section, group.name))
@@ -127,7 +157,7 @@ fun FaceExclusionsScreen(
                     }
                     if (state.ignored.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }, key = "ig-header") {
-                            SectionHeader(stringResource(R.string.face_excluded_ignored_section))
+                            SectionHeader(stringResource(R.string.face_excluded_not_a_person_section))
                         }
                         items(state.ignored, key = { "ig-${it.faceId}" }) { face ->
                             ExcludedFaceTile(face = face, onUndo = { onUndoIgnored(face.faceId) })
@@ -192,15 +222,18 @@ private fun ExcludedFaceTile(face: ExcludedFaceUi, onUndo: () -> Unit) {
             )
         }
         Spacer(Modifier.height(6.dp))
+        // The pill spans the tile and its label stays on one line, shrinking a little for a long word
+        // (a three-column tile is narrower than "Visszavonás" or "Ongedaan maken" at full size).
         Row(
             modifier = Modifier
+                .fillMaxWidth()
                 .clip(pillShape)
                 .background(colors.pillBg, pillShape)
                 .border(0.5.dp, colors.pillBorder, pillShape)
                 .clickable(onClick = onUndo)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.Undo,
@@ -208,11 +241,11 @@ private fun ExcludedFaceTile(face: ExcludedFaceUi, onUndo: () -> Unit) {
                 tint = colors.accent,
                 modifier = Modifier.size(14.dp),
             )
-            Text(
-                stringResource(R.string.face_excluded_undo),
-                color = colors.fgPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
+            BasicText(
+                text = stringResource(R.string.face_excluded_undo),
+                style = TextStyle(color = colors.fgPrimary, fontWeight = FontWeight.Medium),
+                maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = 12.sp),
             )
         }
     }

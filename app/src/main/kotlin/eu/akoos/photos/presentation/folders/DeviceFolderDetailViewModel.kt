@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -78,6 +79,9 @@ import eu.akoos.photos.presentation.common.addToAlbumOutcome
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.PhotoSortOrder
+import eu.akoos.photos.presentation.common.ArrangeSession
+import eu.akoos.photos.data.albumorder.AlbumOrderRepository
+import eu.akoos.photos.domain.usecase.PhotoArrangement
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.StripOutcome
 import eu.akoos.photos.presentation.common.message
@@ -130,6 +134,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val moveController: MoveToFolderController,
     private val folderDelete: DeviceFolderDeleteController,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val albumOrder: AlbumOrderRepository,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -287,6 +292,65 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun setSortMode(mode: AlbumPhotoSortMode) {
         val name = bucketName.value
         viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(context, name, mode) }
+    }
+
+    /** This folder's hand-made order, kept on this device only under the local user, whoever is signed in. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val arrangementFlow = bucketName
+        .flatMapLatest { name ->
+            albumOrder.observe(AlbumOrderRepository.LOCAL_USER, AlbumOrderRepository.folderKey(name))
+                .map { it.arrangement }
+                .catch { emit(emptyList()) }
+        }
+        .distinctUntilChanged()
+
+    /** True once this folder has a hand-made order, so picking Custom shows it instead of opening arrange mode. */
+    val hasArrangement: StateFlow<Boolean> = arrangementFlow.map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private val _arrange = MutableStateFlow<ArrangeSession?>(null)
+    val arrange: StateFlow<ArrangeSession?> = _arrange.asStateFlow()
+
+    private val _arrangeSaved = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val arrangeSaved: SharedFlow<Unit> = _arrangeSaved.asSharedFlow()
+
+    /** Opens arrange mode on the photos as they are shown now. */
+    fun startArrange() {
+        val shown = _items.value
+        if (shown.isEmpty()) return
+        clearSelection()
+        _arrange.value = ArrangeSession(shown.map(::arrangeKeyOf))
+    }
+
+    fun arrangeToggle(key: String) = _arrange.update { it?.toggled(key) }
+
+    fun arrangeReorder(order: List<String>) = _arrange.update { it?.reordered(order) }
+
+    fun arrangeMoveToStart() = _arrange.update { it?.movedToStart() }
+
+    fun arrangeMoveToEnd() = _arrange.update { it?.movedToEnd() }
+
+    fun arrangeMoveNextTo(target: String, after: Boolean) = _arrange.update { it?.movedNextTo(target, after) }
+
+    fun cancelArrange() {
+        _arrange.value = null
+    }
+
+    /** Keeps the arranged order for this folder and switches it to that order. */
+    fun finishArrange() {
+        val session = _arrange.value ?: return
+        val name = bucketName.value
+        _arrange.value = null
+        viewModelScope.launch {
+            val key = AlbumOrderRepository.folderKey(name)
+            val saved = runCatching {
+                val stored = albumOrder.arrangement(AlbumOrderRepository.LOCAL_USER, key)
+                val next = PhotoArrangement.forSave(stored, session.order)
+                albumOrder.saveCustom(AlbumOrderRepository.LOCAL_USER, key, next)
+                PhotoViewChoiceStore.setFolderSort(context, name, AlbumPhotoSortMode.Custom)
+            }.isSuccess
+            if (saved) _arrangeSaved.tryEmit(Unit)
+        }
     }
 
     /** The span of dates each header on this screen gathers. Held here rather than read by the
@@ -502,6 +566,74 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** The pending clearing of [_backupTarget]: armed when a back-up is asked for, replaced once the pipeline idles. */
     private val backupTargetEnd = BackupTargetEnd(viewModelScope, _backupTarget)
 
+    val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
+
+    /** One-shot system trash/delete consent intent for the screen's IntentSender launcher. */
+    private val _pendingDeleteIntent = MutableStateFlow<android.app.PendingIntent?>(null)
+    val pendingDeleteIntent: StateFlow<android.app.PendingIntent?> = _pendingDeleteIntent.asStateFlow()
+
+    /** True while a multi-select delete runs, so the screen can block the UI behind a progress drawer. */
+    private val _isDeleting = MutableStateFlow(false)
+    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
+
+    /** Deferred cloud-delete work, held while the system trash dialog is up. */
+    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+
+    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
+     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the screen's launcher drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** Until when (elapsed realtime) an empty listing right after a rename keeps the photos already shown. */
+    @Volatile private var renameHoldUntil = 0L
+
+    /** One-shot confirmation for a completed folder rename, carrying the new name for the snackbar. */
+    private val _folderRenameConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val folderRenameConfirmation: SharedFlow<String> = _folderRenameConfirmation.asSharedFlow()
+
+    /** The delete of this whole folder awaiting confirmation, or null when none is. */
+    val folderDeleteRequest: StateFlow<DeviceFolderDeleteRequest?> = folderDelete.request
+
+    /** True once a delete of this whole folder has landed, so the screen leaves a folder that is no
+     *  longer on the device rather than showing it empty. */
+    private val _folderDeleted = MutableStateFlow(false)
+    val folderDeleted: StateFlow<Boolean> = _folderDeleted.asStateFlow()
+
+    /** Whether the delete waiting on the system dialog is the whole folder's rather than a selection's. */
+    private var pendingFolderDelete = false
+
+    /** The client-side half of an in-flight hide, held so the Undo offered once the delete confirms
+     *  reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** How many device files that hide could not copy into the vault. Carried to whichever commit
+     *  path lands so the count is reported once the hide is actually done. */
+    private var pendingHideFailures = 0
+
+    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
+     *  folder hide is in flight, which is every selection hide. */
+    private var pendingHideFolderName: String? = null
+
+    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
+    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
+
+    private val _pendingStripIntent = MutableStateFlow<android.app.PendingIntent?>(null)
+    val pendingStripIntent: StateFlow<android.app.PendingIntent?> = _pendingStripIntent.asStateFlow()
+
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
+    private var pendingStripFailed = 0
+
     init {
         // The back-up can end without every queued photo reaching Synced (stopped from the notification or the
         // Activity screen, a failed photo, a full Drive, no Wi-Fi), so the target is also cleared once the
@@ -552,11 +684,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val itemsFlow = accountManager.getPrimaryUserId().flatMapLatest { userId ->
                 if (userId != null) getGalleryItems.invoke(userId) else getGalleryItems.invokeLocalOnly()
             }
+            // The folder is picked out of the whole library and sorted on every change to it, so that
+            // runs off the main thread; only the finished lists are set on it.
             combine(
                 itemsFlow,
                 vaultFlow,
                 sortModeFlow,
-            ) { all, vault, sort ->
+                arrangementFlow,
+            ) { all, vault, sort, arrangement ->
                 val visible = all.mapNotNull { item ->
                     val (uri, bucket) = when (item) {
                         is GalleryItem.LocalOnly -> item.local.uri to item.local.bucketName
@@ -574,15 +709,17 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // read. A synced photo's device DATE_TAKEN can differ from its Drive capture time —
                 // a downloaded file is dated at download — so ordering on the raw device date would
                 // file such a photo under a heading it sorts nowhere near.
-                val ordered = PhotoSortOrder.ordered(
-                    HiddenFolderRecords.folderPhotos(visible, vaulted, showsVault),
-                    newestFirst = sort == AlbumPhotoSortMode.NewestFirst,
-                )
+                val listed = HiddenFolderRecords.folderPhotos(visible, vaulted, showsVault)
+                val ordered = if (sort == AlbumPhotoSortMode.Custom) {
+                    PhotoArrangement.ordered(listed, arrangement, ::arrangeKeyOf) { it.captureTimeMs }
+                } else {
+                    PhotoSortOrder.ordered(listed, newestFirst = sort == AlbumPhotoSortMode.NewestFirst)
+                }
                 val vaultedUris = vaulted.mapTo(mutableSetOf()) { it.local.uri }
                 // Narrowed to what this screen lists, so the badge set stays the size of one folder
                 // rather than of the whole vault.
                 Triple(ordered, vaultedUris, vaultedUris intersect vault.pairedUris)
-            }.collect { (ordered, vaultedUris, pairedUris) ->
+            }.flowOn(Dispatchers.Default).collect { (ordered, vaultedUris, pairedUris) ->
                 // Right after a rename the device list still files the moved photos under the old name for a
                 // few seconds; the photos already shown stay until the new folder lists them.
                 val renaming = android.os.SystemClock.elapsedRealtime() < renameHoldUntil
@@ -812,7 +949,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
     // ── Public link for the single selected (local) photo — delegated to the shared
     // [PublicLinkController]. Device-folder photos are always local, so the manage sheet starts at
     // the "upload & create" step. ──────────────────────────────────────────────────────────────────
-    val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
 
     fun singleSelectedLocalUri(): String? = selection.value.takeIf { it.size == 1 }?.first()
 
@@ -856,21 +992,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
     }
 
-    /** One-shot system trash/delete consent intent for the screen's IntentSender launcher. */
-    private val _pendingDeleteIntent = MutableStateFlow<android.app.PendingIntent?>(null)
-    val pendingDeleteIntent: StateFlow<android.app.PendingIntent?> = _pendingDeleteIntent.asStateFlow()
-
-    /** True while a multi-select delete runs, so the screen can block the UI behind a progress drawer. */
-    private val _isDeleting = MutableStateFlow(false)
-    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
-
-    /** Deferred cloud-delete work, held while the system trash dialog is up. */
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
-
-    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
-     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
-    private var pendingHidePrivateUris: List<String> = emptyList()
-
     /** The selected photos that still have a device file. A vaulted one is a copy in app-private
      *  storage with no MediaStore row, so there is nothing for a delete, a hide, an album add or a
      *  metadata write to act on until it is revealed. */
@@ -887,15 +1008,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
     // ── Move to a device folder / rename this folder (logged-out, device data only) ──────────────
     // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a
     // folder detail can send its selection into another DCIM folder or rename itself in place.
-
-    /** Existing device folders offered as move targets, kept warm for the picker. */
-    val moveTargetFolders = moveController.targetFolders(viewModelScope)
-
-    /** One-shot system write-consent request a foreign-file move needs; the screen's launcher drives it. */
-    val pendingMoveIntent = moveController.pendingMoveIntent
-
-    /** Destination folder of a completed move, for the host's snackbar. */
-    val moveConfirmation = moveController.moveConfirmation
 
     /** Move every selected device photo (device-only + synced, vaulted skipped) into [folderName]. */
     fun moveSelectedToFolder(folderName: String) {
@@ -914,13 +1026,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
 
     fun clearPendingMove() = moveController.clearPending()
-
-    /** Until when (elapsed realtime) an empty listing right after a rename keeps the photos already shown. */
-    @Volatile private var renameHoldUntil = 0L
-
-    /** One-shot confirmation for a completed folder rename, carrying the new name for the snackbar. */
-    private val _folderRenameConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
-    val folderRenameConfirmation: SharedFlow<String> = _folderRenameConfirmation.asSharedFlow()
 
     /** Rename this folder by relocating its photos into [newName] under DCIM/. Repointing [bucketName]
      *  keeps the screen on the same photos as they follow into the renamed folder, with no nav-pop. */
@@ -960,17 +1065,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         deleteItems(selectedGalleryItems(), freeUpSpace, deleteFromCloud, wholeFolder = false)
     }
-
-    /** The delete of this whole folder awaiting confirmation, or null when none is. */
-    val folderDeleteRequest: StateFlow<DeviceFolderDeleteRequest?> = folderDelete.request
-
-    /** True once a delete of this whole folder has landed, so the screen leaves a folder that is no
-     *  longer on the device rather than showing it empty. */
-    private val _folderDeleted = MutableStateFlow(false)
-    val folderDeleted: StateFlow<Boolean> = _folderDeleted.asStateFlow()
-
-    /** Whether the delete waiting on the system dialog is the whole folder's rather than a selection's. */
-    private var pendingFolderDelete = false
 
     /**
      * Ask about deleting this folder with everything it holds on the device. The device side alone
@@ -1014,7 +1108,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
                     is DeletePhotoUseCase.Result.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
-                        buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                        buildDeleteUndoAction(
+                            result.landed(items), result.ranFreeUpSpace ?: freeUpSpace, result.ranDeleteFromCloud ?: deleteFromCloud,
+                            hide = false, localRecoverable = false,
+                        )
                             ?.let { undoController.offer(it) }
                         selection.clear()
                         // A file Android 10 refused stays, and so does the folder that holds it.
@@ -1146,10 +1243,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (reportProgress) _folderVault.value = HiddenFolderProgress(0, vaultable.size, restoring = false)
         for (target in vaultable) {
             if (reportProgress && stopFolderVault.get()) break
+            // A sign-out refuses the journal below, so every further copy would only be dropped again.
+            if (hiddenVaultJournal.signingOut()) break
             val local = target.local
             val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
             val privateUri = hiddenStorage.store(
                 local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+                sourceFolder = sourceFolder, cloudLinkId = target.cloudLinkId,
             )
             if (privateUri != null) {
                 collected += HiddenVaultJournal.Entry(
@@ -1226,14 +1326,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
         hiddenVaultJournal.confirm(uris)
     }
 
-    /** The client-side half of an in-flight hide, held so the Undo offered once the delete confirms
-     *  reverses the whole hide rather than only the photos that were vaulted. */
-    private var pendingHideCloudLinkIds: List<String> = emptyList()
-
-    /** How many device files that hide could not copy into the vault. Carried to whichever commit
-     *  path lands so the count is reported once the hide is actually done. */
-    private var pendingHideFailures = 0
-
     /** Say how many photos a landed hide left behind, and only then: a photo whose copy failed is
      *  still on the device, so a hide that reported plain success would contradict the grid. */
     private fun reportHideFailures() {
@@ -1249,10 +1341,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  everything journalled for them, and put the cloud-only half back in every listing. Those ids
      *  are written before the device half is even attempted, so leaving them set is what made a
      *  refused hide still take photos away. The originals are untouched. */
-    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
-     *  folder hide is in flight, which is every selection hide. */
-    private var pendingHideFolderName: String? = null
-
     private fun rollbackPendingHide() {
         val uris = pendingHidePrivateUris
         val cloudIds = pendingHideCloudLinkIds
@@ -1365,17 +1453,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
     // ── Batch EXIF strip (+ Android 11+ write-permission handshake) ─────────────────────────────
     // Every folder item is a device file, so the whole selection is strippable (no cloud-only skip),
     // mirroring the timeline's More -> Strip metadata so the two look and behave the same.
-    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
-    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
-
-    private val _pendingStripIntent = MutableStateFlow<android.app.PendingIntent?>(null)
-    val pendingStripIntent: StateFlow<android.app.PendingIntent?> = _pendingStripIntent.asStateFlow()
-
-    private var pendingStripConfig: MetadataStripConfig? = null
-    private var pendingStripUris: List<String> = emptyList()
-    private var pendingStripStripped = 0
-    private var pendingStripSkipped = 0
-    private var pendingStripFailed = 0
 
     fun stripMetadataSelected(config: MetadataStripConfig) {
         val uris = selectedDeviceUris()
@@ -1511,7 +1588,8 @@ internal class BackupTargetEnd(
                 job?.cancel()
                 job = null
             }
-            UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
+            UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi,
+            UploadStatus.Cancelled -> {
                 if (job == null && target.value.isNotEmpty()) arm(BACKUP_TARGET_HOLD_MS)
             }
             UploadStatus.Done -> Unit
@@ -1521,3 +1599,10 @@ internal class BackupTargetEnd(
 
 /** How long the folder screen holds its photos after a rename while the device list catches up. */
 private const val RENAME_HOLD_MS = 10_000L
+
+/** The key a folder photo holds its slot in a hand-made order by: its device file, or its link id for a cloud-only one. */
+internal fun arrangeKeyOf(item: GalleryItem): String = when (item) {
+    is GalleryItem.LocalOnly -> item.local.uri
+    is GalleryItem.Synced -> item.local.uri
+    is GalleryItem.CloudOnly -> item.cloud.linkId
+}

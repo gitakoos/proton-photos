@@ -24,6 +24,8 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.presentation.common.snackbarAboveBars
+import eu.akoos.photos.presentation.common.snackbarObstacle
 import android.app.Activity
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -37,6 +39,10 @@ import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import eu.akoos.photos.presentation.common.GlassBackdrop
 import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -102,6 +108,7 @@ import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import androidx.compose.material3.SnackbarHostState
@@ -129,6 +136,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -163,6 +171,7 @@ import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
+import eu.akoos.photos.presentation.common.KeepGridAtTopOnChange
 import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.common.ShimmerSquare
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -174,6 +183,9 @@ import eu.akoos.photos.presentation.gallery.LocalPeopleRail
 import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
+import eu.akoos.photos.presentation.gallery.LabelSuggestionRow
+import eu.akoos.photos.data.db.dao.LabelUsage
+import androidx.compose.material.icons.automirrored.filled.Label
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
 import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
 import eu.akoos.photos.presentation.gallery.GalleryFilter
@@ -280,17 +292,12 @@ fun SearchScreen(
     val allItems by vm.allItems.collectAsStateWithLifecycle()
     val vmSelectedItems by vm.selectedItems.collectAsStateWithLifecycle()
     val selectedItems = pick?.selected ?: vmSelectedItems
-    val albums by vm.albums.collectAsStateWithLifecycle()
-    val pendingDeleteIntent by vm.pendingDeleteIntent.collectAsStateWithLifecycle()
     val isDeleting by vm.isDeleting.collectAsStateWithLifecycle()
-    val pendingStripIntent by vm.pendingStripIntent.collectAsStateWithLifecycle()
-    val multiStripState by vm.multiStripState.collectAsStateWithLifecycle()
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
-    val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
-    val favoriteState by vm.favoriteState.collectAsStateWithLifecycle()
-    val shareState by vm.sel.shareState.collectAsStateWithLifecycle()
     val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
-    val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
+    val labelUsage by vm.labelUsage.collectAsStateWithLifecycle()
+    val labelChips by vm.labelChips.collectAsStateWithLifecycle()
+    val labelTyping by vm.labelTyping.collectAsStateWithLifecycle()
 
     // Typed month and category names match in the language the page is drawn in.
     val screenLocale = appLocale()
@@ -340,115 +347,20 @@ fun SearchScreen(
         onOpenPerson
     }
 
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-
-    // The VM builds the system-share intent off the UI thread; the screen launches the chooser. It can
-    // arrive under the app lock, once cloud originals finish downloading, and the chooser would open above
-    // the lock, so it waits for the unlock.
-    val shareChooserTitle = stringResource(R.string.share_chooser_title)
-    val appLock = LocalAppLock.current
-    LaunchedEffect(Unit) {
-        vm.shareIntent.collect { intent ->
-            appLock.runWhenOpen {
-                runCatching { context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle)) }
-            }
-        }
-    }
-    // Offline-batch result — the pins apply optimistically, this only reports the outcome.
-    val offlineRemovedMsg = stringResource(R.string.offline_removed)
-    LaunchedEffect(Unit) {
-        vm.offlineBatchResult.collect { count ->
-            when {
-                count > 0 -> snackbarHostState.showSnackbar(
-                    context.resources.getQuantityString(R.plurals.offline_batch_result, count, count),
-                )
-                count < 0 -> snackbarHostState.showSnackbar(offlineRemovedMsg)
-            }
-        }
-    }
-    // An action that did not do all it said says so; the message already reads for the user.
-    LaunchedEffect(Unit) {
-        vm.actionFailure.collect { snackbarHostState.showSnackbar(it) }
-    }
-
-    // A download says it began the moment it does. Its progress is shown on the Activity screen and
-    // the selection clears straight away, so this screen said nothing at all until the whole batch
-    // had finished, which on a slow connection reads as a button that did nothing. Same wording the
-    // timeline uses for the same moment.
-    val downloadStartedMsg = stringResource(R.string.download_started_background)
-    LaunchedEffect(Unit) {
-        vm.downloadStarted.collect { snackbarHostState.showSnackbar(downloadStartedMsg) }
-    }
-
-    var showDeleteSheet by remember { mutableStateOf(false) }
-    // The selection's hide split while its confirmation is up, null when none is. Holding the split
-    // rather than a flag is what lets the sheet describe the photos the tap was made on.
-    var hideConfirmSplit by remember {
-        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
-    }
-    var showAddToAlbumSheet by remember { mutableStateOf(false) }
-    var showAddToPersonSheet by remember { mutableStateOf(false) }
-    // The picker's own "New album" row, which names an album and then adds the selection to it.
-    var showCreateAlbumInline by remember { mutableStateOf(false) }
-    // Move the device selection into another folder, logged-out, device-data only. The picker's
-    // targets and the write consent ride the shared host; the selection is snapshotted in the VM.
-    var showMoveSheet by remember { mutableStateOf(false) }
-    val moveTargetFolders by vm.moveTargetFolders.collectAsStateWithLifecycle()
-    val pendingMoveIntent by vm.pendingMoveIntent.collectAsStateWithLifecycle()
-    // System trash-dialog launcher for a delete/hide that needs MANAGE_MEDIA on Android 11+.
-    val deletePermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) vm.onDeletePermissionGranted()
-        else vm.clearPendingDeleteIntent()
-    }
-    LaunchedEffect(pendingDeleteIntent) {
-        val pi = pendingDeleteIntent ?: return@LaunchedEffect
-        // The launch itself can throw if the sender was already consumed; drop the pending work so a
-        // stale intent can't force-close the screen.
-        // The system trash dialog would open above the app lock, so the launch waits for the unlock.
-        appLock.runWhenOpen {
-            runCatching {
-                deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-            }.onFailure { vm.clearPendingDeleteIntent() }
-        }
-    }
-    // System write-permission launcher for the batch metadata strip (foreign files on Android 11+).
-    val stripPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) vm.onStripPermissionGranted()
-        else vm.clearPendingStripIntent()
-    }
-    LaunchedEffect(pendingStripIntent) {
-        val pi = pendingStripIntent ?: return@LaunchedEffect
-        runCatching {
-            stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-        }.onFailure { vm.clearPendingStripIntent() }
-    }
-    // Strip result: one snackbar when a batch finishes, then reset so it fires once.
-    LaunchedEffect(multiStripState) {
-        when (val s = multiStripState) {
-            is MultiStripState.Done -> {
-                val msg = if (s.skipped > 0)
-                    context.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
-                else context.getString(R.string.gallery_stripped_metadata, s.stripped)
-                snackbarHostState.showSnackbar(msg)
-                vm.resetMultiStripState()
-            }
-            is MultiStripState.Failed -> {
-                snackbarHostState.showSnackbar(s.message)
-                vm.resetMultiStripState()
-            }
-            else -> Unit
-        }
-    }
+    SearchSideEffects(vm, snackbarHostState)
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    // The filter sheet's Labels page is open in place of its filters.
+    var labelPage by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val resultsGridState = rememberLazyGridState()
+    // Rows that land ahead of the one at the top (more file-name matches, a name-match row) are pulled
+    // into view instead of being laid out under the header; a new set opens at its first row.
+    KeepGridAtTopOnChange(
+        resultsGridState,
+        firstResultSlotKey(results, showDestinations, showPeopleSuggestions, showAlbumSuggestions),
+    )
     val idleListState = rememberLazyListState()
     // The whole search header (back button, field, filter, categories) hides while the active list is
     // scrolled DOWN, and slides back on a scroll up or once scrolling stops, like the timeline's chrome
@@ -513,8 +425,10 @@ fun SearchScreen(
     val offlineName = stringResource(R.string.filter_offline)
     // The chosen category takes the rail's own place as a pill; the other filters share the row above it.
     val categoryTerm = categoryName?.let { SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) } }
+    val labelPills = labelTerms(filter, labelUsage, vm::removeLabel)
     val filterTerms = buildList {
         searchScope?.let { add(SearchFieldTerm(it.name) { vm.setScope(null) }) }
+        addAll(labelPills)
         when (filter.mediaType) {
             MediaType.PhotosOnly -> add(SearchFieldTerm(photosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
             MediaType.VideosOnly -> add(SearchFieldTerm(videosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
@@ -600,13 +514,32 @@ fun SearchScreen(
                 }
             }
         }
+        // The label keyword typed into the field offers the user's labels, to pick one as a pill. The row eases
+        // in and out like the pill row, keeping its last chips while it leaves.
+        val heldLabelChips = remember { object { var chips = labelChips.orEmpty() } }
+        labelChips?.let { heldLabelChips.chips = it }
+        AnimatedVisibility(
+            visible = labelChips != null && labelUsage.isNotEmpty(),
+            enter = expandVertically(tween(HEADER_EASE_MS)) + fadeIn(tween(HEADER_EASE_MS)),
+            exit = shrinkVertically(tween(HEADER_EASE_MS)) + fadeOut(tween(HEADER_EASE_MS)),
+        ) {
+            Column {
+                LabelSuggestionRow(
+                    labels = heldLabelChips.chips,
+                    onPick = vm::pickLabel,
+                    onMore = { labelPage = true; showFilterSheet = true },
+                )
+            }
+        }
     }
     val density = LocalDensity.current
     // What a picker draws over the bottom: its tab bar, or the keyboard once it is up.
-    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
     // The keyboard animates its height, so the field follows the larger of the two: it never dips below the
-    // tab bar's top while the keyboard slides in or out, and then snaps back.
-    val pickBottomBase = pick?.let { maxOf(it.bottomInset, imeBottom + 8.dp) } ?: 0.dp
+    // tab bar's top while the keyboard slides in or out, and then snaps back. The keyboard height is read
+    // only for a picker: read here always, every frame of the keyboard animation redrew the whole screen.
+    val pickBottomBase = pick?.let {
+        maxOf(it.bottomInset, WindowInsets.ime.asPaddingValues().calculateBottomPadding() + 8.dp)
+    } ?: 0.dp
     if (pick != null) {
         val scrolled by remember {
             derivedStateOf { resultsGridState.firstVisibleItemIndex > 0 || resultsGridState.firstVisibleItemScrollOffset > 0 }
@@ -626,9 +559,6 @@ fun SearchScreen(
             .fillMaxSize()
             .background(colors.bg0),
     ) {
-      // Search content fills the screen; the floating header overlays it (added after this
-      // Column in the Box so it draws on top). The status-bar inset plus a top pad clears
-      // the collapsed header row so the search field never slips under the title pill.
       // The content fills the screen and scrolls up under the floating header. The header is drawn
       // after the content (below) so it overlays it, and its measured height pads the content clear
       // of it so the first row never starts hidden.
@@ -639,7 +569,7 @@ fun SearchScreen(
 
       Box(modifier = Modifier.fillMaxSize()) {
         val isIdle = SearchFilter.nothingAsked(
-            query, filter, selectedCategory, personSelected = selectedPersonId != null, scoped = searchScope != null,
+            labelTyping?.rest ?: query, filter, selectedCategory, personSelected = selectedPersonId != null, scoped = searchScope != null,
         )
         // The people and albums whose name matches the query are rows of the results, so a name that
         // matched no photo still has something to show.
@@ -652,149 +582,28 @@ fun SearchScreen(
             else -> 4
         }
         if (phase == 0) {
-            // A picker's search offers the people and the albums to narrow to, the way typing their name
-            // does, and no recents or months: it is looking for something by name.
-            if (people.isEmpty() && albumRow.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(top = headerPad, bottom = pickBottom),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = stringResource(R.string.search_empty_idle),
-                        color = colors.fgMute,
-                        fontSize = 14.sp,
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.glassSource(glass).fillMaxSize(),
-                    contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = pickBottom),
-                ) {
-                    if (people.isNotEmpty()) {
-                        item(key = "pick_people_section") {
-                            PeopleSuggestionRow(people = people, onOpenPerson = openPerson)
-                        }
-                    }
-                    if (albumRow.isNotEmpty()) {
-                        item(key = "pick_albums_section") {
-                            AlbumsRow(entries = albumRow, onOpen = openAlbum)
-                        }
-                    }
-                }
-            }
-        } else if (phase == 1) {
-            // Idle empty state — surface "On this day" memories + a month-jump grid
-            // so the page is useful without typing anything. Both sections live inside
-            // one LazyColumn so they scroll as a unit and benefit from item-level
-            // recycling when there are many month buckets.
-            // Heavy on a large library — compute off the main thread so the idle page renders
-            // immediately and the sections fill in a moment later, instead of blocking the first
-            // frame on a full-library walk.
-            // Both producers assign `value` below; @Suppress silences a lint false-positive it
-            // raises on the `value = withContext { … }` form.
-            val searchContext = LocalContext.current
-            val onThisDayDays by remember(searchContext) { searchContext.onThisDayWindowDays() }.collectAsState(initial = 0)
-            @Suppress("ProduceStateDoesNotAssignValue")
-            val onThisDay by produceState(emptyList<Pair<Int, List<GalleryItem>>>(), allItems, onThisDayDays) {
-                value = withContext(Dispatchers.Default) { computeOnThisDay(allItems, onThisDayDays) }
-            }
-            @Suppress("ProduceStateDoesNotAssignValue")
-            val monthBuckets by produceState(emptyList<MonthBucket>(), allItems) {
-                value = withContext(Dispatchers.Default) { buildMonthBuckets(allItems) }
-            }
-            val recent = remember(allItems) { allItems.take(6) }
-            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                state = idleListState,
-                modifier = Modifier
-                    .glassSource(glass)
-                    .fillMaxSize()
-                    .navigationBarsPadding(),
-                contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
-            ) {
-                if (recent.isNotEmpty()) {
-                    item(key = "recent_section") {
-                        RecentRow(
-                            items = recent,
-                            onPhotoClick = onPhotoClick,
-                        )
-                    }
-                }
-                // The user's own albums and the device folders, as the Albums tab lays them out.
-                if (albumRow.isNotEmpty()) {
-                    item(key = "albums_section") {
-                        AlbumsRow(
-                            entries = albumRow,
-                            onOpen = openAlbum,
-                        )
-                    }
-                }
-                if (onThisDay.isNotEmpty()) {
-                    item(key = "on_this_day_section") {
-                        OnThisDayRow(
-                            yearGroups = onThisDay,
-                            onPhotoClick = onPhotoClick,
-                        )
-                    }
-                }
-                if (monthBuckets.isNotEmpty()) {
-                    // Header + one list item per tile row so the whole idle page (including the
-                    // months) scrolls as granular items, which lets the position-based scrubber
-                    // scrub through the month picker. The old single-block section wrapped these in
-                    // a Column with top 4 / bottom 16 outer padding; that pad is reproduced on the
-                    // header and the final row so the layout stays identical.
-                    item(key = "jump_to_month_header") {
-                        JumpToMonthHeader(modifier = Modifier.padding(top = 4.dp))
-                    }
-                    val monthRows = monthBuckets.chunked(3)
-                    items(monthRows.size, key = { "month_row_$it" }) { i ->
-                        MonthTileRow(
-                            row = monthRows[i],
-                            onMonthClick = { year, month ->
-                                vm.setContentFilter(
-                                    ContentFilter(year = year, month = month),
-                                )
-                            },
-                            modifier = if (i == monthRows.lastIndex) {
-                                Modifier.padding(bottom = 16.dp)
-                            } else {
-                                Modifier
-                            },
-                        )
-                    }
-                }
-                // True empty library — show the legacy hint so the user understands
-                // why the page is otherwise blank. The "type a name" copy still fits
-                // the active-filter-but-no-results path below.
-                if (onThisDay.isEmpty() && monthBuckets.isEmpty()) {
-                    item(key = "empty_hint") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(top = 80.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.search_empty_idle),
-                                color = colors.fgMute,
-                                fontSize = 14.sp,
-                            )
-                        }
-                    }
-                }
-            }
-            // Fast-scroll grabber over the whole idle page. Position only: the page mixes preview
-            // cards with month rows, so there is no single date axis to label. minItemsToShow keeps
-            // it hidden on a near-empty library (just the three preview cards) and shows it once the
-            // month rows make the page long enough to be worth jumping.
-            ScrollScrubber(
-                listState = idleListState,
-                topPadding = headerPad + 8.dp,
-                bottomPadding = 24.dp + navBottom,
-                minItemsToShow = 8,
+            SearchPickIdlePage(
+                people = people,
+                albumRow = albumRow,
+                openPerson = openPerson,
+                openAlbum = openAlbum,
+                headerPad = headerPad,
+                pickBottom = pickBottom,
+                glass = glass,
             )
-            }
+        } else if (phase == 1) {
+            SearchIdlePage(
+                allItems = allItems,
+                albumRow = albumRow,
+                idleListState = idleListState,
+                headerPad = headerPad,
+                glass = glass,
+                onPhotoClick = onPhotoClick,
+                openAlbum = openAlbum,
+                onMonthClick = { year, month ->
+                    vm.setContentFilter(filter.copy(year = year, month = month, day = null, dayEnd = null, dateFrom = null, dateTo = null))
+                },
+            )
         } else if (phase == 2) {
             // A content search is running and nothing keyword-matched yet (say "sunset", which no
             // filename matches): show shimmering placeholder tiles rather than a blank "no results"
@@ -812,234 +621,51 @@ fun SearchScreen(
                 )
             }
         } else {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Full-width rows ahead of the first photo, which the viewer's return position counts.
-                val leadingRows = (if (showDestinations) 1 else 0) +
-                    (if (showPeopleSuggestions) 1 else 0) + (if (showAlbumSuggestions) 1 else 0)
-                // Drag-to-select: long-press a cell then drag to sweep a range. Cells key on the
-                // shared keyOf() (LocalOnly/Synced by uri, CloudOnly by linkId); the swept keys map
-                // back to the whole GalleryItem the selection holds.
-                val selectableKeys = remember(results) { results.map { keyOf(it) } }
-                val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
-                // Armed at the long-press anchor so the release-tap skips toggling the just-anchored cell.
-                val tapGuard = remember { mutableStateOf(false) }
-                val dragSelectModifier = rememberDragMultiSelectModifier(
-                    gridState = resultsGridState,
-                    items = results,
-                    indexByKey = keyToIndex,
-                    selected = selectedItems,
-                    onSelectionChange = pick?.onSetSelection ?: vm::setSelection,
-                    tapGuard = tapGuard,
-                    enabled = !isDeleting,
-                )
-                val seamless = rememberSeamlessGrid()
-                // Land back on the photo the viewer closed on. Results are one flat run with no
-                // header and nothing ahead of them. The cells key on the prefixed local keyOf(),
-                // which the viewer knows nothing about, so match on the gallery identity instead.
-                val returnGroups = remember(results) { listOf(results) }
-                ReturnToViewerPhoto(
-                    gridState = resultsGridState,
-                    groups = returnGroups,
-                    headerPerGroup = false,
-                    leadingSlots = leadingRows,
-                    keyOf = { it.stableId },
-                )
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    state = resultsGridState,
-                    contentPadding = PaddingValues(
-                        start = if (seamless) 0.dp else 6.dp,
-                        end = if (seamless) 0.dp else 6.dp,
-                        top = headerPad + 4.dp,
-                        bottom = if (pick != null) pickBottom else selectionGridBottomPadding(12.dp, isSelectionMode, gridPadsNavigationBar = true),
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
-                    modifier = Modifier.glassSource(glass)
-                        .fillMaxSize()
-                        .then(if (pick == null) Modifier.navigationBarsPadding() else Modifier)
-                        .then(dragSelectModifier),
-                ) {
-                    // The shortcut tiles the name matches, then the people whose name matches, then the albums
-                    // and folders whose name matches: rows of the results, so they scroll with the photos
-                    // instead of riding the header.
-                    if (showDestinations) {
-                        item(key = "match_destinations", span = { GridItemSpan(maxLineSpan) }) {
-                            DestinationsRow(tiles = destinations, onOpen = onOpenDestination)
-                        }
-                    }
-                    if (showPeopleSuggestions) {
-                        item(key = "match_people", span = { GridItemSpan(maxLineSpan) }) {
-                            PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = openPerson)
-                        }
-                    }
-                    if (showAlbumSuggestions) {
-                        // The same Albums row the idle page shows, with only the albums whose name matches.
-                        item(key = "match_albums", span = { GridItemSpan(maxLineSpan) }) {
-                            AlbumsRow(entries = albumSuggestions, onOpen = openAlbum)
-                        }
-                    }
-                    itemsIndexed(results, key = { _, it -> keyOf(it) }) { idx, item ->
-                        val inputs = remember(item, favoriteIds) {
-                            photoCellInputsFor(item, favoriteIds = favoriteIds)
-                        }
-                        val isSelected = item in selectedItems
-                        PhotoCell(
-                            imageData = inputs.imageData,
-                            stableKey = inputs.stableKey,
-                            isVideo = inputs.isVideo,
-                            isLocalVideo = inputs.isLocalVideo,
-                            durationMs = inputs.durationMs,
-                            isPlaceholder = inputs.isPlaceholder,
-                            selected = isSelected,
-                            isSelectionMode = isSelectionMode,
-                            showCloudBadge = inputs.showCloudBadge,
-                            showSyncedBadge = inputs.showSyncedBadge,
-                            isFavorite = inputs.isFavorite,
-                            typeBadgeRes = inputs.typeBadgeRes,
-                            typeBadgeCdRes = inputs.typeBadgeCdRes,
-                            // Fixed 3-column results grid, so always the big-tile (all badges) tier.
-                            columns = 3,
-                            cornerRadius = if (seamless) 0.dp else 10.dp,
-                            onClick = {
-                                // Skip the release-tap that ends a long-press select; otherwise it
-                                // would toggle the just-anchored cell back off.
-                                if (tapGuard.value) {
-                                    tapGuard.value = false
-                                } else if (pick != null) {
-                                    pick.onToggle(item)
-                                } else if (isSelectionMode) {
-                                    vm.toggleSelection(item)
-                                } else onPhotoClick(results, idx)
-                            },
-                        )
-                    }
-                }
-                // Fast-scroll scrubber over the results. Search results are a flat, date-sorted grid,
-                // so the month tooltip tracks the scroll position directly.
-                TimelineScrubber(
-                    gridState = resultsGridState,
-                    items = results,
-                    grouping = TimelineGrouping.Month,
-                    topPadding = headerPad + 8.dp,
-                    bottomPadding = if (pick != null) pickBottom else 24.dp,
-                    keyOf = { keyOf(it) },
-                )
-            }
+            SearchResultsGrid(
+                results = results,
+                gridState = resultsGridState,
+                headerPad = headerPad,
+                pick = pick,
+                pickBottom = pickBottom,
+                isSelectionMode = isSelectionMode,
+                selectedItems = selectedItems,
+                isDeleting = isDeleting,
+                glass = glass,
+                destinations = if (showDestinations) destinations else emptyList(),
+                peopleSuggestions = if (showPeopleSuggestions) peopleSuggestions else emptyList(),
+                albumSuggestions = if (showAlbumSuggestions) albumSuggestions else emptyList(),
+                favoriteIds = favoriteIds,
+                onPhotoClick = onPhotoClick,
+                onOpenDestination = onOpenDestination,
+                openPerson = openPerson,
+                openAlbum = openAlbum,
+                onToggleSelection = vm::toggleSelection,
+                onSetSelection = pick?.onSetSelection ?: vm::setSelection,
+            )
         }
       }
 
-      // Floating header, drawn after the content so it overlays and lets the grid scroll under it.
-      // The whole thing slides away on a downward scroll and returns on scroll up / stop, like the
-      // timeline chrome. Its measured height feeds `headerPad` above so the first row clears it; the
-      // height sticks while hidden, so the content padding does not jump as the header slides.
-      // The header's pills frost whatever list is under them: the idle page, the picker's or the results.
-      CompositionLocalProvider(LocalGlassBackdrop provides glass) {
-      AnimatedVisibility(
-        // While the field is focused the header stays mounted, so a results-driven scroll does not
-        // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
-        visible = headerVisible || searchFocused,
-        enter = fadeIn() + slideInVertically { -it },
-        exit = fadeOut() + slideOutVertically { -it },
-      ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                // Measure the FULL header (status-bar inset + paddings + content) so the content inset
-                // matches the visible bar. onSizeChanged MUST sit above the paddings; below them it
-                // reports only the children, leaving the inset short and the content tucked under the bar.
-                .onSizeChanged { headerHeightPx = it.height }
-                // Scrim under the floating bar so buttons stay legible over photos: solid at the top,
-                // still darkening through the category row, fading out just below it. A picker has no bar
-                // of its own here, so its header carries no scrim under the picked-photos strip.
-                .then(
-                    if (pick != null) Modifier
-                    else Modifier.background(
-                        Brush.verticalGradient(
-                            0.0f to colors.bg0,
-                            0.55f to colors.bg0.copy(alpha = 0.82f),
-                            0.9f to colors.bg0.copy(alpha = 0.4f),
-                            1.0f to colors.bg0.copy(alpha = 0f),
-                        ),
-                    ),
-                )
-                // A picker draws its own bar over the top, which the header clears; its field sits at the
-                // bottom instead of in this row, and it has no back button or filter button.
-                .then(
-                    if (pick != null) Modifier.padding(top = pick.topInset)
-                    else Modifier.statusBarsPadding().padding(top = 8.dp),
-                ),
-        ) {
-            if (pick == null) Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Back button matches the search field's surface (not the darker pill) so the two
-                // read as one control row.
-                IconBubble(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.onboarding_back),
-                    onClick = { if (pick == null && isSelectionMode) vm.clearSelection() else onBack() },
-                    background = colors.chipUnselectedBg,
-                    borderColor = colors.line,
-                )
-                searchField(Modifier.weight(1f))
-            }
-
-            if (pick == null) {
-                // The pill row and the rail ease in and out, so the photos below glide up or down with the
-                // header instead of jumping.
-                AnimatedVisibility(
-                    visible = filterTerms.isNotEmpty(),
-                    enter = expandVertically(tween(HEADER_EASE_MS)) + fadeIn(tween(HEADER_EASE_MS)),
-                    exit = shrinkVertically(tween(HEADER_EASE_MS)) + fadeOut(tween(HEADER_EASE_MS)),
-                ) {
-                    // Keeps the last pills while the row eases out.
-                    val held = remember { object { var terms = filterTerms } }
-                    if (filterTerms.isNotEmpty()) held.terms = filterTerms
-                    Column {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        SearchTermRow(held.terms, Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-
-            // A picker's search has no category chips: it is looking for something by name. A picked
-            // category takes the rail's place as a pill of the same height and indent, the two fading into
-            // one another where they sit, so the active filter is always in view and nothing else moves.
-            if (pick == null) {
-                val heldCategory = remember { object { var term = categoryTerm } }
-                if (categoryTerm != null) heldCategory.term = categoryTerm
-                Crossfade(
-                    targetState = selectedCategory == GalleryFilter.All,
-                    animationSpec = tween(HEADER_EASE_MS),
-                    label = "categorySlot",
-                ) { railShown ->
-                    if (railShown) {
-                        categoryRow()
-                    } else {
-                        SearchTermRow(listOfNotNull(heldCategory.term), Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                    }
-                }
-            }
-
-            dateRow()
-
-            // Breathing room below the header so the content clears the category bar instead of
-            // tucking right under it, and the scrim keeps a soft tail.
-            Spacer(modifier = Modifier.height(10.dp))
-        }
-      }
-      }
-
+      // Floating header, drawn after the content so it overlays it and lets the grid scroll under it.
+      SearchHeader(
+          glass = glass,
+          // While the field is focused the header stays mounted, so a results-driven scroll does not
+          // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
+          visible = headerVisible || searchFocused,
+          pick = pick,
+          onHeightChange = { headerHeightPx = it },
+          onBackClick = { if (pick == null && isSelectionMode) vm.clearSelection() else onBack() },
+          searchField = searchField,
+          filterTerms = filterTerms,
+          categoryTerm = categoryTerm,
+          selectedCategory = selectedCategory,
+          categoryRow = categoryRow,
+          dateRow = dateRow,
+      )
         // The filter button floats at the bottom right, so the field above can run the full width. It takes
         // the accent while a filter the sheet holds is on, and steps aside for the selection drawer.
         val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
-            filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
+            filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All ||
+            filter.labelKeys.isNotEmpty()
         if (pick == null && !isSelectionMode) CompositionLocalProvider(LocalGlassBackdrop provides glass) {
             IconBubble(
                 icon = Icons.Filled.FilterList,
@@ -1048,7 +674,8 @@ fun SearchScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(end = 24.dp, bottom = 36.dp),
+                    .padding(end = 24.dp, bottom = 36.dp)
+                    .snackbarObstacle(),
                 diameter = 52.dp,
                 iconSize = 22.dp,
                 // Opaque while lit: the tinted fill alone would let the photos show through.
@@ -1092,328 +719,39 @@ fun SearchScreen(
             }
         }
 
-        // A multi-select delete blocks the screen behind a progress drawer so a second tap can't
-        // fire into a half-finished delete.
-        val opDeletingLabel = stringResource(R.string.op_deleting)
-        eu.akoos.photos.presentation.common.BlockingOperationSheet(
-            if (isDeleting) eu.akoos.photos.presentation.common.OperationProgress(0, 0, opDeletingLabel, indeterminate = true) else null,
-        )
-
-        // Selection-mode overlay: the shared drawer, so every bulk action sits in one place here
-        // exactly as it does on the timeline, album and device-folder surfaces. Its header's Select
-        // all takes in every result.
-        val selectAllCount = selectAllCountFor(total = results.size, selected = selectedItems.size)
-        var showStripPicker by remember { mutableStateOf(false) }
-        // Which way the offline row goes, so it names the press rather than the state: a pin while
-        // anything pinnable in the selection is still un-pinned, a removal once none is.
-        val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
-            offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
-        }
-        val sharing = shareState as? SelectionShareState.Working
-        val addLabelsAction = rememberAddLabelsAction(
-            items = remember(selectedItems) { selectedItems.toList() },
-            onDone = { msg ->
-                scope.launch { snackbarHostState.showSnackbar(msg) }
-                vm.clearSelection()
-            },
-        )
-        val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
-        val searchSelectionActions = buildList {
-            // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
-            add(
-                SelectionAction(
-                    icon = Icons.Default.Share,
-                    label = stringResource(R.string.sel_label_share),
-                    working = sharing != null,
-                    progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
-                    enabled = sharing == null,
-                    onClick = { vm.shareSelected() },
-                    slot = PrimarySlot.Share,
-                )
-            )
-            // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
-            if (isSignedIn) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.PhotoAlbum,
-                        label = stringResource(R.string.gallery_add_to_album),
-                        onClick = { showAddToAlbumSheet = true },
-                        slot = PrimarySlot.Organize,
-                    )
-                )
-            }
-            // Add-to-person runs on-device and can name a new person, so it follows face recognition
-            // alone, for a guest too. Only the account-backed actions in this list stay behind isSignedIn.
-            if (faceEnabled) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.Person,
-                        label = stringResource(R.string.gallery_add_to_person),
-                        onClick = { showAddToPersonSheet = true },
-                    )
-                )
-            }
-            // Move the device selection into another folder, on the Android 10+ MediaStore floor.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                add(
-                    SelectionAction(
-                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
-                        label = stringResource(R.string.move_to_folder),
-                        onClick = { showMoveSheet = true },
-                        slot = PrimarySlot.Organize,
-                    )
-                )
-            }
-            // Favourite the whole result set in one press. Search is how a batch worth favouriting
-            // gets assembled in the first place, so the action belongs where the results are rather
-            // than one photo at a time in the viewer.
-            add(
-                favoriteSelectionAction(
-                    turnsOn = remember(selectedItems, favoriteIds) {
-                        favoriteTurnsOn(selectedItems, favoriteIds)
-                    },
-                    state = favoriteState,
-                    onClick = { vm.toggleSelectedFavorite() },
-                )
-            )
-            addLabelsAction?.let(::add)
-            // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
-            // destination, so it stays behind a signed-in session.
-            if (isSignedIn && anyLocalOnly(selectedItems)) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.CloudUpload,
-                        label = stringResource(R.string.sel_label_back_up),
-                        onClick = {
-                            vm.backUpSelected { queued ->
-                                if (queued > 0) scope.launch {
-                                    snackbarHostState.showSnackbar(context.getString(R.string.backup_started))
-                                }
-                            }
-                        },
-                    )
-                )
-            }
-            // Download / offline apply to cloud-only photos (no local file yet).
-            if (hasDownloadable(selectedItems)) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.FileDownload,
-                        label = stringResource(R.string.sel_label_download),
-                        onClick = {
-                            vm.downloadSelected { succeeded, failed ->
-                                val msg = when {
-                                    failed > 0 -> context.getString(R.string.gallery_download_partial, succeeded, failed)
-                                    succeeded == 1 -> context.getString(R.string.gallery_download_done_singular)
-                                    else -> context.getString(R.string.gallery_download_done, succeeded)
-                                }
-                                scope.launch { snackbarHostState.showSnackbar(msg) }
-                            }
-                        },
-                    )
-                )
-            }
-            if (anyCloudOnly(selectedItems)) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.OfflinePin,
-                        label = stringResource(
-                            if (offlinePinsSelection) R.string.offline_make_available
-                            else R.string.offline_remove,
-                        ),
-                        onClick = { vm.toggleSelectedOffline() },
-                    )
-                )
-            }
-            // The date + place editor opens for any editable photo (a device photo, or a cloud or
-            // backed-up image the corrected-copy replace can rewrite), so a mixed selection keeps the
-            // entry (the editor writes exactly those photos and names the count).
-            if (anyMetadataEditable(selectedItems)) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.EditNote,
-                        label = stringResource(R.string.metadata_editor_edit_metadata),
-                        onClick = { onEditMetadata(selectedItems.toList()) },
-                    )
-                )
-            }
-            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
-            // smaller copy is up.
-            compressAction?.let(::add)
-            // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
-            // copy's EXIF, so stripping just the local file is a misleading half-strip.
-            if (allLocalOnly(selectedItems)) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.PrivacyTip,
-                        label = stringResource(R.string.gallery_strip_metadata),
-                        onClick = { showStripPicker = true },
-                    )
-                )
-            }
-            // Hide any non-empty selection: a photo that lives only on this device moves into the
-            // vault, one with a cloud copy is filtered by linkId.
-            if (selectedItems.isNotEmpty()) {
-                add(
-                    SelectionAction(
-                        icon = Icons.Default.VisibilityOff,
-                        label = stringResource(R.string.sel_label_hide),
-                        enabled = !isDeleting,
-                        // A hide ends in a permanent removal of the device originals it vaults, so it
-                        // is confirmed exactly as the delete beside it is. The split is read at the
-                        // tap, so the sheet names what THIS selection will have done to it.
-                        onClick = { hideConfirmSplit = vm.hideSplitForSelection().takeIf { !it.isEmpty } },
-                    )
-                )
-            }
-            add(
-                SelectionAction(
-                    icon = Icons.Default.DeleteOutline,
-                    label = stringResource(R.string.sel_label_delete),
-                    tint = ErrorColor,
-                    enabled = !isDeleting,
-                    onClick = { showDeleteSheet = true },
-                    slot = PrimarySlot.Delete,
-                )
-            )
-        }
-        SelectionDrawer(
-            backdrop = glass,
-            visible = pick == null && isSelectionMode,
-            items = remember(selectedItems) { selectedItems.toList() },
-            actions = searchSelectionActions,
-            onDismiss = { vm.clearSelection() },
-            // Scrolling the results collapses the drawer, so reaching past it to carry on through
-            // them needs no deliberate pull or tap first.
-            contentScrolling = resultsGridState.isScrollInProgress,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            selectAllCount = selectAllCount,
-            onSelectAll = if (selectAllCount != null) {
-                { vm.selectAll() }
-            } else {
-                null
-            },
-        )
-        if (showStripPicker) {
-            MetadataStripPickerDialog(
-                onConfirm = {
-                    showStripPicker = false
-                    vm.stripMetadataSelected(it)
-                },
-                onDismiss = { showStripPicker = false },
-            )
-        }
-
-        // Hide confirmation — the shared sheet every hide surface raises, worded from this
-        // selection's own split.
-        hideConfirmSplit?.let { split ->
-            eu.akoos.photos.presentation.common.HideConfirmSheet(
-                split = split,
-                title = stringResource(R.string.hide_confirm_title),
-                onConfirm = {
-                    hideConfirmSplit = null
-                    vm.hideSelected()
-                },
-                onDismiss = { hideConfirmSplit = null },
-            )
-        }
-
-        // Bulk-delete sheet — reuses the gallery's dialog so options + copy stay identical.
-        if (showDeleteSheet && selectedItems.isNotEmpty()) {
-            GalleryMultiDeleteDialog(
-                selectedItems = selectedItems,
-                onDismiss = { showDeleteSheet = false },
-                onDelete = { freeUpSpace, deleteFromCloud ->
-                    showDeleteSheet = false
-                    vm.deleteSelected(freeUpSpace, deleteFromCloud)
-                },
-            )
-        }
-
-        // Add-to-album sheet — reuses the gallery's picker. Cloud-backed selections join now;
-        // local-only selections upload first and join afterwards.
-        if (showAddToAlbumSheet && selectedItems.isNotEmpty()) {
-            GalleryAddToAlbumDialog(
-                selectedItems = selectedItems,
-                cloudAlbums = albums,
-                onCreateNew = {
-                    showAddToAlbumSheet = false
-                    showCreateAlbumInline = true
-                },
-                onCloudAlbumSelected = { album ->
-                    showAddToAlbumSheet = false
-                    vm.addSelectedToAlbum(album.linkId) { joined, queued ->
-                        val msg = addToAlbumResultText(context.resources, joined, queued, album.name)
-                        scope.launch { snackbarHostState.showSnackbar(msg) }
-                    }
-                },
-                onDismiss = { showAddToAlbumSheet = false },
-            )
-        }
-
-        // Add-to-person runs the same face-first flow as the timeline, on-device, so a guest has it too.
-        if (showAddToPersonSheet && selectedItems.isNotEmpty()) {
-            val personPhotos = remember(selectedItems) { selectedItems.toList() }
-            AddToPersonFaceSheet(
-                photos = personPhotos,
-                onDone = {
-                    showAddToPersonSheet = false
-                    vm.clearSelection()
-                },
-                onDismiss = { showAddToPersonSheet = false },
-            )
-        }
-
-        // Name a brand-new album for the selection, then create it and add the photos to it — the
-        // same two steps the timeline's picker runs, so the row means the same thing on both.
-        if (showCreateAlbumInline) {
-            eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
-                onDismiss = { showCreateAlbumInline = false },
-                onCreate = { name ->
-                    showCreateAlbumInline = false
-                    vm.createAlbumThenAddSelected(name) { joined, queued, error ->
-                        val msg = error ?: addToAlbumResultText(context.resources, joined, queued, name)
-                        scope.launch { snackbarHostState.showSnackbar(msg) }
-                    }
-                },
-            )
-        }
-
-        // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
-        // foreign-file move needs and the completion snackbar, device files only. The
-        // selection is snapshotted in the ViewModel, so the host carries only the picked name.
-        MoveToFolderHost(
-            targetFolders = moveTargetFolders,
-            show = showMoveSheet,
-            pendingMoveIntent = pendingMoveIntent,
-            moveConfirmation = vm.moveConfirmation,
-            onPick = { vm.moveSelectedToFolder(it) },
-            onCreate = { vm.createFolderWithPhotos(it) },
-            onGranted = { vm.onMovePermissionGranted() },
-            onClear = { vm.clearPendingMove() },
-            onDismiss = { showMoveSheet = false },
+        SearchSelectionLayer(
+            vm = vm,
+            glass = glass,
+            pick = pick,
             snackbarHostState = snackbarHostState,
-        )
-
-        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
-            snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            selectedItems = selectedItems,
+            totalResults = results.size,
+            isSelectionMode = isSelectionMode,
+            isDeleting = isDeleting,
+            isSignedIn = isSignedIn,
+            favoriteIds = favoriteIds,
+            resultsGridState = resultsGridState,
+            onEditMetadata = onEditMetadata,
         )
     }
 
     if (showFilterSheet) {
         AppModalSheet(
-            onDismissRequest = { showFilterSheet = false },
+            onDismissRequest = { showFilterSheet = false; labelPage = false },
             sheetState = filterSheetState,
             containerColor = colors.sheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
+            onBackStep = { labelPage.also { if (it) labelPage = false } },
         ) {
             ContentFilterSheet(
                 currentFilter = filter,
                 currentCategory = selectedCategory,
                 onApply = { vm.setContentFilter(it) },
                 onCategorySelected = vm::onCategorySelected,
-                onDismiss = { showFilterSheet = false },
+                onDismiss = { showFilterSheet = false; labelPage = false },
+                labels = labelUsage,
+                labelPage = labelPage,
+                onLabelPageChange = { labelPage = it },
                 // The sheet holds the categories too, so every filter can be reached from this one place; the
                 // media type stays a category of its own (Videos).
                 showCategorySection = true,
@@ -1429,10 +767,936 @@ fun SearchScreen(
 /** How long the header's pill row and category rail take to ease in or out. */
 private const val HEADER_EASE_MS = 220
 
+/** The picked labels as pills in the field, each with its tag; one a tap removes. */
+@Composable
+private fun labelTerms(filter: ContentFilter, usage: List<LabelUsage>, onRemove: (String) -> Unit): List<SearchFieldTerm> =
+    filter.labelKeys.map { key ->
+        val name = usage.firstOrNull { it.labelKey == key }?.label ?: key
+        SearchFieldTerm(
+            label = name,
+            removeDescription = stringResource(R.string.label_remove_cd, name),
+            icon = Icons.AutoMirrored.Filled.Label,
+            onRemove = { onRemove(key) },
+        )
+    }
+
+/**
+ * The side effects of the search screen that report back through the snackbar or launch a system
+ * dialog: the share chooser, the offline and download results, the action failures and the two
+ * write-permission launchers a delete and a metadata strip can need.
+ */
+@Composable
+private fun SearchSideEffects(vm: SearchViewModel, snackbarHostState: SnackbarHostState) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val pendingDeleteIntent by vm.pendingDeleteIntent.collectAsStateWithLifecycle()
+    val pendingStripIntent by vm.pendingStripIntent.collectAsStateWithLifecycle()
+    val multiStripState by vm.multiStripState.collectAsStateWithLifecycle()
+    // The VM builds the system-share intent off the UI thread; the screen launches the chooser. It can
+    // arrive under the app lock, once cloud originals finish downloading, and the chooser would open above
+    // the lock, so it waits for the unlock.
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val appLock = LocalAppLock.current
+    LaunchedEffect(Unit) {
+        vm.shareIntent.collect { intent ->
+            appLock.runWhenOpen {
+                runCatching { context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle)) }
+            }
+        }
+    }
+    // Offline-batch result: the pins apply optimistically, this only reports the outcome.
+    val offlineRemovedMsg = stringResource(R.string.offline_removed)
+    LaunchedEffect(Unit) {
+        vm.offlineBatchResult.collect { count ->
+            when {
+                count > 0 -> snackbarHostState.showSnackbar(
+                    context.resources.getQuantityString(R.plurals.offline_batch_result, count, count),
+                )
+                count < 0 -> snackbarHostState.showSnackbar(offlineRemovedMsg)
+            }
+        }
+    }
+    // An action that did not do all it said says so; the message already reads for the user.
+    LaunchedEffect(Unit) {
+        vm.actionFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    // A download says it began the moment it does. Its progress is shown on the Activity screen and
+    // the selection clears straight away, so this screen said nothing at all until the whole batch
+    // had finished, which on a slow connection reads as a button that did nothing. Same wording the
+    // timeline uses for the same moment.
+    val downloadStartedMsg = stringResource(R.string.download_started_background)
+    LaunchedEffect(Unit) {
+        vm.downloadStarted.collect { snackbarHostState.showSnackbar(downloadStartedMsg) }
+    }
+
+    // System trash-dialog launcher for a delete/hide that needs MANAGE_MEDIA on Android 11+.
+    val deletePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) vm.onDeletePermissionGranted()
+        else vm.clearPendingDeleteIntent()
+    }
+    LaunchedEffect(pendingDeleteIntent) {
+        val pi = pendingDeleteIntent ?: return@LaunchedEffect
+        // The launch itself can throw if the sender was already consumed; drop the pending work so a
+        // stale intent can't force-close the screen.
+        // The system trash dialog would open above the app lock, so the launch waits for the unlock.
+        appLock.runWhenOpen {
+            runCatching {
+                deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            }.onFailure { vm.clearPendingDeleteIntent() }
+        }
+    }
+    // System write-permission launcher for the batch metadata strip (foreign files on Android 11+).
+    val stripPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) vm.onStripPermissionGranted()
+        else vm.clearPendingStripIntent()
+    }
+    LaunchedEffect(pendingStripIntent) {
+        val pi = pendingStripIntent ?: return@LaunchedEffect
+        runCatching {
+            stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }.onFailure { vm.clearPendingStripIntent() }
+    }
+    // Strip result: one snackbar when a batch finishes, then reset so it fires once.
+    LaunchedEffect(multiStripState) {
+        when (val s = multiStripState) {
+            is MultiStripState.Done -> {
+                val msg = if (s.skipped > 0)
+                    resources.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
+                else resources.getString(R.string.gallery_stripped_metadata, s.stripped)
+                snackbarHostState.showSnackbar(msg)
+                vm.resetMultiStripState()
+            }
+            is MultiStripState.Failed -> {
+                snackbarHostState.showSnackbar(s.message)
+                vm.resetMultiStripState()
+            }
+            else -> Unit
+        }
+    }
+}
+
+/**
+ * A picker's idle search: the people and the albums to narrow to, the way typing their name does, and
+ * no recents or months, since it is looking for something by name.
+ */
+@Composable
+private fun SearchPickIdlePage(
+    people: List<PersonUi>,
+    albumRow: List<SearchAlbum>,
+    openPerson: (Long) -> Unit,
+    openAlbum: (SearchAlbum) -> Unit,
+    headerPad: Dp,
+    pickBottom: Dp,
+    glass: GlassBackdrop?,
+) {
+    val colors = AppColors.current
+    if (people.isEmpty() && albumRow.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(top = headerPad, bottom = pickBottom),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = stringResource(R.string.search_empty_idle),
+                color = colors.fgMute,
+                fontSize = 14.sp,
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.glassSource(glass).fillMaxSize(),
+            contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = pickBottom),
+        ) {
+            if (people.isNotEmpty()) {
+                item(key = "pick_people_section") {
+                    PeopleSuggestionRow(people = people, onOpenPerson = openPerson)
+                }
+            }
+            if (albumRow.isNotEmpty()) {
+                item(key = "pick_albums_section") {
+                    AlbumsRow(entries = albumRow, onOpen = openAlbum)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The idle page: "On this day" memories, the albums and a month-jump grid, so the page is useful
+ * without typing anything. All sections live inside one LazyColumn so they scroll as a unit and
+ * benefit from item-level recycling when there are many month buckets.
+ */
+@Composable
+private fun SearchIdlePage(
+    allItems: List<GalleryItem>,
+    albumRow: List<SearchAlbum>,
+    idleListState: LazyListState,
+    headerPad: Dp,
+    glass: GlassBackdrop?,
+    onPhotoClick: (List<GalleryItem>, Int) -> Unit,
+    openAlbum: (SearchAlbum) -> Unit,
+    onMonthClick: (year: Int, month: Int) -> Unit,
+) {
+    val colors = AppColors.current
+    // Idle empty state: surface "On this day" memories + a month-jump grid
+    // so the page is useful without typing anything. Both sections live inside
+    // one LazyColumn so they scroll as a unit and benefit from item-level
+    // recycling when there are many month buckets.
+    // Heavy on a large library: compute off the main thread so the idle page renders
+    // immediately and the sections fill in a moment later, instead of blocking the first
+    // frame on a full-library walk.
+    // Both producers assign `value` below; @Suppress silences a lint false-positive it
+    // raises on the `value = withContext { … }` form.
+    val searchContext = LocalContext.current
+    val onThisDayDays by remember(searchContext) { searchContext.onThisDayWindowDays() }.collectAsState(initial = 0)
+    @Suppress("ProduceStateDoesNotAssignValue")
+    val onThisDay by produceState(emptyList<Pair<Int, List<GalleryItem>>>(), allItems, onThisDayDays) {
+        value = withContext(Dispatchers.Default) { computeOnThisDay(allItems, onThisDayDays) }
+    }
+    @Suppress("ProduceStateDoesNotAssignValue")
+    val monthBuckets by produceState(emptyList<MonthBucket>(), allItems) {
+        value = withContext(Dispatchers.Default) { buildMonthBuckets(allItems) }
+    }
+    val recent = remember(allItems) { allItems.take(6) }
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    Box(modifier = Modifier.fillMaxSize()) {
+    LazyColumn(
+        state = idleListState,
+        modifier = Modifier
+            .glassSource(glass)
+            .fillMaxSize()
+            .navigationBarsPadding(),
+        contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
+    ) {
+        if (recent.isNotEmpty()) {
+            item(key = "recent_section") {
+                RecentRow(
+                    items = recent,
+                    onPhotoClick = onPhotoClick,
+                )
+            }
+        }
+        // The user's own albums and the device folders, as the Albums tab lays them out.
+        if (albumRow.isNotEmpty()) {
+            item(key = "albums_section") {
+                AlbumsRow(
+                    entries = albumRow,
+                    onOpen = openAlbum,
+                )
+            }
+        }
+        if (onThisDay.isNotEmpty()) {
+            item(key = "on_this_day_section") {
+                OnThisDayRow(
+                    yearGroups = onThisDay,
+                    onPhotoClick = onPhotoClick,
+                )
+            }
+        }
+        if (monthBuckets.isNotEmpty()) {
+            // Header + one list item per tile row so the whole idle page (including the
+            // months) scrolls as granular items, which lets the position-based scrubber
+            // scrub through the month picker. The old single-block section wrapped these in
+            // a Column with top 4 / bottom 16 outer padding; that pad is reproduced on the
+            // header and the final row so the layout stays identical.
+            item(key = "jump_to_month_header") {
+                JumpToMonthHeader(modifier = Modifier.padding(top = 4.dp))
+            }
+            val monthRows = monthBuckets.chunked(3)
+            items(monthRows.size, key = { "month_row_$it" }) { i ->
+                MonthTileRow(
+                    row = monthRows[i],
+                    onMonthClick = onMonthClick,
+                    modifier = if (i == monthRows.lastIndex) {
+                        Modifier.padding(bottom = 16.dp)
+                    } else {
+                        Modifier
+                    },
+                )
+            }
+        }
+        // True empty library: show the legacy hint so the user understands
+        // why the page is otherwise blank. The "type a name" copy still fits
+        // the active-filter-but-no-results path below.
+        if (onThisDay.isEmpty() && monthBuckets.isEmpty()) {
+            item(key = "empty_hint") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 80.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.search_empty_idle),
+                        color = colors.fgMute,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+        }
+    }
+    // Fast-scroll grabber over the whole idle page. Position only: the page mixes preview
+    // cards with month rows, so there is no single date axis to label. minItemsToShow keeps
+    // it hidden on a near-empty library (just the three preview cards) and shows it once the
+    // month rows make the page long enough to be worth jumping.
+    ScrollScrubber(
+        listState = idleListState,
+        topPadding = headerPad + 8.dp,
+        bottomPadding = 24.dp + navBottom,
+        minItemsToShow = 8,
+    )
+    }
+}
+
+/**
+ * The results: name-match rows ahead of the photos, then a fixed three-column grid with drag-to-select,
+ * the viewer's return position and the fast-scroll scrubber. [destinations], [peopleSuggestions] and
+ * [albumSuggestions] are empty when their row is not shown.
+ */
+@Composable
+private fun SearchResultsGrid(
+    results: List<GalleryItem>,
+    gridState: LazyGridState,
+    headerPad: Dp,
+    pick: SearchPick?,
+    pickBottom: Dp,
+    isSelectionMode: Boolean,
+    selectedItems: Set<GalleryItem>,
+    isDeleting: Boolean,
+    glass: GlassBackdrop?,
+    destinations: List<LibraryTile>,
+    peopleSuggestions: List<PersonUi>,
+    albumSuggestions: List<SearchAlbum>,
+    favoriteIds: Set<String>,
+    onPhotoClick: (List<GalleryItem>, Int) -> Unit,
+    onOpenDestination: (LibraryTile) -> Unit,
+    openPerson: (Long) -> Unit,
+    openAlbum: (SearchAlbum) -> Unit,
+    onToggleSelection: (GalleryItem) -> Unit,
+    onSetSelection: (Set<GalleryItem>) -> Unit,
+) {
+    val showDestinations = destinations.isNotEmpty()
+    val showPeopleSuggestions = peopleSuggestions.isNotEmpty()
+    val showAlbumSuggestions = albumSuggestions.isNotEmpty()
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Full-width rows ahead of the first photo, which the viewer's return position counts.
+        val leadingRows = (if (showDestinations) 1 else 0) +
+            (if (showPeopleSuggestions) 1 else 0) + (if (showAlbumSuggestions) 1 else 0)
+        // Drag-to-select: long-press a cell then drag to sweep a range. Cells key on the
+        // shared keyOf() (LocalOnly/Synced by uri, CloudOnly by linkId); the swept keys map
+        // back to the whole GalleryItem the selection holds.
+        val selectableKeys = remember(results) { results.map { keyOf(it) } }
+        val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
+        // Armed at the long-press anchor so the release-tap skips toggling the just-anchored cell.
+        RequestVisibleThumbnails(gridState, results) { keyOf(it) }
+        val tapGuard = remember { mutableStateOf(false) }
+        val dragSelectModifier = rememberDragMultiSelectModifier(
+            gridState = gridState,
+            items = results,
+            indexByKey = keyToIndex,
+            selected = selectedItems,
+            onSelectionChange = onSetSelection,
+            tapGuard = tapGuard,
+            enabled = !isDeleting,
+        )
+        val seamless = rememberSeamlessGrid()
+        // Land back on the photo the viewer closed on. Results are one flat run with no
+        // header and nothing ahead of them. The cells key on the prefixed local keyOf(),
+        // which the viewer knows nothing about, so match on the gallery identity instead.
+        val returnGroups = remember(results) { listOf(results) }
+        ReturnToViewerPhoto(
+            gridState = gridState,
+            groups = returnGroups,
+            headerPerGroup = false,
+            leadingSlots = leadingRows,
+            keyOf = { it.stableId },
+        )
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            state = gridState,
+            contentPadding = PaddingValues(
+                start = if (seamless) 0.dp else 6.dp,
+                end = if (seamless) 0.dp else 6.dp,
+                top = headerPad + 4.dp,
+                bottom = if (pick != null) pickBottom else selectionGridBottomPadding(12.dp, isSelectionMode, gridPadsNavigationBar = true),
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
+            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
+            modifier = Modifier.glassSource(glass)
+                .fillMaxSize()
+                .then(if (pick == null) Modifier.navigationBarsPadding() else Modifier)
+                .then(dragSelectModifier),
+        ) {
+            // The shortcut tiles the name matches, then the people whose name matches, then the albums
+            // and folders whose name matches: rows of the results, so they scroll with the photos
+            // instead of riding the header.
+            if (showDestinations) {
+                item(key = KEY_MATCH_DESTINATIONS, span = { GridItemSpan(maxLineSpan) }) {
+                    DestinationsRow(tiles = destinations, onOpen = onOpenDestination)
+                }
+            }
+            if (showPeopleSuggestions) {
+                item(key = KEY_MATCH_PEOPLE, span = { GridItemSpan(maxLineSpan) }) {
+                    PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = openPerson)
+                }
+            }
+            if (showAlbumSuggestions) {
+                // The same Albums row the idle page shows, with only the albums whose name matches.
+                item(key = KEY_MATCH_ALBUMS, span = { GridItemSpan(maxLineSpan) }) {
+                    AlbumsRow(entries = albumSuggestions, onOpen = openAlbum)
+                }
+            }
+            itemsIndexed(results, key = { _, it -> keyOf(it) }) { idx, item ->
+                val inputs = remember(item, favoriteIds) {
+                    photoCellInputsFor(item, favoriteIds = favoriteIds)
+                }
+                val isSelected = item in selectedItems
+                PhotoCell(
+                    imageData = inputs.imageData,
+                    stableKey = inputs.stableKey,
+                    isVideo = inputs.isVideo,
+                    isLocalVideo = inputs.isLocalVideo,
+                    durationMs = inputs.durationMs,
+                    isPlaceholder = inputs.isPlaceholder,
+                    selected = isSelected,
+                    isSelectionMode = isSelectionMode,
+                    showCloudBadge = inputs.showCloudBadge,
+                    showSyncedBadge = inputs.showSyncedBadge,
+                    isFavorite = inputs.isFavorite,
+                    typeBadgeRes = inputs.typeBadgeRes,
+                    typeBadgeCdRes = inputs.typeBadgeCdRes,
+                    // Fixed 3-column results grid, so always the big-tile (all badges) tier.
+                    columns = 3,
+                    cornerRadius = if (seamless) 0.dp else 10.dp,
+                    onClick = {
+                        // Skip the release-tap that ends a long-press select; otherwise it
+                        // would toggle the just-anchored cell back off.
+                        if (tapGuard.value) {
+                            tapGuard.value = false
+                        } else if (pick != null) {
+                            pick.onToggle(item)
+                        } else if (isSelectionMode) {
+                            onToggleSelection(item)
+                        } else onPhotoClick(results, idx)
+                    },
+                )
+            }
+        }
+        // Fast-scroll scrubber over the results. Search results are a flat, date-sorted grid,
+        // so the month tooltip tracks the scroll position directly.
+        TimelineScrubber(
+            gridState = gridState,
+            items = results,
+            grouping = TimelineGrouping.Month,
+            topPadding = headerPad + 8.dp,
+            bottomPadding = if (pick != null) pickBottom else 24.dp,
+            keyOf = { keyOf(it) },
+        )
+    }
+}
+
+/**
+ * The floating header, drawn after the content so it overlays it and lets the grid scroll under it. It
+ * slides away on a downward scroll and returns on scroll up, like the timeline chrome. Its measured
+ * height is reported through [onHeightChange] so the first row of the content clears it; the height
+ * sticks while hidden, so the content padding does not jump as the header slides. The pills frost
+ * whatever list is under them: the idle page, the picker's or the results.
+ */
+@Composable
+private fun SearchHeader(
+    glass: GlassBackdrop?,
+    visible: Boolean,
+    pick: SearchPick?,
+    onHeightChange: (Int) -> Unit,
+    onBackClick: () -> Unit,
+    searchField: @Composable (Modifier) -> Unit,
+    filterTerms: List<SearchFieldTerm>,
+    categoryTerm: SearchFieldTerm?,
+    selectedCategory: GalleryFilter,
+    categoryRow: @Composable () -> Unit,
+    dateRow: @Composable () -> Unit,
+) {
+    val colors = AppColors.current
+    CompositionLocalProvider(LocalGlassBackdrop provides glass) {
+    AnimatedVisibility(
+      // While the field is focused the header stays mounted, so a results-driven scroll does not
+      // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
+      visible = visible,
+      enter = fadeIn() + slideInVertically { -it },
+      exit = fadeOut() + slideOutVertically { -it },
+    ) {
+      Column(
+          modifier = Modifier
+              .fillMaxWidth()
+              // Measure the FULL header (status-bar inset + paddings + content) so the content inset
+              // matches the visible bar. onSizeChanged MUST sit above the paddings; below them it
+              // reports only the children, leaving the inset short and the content tucked under the bar.
+              .onSizeChanged { onHeightChange(it.height) }
+              // Scrim under the floating bar so buttons stay legible over photos: solid at the top,
+              // still darkening through the category row, fading out just below it. A picker has no bar
+              // of its own here, so its header carries no scrim under the picked-photos strip.
+              .then(
+                  if (pick != null) Modifier
+                  else Modifier.background(
+                      Brush.verticalGradient(
+                          0.0f to colors.bg0,
+                          0.55f to colors.bg0.copy(alpha = 0.82f),
+                          0.9f to colors.bg0.copy(alpha = 0.4f),
+                          1.0f to colors.bg0.copy(alpha = 0f),
+                      ),
+                  ),
+              )
+              // A picker draws its own bar over the top, which the header clears; its field sits at the
+              // bottom instead of in this row, and it has no back button or filter button.
+              .then(
+                  if (pick != null) Modifier.padding(top = pick.topInset)
+                  else Modifier.statusBarsPadding().padding(top = 8.dp),
+              ),
+      ) {
+          if (pick == null) Row(
+              modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 14.dp, vertical = 4.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+              // Back button matches the search field's surface (not the darker pill) so the two
+              // read as one control row.
+              IconBubble(
+                  icon = Icons.AutoMirrored.Filled.ArrowBack,
+                  contentDescription = stringResource(R.string.onboarding_back),
+                  onClick = onBackClick,
+                  background = colors.chipUnselectedBg,
+                  borderColor = colors.line,
+              )
+              searchField(Modifier.weight(1f))
+          }
+
+          if (pick == null) {
+              // The pill row and the rail ease in and out, so the photos below glide up or down with the
+              // header instead of jumping.
+              AnimatedVisibility(
+                  visible = filterTerms.isNotEmpty(),
+                  enter = expandVertically(tween(HEADER_EASE_MS)) + fadeIn(tween(HEADER_EASE_MS)),
+                  exit = shrinkVertically(tween(HEADER_EASE_MS)) + fadeOut(tween(HEADER_EASE_MS)),
+              ) {
+                  // Keeps the last pills while the row eases out.
+                  val held = remember { object { var terms = filterTerms } }
+                  if (filterTerms.isNotEmpty()) held.terms = filterTerms
+                  Column {
+                      Spacer(modifier = Modifier.height(10.dp))
+                      SearchTermRow(held.terms, Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+                  }
+              }
+              Spacer(modifier = Modifier.height(10.dp))
+          }
+
+          // A picker's search has no category chips: it is looking for something by name. A picked
+          // category takes the rail's place as a pill of the same height and indent, the two fading into
+          // one another where they sit, so the active filter is always in view and nothing else moves.
+          if (pick == null) {
+              val heldCategory = remember { object { var term = categoryTerm } }
+              if (categoryTerm != null) heldCategory.term = categoryTerm
+              Crossfade(
+                  targetState = selectedCategory == GalleryFilter.All,
+                  animationSpec = tween(HEADER_EASE_MS),
+                  label = "categorySlot",
+              ) { railShown ->
+                  if (railShown) {
+                      categoryRow()
+                  } else {
+                      SearchTermRow(listOfNotNull(heldCategory.term), Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+                  }
+              }
+          }
+
+          dateRow()
+
+          // Breathing room below the header so the content clears the category bar instead of
+          // tucking right under it, and the scrim keeps a soft tail.
+          Spacer(modifier = Modifier.height(10.dp))
+      }
+    }
+    }
+}
+
+/**
+ * The selection layer of the search: the blocking delete progress, the shared selection drawer with
+ * every bulk action, the sheets and dialogs those actions open, and the snackbar host.
+ */
+@Composable
+private fun BoxScope.SearchSelectionLayer(
+    vm: SearchViewModel,
+    glass: GlassBackdrop?,
+    pick: SearchPick?,
+    snackbarHostState: SnackbarHostState,
+    selectedItems: Set<GalleryItem>,
+    totalResults: Int,
+    isSelectionMode: Boolean,
+    isDeleting: Boolean,
+    isSignedIn: Boolean,
+    favoriteIds: Set<String>,
+    resultsGridState: LazyGridState,
+    onEditMetadata: (items: List<GalleryItem>) -> Unit,
+) {
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
+    val albums by vm.albums.collectAsStateWithLifecycle()
+    val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
+    val favoriteState by vm.favoriteState.collectAsStateWithLifecycle()
+    val shareState by vm.sel.shareState.collectAsStateWithLifecycle()
+    val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
+    val moveTargetFolders by vm.moveTargetFolders.collectAsStateWithLifecycle()
+    val pendingMoveIntent by vm.pendingMoveIntent.collectAsStateWithLifecycle()
+    var showDeleteSheet by remember { mutableStateOf(false) }
+    // The selection's hide split while its confirmation is up, null when none is. Holding the split
+    // rather than a flag is what lets the sheet describe the photos the tap was made on.
+    var hideConfirmSplit by remember {
+        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+    }
+    var showAddToAlbumSheet by remember { mutableStateOf(false) }
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
+    // The picker's own "New album" row, which names an album and then adds the selection to it.
+    var showCreateAlbumInline by remember { mutableStateOf(false) }
+    // Move the device selection into another folder, logged-out, device-data only. The picker's
+    // targets and the write consent ride the shared host; the selection is snapshotted in the VM.
+    var showMoveSheet by remember { mutableStateOf(false) }
+    // A multi-select delete blocks the screen behind a progress drawer so a second tap can't
+    // fire into a half-finished delete.
+    val opDeletingLabel = stringResource(R.string.op_deleting)
+    eu.akoos.photos.presentation.common.BlockingOperationSheet(
+        if (isDeleting) eu.akoos.photos.presentation.common.OperationProgress(0, 0, opDeletingLabel, indeterminate = true) else null,
+    )
+
+    // Selection-mode overlay: the shared drawer, so every bulk action sits in one place here
+    // exactly as it does on the timeline, album and device-folder surfaces. Its header's Select
+    // all takes in every result.
+    val selectAllCount = selectAllCountFor(total = totalResults, selected = selectedItems.size)
+    var showStripPicker by remember { mutableStateOf(false) }
+    // Which way the offline row goes, so it names the press rather than the state: a pin while
+    // anything pinnable in the selection is still un-pinned, a removal once none is.
+    val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
+        offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
+    }
+    val sharing = shareState as? SelectionShareState.Working
+    val addLabelsAction = rememberAddLabelsAction(
+        items = remember(selectedItems) { selectedItems.toList() },
+        onDone = { msg ->
+            scope.launch { snackbarHostState.showSnackbar(msg) }
+            vm.clearSelection()
+        },
+    )
+    val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
+    val searchSelectionActions = buildList {
+        // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
+        add(
+            SelectionAction(
+                icon = Icons.Default.Share,
+                label = stringResource(R.string.sel_label_share),
+                working = sharing != null,
+                progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+                enabled = sharing == null,
+                onClick = { vm.shareSelected() },
+                slot = PrimarySlot.Share,
+            )
+        )
+        // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
+        if (isSignedIn) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PhotoAlbum,
+                    label = stringResource(R.string.gallery_add_to_album),
+                    onClick = { showAddToAlbumSheet = true },
+                    slot = PrimarySlot.Organize,
+                )
+            )
+        }
+        // Add-to-person runs on-device and can name a new person, so it follows face recognition
+        // alone, for a guest too. Only the account-backed actions in this list stay behind isSignedIn.
+        if (faceEnabled) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.Person,
+                    label = stringResource(R.string.gallery_add_to_person),
+                    onClick = { showAddToPersonSheet = true },
+                )
+            )
+        }
+        // Move the device selection into another folder, on the Android 10+ MediaStore floor.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            add(
+                SelectionAction(
+                    icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                    label = stringResource(R.string.move_to_folder),
+                    onClick = { showMoveSheet = true },
+                    slot = PrimarySlot.Organize,
+                )
+            )
+        }
+        // Favourite the whole result set in one press. Search is how a batch worth favouriting
+        // gets assembled in the first place, so the action belongs where the results are rather
+        // than one photo at a time in the viewer.
+        add(
+            favoriteSelectionAction(
+                turnsOn = remember(selectedItems, favoriteIds) {
+                    favoriteTurnsOn(selectedItems, favoriteIds)
+                },
+                state = favoriteState,
+                onClick = { vm.toggleSelectedFavorite() },
+            )
+        )
+        addLabelsAction?.let(::add)
+        // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
+        // destination, so it stays behind a signed-in session.
+        if (isSignedIn && anyLocalOnly(selectedItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.CloudUpload,
+                    label = stringResource(R.string.sel_label_back_up),
+                    onClick = {
+                        vm.backUpSelected { queued ->
+                            if (queued > 0) scope.launch {
+                                snackbarHostState.showSnackbar(resources.getString(R.string.backup_started))
+                            }
+                        }
+                    },
+                )
+            )
+        }
+        // Download / offline apply to cloud-only photos (no local file yet).
+        if (hasDownloadable(selectedItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.FileDownload,
+                    label = stringResource(R.string.sel_label_download),
+                    onClick = {
+                        vm.downloadSelected { succeeded, failed ->
+                            val msg = when {
+                                failed > 0 -> resources.getString(R.string.gallery_download_partial, succeeded, failed)
+                                succeeded == 1 -> resources.getString(R.string.gallery_download_done_singular)
+                                else -> resources.getString(R.string.gallery_download_done, succeeded)
+                            }
+                            scope.launch { snackbarHostState.showSnackbar(msg) }
+                        }
+                    },
+                )
+            )
+        }
+        if (anyCloudOnly(selectedItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.OfflinePin,
+                    label = stringResource(
+                        if (offlinePinsSelection) R.string.offline_make_available
+                        else R.string.offline_remove,
+                    ),
+                    onClick = { vm.toggleSelectedOffline() },
+                )
+            )
+        }
+        // The date + place editor opens for any editable photo (a device photo, or a cloud or
+        // backed-up image the corrected-copy replace can rewrite), so a mixed selection keeps the
+        // entry (the editor writes exactly those photos and names the count).
+        if (anyMetadataEditable(selectedItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.EditNote,
+                    label = stringResource(R.string.metadata_editor_edit_metadata),
+                    onClick = { onEditMetadata(selectedItems.toList()) },
+                )
+            )
+        }
+        // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+        // smaller copy is up.
+        compressAction?.let(::add)
+        // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
+        // copy's EXIF, so stripping just the local file is a misleading half-strip.
+        if (allLocalOnly(selectedItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PrivacyTip,
+                    label = stringResource(R.string.gallery_strip_metadata),
+                    onClick = { showStripPicker = true },
+                )
+            )
+        }
+        // Hide any non-empty selection: a photo that lives only on this device moves into the
+        // vault, one with a cloud copy is filtered by linkId.
+        if (selectedItems.isNotEmpty()) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.VisibilityOff,
+                    label = stringResource(R.string.sel_label_hide),
+                    enabled = !isDeleting,
+                    // A hide ends in a permanent removal of the device originals it vaults, so it
+                    // is confirmed exactly as the delete beside it is. The split is read at the
+                    // tap, so the sheet names what THIS selection will have done to it.
+                    onClick = { hideConfirmSplit = vm.hideSplitForSelection().takeIf { !it.isEmpty } },
+                )
+            )
+        }
+        add(
+            SelectionAction(
+                icon = Icons.Default.DeleteOutline,
+                label = stringResource(R.string.sel_label_delete),
+                tint = ErrorColor,
+                enabled = !isDeleting,
+                onClick = { showDeleteSheet = true },
+                slot = PrimarySlot.Delete,
+            )
+        )
+    }
+    SelectionDrawer(
+        backdrop = glass,
+        visible = pick == null && isSelectionMode,
+        items = remember(selectedItems) { selectedItems.toList() },
+        actions = searchSelectionActions,
+        onDismiss = { vm.clearSelection() },
+        // Scrolling the results collapses the drawer, so reaching past it to carry on through
+        // them needs no deliberate pull or tap first.
+        contentScrollingProvider = { resultsGridState.isScrollInProgress },
+        modifier = Modifier.align(Alignment.BottomCenter),
+        selectAllCount = selectAllCount,
+        onSelectAll = if (selectAllCount != null) {
+            { vm.selectAll() }
+        } else {
+            null
+        },
+    )
+    if (showStripPicker) {
+        MetadataStripPickerDialog(
+            onConfirm = {
+                showStripPicker = false
+                vm.stripMetadataSelected(it)
+            },
+            onDismiss = { showStripPicker = false },
+        )
+    }
+
+    // Hide confirmation: the shared sheet every hide surface raises, worded from this
+    // selection's own split.
+    hideConfirmSplit?.let { split ->
+        eu.akoos.photos.presentation.common.HideConfirmSheet(
+            split = split,
+            title = stringResource(R.string.hide_confirm_title),
+            onConfirm = {
+                hideConfirmSplit = null
+                vm.hideSelected()
+            },
+            onDismiss = { hideConfirmSplit = null },
+        )
+    }
+
+    // Bulk-delete sheet: reuses the gallery's dialog so options + copy stay identical.
+    if (showDeleteSheet && selectedItems.isNotEmpty()) {
+        GalleryMultiDeleteDialog(
+            selectedItems = selectedItems,
+            onDismiss = { showDeleteSheet = false },
+            onDelete = { freeUpSpace, deleteFromCloud ->
+                showDeleteSheet = false
+                vm.deleteSelected(freeUpSpace, deleteFromCloud)
+            },
+        )
+    }
+
+    // Add-to-album sheet: reuses the gallery's picker. Cloud-backed selections join now;
+    // local-only selections upload first and join afterwards.
+    if (showAddToAlbumSheet && selectedItems.isNotEmpty()) {
+        GalleryAddToAlbumDialog(
+            selectedItems = selectedItems,
+            cloudAlbums = albums,
+            onCreateNew = {
+                showAddToAlbumSheet = false
+                showCreateAlbumInline = true
+            },
+            onCloudAlbumSelected = { album ->
+                showAddToAlbumSheet = false
+                vm.addSelectedToAlbum(album.linkId) { joined, queued ->
+                    val msg = addToAlbumResultText(context.resources, joined, queued, album.name)
+                    scope.launch { snackbarHostState.showSnackbar(msg) }
+                }
+            },
+            onDismiss = { showAddToAlbumSheet = false },
+        )
+    }
+
+    // Add-to-person runs the same face-first flow as the timeline, on-device, so a guest has it too.
+    if (showAddToPersonSheet && selectedItems.isNotEmpty()) {
+        val personPhotos = remember(selectedItems) { selectedItems.toList() }
+        AddToPersonFaceSheet(
+            photos = personPhotos,
+            onDone = {
+                showAddToPersonSheet = false
+                vm.clearSelection()
+            },
+            onDismiss = { showAddToPersonSheet = false },
+        )
+    }
+
+    // Name a brand-new album for the selection, then create it and add the photos to it: the
+    // same two steps the timeline's picker runs, so the row means the same thing on both.
+    if (showCreateAlbumInline) {
+        eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+            onDismiss = { showCreateAlbumInline = false },
+            onCreate = { name ->
+                showCreateAlbumInline = false
+                vm.createAlbumThenAddSelected(name) { joined, queued, error ->
+                    val msg = error ?: addToAlbumResultText(context.resources, joined, queued, name)
+                    scope.launch { snackbarHostState.showSnackbar(msg) }
+                }
+            },
+        )
+    }
+
+    // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
+    // foreign-file move needs and the completion snackbar, device files only. The
+    // selection is snapshotted in the ViewModel, so the host carries only the picked name.
+    MoveToFolderHost(
+        targetFolders = moveTargetFolders,
+        show = showMoveSheet,
+        pendingMoveIntent = pendingMoveIntent,
+        moveConfirmation = vm.moveConfirmation,
+        onPick = { vm.moveSelectedToFolder(it) },
+        onCreate = { vm.createFolderWithPhotos(it) },
+        onGranted = { vm.onMovePermissionGranted() },
+        onClear = { vm.clearPendingMove() },
+        onDismiss = { showMoveSheet = false },
+        snackbarHostState = snackbarHostState,
+    )
+
+    eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+        snackbarHostState,
+        modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
+    )
+}
+
 private fun keyOf(item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "L:" + item.local.uri
     is GalleryItem.Synced    -> "S:" + item.local.uri
     is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
+}
+
+private const val KEY_MATCH_DESTINATIONS = "match_destinations"
+private const val KEY_MATCH_PEOPLE = "match_people"
+private const val KEY_MATCH_ALBUMS = "match_albums"
+
+/** The key of the results grid's first item, in the order [SearchResultsGrid] emits them, or null
+ *  while it lists nothing. */
+private fun firstResultSlotKey(
+    results: List<GalleryItem>,
+    destinations: Boolean,
+    people: Boolean,
+    albums: Boolean,
+): String? = when {
+    destinations -> KEY_MATCH_DESTINATIONS
+    people -> KEY_MATCH_PEOPLE
+    albums -> KEY_MATCH_ALBUMS
+    else -> results.firstOrNull()?.let(::keyOf)
 }
 
 /**

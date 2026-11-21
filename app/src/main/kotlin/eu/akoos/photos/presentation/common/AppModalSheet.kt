@@ -23,6 +23,14 @@
 package eu.akoos.photos.presentation.common
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -45,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntOffset
 import eu.akoos.photos.presentation.theme.SheetBg
 import kotlinx.coroutines.launch
 
@@ -104,4 +113,17 @@ fun AppModalSheet(
             CompositionLocalProvider(LocalOnGlassSheet provides (frozen != null)) { content() }
         }
     }
+}
+
+/**
+ * How a sheet with pages steps between them: [forward] slides the next page in from the end while the one it
+ * leaves drifts a third of the way out, back reverses it, and the sheet's height follows on the same spring.
+ */
+internal fun sheetPageTransition(forward: Boolean): ContentTransform {
+    val spec = spring<IntOffset>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+    return ContentTransform(
+        targetContentEnter = slideInHorizontally(spec) { if (forward) it else -it / 3 } + fadeIn(),
+        initialContentExit = slideOutHorizontally(spec) { if (forward) -it / 3 else it } + fadeOut(),
+        sizeTransform = SizeTransform(clip = false) { _, _ -> spring(stiffness = Spring.StiffnessMediumLow) },
+    )
 }

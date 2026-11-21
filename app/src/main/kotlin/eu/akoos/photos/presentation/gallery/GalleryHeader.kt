@@ -39,7 +39,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.presentation.albums.AlbumsUiState
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Top-of-screen rail for normal (non-selection) mode: the per-tab filter rail (Photos / Albums /
@@ -52,6 +54,7 @@ import eu.akoos.photos.presentation.albums.AlbumsUiState
 internal fun GalleryHeader(
     selectedTab: Int,
     galleryState: GalleryUiState,
+    progress: StateFlow<GalleryProgress>,
     albumsState: AlbumsUiState,
     isOnlineNow: Boolean,
     onFilterSelected: (GalleryFilter) -> Unit,
@@ -76,6 +79,8 @@ internal fun GalleryHeader(
     onOpenUploads: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
 ) {
+    // Back-up ticks are collected here rather than in the screen, so they recompose the header only.
+    val backup by progress.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -106,6 +111,7 @@ internal fun GalleryHeader(
                         },
                         onOpenTimelineFilter = onShowAlbumsFilterSheet,
                         modifier = Modifier.weight(1f),
+                        labelUsage = galleryState.labelUsage,
                     )
                 }
                 1 -> {
@@ -129,9 +135,9 @@ internal fun GalleryHeader(
                 // The avatar ring means real backup work is running. A plain cloud-listing refresh
                 // (fired on every foreground and on pull-to-refresh) is not backup, so isRefreshing is
                 // deliberately left out here, it kept the ring spinning for a long check with no upload.
-                isSyncing       = galleryState.isSyncing || albumsState.isLoading,
-                hasActiveUpload   = galleryState.hasActiveUpload,
-                hasActiveDownload = galleryState.hasActiveDownload,
+                isSyncing       = backup.isSyncing || albumsState.isLoading,
+                hasActiveUpload   = backup.hasActiveUpload,
+                hasActiveDownload = backup.hasActiveDownload,
                 isOffline       = !isOnlineNow,
                 updateAvailable = updateAvailable,
                 newsUnread      = newsUnread,

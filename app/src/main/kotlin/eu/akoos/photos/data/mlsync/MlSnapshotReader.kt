@@ -24,11 +24,13 @@ package eu.akoos.photos.data.mlsync
 
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.FACE_BLUR_KNOWN
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.FACE_REJECTED
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.HIDDEN_FLAG
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.NO_REFERENCE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.SCAN_HI_RES
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.SEARCH_TOMBSTONE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_COVER
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_FACE
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_HIDDEN_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_KEY
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_MANUAL_PHOTO
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NAME_CHANGE
@@ -143,6 +145,11 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                 val flags = checkedFlags(source.u8(), SCAN_HI_RES)
                 MlSnapshotRecord.ScanMarker(photoKey, (flags and SCAN_HI_RES) != 0)
             }
+            TAG_HIDDEN_PERSON -> {
+                val person = personAt(source.i32())
+                val flags = checkedFlags(source.u8(), HIDDEN_FLAG)
+                MlSnapshotRecord.HiddenPerson(person, (flags and HIDDEN_FLAG) != 0, nonNegative(source.i64(), "hidden change time"))
+            }
             TAG_SEARCH_EMBEDDING -> readSearchEmbedding()
             else -> throw MlSnapshotFormatException("unexpected ${tagName(tag)}")
         }
@@ -190,6 +197,7 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                     notPersonCount = nonNegative(source.i32(), "not-person count"),
                     coverCount = nonNegative(source.i32(), "cover count"),
                     scanMarkerCount = nonNegative(source.i32(), "scan marker count"),
+                    hiddenPeopleCount = if (version >= 7) nonNegative(source.i32(), "hidden people count") else 0,
                     nameChangeCount = nameChangeCount,
                     removalCount = removalCount,
                     facesWipedAtMillis = facesWipedAt,

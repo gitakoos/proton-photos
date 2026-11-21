@@ -126,6 +126,7 @@ class CompressCloudPhotoUseCase @Inject constructor(
                     uri = workingUri,
                     settings = settings,
                     captureMs = photo.captureTimeMs,
+                    stripConfig = MetadataStripConfig(),
                     onProgress = { p: VideoUploadCompressor.Progress -> onCompressProgress?.invoke(p.fraction) },
                 )
                 compressed = attempt.file

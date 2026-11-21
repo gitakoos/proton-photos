@@ -26,7 +26,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.presentation.theme.FgDim
@@ -54,10 +57,13 @@ fun EmptyState(
     modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier,
+        modifier = modifier.padding(horizontal = 32.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            modifier = Modifier.widthIn(max = 320.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             if (icon != null) {
                 Icon(
                     imageVector = icon,
@@ -72,6 +78,7 @@ fun EmptyState(
                 color = FgPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
             )
             if (subtitle != null) {
                 Spacer(Modifier.height(8.dp))
@@ -79,6 +86,8 @@ fun EmptyState(
                     text = subtitle,
                     color = FgDim,
                     fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    textAlign = TextAlign.Center,
                 )
             }
         }

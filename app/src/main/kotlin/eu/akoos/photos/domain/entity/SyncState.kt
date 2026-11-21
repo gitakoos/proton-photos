@@ -46,4 +46,32 @@ data class SyncState(
     val queued: Boolean = false,
     val queueSource: String? = null,
     val queuedAt: Long? = null,
+    /**
+     * Read-only: the SHA-1 of what the device file holds as backed up: as the last backup read it,
+     * before any strip or compression, or as this app wrote it itself since (a mirror rewrite at that
+     * backup, a download's saved copy, a metadata write). Null for a row backed up before it was
+     * recorded, and one whose hash or Drive pairing changed since (the DAO clears it then). Written only
+     * by [eu.akoos.photos.domain.repository.SyncStateRepository.setOriginalHash] and
+     * [eu.akoos.photos.domain.repository.SyncStateRepository.recordOwnDeviceWrite].
+     */
+    val originalHash: String? = null,
+    /**
+     * What [cloudFileId] rests on, a [LinkBasis] value: proof by content or by this app's own upload or
+     * download, or a name rule of reconcile's alone. Every writer states it; a row reconcile paired by
+     * name keeps its mark on later passes until a content hash proves the link.
+     */
+    val linkBasis: Int = LinkBasis.PROVEN,
 )
+
+/** What a sync row's link to its Drive photo rests on, see [SyncState.linkBasis]. */
+object LinkBasis {
+    /** The device bytes hash to the Drive copy, or this app uploaded or downloaded the photo itself. */
+    const val PROVEN = 0
+
+    /** Reconcile matched the name with the capture second or the size, nothing of the bytes. */
+    const val NAME = 1
+
+    /** Reconcile matched the name and capture second of a photo whose upload rewrites its bytes (strip or
+     *  compress on), so no hash of the device file can match the Drive copy. */
+    const val NAME_REWRITTEN = 2
+}

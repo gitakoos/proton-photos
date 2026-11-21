@@ -602,8 +602,10 @@ class CloudTrashService @Inject constructor(
                     val deletedList = deleted.toList()
                     runCatching {
                         facePhotoRemoval.dropPhotos(userId.id, deleted)
-                        perceptualHashDao.deleteByKeys(deletedList)
-                        photoLocationDao.deleteByIds(userId.id, deletedList)
+                        // Sliced under SQLite's host-variable cap: emptying a trash of more than 999 photos
+                        // otherwise failed both statements and left every row in place.
+                        deletedList.forEachSqlChunk { perceptualHashDao.deleteByKeys(it) }
+                        deletedList.forEachSqlChunk { photoLocationDao.deleteByIds(userId.id, it) }
                     }.onFailure { Log.w(TAG, "deleteFromCloudForever: per-photo data prune failed: ${it.message}") }
                 }
                 CloudDeleteOutcome(deleted, failed)
@@ -747,8 +749,10 @@ class CloudTrashService @Inject constructor(
         photo: CloudPhoto,
         newName: String,
     ): String = withContext(Dispatchers.IO) {
-        val fullResFile = downloadService.downloadFullResPhoto(userId, photo)
-        if (!fullResFile.exists() || fullResFile.length() == 0L) error("Full-res download failed for ${photo.linkId}")
+        val original = downloadService.downloadFullResPhoto(userId, photo)
+        if (!original.exists() || original.plainLength == 0L) error("Full-res download failed for ${photo.linkId}")
+        // The cached original is kept encrypted: the upload reads a plaintext scratch copy of it, deleted after.
+        original.withPlainFile { fullResFile ->
 
         // SHA-1 hex of the plaintext file. Drive Android pins
         // ConfigurationProvider.contentDigestAlgorithm to SHA-1 and Drive web's
@@ -757,15 +761,8 @@ class CloudTrashService @Inject constructor(
         // hash". The hex string is what PhotoUploadService passes into both
         // `Common.Digests.SHA1` of the xAttr blob and the HMAC that produces the
         // wire ContentHash.
-        val hash = run {
-            val digest = MessageDigest.getInstance("SHA-1")
-            fullResFile.inputStream().use { stream ->
-                val buf = ByteArray(8192)
-                var read: Int
-                while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
-            }
-            digest.digest().joinToString("") { "%02x".format(it) }
-        }
+        // The hash and the upload read this same scratch copy, checked to hold no encrypted bytes.
+        val hash = eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(fullResFile)
 
         val fileUri = android.net.Uri.fromFile(fullResFile).toString()
         // The copy carries the source's capture time, so it lands in the same timeline slot.
@@ -781,6 +778,7 @@ class CloudTrashService @Inject constructor(
             duration    = 0L,
         )
         uploadService.uploadFile(userId, item, hash, fileUri)
+        }
     }
 }
 

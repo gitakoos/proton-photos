@@ -120,6 +120,14 @@ class NameOrMergeRulesTest {
     }
 
     @Test
+    fun `only a selection with photos and no face chosen may go to several people`() {
+        assertTrue(NameOrMergeRules.picksSeveral(faces(manual = listOf("a", "b"))))
+        assertFalse(NameOrMergeRules.picksSeveral(faces(chosen("f1", "a"), manual = listOf("b"))))
+        assertFalse(NameOrMergeRules.picksSeveral(faces(chosen("f1", "a"))))
+        assertFalse(NameOrMergeRules.picksSeveral(faces()))
+    }
+
+    @Test
     fun `the photos without a face are kept, and every photo when no face was written`() {
         val subject = faces(chosen("f1", "a"), chosen("f2", "b"), manual = listOf("c", "d"))
         assertEquals(listOf("c", "d"), NameOrMergeRules.manualPhotoKeys(subject, facesAssigned = true))

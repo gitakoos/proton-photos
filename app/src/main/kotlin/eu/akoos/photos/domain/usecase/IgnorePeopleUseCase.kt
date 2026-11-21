@@ -79,6 +79,7 @@ class IgnorePeopleUseCase @Inject constructor(
 
     /** Drops the name-keyed curation of a dismissed person called [name], noting each removal for the shared copy. */
     private suspend fun clearCuration(account: String, name: String, now: Long) {
+        appDatabase.personHiddenDao().delete(account, name)
         val manualDao = appDatabase.personManualPhotoDao()
         val notPersonDao = appDatabase.notPersonDao()
         val coverDao = appDatabase.personCoverDao()

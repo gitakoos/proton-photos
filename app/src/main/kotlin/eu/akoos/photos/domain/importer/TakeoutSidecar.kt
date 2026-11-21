@@ -115,8 +115,11 @@ object TakeoutSidecar {
     /** Google's export container folders; a media file sitting straight under one has no album. */
     private val EXPORT_CONTAINERS = setOf("takeout", "google photos", "google fotos")
 
-    /** Google's non-album timeline buckets, matched case-insensitively alongside [TIMELINE_YEAR]. */
-    private val TIMELINE_BUCKETS = setOf("archive", "trash", "bin")
+    /**
+     * Folders that are a timeline rather than an album, matched case-insensitively alongside [TIMELINE_YEAR]:
+     * Google's archive and trash buckets, and Ente's Uncategorized, which holds the photos no album claims.
+     */
+    private val TIMELINE_BUCKETS = setOf("archive", "trash", "bin", "uncategorized")
 
     /**
      * The metadata [jsonText] holds, or null when it is not a usable sidecar. Never throws: malformed,
@@ -192,7 +195,7 @@ object TakeoutSidecar {
      * sidecars in `<Album>/metadata/`, but the media itself sits directly in `<Album>`).
      *
      * Null means there is no user album to regroup into: the parent is one of Google's timeline buckets
-     * (`Photos from <year>`, `Archive`, `Trash`/`Bin`, all case-insensitive), or the file has no album
+     * (`Photos from <year>`, `Archive`, `Trash`/`Bin`), Ente's `Uncategorized` (all case-insensitive), or the file has no album
      * folder at all because it sits at the export root or straight under the `Takeout`/`Google Photos`
      * container. Separators are normalised and every segment is trimmed, so a padded or empty folder name
      * never leaks through.
@@ -210,7 +213,7 @@ object TakeoutSidecar {
         return parent
     }
 
-    /** True when [folder] is one of Google's non-album timeline buckets (a year stream, archive, trash). */
+    /** True when [folder] is a non-album timeline bucket (a year stream, archive, trash, uncategorized). */
     private fun isTimelineBucket(folder: String): Boolean {
         val lower = folder.lowercase()
         return lower in TIMELINE_BUCKETS || TIMELINE_YEAR.matches(lower)

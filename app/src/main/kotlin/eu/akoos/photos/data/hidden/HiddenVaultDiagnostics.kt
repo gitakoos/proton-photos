@@ -106,6 +106,11 @@ object HiddenVaultDiagnostics {
         SyncDiagnostics.log("hide: journal write failed ($reason)")
     }
 
+    /** A hide refused because a sign-out was emptying the vault; its originals were left alone. */
+    fun refusedForSignOut(count: Int) {
+        SyncDiagnostics.log("hide: $count refused, sign-out running, originals kept")
+    }
+
     /** The originals are gone. [neededConsent] is false only where the delete ran without the system
      *  dialog, which is the pre-Android-11 path. */
     fun originalsRemoved(count: Int, neededConsent: Boolean) {
@@ -136,6 +141,12 @@ object HiddenVaultDiagnostics {
         SyncDiagnostics.log("vault: reconcile found nothing")
     }
 
+    /** Copies the reconciliation kept because their original is still there and the delete prompt their
+     *  hide opened may still be answered. A later pass decides them. */
+    fun waitingOnDelete(count: Int) {
+        SyncDiagnostics.log("vault: reconcile kept $count waiting on a delete prompt")
+    }
+
     /** What the reconciliation decided for the leftovers of an interrupted hide, one count per
      *  outcome — the one line that says whether a tester's vault is self-consistent. */
     fun reconciled(confirm: Int, adopt: Int, discard: Int, forget: Int) {
@@ -156,6 +167,11 @@ object HiddenVaultDiagnostics {
         SyncDiagnostics.log(
             "vault: swept $examined row(s), revived synced=$synced local=$localOnly stranded=$stranded",
         )
+    }
+
+    /** HIDDEN rows put back from the vault's records after the database was rebuilt empty. */
+    fun reseeded(count: Int) {
+        SyncDiagnostics.log("hide: rows re-filed after a rebuilt database=$count")
     }
 
     /** A reveal is starting over [count] photos. */

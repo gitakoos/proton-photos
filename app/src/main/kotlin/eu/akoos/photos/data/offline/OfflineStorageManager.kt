@@ -22,15 +22,21 @@
 
 package eu.akoos.photos.data.offline
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.localcrypto.CacheFiles
+import eu.akoos.photos.data.localcrypto.LocalCryptoFormat
+import eu.akoos.photos.data.localcrypto.LocalFileForm
+import eu.akoos.photos.data.localcrypto.LocalFiles
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
+import kotlin.concurrent.withLock
 import javax.inject.Singleton
 
 /**
@@ -51,7 +57,7 @@ class OfflineStorageManager @Inject constructor(
         get() = File(context.filesDir, "offline").also { it.mkdirs() }
 
     /** Canonical blob path for [linkId] with extension [ext] — matches the full-res cache stem. */
-    fun blobFile(linkId: String, ext: String): File = File(offlineDir, "$linkId.$ext")
+    fun blobFile(linkId: String, ext: String): File = File(offlineDir, "${safeFileId(linkId)}.$ext")
 
     /**
      * The existing non-empty offline blob for [linkId] regardless of extension, or null when
@@ -59,7 +65,7 @@ class OfflineStorageManager @Inject constructor(
      * under any mime extension is found.
      */
     fun findBlob(linkId: String): File? {
-        val prefix = "$linkId."
+        val prefix = "${safeFileId(linkId)}."
         return offlineDir.listFiles()
             ?.firstOrNull { it.isFile && !it.name.endsWith(".tmp") && it.name.startsWith(prefix) && it.length() > 0 }
     }
@@ -71,31 +77,50 @@ class OfflineStorageManager @Inject constructor(
      * Copies [source] into offline storage under `<linkId>.<source.extension>` and returns the
      * stored file. Writes to a `.tmp` sibling first, then atomically renames, so a crash
      * mid-copy never leaves a truncated blob that [findBlob] would treat as complete.
+     *
+     * The copy is kept encrypted: an encrypted [source] (the full-size cache) is copied as it is, a plaintext
+     * one (a cache file from an earlier version) is encrypted on the way, and when no key answers now nothing is
+     * written and this throws, so the pin is tried again later.
      */
     suspend fun store(linkId: String, source: File): File = withContext(Dispatchers.IO) {
+        LocalFiles.offlineLock.withLock { storeLocked(linkId, source) }
+    }
+
+    private fun storeLocked(linkId: String, source: File): File {
         val ext = source.extension.ifBlank { "bin" }
         val dest = blobFile(linkId, ext)
-        val tmp = File(offlineDir, "$linkId.$ext.tmp")
+        val tmp = File(offlineDir, "${safeFileId(linkId)}.$ext.tmp")
         if (tmp.exists()) tmp.delete()
-        source.inputStream().use { input ->
-            tmp.outputStream().use { output -> input.copyTo(output) }
+        try {
+            if (LocalCryptoFormat.formOf(source) == LocalFileForm.PLAIN) {
+                CacheFiles.encryptingStream(tmp.outputStream(), context).use { output ->
+                    source.inputStream().use { it.copyTo(output) }
+                }
+            } else {
+                source.inputStream().use { input ->
+                    tmp.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        } catch (e: Exception) {
+            tmp.delete()
+            throw e
         }
         // Drop any prior blob for this linkId — including one stored under a different extension —
         // so a re-pin never leaves a stale duplicate that would double-count or shadow the new
         // blob. The just-written .tmp is excluded so the rename below still has its source.
         offlineDir.listFiles()
-            ?.filter { it.isFile && it.name.startsWith("$linkId.") && it.absolutePath != tmp.absolutePath }
+            ?.filter { it.isFile && it.name.startsWith("${safeFileId(linkId)}.") && it.absolutePath != tmp.absolutePath }
             ?.forEach { it.delete() }
         if (!tmp.renameTo(dest)) {
             tmp.delete()
             error("Failed to publish offline blob for $linkId")
         }
-        dest
+        return dest
     }
 
     /** Removes the offline blob (and any leftover `.tmp`) for [linkId]. */
-    fun delete(linkId: String) {
-        val prefix = "$linkId."
+    fun delete(linkId: String) = LocalFiles.offlineLock.withLock {
+        val prefix = "${safeFileId(linkId)}."
         offlineDir.listFiles()
             ?.filter { it.isFile && it.name.startsWith(prefix) }
             ?.forEach { runCatching { it.delete() } }
@@ -110,7 +135,7 @@ class OfflineStorageManager @Inject constructor(
 
     /** Drops every offline blob. */
     fun clearAll() {
-        offlineDir.deleteRecursively()
+        LocalFiles.offlineLock.withLock { offlineDir.deleteRecursively() }
     }
 
     /**

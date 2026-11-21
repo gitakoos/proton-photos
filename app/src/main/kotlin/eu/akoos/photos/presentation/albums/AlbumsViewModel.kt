@@ -44,10 +44,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
@@ -82,6 +85,8 @@ data class DeviceFolder(
     val name: String,
     val coverUri: String?,
     val itemCount: Int,
+    /** How many of the [itemCount] files are videos, so the card counts photos and videos apart. */
+    val videoCount: Int = 0,
     /** True when the cover file is a GIF, so its card can animate it when cover autoplay is on. The
      *  cover uri is a MediaStore `content://` id that never reveals the extension, so gif-ness is
      *  resolved from the cover item's mime type / display name when the card is built. */
@@ -111,6 +116,8 @@ data class AlbumsUiState(
      *  flag, for the same reason [folderPrefs] is: the grid shows every album at once and the drawer
      *  asks about whichever card was held. */
     val timelineExcludedAlbumIds: Set<String> = emptySet(),
+    /** The hide-all switch: every album kept out of the main feed. */
+    val timelineHideAll: Boolean = false,
     /** The albums and folders taken off the grid, as stored entries. Read through
      *  [AlbumsGridExclusion], which also decides what each view filter lays out. */
     val excludedFromGrid: Set<String> = emptySet(),
@@ -155,6 +162,7 @@ data class AlbumsUiState(
 @HiltViewModel
 class AlbumsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    peopleVisibility: eu.akoos.photos.presentation.people.PeopleVisibility,
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
     private val localMediaRepo: LocalMediaRepository,
@@ -163,10 +171,18 @@ class AlbumsViewModel @Inject constructor(
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
     private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
+    private val albumOrder: eu.akoos.photos.data.albumorder.AlbumOrderRepository,
+    private val sharedBackup: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler,
+    private val cloudTrash: eu.akoos.photos.data.repository.drive.CloudTrashService,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
     val uiState: StateFlow<AlbumsUiState> = _uiState.asStateFlow()
+
+    /** Whether the People tile is offered: this phone scans for faces, or the account already holds people
+     *  ([eu.akoos.photos.presentation.people.PeopleVisibility]). */
+    val peopleVisible: StateFlow<Boolean> = peopleVisibility.visible()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Whether a Proton account is signed in. A local-only session has no Drive to back up to, so the
      *  device-folder drawer drops its cloud rows. Defaults to signed-in so nothing flickers before the
@@ -197,8 +213,15 @@ class AlbumsViewModel @Inject constructor(
     /** The user's own arrangement, read only by [AlbumSortMode.Custom]. */
     private val customOrder = MutableStateFlow<List<String>>(emptyList())
 
+    /** Each album's newest photo time, read only by [AlbumSortMode.NewestPhoto]. */
+    private val newestPhoto = MutableStateFlow<Map<String, Long>>(emptyMap())
+
     private fun applySort(albums: List<Album>): List<Album> =
-        sortAlbums(albums, sortMode.value, customOrder.value)
+        sortAlbums(albums, sortMode.value, customOrder.value, newestPhoto.value)
+
+    // A newer load replaces an older one still in flight, so a slower, older answer never lands last.
+    private var loadJob: kotlinx.coroutines.Job? = null
+    private var membershipPrefetchJob: kotlinx.coroutines.Job? = null
 
     init {
         observeSortMode()
@@ -206,9 +229,17 @@ class AlbumsViewModel @Inject constructor(
         loadAlbums()
         observeDeviceFolders()
         observeExcludedFromGrid()
-        // Re-fetch on share-state changes so the grid badge updates without a manual pull-to-refresh.
+        // Share changes and trash moves both re-fetch, so badges and counts follow without a pull.
         viewModelScope.launch {
-            albumListEvents.changes.collect { loadAlbums() }
+            albumGridReloads(albumListEvents.changes, cloudTrash.trashCountChanges).collect { loadAlbums() }
+        }
+        // A rename made inside an album patches that card's name, so the grid never shows the old one.
+        viewModelScope.launch {
+            albumListEvents.renames.collect { (albumId, name) ->
+                _uiState.update { st ->
+                    st.copy(albums = applySort(st.albums.map { if (it.linkId == albumId) it.copy(name = name) else it }))
+                }
+            }
         }
         // A cover change patches only that album's thumbnail in place, so the grid card flips without
         // reloading and flashing the whole list.
@@ -231,6 +262,7 @@ class AlbumsViewModel @Inject constructor(
      * [kotlinx.coroutines.flow.distinctUntilChanged] keeps writes to unrelated settings, which the
      * store also emits on, from re-sorting the grid for nothing.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observeSortMode() {
         viewModelScope.launch {
             context.settingsDataStore.data
@@ -240,23 +272,47 @@ class AlbumsViewModel @Inject constructor(
                 }
                 .distinctUntilChanged()
                 .catch { emit(AlbumSortMode.Default to emptyList()) }
-                .collect { (mode, order) ->
+                .flatMapLatest { (mode, order) ->
+                    newestPhotoTimes(mode).map { newest -> Triple(mode, order, newest) }
+                }
+                .collect { (mode, order, newest) ->
                     sortMode.value = mode
                     customOrder.value = order
+                    newestPhoto.value = newest
                     _uiState.update { it.copy(albums = applySort(it.albums), albumSortMode = mode) }
                 }
         }
     }
+
+    /** The newest photo time of each album while the grid sorts by it; nothing in any other mode. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun newestPhotoTimes(mode: AlbumSortMode): Flow<Map<String, Long>> =
+        if (mode != AlbumSortMode.NewestPhoto) {
+            flowOf(emptyMap())
+        } else {
+            accountManager.getPrimaryUserId().flatMapLatest { userId ->
+                if (userId == null) flowOf(emptyMap())
+                else albumOrder.observeNewestPhotoTimes(userId.id).catch { emit(emptyMap()) }
+            }
+        }
 
     /**
      * Track how each album and folder lists its photos, so a card's drawer can tick the choice in
      * force for that card. Its own collector rather than a member of the pair above: that pair orders
      * the grid, this orders what is inside an album, and the two are set from different places.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observeViewChoices() {
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { PhotoViewChoices.from(it) }
+            val albumModes = accountManager.getPrimaryUserId().flatMapLatest { userId ->
+                if (userId == null) flowOf(emptyMap())
+                else albumOrder.observeModes(userId.id)
+                    .map { modes -> modes.mapNotNull { (album, word) -> AlbumPhotoSortMode.fromWord(word)?.let { album to it } }.toMap() }
+                    .catch { emit(emptyMap()) }
+            }
+            combine(context.settingsDataStore.data.map { PhotoViewChoices.from(it) }, albumModes) { choices, modes ->
+                choices.copy(albumModes = modes)
+            }
                 .distinctUntilChanged()
                 .catch { emit(PhotoViewChoices()) }
                 .collect { choices -> _uiState.update { it.copy(viewChoices = choices) } }
@@ -338,14 +394,21 @@ class AlbumsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.data
                 .map { prefs ->
-                    (prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()) to
-                        (prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet())
+                    Triple(
+                        prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet(),
+                        prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet(),
+                        prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true,
+                    )
                 }
                 .distinctUntilChanged()
-                .catch { emit(emptySet<String>() to emptySet()) }
-                .collect { (hidden, timelineExcluded) ->
+                .catch { emit(Triple(emptySet(), emptySet(), false)) }
+                .collect { (hidden, timelineExcluded, hideAll) ->
                     _uiState.update {
-                        it.copy(hiddenAlbumIds = hidden, timelineExcludedAlbumIds = timelineExcluded)
+                        it.copy(
+                            hiddenAlbumIds = hidden,
+                            timelineExcludedAlbumIds = timelineExcluded,
+                            timelineHideAll = hideAll,
+                        )
                     }
                 }
         }
@@ -458,7 +521,10 @@ class AlbumsViewModel @Inject constructor(
     /** Persist the direction [albumLinkId] lists its photos in, the same choice the album's own screen
      *  writes, so a direction set from its card and one set inside it are one choice. */
     fun setAlbumPhotoSortMode(albumLinkId: String, mode: AlbumPhotoSortMode) {
-        viewModelScope.launch { PhotoViewChoiceStore.setAlbumSort(context, albumLinkId, mode) }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { albumOrder.setMode(userId.id, albumLinkId, mode.word) }
+        }
     }
 
     /** Persist the span of dates [albumLinkId]'s headers gather, the same choice the album's own
@@ -469,11 +535,19 @@ class AlbumsViewModel @Inject constructor(
 
     fun refresh() = loadAlbums()
 
+    /** The user's pull: the shared backup is brought up to date as well, in the background. */
+    fun pullRefresh() {
+        sharedBackup.refresh()
+        refresh()
+    }
+
     fun loadAlbums() {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             // Phase 1: instant cache read so the grid paints on cold/airplane-mode launch.
             val cached = runCatching { driveRepo.loadAlbumsCached() }.getOrNull().orEmpty()
+            ensureActive()
             if (cached.isNotEmpty()) {
                 _uiState.update { it.copy(isLoading = false, albums = applySort(cached)) }
             }
@@ -488,6 +562,7 @@ class AlbumsViewModel @Inject constructor(
             // left sitting in the add-to-album picker. A failure inside the read also surfaces as
             // empty and briefly clears the picker, which the next successful read restores.
             val sharedAddable = runCatching { driveRepo.loadSharedAddableAlbumsCached() }.getOrDefault(emptyList())
+            ensureActive()
             _uiState.update { it.copy(sharedAddableAlbums = sharedAddable) }
 
             // Phase 2: network refresh, online only — else keep the painted cache.
@@ -505,15 +580,18 @@ class AlbumsViewModel @Inject constructor(
             }
             runCatching { driveRepo.loadAlbums(userId) }.fold(
                 onSuccess = { albums ->
+                    ensureActive()
                     _uiState.update { it.copy(isLoading = false, albums = applySort(albums)) }
                     // Fire-and-forget membership prefetch so a later album-open paints from cache.
                     // Delayed 5 s so foreground gallery decrypts get first crack at the network semaphore.
-                    viewModelScope.launch {
+                    membershipPrefetchJob?.cancel()
+                    membershipPrefetchJob = viewModelScope.launch {
                         kotlinx.coroutines.delay(5_000)
                         runCatching { driveRepo.prefetchAlbumsMembership(userId, albums) }
                     }
                 },
                 onFailure = { e ->
+                    ensureActive()
                     val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                     _uiState.update {
                         it.copy(
@@ -669,11 +747,16 @@ class AlbumsViewModel @Inject constructor(
      * the same edit keeps the flip atomic.
      */
     fun toggleAlbumHiddenFromTimeline(albumLinkId: String) {
+        val allAlbumIds = _uiState.value.albums.mapTo(HashSet()) { it.linkId }
         viewModelScope.launch {
             context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-                prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] =
-                    AlbumTimelineHide.toggled(current, albumLinkId)
+                val stored = AlbumTimelineHide.Stored(
+                    prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet(),
+                    prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true,
+                )
+                val next = AlbumTimelineHide.toggled(stored, albumLinkId, allAlbumIds)
+                prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = next.excludedAlbumIds
+                if (stored.hideAll && !next.hideAll) prefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
             }
         }
     }

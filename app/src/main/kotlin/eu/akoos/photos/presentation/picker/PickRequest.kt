@@ -28,7 +28,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import eu.akoos.photos.MainActivity
+import eu.akoos.photos.MainHostActivity
 
 /**
  * What an app asking for a photo will take: the MIME patterns it named and whether it accepts more
@@ -98,7 +98,7 @@ fun pickResultIntent(uris: List<Uri>, mimeTypes: List<String>): Intent {
 object ExternalPicker {
 
     private fun entry(context: Context) =
-        ComponentName(context, "${MainActivity::class.java.name.substringBeforeLast('.')}.PickPhotoEntry")
+        ComponentName(context, "${MainHostActivity::class.java.name.substringBeforeLast('.')}.PickPhotoEntry")
 
     fun isEnabled(context: Context): Boolean =
         context.packageManager.getComponentEnabledSetting(entry(context)) ==

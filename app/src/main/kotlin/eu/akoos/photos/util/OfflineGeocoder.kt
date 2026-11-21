@@ -70,10 +70,97 @@ object OfflineGeocoder {
     )
 
     private class Db(
-        val lat: FloatArray,
-        val lon: FloatArray,
+        val nearest: NearestCityIndex,
         val rows: List<CityRow>,
     )
+
+    /**
+     * Nearest city lookup over the city coordinates, kept sorted by latitude. A query starts at its own
+     * latitude and walks outwards in both directions, and stops once the latitude gap alone is larger
+     * than the best distance found, since no city further out can be closer. It answers exactly what a
+     * scan of every city answers ([nearestByScan]), the lowest index on a tie included, while reading a
+     * few hundred cities instead of all of them; with a hundred thousand located photos, a scan of every
+     * city per photo takes seconds.
+     */
+    internal class NearestCityIndex(lat: FloatArray, lon: FloatArray) {
+        private val order: IntArray = lat.indices.sortedBy { lat[it] }.toIntArray()
+        private val sortedLat = FloatArray(order.size) { lat[order[it]] }
+        private val sortedLon = FloatArray(order.size) { lon[order[it]] }
+
+        /** Index of the city nearest to [latitude]/[longitude] (equirectangular, longitude scaled by
+         *  cos(latitude)), or -1 when there is none or a coordinate is not finite. */
+        fun nearest(latitude: Double, longitude: Double): Int {
+            if (order.isEmpty() || !latitude.isFinite() || !longitude.isFinite()) return -1
+            val cosLat = cos(Math.toRadians(latitude))
+            // First position whose latitude is at least the query's.
+            var lo = 0
+            var hi = order.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (sortedLat[mid] < latitude) lo = mid + 1 else hi = mid
+            }
+            var best = -1
+            var bestDist = Double.MAX_VALUE
+            var up = lo
+            var down = lo - 1
+            while (up < order.size || down >= 0) {
+                var advanced = false
+                if (up < order.size) {
+                    val dLat = sortedLat[up] - latitude
+                    // Equal gap still reads on: a city straight north can tie and carry a lower index.
+                    if (dLat * dLat <= bestDist) {
+                        val dLon = (sortedLon[up] - longitude) * cosLat
+                        val dist = dLat * dLat + dLon * dLon
+                        val index = order[up]
+                        if (dist < bestDist || (dist == bestDist && index < best)) {
+                            bestDist = dist
+                            best = index
+                        }
+                        up++
+                        advanced = true
+                    } else {
+                        up = order.size
+                    }
+                }
+                if (down >= 0) {
+                    val dLat = sortedLat[down] - latitude
+                    if (dLat * dLat <= bestDist) {
+                        val dLon = (sortedLon[down] - longitude) * cosLat
+                        val dist = dLat * dLat + dLon * dLon
+                        val index = order[down]
+                        if (dist < bestDist || (dist == bestDist && index < best)) {
+                            bestDist = dist
+                            best = index
+                        }
+                        down--
+                        advanced = true
+                    } else {
+                        down = -1
+                    }
+                }
+                if (!advanced) break
+            }
+            return best
+        }
+    }
+
+    /** The scan of every city that [NearestCityIndex] answers like; kept for the test that pins the two
+     *  together. */
+    internal fun nearestByScan(lat: FloatArray, lon: FloatArray, latitude: Double, longitude: Double): Int {
+        val cosLat = cos(Math.toRadians(latitude))
+        var best = -1
+        var bestDist = Double.MAX_VALUE
+        for (i in lat.indices) {
+            val dLat = lat[i] - latitude
+            val dLon = (lon[i] - longitude) * cosLat
+            val dist = dLat * dLat + dLon * dLon
+            if (dist < bestDist) {
+                bestDist = dist
+                best = i
+            }
+        }
+        return best
+    }
 
     @Volatile private var db: Db? = null
 
@@ -98,23 +185,11 @@ object OfflineGeocoder {
         }
 
     /**
-     * Equirectangular nearest-neighbour: a degree of longitude shrinks toward the poles, so scale the
-     * longitude delta by cos(latitude) before comparing. Squared distance is enough to rank; ~34k points
-     * is a sub-millisecond linear scan.
+     * Equirectangular nearest-neighbour: a degree of longitude shrinks toward the poles, so the longitude
+     * delta is scaled by cos(latitude) before comparing; see [NearestCityIndex].
      */
     private fun nearestRow(d: Db, latitude: Double, longitude: Double): CityRow? {
-        val cosLat = cos(Math.toRadians(latitude))
-        var best = -1
-        var bestDist = Double.MAX_VALUE
-        for (i in d.lat.indices) {
-            val dLat = d.lat[i] - latitude
-            val dLon = (d.lon[i] - longitude) * cosLat
-            val dist = dLat * dLat + dLon * dLon
-            if (dist < bestDist) {
-                bestDist = dist
-                best = i
-            }
-        }
+        val best = d.nearest.nearest(latitude, longitude)
         return if (best < 0) null else d.rows[best]
     }
 
@@ -183,7 +258,7 @@ object OfflineGeocoder {
             lats[i] = rows[i].latitude.toFloat()
             lons[i] = rows[i].longitude.toFloat()
         }
-        return Db(lat = lats, lon = lons, rows = rows)
+        return Db(nearest = NearestCityIndex(lats, lons), rows = rows)
     }
 
     /**

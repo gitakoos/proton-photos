@@ -32,6 +32,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.db.dao.LocalExifCheckDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
@@ -305,6 +306,7 @@ class MetadataEditorViewModel @Inject constructor(
     private val writeMetadata: WriteLocalPhotoMetadataUseCase,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
+    private val localExifCheckDao: LocalExifCheckDao,
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultEditor: HiddenVaultEditor,
     private val localMediaRepository: LocalMediaRepository,
@@ -1142,9 +1144,11 @@ class MetadataEditorViewModel @Inject constructor(
      * Removing it both clears the stale point from the live map query and puts the file back in the
      * backfill's queue, where it re-reads the place the write just stored. Only the ids the landed
      * write actually made stale are dropped ([staleLocationIds]); a delete failure leaves the written
-     * file intact and costs a stale point until the row is dropped again.
+     * file intact and costs a stale point until the row is dropped again. The files' EXIF-walk checks
+     * go too, so a place written into a file that had none is read even if its modified time held.
      */
     private suspend fun invalidateStoredLocations(uris: List<String>) {
+        runCatching { uris.forEachSqlChunk { localExifCheckDao.deleteByUris(it) } }
         val ids = staleLocationIds(boundItems, uris.toSet())
         if (ids.isEmpty()) return
         // Signed out, drop the row from the local partition so the backfill re-reads the new place.

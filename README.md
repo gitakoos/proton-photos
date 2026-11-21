@@ -128,7 +128,7 @@ app/src/main/kotlin/eu/akoos/photos/
 ├── worker/           WorkManager workers
 ├── service/          Background-sync service + boot receiver + screenshot quick-action overlay
 ├── widget/           Home-screen widget (4 modes incl. Cloud Photos from encrypted cache)
-└── App.kt + MainActivity.kt
+└── App.kt + MainHostActivity.kt
 ```
 
 ## Tech stack
@@ -182,6 +182,10 @@ Plus the layers around them:
 - `presentation/`: Jetpack Compose UI (gallery, viewer, editor, albums, settings, …) and ViewModels.
 
 No private endpoints, no undocumented APIs, no obfuscation (`-dontobfuscate` in `proguard-rules.pro` so the released APK can be byte-compared to a fresh build from this source).
+
+## Contributing
+
+Development happens on the [`beta`](https://github.com/gitakoos/proton-photos/tree/beta) branch. `main` holds the stable releases and `preview` the test builds. Pull requests go against `beta`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, the commit rules and how pull requests are reviewed.
 
 ## Disclaimer
 

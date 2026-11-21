@@ -24,7 +24,6 @@ package eu.akoos.photos.widget
 
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -55,7 +54,7 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import java.io.File
-import eu.akoos.photos.MainActivity
+import eu.akoos.photos.MainHostActivity
 
 class PhotoWidget : GlanceAppWidget() {
 
@@ -73,25 +72,25 @@ class PhotoWidget : GlanceAppWidget() {
         val currentUri = prefs[PhotoWidgetKeys.CURRENT_URI]
 
         // Light/dark surfaces follow the system. The image (when present) covers the full
-        // background, so the bg only shows during the placeholder state — but we still want
+        // background, so the bg only shows during the placeholder state - but we still want
         // that placeholder to be legible on both light and dark home screens.
         val isLight = isSystemLight()
         val backgroundColor = if (isLight) Color(0xFFF5F5F5) else Color(0xFF0E0E0E)
         val placeholderColor = if (isLight) Color(0xFF4A4A55) else Color(0xFFA4A1B4)
 
-        // Tap target: open MainActivity with the current photo's URI so the gallery can
+        // Tap target: open MainHostActivity with the current photo's URI so the gallery can
         // route straight to the viewer for that photo. The CURRENT_URI prefs key gets
         // rewritten every widget tick by PhotoWidgetUpdater, so the intent always opens
         // whatever the widget is showing right now.
         val context = LocalContext.current
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = Intent(context, MainHostActivity::class.java).apply {
             // CLEAR_TOP + SINGLE_TOP so a foreground app doesn't pile up a second instance
-            // — onNewIntent picks up the URI in MainActivity and re-forwards to NavGraph.
+            // - onNewIntent picks up the URI in MainHostActivity and re-forwards to NavGraph.
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (currentUri != null) {
-                putExtra(MainActivity.EXTRA_WIDGET_PHOTO_URI, currentUri)
+                putExtra(MainHostActivity.EXTRA_WIDGET_PHOTO_URI, currentUri)
             }
         }
 
@@ -141,7 +140,7 @@ class PhotoWidget : GlanceAppWidget() {
     companion object {
         /**
          * Re-decoding a 480px JPEG from disk on every recompose (every state read, every
-         * configuration change) costs ~5–15ms and a fresh allocation each time. Cache the
+         * configuration change) costs ~5-15ms and a fresh allocation each time. Cache the
          * decoded Bitmap keyed by absolute path + lastModified so the next widget update with
          * the same file reuses it. The worker rewrites the file when it advances to the next
          * photo, which changes lastModified ⇒ stale entries are dropped automatically.
@@ -158,7 +157,7 @@ class PhotoWidget : GlanceAppWidget() {
             if (!file.exists()) return null
             val key = "$path|${file.lastModified()}"
             bitmapCache.get(key)?.let { return it }
-            val decoded = runCatching { BitmapFactory.decodeFile(path) }.getOrNull() ?: return null
+            val decoded = runCatching { eu.akoos.photos.data.localcrypto.LocalFiles.decodeBitmap(null, file) }.getOrNull() ?: return null
             bitmapCache.put(key, decoded)
             return decoded
         }

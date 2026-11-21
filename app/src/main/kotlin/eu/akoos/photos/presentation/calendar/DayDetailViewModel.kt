@@ -33,12 +33,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
@@ -77,7 +80,7 @@ class DayDetailViewModel @Inject constructor(
      *  key the gallery uses. */
     private val hiddenUrisFlow = context.settingsDataStore.data.map {
         it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     init {
         viewModelScope.launch {
@@ -110,16 +113,19 @@ class DayDetailViewModel @Inject constructor(
                         _uiState.update { it.copy(isLoading = false, items = emptyList(), meta = null) }
                         return@collect
                     }
-                    val dayItems = data.items
-                        .filter { item ->
-                            val uri = when (item) {
-                                is GalleryItem.LocalOnly -> item.local.uri
-                                is GalleryItem.Synced -> item.local.uri
-                                is GalleryItem.CloudOnly -> null
+                    // A date check per photo of the whole library: off the main thread.
+                    val dayItems = withContext(Dispatchers.Default) {
+                        data.items
+                            .filter { item ->
+                                val uri = when (item) {
+                                    is GalleryItem.LocalOnly -> item.local.uri
+                                    is GalleryItem.Synced -> item.local.uri
+                                    is GalleryItem.CloudOnly -> null
+                                }
+                                (uri == null || uri !in data.hiddenUris) && isInDay(item.captureTimeMs, date)
                             }
-                            (uri == null || uri !in data.hiddenUris) && isInDay(item.captureTimeMs, date)
-                        }
-                        .sortedByDescending { it.captureTimeMs }
+                            .sortedByDescending { it.captureTimeMs }
+                    }
                     val meta = data.meta
                     _uiState.update {
                         it.copy(

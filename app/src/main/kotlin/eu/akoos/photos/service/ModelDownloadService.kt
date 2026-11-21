@@ -43,6 +43,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
 import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
+import eu.akoos.photos.data.sharedbackup.FirstScanDriveGate
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
@@ -56,6 +58,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
 import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.data.semantic.SemanticModelManager
+import eu.akoos.photos.data.semantic.SemanticModelOutcome
 import eu.akoos.photos.data.semantic.SemanticModelPreparation
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.util.ModelDownloadKind
@@ -97,6 +100,7 @@ class ModelDownloadService : Service() {
 
     @Inject lateinit var downloadState: ModelDownloadState
     @Inject lateinit var faceIndexingScheduler: FaceIndexingScheduler
+    @Inject lateinit var firstScanGate: FirstScanDriveGate
     @Inject lateinit var semanticIndexingScheduler: SemanticIndexingScheduler
     @Inject lateinit var accountManager: AccountManager
 
@@ -197,7 +201,7 @@ class ModelDownloadService : Service() {
         val userId = runCatching { accountManager.getPrimaryUserId().first() }.getOrNull()
         val total = totalFor(kind)
         // Reaching here means the user accepted the prompt, so record the consent the managers also check.
-        runCatching { settingsDataStore.edit { it[consentKeyFor(kind)] = true } }
+        consentKeyFor(kind)?.let { key -> runCatching { settingsDataStore.edit { it[key] = true } } }
         lastNotifiedBytes = -1L
         downloadState.running(kind, 0L, total)
         postNotification(buildNotification(kind, 0L, total))
@@ -248,6 +252,9 @@ class ModelDownloadService : Service() {
             ModelDownloadKind.SEMANTIC ->
                 SemanticModelManager(this)
                     .ensureDownloaded(onProgress = { onProgress(it) }) is SemanticModelPreparation.Ready
+            ModelDownloadKind.SEMANTIC_TEXT ->
+                SemanticModelManager(this)
+                    .ensureTextDownloaded(onProgress = { onProgress(it) }) is SemanticModelOutcome.Ready
         }
 
     /** Turn the feature on and kick its indexer, so a verified download flows straight into use. */
@@ -255,17 +262,21 @@ class ModelDownloadService : Service() {
         when (kind) {
             ModelDownloadKind.FACE -> {
                 runCatching { settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true } }
-                faceIndexingScheduler.requestIndex(userId)
+                val scheduler = faceIndexingScheduler
+                firstScanGate.startFirstScan(MlDriveFileKind.FACES, userId) { scheduler.requestIndex(userId) }
             }
             ModelDownloadKind.OCR ->
                 runCatching { settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = true } }
             ModelDownloadKind.SEMANTIC -> {
                 runCatching { settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = true } }
-                // Fire-and-forget on the scheduler's own scope (like the face branch), so marking the
-                // download done and tearing the notification down does not wait out the whole first
-                // indexing pass. requestIndex clears any pause and starts the walk.
-                semanticIndexingScheduler.requestIndex(userId)
+                // Fire-and-forget on the app's scope (like the face branch), so marking the download done
+                // and tearing the notification down waits out neither the Drive copies nor the first pass.
+                // requestIndex clears any pause and starts the walk.
+                val scheduler = semanticIndexingScheduler
+                firstScanGate.startFirstScan(MlDriveFileKind.SEARCH, userId) { scheduler.requestIndex(userId) }
             }
+            // Only the query side of search: no switch is turned on and nothing is indexed.
+            ModelDownloadKind.SEMANTIC_TEXT -> Unit
         }
     }
 
@@ -329,19 +340,24 @@ class ModelDownloadService : Service() {
     private fun totalFor(kind: ModelDownloadKind): Long = when (kind) {
         ModelDownloadKind.FACE -> FaceModelAssets.TOTAL_DOWNLOAD_BYTES
         ModelDownloadKind.OCR -> 0L
-        ModelDownloadKind.SEMANTIC -> SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+        ModelDownloadKind.SEMANTIC -> SemanticModelManager(this).missingDownloadBytes()
+            .takeIf { it > 0L } ?: SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+        ModelDownloadKind.SEMANTIC_TEXT -> SemanticModelAssets.TEXT_MODEL.sizeBytes
     }
 
     private fun titleResFor(kind: ModelDownloadKind): Int = when (kind) {
         ModelDownloadKind.FACE -> R.string.model_download_title_face
         ModelDownloadKind.OCR -> R.string.model_download_title_ocr
-        ModelDownloadKind.SEMANTIC -> R.string.model_download_title_semantic
+        ModelDownloadKind.SEMANTIC, ModelDownloadKind.SEMANTIC_TEXT -> R.string.model_download_title_semantic
     }
 
-    private fun consentKeyFor(kind: ModelDownloadKind): Preferences.Key<Boolean> = when (kind) {
+    /** The consent flag a start records, or null for the text-only fetch: it is automatic and is not the
+     *  user's answer to the download prompt, so it must not stand in for it. */
+    private fun consentKeyFor(kind: ModelDownloadKind): Preferences.Key<Boolean>? = when (kind) {
         ModelDownloadKind.FACE -> SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED
         ModelDownloadKind.OCR -> SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED
         ModelDownloadKind.SEMANTIC -> SettingsKeys.SEMANTIC_MODEL_DOWNLOAD_ALLOWED
+        ModelDownloadKind.SEMANTIC_TEXT -> null
     }
 
     companion object {

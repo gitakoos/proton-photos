@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.location
 
+import eu.akoos.photos.presentation.common.snackbarObstacle
+import eu.akoos.photos.presentation.common.snackbarAboveBars
 import android.app.Activity
 import android.net.Uri
 import android.os.Build
@@ -84,6 +86,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -118,7 +121,7 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
 import eu.akoos.photos.presentation.common.offlineTurnsOn
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberStoreThumbnailUrl
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
@@ -184,6 +187,7 @@ fun LocationPhotosContent(
     }
 
     val context = LocalContext.current
+    val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
@@ -295,8 +299,8 @@ fun LocationPhotosContent(
         when (val s = multiStripState) {
             is MultiStripState.Done -> {
                 val msg = if (s.skipped > 0)
-                    context.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
-                else context.getString(R.string.gallery_stripped_metadata, s.stripped)
+                    resources.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
+                else resources.getString(R.string.gallery_stripped_metadata, s.stripped)
                 snackbarHostState.showSnackbar(msg)
                 viewModel.resetMultiStripState()
             }
@@ -329,16 +333,16 @@ fun LocationPhotosContent(
     }
 
     // Cover = the newest item's image (the list is sorted newest-first by capture time).
-    // A cloud cover reads its decrypted URL from the shared store first; key on that map so the
-    // cover repaints when the decrypt lands.
-    val thumbUrls = LocalThumbnailUrls.current.value
-    val coverModel: Any? = remember(state.items, thumbUrls) {
+    // A cloud cover reads its decrypted URL from the shared store first, its own entry only, so the
+    // cover repaints when its decrypt lands and a thumbnail landing elsewhere leaves the screen alone.
+    val coverStoreUrl by rememberStoreThumbnailUrl((state.items.firstOrNull() as? GalleryItem.CloudOnly)?.cloud?.linkId)
+    val coverModel: Any? = remember(state.items, coverStoreUrl) {
         state.items.firstOrNull()?.let { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                 is GalleryItem.Synced -> Uri.parse(item.local.uri)
                 is GalleryItem.CloudOnly ->
-                    (thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
+                    (coverStoreUrl ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
             }
         }
     }
@@ -377,6 +381,7 @@ fun LocationPhotosContent(
             val fmt = monthYearFormat()
             locationGridRows(photos, TimeZone.getDefault()) { fmt.format(Date(it)) }
         }
+        eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, photos) { locationCellKey(it) }
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -612,7 +617,7 @@ fun LocationPhotosContent(
                         onClick = {
                             viewModel.backUpSelected { queued ->
                                 if (queued > 0) scope.launch {
-                                    snackbarHostState.showSnackbar(context.getString(R.string.backup_started))
+                                    snackbarHostState.showSnackbar(resources.getString(R.string.backup_started))
                                 }
                             }
                         },
@@ -628,9 +633,9 @@ fun LocationPhotosContent(
                         onClick = {
                             viewModel.downloadSelected { succeeded, failed ->
                                 val msg = when {
-                                    failed > 0 -> context.getString(R.string.gallery_download_partial, succeeded, failed)
-                                    succeeded == 1 -> context.getString(R.string.gallery_download_done_singular)
-                                    else -> context.getString(R.string.gallery_download_done, succeeded)
+                                    failed > 0 -> resources.getString(R.string.gallery_download_partial, succeeded, failed)
+                                    succeeded == 1 -> resources.getString(R.string.gallery_download_done_singular)
+                                    else -> resources.getString(R.string.gallery_download_done, succeeded)
                                 }
                                 scope.launch { snackbarHostState.showSnackbar(msg) }
                             }
@@ -710,7 +715,7 @@ fun LocationPhotosContent(
             onDismiss = { viewModel.clearSelection() },
             // Scrolling the grid collapses the drawer, so reaching past it to carry on through the
             // photos needs no deliberate pull or tap first.
-            contentScrolling = gridState.isScrollInProgress,
+            contentScrollingProvider = { gridState.isScrollInProgress },
             modifier = Modifier.align(Alignment.BottomCenter),
             selectAllCount = selectAllCount,
             onSelectAll = if (selectAllCount != null) {
@@ -736,6 +741,7 @@ fun LocationPhotosContent(
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
+                modifier = Modifier.snackbarObstacle(),
                 diameter = 44.dp,
                 iconSize = 24.dp,
                 background = PillBg,
@@ -746,7 +752,7 @@ fun LocationPhotosContent(
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier.align(Alignment.BottomCenter).snackbarAboveBars(),
         )
 
         // A full-screen host gets the back button over the hero, then the floating header with the

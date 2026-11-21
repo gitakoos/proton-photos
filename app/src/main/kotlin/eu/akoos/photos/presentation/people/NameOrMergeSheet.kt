@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -123,7 +124,8 @@ fun rememberGroupSubject(person: PersonUi): NameOrMergeSubject.Group {
  * person picked, or typed, only after a confirm, since a merge cannot be split back apart automatically.
  * A selection's faces go together to the person picked or typed, and its photos without a face follow;
  * a new name is offered only while at least one face is chosen, since a person with no face shows up
- * nowhere.
+ * nowhere. A selection with no face chosen can go to several people at once ([NameOrMergeRules.picksSeveral]),
+ * ticked in the picker and added together.
  *
  * On success [onDone] gets the person the subject now belongs to and the sheet closes; a failure keeps it
  * open with a short message. For a group, "See photos" hands [onOpenGroup] its id and closes the sheet.
@@ -138,6 +140,7 @@ fun NameOrMergeSheet(
 ) {
     val viewModel: NameOrMergeViewModel = hiltViewModel()
     val context = LocalContext.current
+    val resources = LocalResources.current
     // A selection's key spans all its photos, so it is built once per subject.
     val subjectKey = remember(subject) { subject.key }
     val people by viewModel.people.collectAsStateWithLifecycle()
@@ -150,7 +153,7 @@ fun NameOrMergeSheet(
         viewModel.bind(subject)
         viewModel.outcomes.collect { outcome ->
             if (outcome.subjectKey != subjectKey) return@collect
-            Toast.makeText(context, context.getString(outcome.message), Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, resources.getString(outcome.message), Toast.LENGTH_SHORT).show()
             if (outcome is NameOrMergeViewModel.Outcome.Done) {
                 currentOnDone(outcome.personId)
                 currentOnDismiss()
@@ -181,6 +184,11 @@ fun NameOrMergeSheet(
     // Without a new name to offer, the field only searches and the empty list says how to get one.
     val canCreate = NameOrMergeRules.canCreate(subject)
     val createNew = { name: String -> create(name) }.takeIf { canCreate }
+    val pickSeveral = (subject as? NameOrMergeSubject.Faces)
+        ?.takeIf { NameOrMergeRules.picksSeveral(it) }
+        ?.let { faces ->
+            { chosen: List<PersonUi> -> if (!working) viewModel.addToPeople(faces, chosen.map { it.personId }) }
+        }
 
     // The confirm opens over the picker rather than in its place, so backing out of it returns to the
     // choice with the typed text still there.
@@ -192,6 +200,7 @@ fun NameOrMergeSheet(
         onCreateNew = createNew,
         searchPlaceholder = if (canCreate) null else stringResource(R.string.people_search_hint),
         emptyText = if (canCreate) null else stringResource(R.string.add_to_person_needs_face),
+        onPickSeveral = pickSeveral,
         header = {
             NameOrMergeHeader(
                 subject = subject,

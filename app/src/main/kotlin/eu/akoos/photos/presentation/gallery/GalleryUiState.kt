@@ -112,6 +112,8 @@ data class GalleryUiState(
     /** Photo keys ([GalleryItem.stableId]) the selected person appears in. [applyFilter] keeps only
      *  feed items in this set while [selectedPersonId] is non-null, composing like the Offline set. */
     val personPhotoKeys: Set<String> = emptySet(),
+    /** The account's labels with their photo counts, most used first, for the label filter. */
+    val labelUsage: List<eu.akoos.photos.data.db.dao.LabelUsage> = emptyList(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)
@@ -121,6 +123,39 @@ data class GalleryUiState(
     val isSelectionMode: Boolean get() = selectedItems.isNotEmpty()
     val selectedCount: Int get() = selectedItems.size
 }
+
+/**
+ * The fast-changing back-up and transfer flags: they move with every uploaded photo, so they live in
+ * their own flow ([GalleryViewModel.progress]) and only the avatar and the progress pill read them,
+ * rather than the whole screen recomposing beside its full-library lists on each tick.
+ */
+data class GalleryProgress(
+    val isSyncing: Boolean = false,
+    val hasActiveUpload: Boolean = false,
+    val hasActiveDownload: Boolean = false,
+    val uploadDoneIdx: Int = 0,
+    val uploadTotalCount: Int = 0,
+)
+
+internal fun GalleryUiState.progress() = GalleryProgress(
+    isSyncing = isSyncing,
+    hasActiveUpload = hasActiveUpload,
+    hasActiveDownload = hasActiveDownload,
+    uploadDoneIdx = uploadDoneIdx,
+    uploadTotalCount = uploadTotalCount,
+)
+
+/** This state with the fields [progress] carries reset, so two states that differ only in back-up
+ *  ticks compare equal. */
+internal fun GalleryUiState.withoutProgress() = copy(
+    isSyncing = false,
+    hasActiveUpload = false,
+    hasActiveDownload = false,
+    uploadDoneIdx = 0,
+    uploadTotalCount = 0,
+    pendingUploadCount = 0,
+    uploadedCount = 0,
+)
 
 sealed class MultiDeleteState {
     data object Idle    : MultiDeleteState()
@@ -203,7 +238,15 @@ data class ContentFilter(
     // of the year, month and day above, which cannot hold such a run; picking a date there clears it.
     val dateFrom: LocalDate? = null,
     val dateTo: LocalDate? = null,
-)
+    // The labels photos must carry, by their folded key ([eu.akoos.photos.util.LabelNormalizer.fold]): any of
+    // them, or every one when [labelsMatchAll] is set. Set them through [withLabels].
+    val labelKeys: Set<String> = emptySet(),
+    val labelsMatchAll: Boolean = false,
+) {
+    /** This filter narrowed to [keys]; matching every label only means something with two or more. */
+    fun withLabels(keys: Set<String>, matchAll: Boolean = labelsMatchAll): ContentFilter =
+        copy(labelKeys = keys, labelsMatchAll = matchAll && keys.size >= 2)
+}
 
 enum class MediaType { All, PhotosOnly, VideosOnly }
 enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly, Offline }
@@ -239,13 +282,14 @@ data class FaceBox(
 
 /**
  * Adapt a domain [eu.akoos.photos.domain.model.PersonSummary] to the UI [PersonUi], dropping a person
- * with no resolvable cover (so a tile never renders blank). Shared by every surface that lists people.
+ * with no resolvable cover (so a tile never renders blank). A reserved hidden-group name reads as no name.
+ * Shared by every surface that lists people.
  */
 fun eu.akoos.photos.domain.model.PersonSummary.toPersonUi(): PersonUi? {
     val cover = coverPhotoKey ?: return null
     return PersonUi(
         personId = personId,
-        displayName = displayName,
+        displayName = eu.akoos.photos.domain.usecase.HiddenPersonToken.visibleName(displayName),
         coverPhotoKey = cover,
         faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
         faceCount = faceCount,

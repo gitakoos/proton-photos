@@ -152,6 +152,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -302,6 +303,7 @@ fun VideoEditorScreen(
     var showSaveSheet by remember { mutableStateOf(false) }
     val saveSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
+    val resources = LocalResources.current
 
     androidx.compose.runtime.LaunchedEffect(localUri, cloudPhoto?.linkId, externalRequest?.uri) {
         when {
@@ -404,7 +406,7 @@ fun VideoEditorScreen(
         if (state.savedAsCopy) {
             android.widget.Toast.makeText(
                 context,
-                context.getString(R.string.editor_saved_as_copy),
+                resources.getString(R.string.editor_saved_as_copy),
                 android.widget.Toast.LENGTH_LONG,
             ).show()
             vm.consumeSavedAsCopy()
@@ -417,7 +419,7 @@ fun VideoEditorScreen(
             is FrameGrabResult.Success -> {
                 android.widget.Toast.makeText(
                     context,
-                    context.getString(R.string.video_editor_frame_saved),
+                    resources.getString(R.string.video_editor_frame_saved),
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
                 vm.consumeFrameGrabResult()
@@ -454,7 +456,7 @@ fun VideoEditorScreen(
                 parameters = buildUponParameters().setMaxVideoSize(1920, 1080).build()
             }
             ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).setTrackSelector(trackSelector).build().apply {
-                setMediaItem(MediaItem.fromUri(Uri.parse(sourceUri)))
+                setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(sourceUri))))
                 prepare()
                 // Start with playWhenReady=true so the renderer immediately decodes and
                 // paints frame 0 to the surface — the listener below pauses on first
@@ -528,7 +530,7 @@ fun VideoEditorScreen(
                     val uri = state.sources.firstOrNull()?.uri ?: state.sourceUri
                     if (uri != null) {
                         runCatching {
-                            p.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                            p.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                             p.repeatMode = ExoPlayer.REPEAT_MODE_ONE
                             p.prepare()
                         }
@@ -544,7 +546,7 @@ fun VideoEditorScreen(
             val items = keptNow.mapNotNull { c ->
                 val uri = state.sources.uriOf(c.sourceId) ?: return@mapNotNull null
                 val srcDur = state.sources.durationOf(c.sourceId)
-                val base = MediaItem.fromUri(Uri.parse(uri))
+                val base = MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri)))
                 val start = c.startMs.coerceAtLeast(0L)
                 // Clamp the end to the real source duration (a reported length can run a few ms past the
                 // container, and endPositionMs >= the true duration trips a ClippingMediaSource assertion);
@@ -605,7 +607,7 @@ fun VideoEditorScreen(
         kotlinx.coroutines.delay(150)
         val end = state.audioTrimEndMs.coerceAtLeast(state.audioTrimStartMs + 1L)
         ov.setMediaItem(
-            MediaItem.fromUri(Uri.parse(uri)).buildUpon()
+            MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))).buildUpon()
                 .setClippingConfiguration(
                     MediaItem.ClippingConfiguration.Builder()
                         .setStartPositionMs(state.audioTrimStartMs.coerceAtLeast(0L))
@@ -1235,7 +1237,7 @@ private fun IconBubble(onClick: () -> Unit, content: @Composable () -> Unit) {
 
 @Composable
 private fun VideoToolTab(tool: VideoTool, selected: Boolean, onClick: () -> Unit) {
-    val label = LocalContext.current.getString(tool.labelRes)
+    val label = stringResource(tool.labelRes)
     // The selection fills in and the icon springs up a touch, so switching tools reads as a
     // deliberate move rather than an instant swap.
     val bgAlpha by animateFloatAsState(if (selected) 0.22f else 0f, tween(200), label = "video_tab_bg")
@@ -1281,6 +1283,7 @@ private fun TrimPanel(
     /** Opens the in-app video picker for the "+" menu's "Add video". */
     onAddVideoRequested: () -> Unit,
 ) {
+    val context = LocalContext.current
     val duration = state.durationMs.coerceAtLeast(1L)
     // The clips in play order, and the played (edited) length.
     val clips = resolveClips(state.clips, state.sources)
@@ -1343,7 +1346,7 @@ private fun TrimPanel(
                         val uri = liveSources.uriOf(cur.sourceId)
                         if (uri != null) {
                             runCatching {
-                                p.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                                p.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                                 p.prepare()
                                 p.seekTo(cur.startMs.coerceAtLeast(0L))
                             }
@@ -1431,7 +1434,7 @@ private fun TrimPanel(
             val uri = state.sources.uriOf(srcId)
             if (uri != null) {
                 runCatching {
-                    previewPlayer?.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                    previewPlayer?.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                     previewPlayer?.prepare()
                     previewPlayer?.seekTo(target)
                 }
@@ -1458,7 +1461,7 @@ private fun TrimPanel(
             val uri = state.sources.uriOf(clip.sourceId)
             if (uri != null) {
                 runCatching {
-                    previewPlayer?.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                    previewPlayer?.setMediaItem(MediaItem.fromUri(eu.akoos.photos.data.localcrypto.VaultFiles.readableUri(context, Uri.parse(uri))))
                     previewPlayer?.prepare()
                     previewPlayer?.seekTo(target)
                 }
@@ -1482,7 +1485,7 @@ private fun TrimPanel(
         }
     }
 
-    val context = LocalContext.current
+    val resources = LocalResources.current
     // "+" can also add music, so a track can be placed straight from the cut track. Same picker the Audio
     // tab uses; the read permission is persisted so a later re-encode still has access.
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -1576,7 +1579,7 @@ private fun TrimPanel(
                         border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
                     ) {
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(context.getString(R.string.video_editor_add_video), color = FgPrimary) },
+                            text = { Text(resources.getString(R.string.video_editor_add_video), color = FgPrimary) },
                             leadingIcon = { Icon(Icons.Default.Add, null, tint = Accent, modifier = Modifier.size(20.dp)) },
                             onClick = { addMenuOpen = false; onAddVideoRequested() },
                         )
@@ -1586,7 +1589,7 @@ private fun TrimPanel(
                         androidx.compose.material3.DropdownMenuItem(
                             text = {
                                 Text(
-                                    context.getString(
+                                    resources.getString(
                                         if (hasMusic) R.string.video_editor_replace_music
                                         else R.string.video_editor_add_music,
                                     ),
@@ -1615,7 +1618,7 @@ private fun TrimPanel(
                     ) {
                         Icon(
                             if (musicMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = context.getString(R.string.video_editor_audio),
+                            contentDescription = resources.getString(R.string.video_editor_audio),
                             tint = if (musicMuted) FgMute else Accent,
                             modifier = Modifier.size(18.dp),
                         )
@@ -1886,7 +1889,7 @@ private fun VideoFilterThumb(
  *  [effectiveColorMatrix4x5]. */
 @Composable
 private fun AdjustPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
-    val context = LocalContext.current
+    val resources = LocalResources.current
     var selected by remember { mutableStateOf(VideoAdjustment.Brightness) }
     val value = selected.value(state)
     val edited = state.hasColorEdits()
@@ -1897,13 +1900,13 @@ private fun AdjustPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
     ) {
         Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.Center) {
             Text(
-                context.getString(selected.labelRes),
+                resources.getString(selected.labelRes),
                 color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1,
             )
             if (edited) {
                 Text(
-                    context.getString(R.string.filter_reset),
+                    resources.getString(R.string.filter_reset),
                     color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -1924,7 +1927,7 @@ private fun AdjustPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
                     val v = adj.value(state)
                     ToolCircle(
                         icon = adj.icon,
-                        label = context.getString(adj.labelRes),
+                        label = resources.getString(adj.labelRes),
                         selected = adj == selected,
                         modified = v != 0,
                         valueText = v.takeIf { it != 0 }?.let { formatAdjustmentValue(it) },
@@ -1976,6 +1979,7 @@ private fun formatAdjustmentValue(v: Int): String = if (v > 0) "+$v" else v.toSt
 @Composable
 private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, previewPlayer: ExoPlayer?) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val appColors = eu.akoos.photos.presentation.theme.AppColors.current
     // Picker for an arbitrary audio file. GetContent shows the system file picker filtered
     // to audio/* — works for MediaStore items, SAF documents, and a number of cloud
@@ -2000,7 +2004,7 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
     ) {
         // Video's own sound: a mute toggle + a volume slider (no percentage, kept clean).
         AudioTrackRow(
-            label = context.getString(R.string.video_editor_audio_original),
+            label = resources.getString(R.string.video_editor_audio_original),
             gain = state.originalAudioGain,
             onGainChange = vm::setOriginalAudioGain,
             onToggleMute = { vm.toggleMute() },
@@ -2019,7 +2023,7 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
             ) {
                 Icon(Icons.Default.MusicNote, null, tint = Accent, modifier = Modifier.size(20.dp))
                 Text(
-                    context.getString(R.string.video_editor_add_music),
+                    resources.getString(R.string.video_editor_add_music),
                     color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                 )
             }
@@ -2040,7 +2044,7 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
                         ) {
                             Icon(
                                 Icons.Default.KeyboardArrowRight,
-                                contentDescription = context.getString(R.string.video_editor_remove_music),
+                                contentDescription = resources.getString(R.string.video_editor_remove_music),
                                 tint = FgMute,
                                 modifier = Modifier.size(22.dp),
                             )
@@ -2053,12 +2057,12 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
                             border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
                         ) {
                             androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(context.getString(R.string.video_editor_replace_music), color = FgPrimary) },
+                                text = { Text(resources.getString(R.string.video_editor_replace_music), color = FgPrimary) },
                                 leadingIcon = { Icon(Icons.Default.SwapHoriz, null, tint = Accent, modifier = Modifier.size(20.dp)) },
                                 onClick = { menuOpen = false; pickAudio.launch("audio/*") },
                             )
                             androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(context.getString(R.string.video_editor_remove_music), color = eu.akoos.photos.presentation.theme.ErrorColor) },
+                                text = { Text(resources.getString(R.string.video_editor_remove_music), color = eu.akoos.photos.presentation.theme.ErrorColor) },
                                 leadingIcon = { Icon(Icons.Default.DeleteOutline, null, tint = eu.akoos.photos.presentation.theme.ErrorColor, modifier = Modifier.size(20.dp)) },
                                 onClick = { menuOpen = false; vm.clearAudioOverlay() },
                             )
@@ -2141,7 +2145,7 @@ private fun AudioTrackRow(
  */
 @Composable
 private fun MuteToggle(muted: Boolean, onClick: () -> Unit) {
-    val context = LocalContext.current
+    val resources = LocalResources.current
     Row(
         modifier = Modifier
             .height(28.dp)
@@ -2158,12 +2162,12 @@ private fun MuteToggle(muted: Boolean, onClick: () -> Unit) {
     ) {
         Icon(
             if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-            contentDescription = context.getString(R.string.video_editor_mute),
+            contentDescription = resources.getString(R.string.video_editor_mute),
             tint = if (muted) Accent else FgDim,
             modifier = Modifier.size(15.dp),
         )
         Text(
-            context.getString(R.string.video_editor_mute),
+            resources.getString(R.string.video_editor_mute),
             color = if (muted) Accent else FgPrimary,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
@@ -2472,7 +2476,7 @@ private fun VideoSaveSheet(
         if (isSaving && progress != null && stage != VideoSaveStage.Idle &&
             stage != VideoSaveStage.Uploading) {
             Text(
-                LocalContext.current.getString(
+                stringResource(
                     when (stage) {
                         VideoSaveStage.Encrypting -> R.string.video_editor_encrypting
                         else -> R.string.video_editor_reencoding

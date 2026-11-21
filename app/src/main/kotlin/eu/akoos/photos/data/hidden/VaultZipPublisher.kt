@@ -60,8 +60,11 @@ class VaultZipPublisher @Inject constructor(
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
         var copied = -1L
         try {
-            resolver.openOutputStream(uri)?.use { out ->
-                source.inputStream().use { input -> copied = input.copyTo(out) }
+            // Forced to the storage before it counts as published: the vault is wiped right after.
+            resolver.openFileDescriptor(uri, "w")?.let { pfd ->
+                android.os.ParcelFileDescriptor.AutoCloseOutputStream(pfd).use { out ->
+                    source.inputStream().use { input -> copied = DurableCopy.copy(input, out) }
+                }
             }
             if (copied != source.length()) {
                 resolver.delete(uri, null, null)
@@ -84,7 +87,9 @@ class VaultZipPublisher @Inject constructor(
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!dir.exists() && !dir.mkdirs()) return false
         val target = File(dir, displayName)
-        source.copyTo(target, overwrite = false)
+        if (target.exists()) return false
+        source.inputStream().use { input -> java.io.FileOutputStream(target).use { DurableCopy.copy(input, it) } }
+        DurableCopy.syncDir(dir)
         if (target.length() != source.length()) {
             target.delete()
             return false

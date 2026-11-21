@@ -63,12 +63,10 @@ import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
-import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.presentation.util.formatBytes
@@ -108,7 +106,8 @@ internal fun shareStarts(selectedCount: Int, state: SelectionShareState): Boolea
  * Owns the selection plus share / add-to-album / back-up / download / offline / hide / delete / strip,
  * including the Android 11+ system-trash and write-permission handshakes and the Undo offer, so the
  * grids do not each re-implement them. Constructed per ViewModel with that ViewModel's scope via the
- * assisted [Factory]; every coroutine runs on [scope], so it dies with the ViewModel.
+ * assisted [Factory]; every coroutine runs on [scope], so it dies with the ViewModel. Downloads and
+ * offline pins are the exception: they run on [GalleryDownloads] and only their result is awaited here.
  *
  * Album and device-folder grids key their selection differently (cloud linkId / device URI) and carry
  * scoped actions, so they keep their own logic and only reuse the shared selection widgets.
@@ -116,14 +115,13 @@ internal fun shareStarts(selectedCount: Int, state: SelectionShareState): Boolea
 class GalleryItemSelectionController @AssistedInject constructor(
     @Assisted private val scope: CoroutineScope,
     private val deletePhotoUseCase: DeletePhotoUseCase,
-    private val downloadPhotos: DownloadPhotosUseCase,
+    private val downloads: GalleryDownloads,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val driveRepo: DrivePhotoRepository,
     private val offlineStore: OfflineStorageManager,
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
-    private val transferCenter: TransferCenter,
     private val undoController: UndoController,
     private val accountManager: AccountManager,
     private val favoriteWriter: FavoriteWriter,
@@ -150,17 +148,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
-    init {
-        // Follows the cached album rows, so an album made or refreshed anywhere shows in the picker
-        // without a visit to the Albums tab.
-        scope.launch {
-            driveRepo.observeAlbumsCached()
-                .catch { Log.w(TAG, "album list stream failed: ${it.message}") }
-                .collect { _albums.value = it }
-        }
-    }
-
-    // ── One-shot results the screen consumes ────────────────────────────────────────────────────
     private val _shareIntent = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
     val shareIntent: SharedFlow<Intent> = _shareIntent.asSharedFlow()
 
@@ -189,14 +176,61 @@ class GalleryItemSelectionController @AssistedInject constructor(
         .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
         .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    // ── Favourite ───────────────────────────────────────────────────────────────────────────────
-
     /** The device-side favourite set, which the dock needs to decide which way its button goes. */
     val favoriteIds: StateFlow<Set<String>> =
         favoriteWriter.favoriteIds.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     private val _favoriteState = MutableStateFlow<FavoriteActionState>(FavoriteActionState.Idle)
     val favoriteState: StateFlow<FavoriteActionState> = _favoriteState.asStateFlow()
+
+    private val _shareState = MutableStateFlow<SelectionShareState>(SelectionShareState.Idle)
+    val shareState: StateFlow<SelectionShareState> = _shareState.asStateFlow()
+
+    private val _isDeleting = MutableStateFlow(false)
+    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
+
+    private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
+    val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
+
+    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+
+    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
+     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
+     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** How many device files that hide could not copy into the vault. Carried to whichever commit
+     *  path lands so the count is reported once the hide is actually done. */
+    private var pendingHideFailures = 0
+
+    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
+    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
+
+    private val _pendingStripIntent = MutableStateFlow<PendingIntent?>(null)
+    val pendingStripIntent: StateFlow<PendingIntent?> = _pendingStripIntent.asStateFlow()
+
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
+    private var pendingStripFailed = 0
+
+    init {
+        // Follows the cached album rows, so an album made or refreshed anywhere shows in the picker
+        // without a visit to the Albums tab.
+        scope.launch {
+            driveRepo.observeAlbumsCached()
+                .catch { Log.w(TAG, "album list stream failed: ${it.message}") }
+                .collect { _albums.value = it }
+        }
+    }
+
+    // ── One-shot results the screen consumes ────────────────────────────────────────────────────
+
+    // ── Favourite ───────────────────────────────────────────────────────────────────────────────
 
     /**
      * Puts the whole selection into the state [favoriteTurnsOn] picks for it: on if any selected photo
@@ -246,8 +280,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Share ───────────────────────────────────────────────────────────────────────────────────
-    private val _shareState = MutableStateFlow<SelectionShareState>(SelectionShareState.Idle)
-    val shareState: StateFlow<SelectionShareState> = _shareState.asStateFlow()
 
     fun shareSelected() {
         val items = selection.value.toList()
@@ -268,7 +300,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                             val uid = userId ?: error("Not signed in")
                             val file = driveRepo.downloadFullResPhoto(uid, item.cloud)
                             FileProvider.getUriForFile(
-                                context, "${context.packageName}.share.fileprovider", file,
+                                context, "${context.packageName}.share.fileprovider", file.storedFile,
                             ).also {
                                 ShareFileProvider.putDisplayName(it, item.cloud.displayName)
                             }
@@ -393,46 +425,26 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Download (cloud items to DCIM/Camera, cloud-album photos into their album folder) ───────
+    // The batch runs on [GalleryDownloads], not on [scope]: leaving the screen right after the tap
+    // clears this controller with its ViewModel, and the photos must still reach the device.
     fun downloadSelected(onResult: (succeeded: Int, failed: Int) -> Unit) {
         val items = selection.value.toList()
         if (items.isEmpty()) return
-        var job: kotlinx.coroutines.Job? = null
-        job = scope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            // One thumbnail URI per selected photo so the Activity screen lists them individually.
-            val thumbUris = items.map { thumbUriFor(it) }
-            val transferId = transferCenter.start(
-                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
-                onCancel = { job?.cancel() },
-            )
-            _downloadStarted.tryEmit(items.size)
-            val memberships: Map<String, String> = runCatching { driveRepo.getAlbumMemberships(userId) }
-                .getOrElse { emptyMap() }
-                .mapValues { (_, name) -> ProtonPhotosStorage.sanitize(name) }
-            val savedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
-            val result = try {
-                downloadPhotos.downloadGalleryItems(
-                    userId, items,
-                    folderName = "",
-                    folderByLinkId = memberships,
-                    onSaved = { savedUris.add(it) },
-                ) { progress -> transferCenter.progress(transferId, progress.done) }
-            } finally {
-                transferCenter.finish(transferId)
-            }
-            transferCenter.log(TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList())
+        val batch = downloads.saveToDevice(items)
+        _downloadStarted.tryEmit(items.size)
+        scope.launch {
+            val outcome = batch.await()
             selection.clear()
-            onResult(result.done - result.failed, result.failed)
+            when (outcome) {
+                is GalleryDownloads.Outcome.Finished -> outcome.progress.let { r ->
+                    // Every photo cancelled one by one: nothing was downloaded, so no "0 downloaded" message.
+                    if (r.done > 0 || r.cancelled == 0) onResult(r.done - r.failed, r.failed)
+                }
+                is GalleryDownloads.Outcome.Failed -> onResult(0, items.count { it is GalleryItem.CloudOnly })
+                // Stopped from the Activity screen or by a sign-out, or nobody signed in: nothing to report.
+                GalleryDownloads.Outcome.NotSignedIn, null -> Unit
+            }
         }
-    }
-
-    /** Thumbnail URI for one gallery item: the on-device file for local/synced photos, the cached
-     *  cloud thumbnail (which may not exist yet) for cloud-only ones. */
-    private fun thumbUriFor(item: GalleryItem): String = when (item) {
-        is GalleryItem.LocalOnly -> item.local.uri
-        is GalleryItem.Synced -> item.local.uri
-        is GalleryItem.CloudOnly ->
-            "file://" + java.io.File(context.cacheDir, "thumbnails/thumb_${item.cloud.linkId}.jpg").absolutePath
     }
 
     // ── Make available offline (toggle for the cloud-only items) ────────────────────────────────
@@ -457,70 +469,16 @@ class GalleryItemSelectionController @AssistedInject constructor(
         }
 
         val toPin = cloudItems.filter { it.cloud.linkId !in pinned }
-        val linkIds = toPin.map { it.cloud.linkId }
+        // The pins download on [GalleryDownloads], so leaving the screen does not strand them.
+        val pinning = downloads.pinOffline(toPin.map { it.cloud })
+        selection.clear()
         scope.launch {
-            // Optimistic pin so the badges light up before any byte lands; failures below revert.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
-            }
-            selection.clear()
-            val userId = accountManager.getPrimaryUserId().first()
-            var succeeded = 0
-            val failedLinkIds = mutableListOf<String>()
-            val savedPaths = mutableListOf<String>()
-            val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, toPin.size)
-            try {
-                for (item in toPin) {
-                    val linkId = item.cloud.linkId
-                    try {
-                        val uid = userId ?: error("Not signed in")
-                        val file = driveRepo.downloadFullResPhoto(uid, item.cloud)
-                        val stored = offlineStore.store(linkId, file)
-                        savedPaths += "file://${stored.absolutePath}"
-                        succeeded++
-                    } catch (e: Exception) {
-                        if (e is kotlinx.coroutines.CancellationException) throw e
-                        Log.w(TAG, "offline pin failed: ${e.message}")
-                        failedLinkIds += linkId
-                    }
-                    transferCenter.progress(transferId, succeeded + failedLinkIds.size)
-                }
-            } finally {
-                transferCenter.finish(transferId)
-            }
-            if (failedLinkIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
-                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
-                }
-                failedLinkIds.forEach { offlineStore.delete(it) }
-            }
-            transferCenter.log(TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths)
-            _offlineBatchResult.emit(succeeded)
+            val result = pinning.awaitUnlessStopped() ?: return@launch
+            _offlineBatchResult.emit(result.pinned)
         }
     }
 
     // ── Delete / hide + system-trash permission handshake ───────────────────────────────────────
-    private val _isDeleting = MutableStateFlow(false)
-    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
-
-    private val _pendingDeleteIntent = MutableStateFlow<PendingIntent?>(null)
-    val pendingDeleteIntent: StateFlow<PendingIntent?> = _pendingDeleteIntent.asStateFlow()
-
-    private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
-
-    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
-     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
-    private var pendingHidePrivateUris: List<String> = emptyList()
-
-    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
-     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
-    private var pendingHideCloudLinkIds: List<String> = emptyList()
-
-    /** How many device files that hide could not copy into the vault. Carried to whichever commit
-     *  path lands so the count is reported once the hide is actually done. */
-    private var pendingHideFailures = 0
 
     /**
      * The two halves the current selection's hide would act on, for the confirmation that fronts it.
@@ -545,7 +503,10 @@ class GalleryItemSelectionController @AssistedInject constructor(
                     is DeletePhotoUseCase.Result.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
-                        buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                        buildDeleteUndoAction(
+                            result.landed(items), result.ranFreeUpSpace ?: freeUpSpace, result.ranDeleteFromCloud ?: deleteFromCloud,
+                            hide = false, localRecoverable = false,
+                        )
                             ?.let { undoController.offer(it) }
                         reportKeptOnDevice(result)
                         selection.clear()
@@ -624,6 +585,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                     val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
                     val privateUri = hiddenStorage.store(
                         local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+                        sourceFolder = sourceFolder, cloudLinkId = target.cloudLinkId,
                     )
                     if (privateUri != null) {
                         collected += HiddenVaultJournal.Entry(
@@ -807,17 +769,6 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Batch EXIF strip (+ Android 11+ write-permission handshake) ─────────────────────────────
-    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
-    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
-
-    private val _pendingStripIntent = MutableStateFlow<PendingIntent?>(null)
-    val pendingStripIntent: StateFlow<PendingIntent?> = _pendingStripIntent.asStateFlow()
-
-    private var pendingStripConfig: MetadataStripConfig? = null
-    private var pendingStripUris: List<String> = emptyList()
-    private var pendingStripStripped = 0
-    private var pendingStripSkipped = 0
-    private var pendingStripFailed = 0
 
     /** [config] comes straight from the multi-select picker, so this manual strip is independent of
      *  the upload-strip settings. An empty config never reaches here (the picker's confirm is gated on

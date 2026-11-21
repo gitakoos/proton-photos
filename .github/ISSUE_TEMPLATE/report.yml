@@ -1,7 +1,5 @@
 name: Report a bug, a crash or an idea
 description: A few short fields. Only the ones marked * are required.
-title: ""
-labels: ["triage"]
 body:
   - type: markdown
     attributes:

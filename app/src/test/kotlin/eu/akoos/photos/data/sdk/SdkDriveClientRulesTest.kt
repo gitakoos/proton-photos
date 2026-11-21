@@ -119,4 +119,19 @@ class SdkDriveClientRulesTest {
         }
         assertTrue(lease.idle.value)
     }
+
+    @Test
+    fun `background work holds a retired client open only while a call still holds it`() {
+        val lease = SdkClientLease()
+        assertFalse("nothing holds it, so nothing may extend it", lease.extend())
+        assertTrue(lease.enter())
+        assertFalse(lease.retire())
+        // Retired under a call: the call hands one more hold to background work.
+        assertTrue(lease.extend())
+        // The call returns; the background work still holds the client.
+        assertFalse(lease.exit())
+        // The background work ends: now it closes.
+        assertTrue(lease.exit())
+        assertFalse(lease.extend())
+    }
 }

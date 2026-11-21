@@ -111,6 +111,7 @@ class MigrateGuestFaceDataUseCase @Inject constructor(
                         clusterSummaryDao.updateUserId(guest, accountId)
                         appDatabase.personNameDao().updateStateUserId(guest, accountId)
                         appDatabase.personNameDao().updateChangeUserId(guest, accountId)
+                        appDatabase.personHiddenDao().updateUserId(guest, accountId)
                         appDatabase.faceCurationTimeDao().updateUserId(guest, accountId)
                     }
                     GuestFaceMigration.DISCARD -> {
@@ -123,6 +124,7 @@ class MigrateGuestFaceDataUseCase @Inject constructor(
                         clusterSummaryDao.clearForUser(guest)
                         appDatabase.personNameDao().clearStates(guest)
                         appDatabase.personNameDao().clearChanges(guest)
+                        appDatabase.personHiddenDao().clearForUser(guest)
                         appDatabase.faceCurationTimeDao().clearForUser(guest)
                     }
                 }

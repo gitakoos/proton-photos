@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -102,15 +103,16 @@ private fun detailsEditor(
         appLock.runWhenOpen { consent.launch(IntentSenderRequest.Builder(sender).build()) }
     }
     val context = LocalContext.current
+    val resources = LocalResources.current
     val finished by rememberUpdatedState(onFinished)
     val failed by rememberUpdatedState(onFailed)
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
                 MetadataEditorEvent.Finished -> finished()
-                MetadataEditorEvent.Failed -> failed(context.getString(R.string.metadata_editor_write_failed))
+                MetadataEditorEvent.Failed -> failed(resources.getString(R.string.metadata_editor_write_failed))
                 is MetadataEditorEvent.PartlySaved -> failed(
-                    context.getString(R.string.metadata_editor_saved_partial, event.saved, event.failed),
+                    resources.getString(R.string.metadata_editor_saved_partial, event.saved, event.failed),
                 )
                 MetadataEditorEvent.Saved -> Unit
             }

@@ -107,6 +107,13 @@ object NotificationIds {
     /** Its summary once a run ends, apart from the progress post WorkManager takes down. */
     const val CLOUD_COMPRESS_DONE = 4262
 
+    /** The sign-out notice that hidden photos stayed in the app because Drive could not confirm their copies;
+     *  its own id, so it stands beside the notice about the photos the sign-out took out. */
+    const val VAULT_KEPT_FOR_DRIVE = 4263
+
+    /** The notice that an edited copy was saved but could not be put into the album it was edited from. */
+    const val EDIT_ALBUM_ADD_FAILED = 4264
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

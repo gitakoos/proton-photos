@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -34,11 +35,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
@@ -178,6 +181,28 @@ class GetGalleryItemsUseCase @Inject constructor(
         }
     }
 
+    /**
+     * The device files and the Drive photos the merge pairs, before any album hide drops a photo: the
+     * sides a screen weighs a sync link on with [syncedRowsShownAsOne], the same inputs [invoke] gives
+     * [linkShowsAsOne]. Both sources are shared, so this starts no second scan or listing read, and it
+     * is throttled like the merge. Empty until the first sides arrive and after a failure, so a proven
+     * link stands at once and a screen's flow carries on with proven links alone.
+     */
+    @OptIn(FlowPreview::class)
+    fun linkSides(userId: UserId): Flow<LinkSides> =
+        combine(
+            localRepo.observeLocalMedia().distinctUntilChanged(),
+            cloudRepo.observeCloudPhotos(userId).distinctUntilChanged(),
+            ::LinkSides,
+        )
+            .sample(RECOMPUTE_THROTTLE_MS)
+            .retryOnDbTear("LinkSides")
+            .onStart { emit(LinkSides.NONE) }
+            .catch { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("GetGalleryItems", "link sides unavailable: ${e.message}")
+            }
+
     /** Session-free gallery feed for the no-account (local-only) mode: the device's own media with
      *  no Proton session. Merges the local source against zero cloud photos and empty sync state, so
      *  it yields EXACTLY the [GalleryItem.LocalOnly] rows [invoke] produces, sorted identically. The
@@ -231,6 +256,7 @@ class GetGalleryItemsUseCase @Inject constructor(
         syncByUri = syncStates.associateBy { it.localUri },
         cloudFileIdOf = { it.cloudFileId },
         localHashOf = { it.localHash },
+        linkBasisOf = { it.linkBasis },
         hiddenSyncedLinkIds = syncStates.asSequence()
             .filter { it.status == SyncStatus.HIDDEN }
             .mapNotNull { it.cloudFileId }
@@ -251,6 +277,7 @@ class GetGalleryItemsUseCase @Inject constructor(
         syncByUri = sync.byUri,
         cloudFileIdOf = { it.cloudFileId },
         localHashOf = { it.localHash },
+        linkBasisOf = { it.linkBasis },
         hiddenSyncedLinkIds = sync.hiddenCloudIds,
         hiddenLinkIds = hiddenLinkIds,
     )
@@ -266,52 +293,22 @@ class GetGalleryItemsUseCase @Inject constructor(
         syncByUri: Map<String, R>,
         cloudFileIdOf: (R) -> String?,
         localHashOf: (R) -> String,
+        linkBasisOf: (R) -> Int,
         hiddenSyncedLinkIds: Set<String>,
         hiddenLinkIds: Set<String>,
     ): List<GalleryItem> {
-        // Fast lookup of cloud entries by both linkId AND contentHash so we can pair a local
-        // file with its cloud counterpart even when the SyncState is missing (e.g. user just
-        // downloaded the album from a fresh install — no SyncState row exists yet but the
-        // contentHash matches).
+        // A device file pairs with a Drive photo on the same basis the sync layer links them: the
+        // file's sync_state row names the photo (a link reconcile made by name only while the file
+        // still agrees with the photo, see [linkShowsAsOne]), or the bytes the row recorded hash to the
+        // photo's Drive content hash. A shared name, capture time or size is no proof the bytes are the same:
+        // paired on one, a different file of the same name read as the photo's copy on this device,
+        // and the Drive photo could not be saved from the gallery. An unproven pair shows as two
+        // items, the device file and the Drive photo, until a backup, reconcile or save links them.
         val cloudByLinkId = cloud.associateBy { it.linkId }
         // Read only when a local item's SyncState carries no cloudFileId, so a steady-state library
         // (every device photo already paired by cloudFileId) never builds it.
         val cloudByHash: Map<String, CloudPhoto> by lazy(LazyThreadSafetyMode.NONE) {
             cloud.filter { !it.contentHash.isNullOrEmpty() }.associateBy { it.contentHash!! }
-        }
-        // The three name-keyed maps below are read ONLY for a local item whose cloudFileId AND
-        // contentHash pairing both missed, so a cloud-heavy library (many cloud rows, few device
-        // photos) never reads one — building them up front costs tens of MB on a large library for
-        // entries nothing looks at. Deferring them keeps that off the merge's allocation peak.
-        // Each delegate is function-local and never published, so no two threads share one.
-        // Lower-cased names positionally aligned with [cloud]: all three key off this single pass
-        // rather than folding every row's name once per map.
-        val cloudLowerNames: List<String> by lazy(LazyThreadSafetyMode.NONE) {
-            cloud.map { it.displayName.lowercase() }
-        }
-        // Content-based pairing fallback for cloud photos THIS app never uploaded — e.g. a library
-        // backed up by Proton Drive's own app. With no SyncState row, neither cloudFileId nor
-        // localHash resolves, so a device photo that also lives on Drive would otherwise render
-        // twice (LocalOnly + CloudOnly). Group by (lower-case name, capture second); a local item
-        // with exactly ONE unclaimed match there pairs as Synced. Grouping (not associateBy) lets
-        // the loop REFUSE to guess when two cloud photos share the key, rather than merge a wrong pair.
-        val cloudByNameAndDate: Map<Pair<String, Long>, List<CloudPhoto>> by lazy(LazyThreadSafetyMode.NONE) {
-            cloud.indices.groupBy({ cloudLowerNames[it] to cloud[it].captureTime }, { cloud[it] })
-        }
-        // Name + exact byte size, videos only (see [cloudFromVideoSize] below). Grouped, not
-        // associateBy, so an ambiguous (name,size) refuses to guess just like name+date.
-        val cloudByNameSize: Map<Pair<String, Long>, List<CloudPhoto>> by lazy(LazyThreadSafetyMode.NONE) {
-            cloud.indices.groupBy({ cloudLowerNames[it] to cloud[it].sizeBytes }, { cloud[it] })
-        }
-        // Name only, any type (see [cloudFromName] below). An edited clip keeps the ORIGINAL
-        // capture time on its cloud copy but the device copy carries the EDIT time, so name+second
-        // misses by an unbounded gap (a today-edit of a year-old clip drifts by a year); a re-downloaded
-        // PNG can carry no reliable date at all. Cloud Size is 0 for the whole photo volume, so name+size
-        // is dead too. The stamped edit filename is highly
-        // distinctive, so the ONE unclaimed cloud video with the same name is the twin. Grouped so
-        // singleOrNull still refuses an ambiguous same-name burst.
-        val cloudByName: Map<String, List<CloudPhoto>> by lazy(LazyThreadSafetyMode.NONE) {
-            cloud.indices.groupBy({ cloudLowerNames[it] }, { cloud[it] })
         }
 
         val result = mutableListOf<GalleryItem>()
@@ -321,16 +318,15 @@ class GetGalleryItemsUseCase @Inject constructor(
             val sync = syncByUri[localItem.uri]
 
             // Resolve the matching cloud photo in priority order:
-            //   1. SyncState.cloudFileId (most reliable, set explicitly on upload + download)
-            //   2. contentHash equality (covers downloads without a SyncState row + restores)
-            //   3. name + capture-second (covers cloud photos this app never uploaded, e.g. backed
-            //      up by Proton Drive's own app — only when the match is unambiguous)
+            //   1. SyncState.cloudFileId (set explicitly on upload, download and reconcile)
+            //   2. the row's recorded hash equal to the photo's Drive content hash
             // Each cloud entry can only be claimed by ONE local item — that's why we check
             // [usedCloudIds] before pairing. Without this, a download that races a sync can
             // produce two Synced entries pointing at the same cloud linkId.
             val cloudFromSync = sync?.let(cloudFileIdOf)
                 ?.takeIf { it !in usedCloudIds }
                 ?.let { cloudByLinkId[it] }
+                ?.takeIf { linkShowsAsOne(linkBasisOf(sync), localItem, it) }
             // localHash is the bare SHA-1; cloudByHash is keyed by the cloud ContentHash
             // (HMAC-SHA256(rootNodeHashKey, sha1Hex)), so convert before the lookup — this pairs a
             // photo to its cloud copy by content even when rename-on-upload changed the cloud name.
@@ -340,45 +336,8 @@ class GetGalleryItemsUseCase @Inject constructor(
                     ?.let { cloudByHash[it] }
                     ?.takeIf { it.linkId !in usedCloudIds }
             else null
-            // Only when our own bookkeeping gave us nothing: pair ONLY if exactly one unclaimed
-            // cloud photo carries this name+second, so an ambiguous burst/duplicate falls back to
-            // the LocalOnly + CloudOnly behaviour instead of merging the wrong pair.
-            val cloudFromContent = if (cloudFromSync == null && cloudFromHash == null)
-                cloudByNameAndDate[localItem.displayName.lowercase() to (localItem.dateTaken / 1000L)]
-                    ?.filter { it.linkId !in usedCloudIds }
-                    ?.singleOrNull()
-            else null
-            // Videos can't reliably name+capture-time pair: a video's capture time isn't a stable
-            // cross-client key the way a photo's EXIF date is, so after a fresh reinstall (no
-            // SyncState/stored hash yet) a video stays LocalOnly until the next full sync recomputes
-            // hashes — while photos pair immediately. Fall back to name + EXACT byte size for videos
-            // only: a video's length is highly distinctive and singleOrNull refuses any ambiguous
-            // match, so this pairs the same file early without the capture-time mismatch.
-            val cloudFromVideoSize = if (cloudFromSync == null && cloudFromHash == null &&
-                    cloudFromContent == null && localItem.mimeType.startsWith("video/"))
-                cloudByNameSize[localItem.displayName.lowercase() to localItem.sizeBytes]
-                    ?.filter { it.linkId !in usedCloudIds && it.sizeBytes > 0 }
-                    ?.singleOrNull()
-            else null
-            // Last resort for ANY type: name + capture-second misses whenever the device copy's date
-            // drifts off the cloud original: an edit shifts it by an unbounded gap, a motion photo can
-            // land a second off, and a re-downloaded PNG can carry no reliable DATE_TAKEN at all (the OS
-            // refuses the column for PNG, so it reads as the download day). Cloud Size is 0 for the whole
-            // photo volume, so name+size is dead too. After a reinstall (no SyncState / stored hash yet)
-            // that leaves the exact name as the only signal. Pair the ONE unclaimed cloud item that
-            // shares it; singleOrNull leaves an ambiguous same-name burst (recurring camera names) as
-            // LocalOnly rather than guessing. Display-only: a wrong guess would show a bad thumbnail, it
-            // can never delete or re-upload. A paired photo then reads its date from the cloud copy, so
-            // this also rescues the PNG's shown date.
-            val cloudFromName = if (cloudFromSync == null && cloudFromHash == null &&
-                    cloudFromContent == null && cloudFromVideoSize == null)
-                cloudByName[localItem.displayName.lowercase()]
-                    ?.filter { it.linkId !in usedCloudIds }
-                    ?.singleOrNull()
-            else null
 
-            val cloudPhoto = cloudFromSync ?: cloudFromHash ?: cloudFromContent
-                ?: cloudFromVideoSize ?: cloudFromName
+            val cloudPhoto = cloudFromSync ?: cloudFromHash
 
             if (cloudPhoto != null) {
                 usedCloudIds += cloudPhoto.linkId

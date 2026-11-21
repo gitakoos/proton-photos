@@ -57,12 +57,15 @@ class PhotosApiClient @Inject constructor(
         append(android.os.Build.BRAND).append(' ').append(android.os.Build.MODEL)
         append(')')
     }
-    override val enableDebugLogging = BuildConfig.DEBUG
+    // Off in every build: it adds a body-level HTTP logger, which reads every body it is not told is
+    // one-shot. The Drive SDK's block uploads carry their own Content-Type so Retrofit does not wrap
+    // them and hide that (CoreSdkHttpClient), but any streamed body wrapped that way would be drained.
+    override val enableDebugLogging = false
 
     override suspend fun shouldUseDoh(): Boolean = true
 
     override fun forceUpdate(errorMessage: String) {
-        // Persist the flag so MainActivity can show a non-dismissible "please update" dialog.
+        // Persist the flag so MainHostActivity can show a non-dismissible "please update" dialog.
         scope.launch {
             context.settingsDataStore.edit { it[FORCE_UPDATE_REQUIRED] = true }
         }

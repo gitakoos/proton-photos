@@ -32,6 +32,12 @@ enum class DriveDataFolder(val folderName: String, private val parseDeviceId: (S
 
     /** The hidden photos and albums. */
     HIDDEN(MlDriveNaming.HIDDEN_FOLDER_NAME, { HiddenDriveNaming.parse(it) }),
+
+    /** The settings. */
+    SETTINGS(MlDriveNaming.SETTINGS_FOLDER_NAME, { SettingsDriveNaming.parse(it) }),
+
+    /** The photo order inside each album. */
+    ALBUM_ORDER(MlDriveNaming.ALBUM_ORDER_FOLDER_NAME, { AlbumOrderDriveNaming.parse(it) }),
     ;
 
     /** The install id [fileName] carries, or null for a name this folder does not write. */
@@ -94,6 +100,12 @@ object MlDriveNaming {
 
     /** The folder inside [APP_FOLDER_NAME] that holds every install's hidden list. */
     const val HIDDEN_FOLDER_NAME = "Hidden"
+
+    /** The folder inside [APP_FOLDER_NAME] that holds every install's settings. */
+    const val SETTINGS_FOLDER_NAME = "Settings"
+
+    /** The folder inside [APP_FOLDER_NAME] that holds every install's album photo orders. */
+    const val ALBUM_ORDER_FOLDER_NAME = "Album order"
 
     /** Extension of a snapshot file. */
     const val FILE_EXTENSION = ".pfpml"

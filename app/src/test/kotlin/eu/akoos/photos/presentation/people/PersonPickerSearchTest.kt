@@ -161,4 +161,26 @@ class PersonPickerSearchTest {
     }
 
     // endregion
+    // region choosing several
+
+    @Test
+    fun `a tap ticks a person and a second tap clears them`() {
+        val once = PersonPickerSearch.toggle(emptySet(), 2L)
+        assertEquals(setOf(2L), once)
+        assertEquals(setOf(2L, 3L), PersonPickerSearch.toggle(once, 3L))
+        assertEquals(emptySet<Long>(), PersonPickerSearch.toggle(once, 2L))
+    }
+
+    @Test
+    fun `the ticked people are handed over in the list's order`() {
+        assertEquals(listOf(1L, 3L), PersonPickerSearch.chosen(people, setOf(3L, 1L)).map { it.personId })
+        assertEquals(emptyList<PersonUi>(), PersonPickerSearch.chosen(people, emptySet()))
+    }
+
+    @Test
+    fun `someone gone from the list is never handed over`() {
+        assertEquals(listOf(2L), PersonPickerSearch.chosen(people, setOf(2L, 99L)).map { it.personId })
+    }
+
+    // endregion
 }

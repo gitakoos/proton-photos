@@ -39,12 +39,12 @@ import kotlin.concurrent.withLock
  */
 class PriorityGate(private val permits: Int) {
 
-    init { require(permits >= 1) { "permits must be >= 1" } }
-
     private val lock = ReentrantLock()
     private var available = permits
     private val foreground = ArrayDeque<CompletableDeferred<Unit>>()
     private val background = ArrayDeque<CompletableDeferred<Unit>>()
+
+    init { require(permits >= 1) { "permits must be >= 1" } }
 
     /** Runs [block] holding exactly one permit, admitting foreground waiters ahead of background ones. */
     suspend fun <T> withPermit(priority: DecryptPriority, block: suspend () -> T): T {

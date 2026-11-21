@@ -24,6 +24,13 @@ package eu.akoos.photos.data.repository
 
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.repository.LocalMediaRepository
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -81,5 +88,46 @@ class LocalContentHashFillerTest {
             listOf(local("a", 0), local("b", 0), local("c", 100), local("d", 100)),
         )
         assertEquals(setOf("c", "d"), out.map { it.uri }.toSet())
+    }
+
+    private fun repo(unreadable: Set<String> = emptySet()): LocalMediaRepository = mockk {
+        coEvery { sha1(any()) } answers { firstArg<String>().takeUnless { it in unreadable }?.let { "sha-$it" } }
+    }
+
+    @Test
+    fun `a pass publishes the hash of every same-size file`() = runBlocking {
+        val filler = LocalContentHashFiller(repo())
+        val items = (1..200).map { local("u$it", 100) }
+
+        filler.request(items)
+        val hashes = withTimeout(10_000) { filler.hashes.first { it.size == 200 } }
+
+        assertEquals("sha-u1", hashes["u1"])
+        assertEquals("sha-u200", hashes["u200"])
+    }
+
+    @Test
+    fun `a file that cannot be read is left out and the rest still land`() = runBlocking {
+        val filler = LocalContentHashFiller(repo(unreadable = setOf("b")))
+
+        filler.request(listOf(local("a", 100), local("b", 100), local("c", 100)))
+        val hashes = withTimeout(10_000) { filler.hashes.first { it.size == 2 } }
+
+        assertEquals(mapOf("a" to "sha-a", "c" to "sha-c"), hashes)
+    }
+
+    @Test
+    fun `an unchanged file is not read again on the next pass`() = runBlocking {
+        val media = repo()
+        val filler = LocalContentHashFiller(media)
+        val items = listOf(local("a", 100), local("b", 100))
+        filler.request(items)
+        withTimeout(10_000) { filler.hashes.first { it.size == 2 } }
+
+        filler.request(items + local("c", 100))
+        withTimeout(10_000) { filler.hashes.first { it.size == 3 } }
+
+        coVerify(exactly = 1) { media.sha1("a") }
+        coVerify(exactly = 1) { media.sha1("c") }
     }
 }

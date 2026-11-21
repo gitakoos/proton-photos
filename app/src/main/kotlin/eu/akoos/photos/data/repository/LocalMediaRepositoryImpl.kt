@@ -111,6 +111,22 @@ private const val SNAPSHOT_SMALL_HEAP_ITEMS = 40_000
 /** How long a file the app removed stays out of the device list while scans still list it. */
 private const val REMOVED_HOLD_MS = 60_000L
 
+/**
+ * The entries of [removed] (uri to when the app removed it) still held out of the device list: those
+ * [items] still lists, for less than [holdMs] before [now]. One pass over the scan with a lookup per
+ * file, so a delete of thousands of photos costs no more than one of a single photo.
+ */
+internal fun heldRemovals(
+    items: List<LocalMediaItem>,
+    removed: Map<String, Long>,
+    now: Long,
+    holdMs: Long,
+): Map<String, Long> {
+    val listed = HashSet<String>()
+    for (item in items) if (item.uri in removed) listed += item.uri
+    return removed.filter { (uri, at) -> uri in listed && now - at < holdMs }
+}
+
 /** How long the shared list outlives its last collector, so moving between screens reuses it
  *  instead of re-scanning. After that it is dropped. The gallery feed keeps the same window. */
 private const val SHARE_STOP_TIMEOUT_MS = 5_000L
@@ -375,8 +391,8 @@ class LocalMediaRepositoryImpl @Inject constructor(
      * run instead of pinging the worker once per file.
      *
      * Each onChange resets the pending kick — so the timer only fires after the user stops
-     * adding files for [syncSettleMs] milliseconds. The kick itself is a OneTime enqueue,
-     * which KEEP-coalesces with any in-flight periodic / oneshot worker.
+     * adding files for [syncSettleMs] milliseconds. The kick itself is [SyncWorker.queueTriggeredRun],
+     * which coalesces with a triggered run already waiting.
      */
     private val syncKickHandler = Handler(Looper.getMainLooper())
     private val syncSettleMs: Long = 2_000L
@@ -395,7 +411,6 @@ class LocalMediaRepositoryImpl @Inject constructor(
         try {
             val prefs: Preferences = context.settingsDataStore.data.first()
             val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
-            val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
             val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
             val selectedFolders = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
             if (!autoSync) return
@@ -404,7 +419,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
             // new mode (without picking folders) would never see auto-upload because this
             // gate would early-return on a null selectedFolders set.
             if (!backupEverything && selectedFolders.isNullOrEmpty()) return
-            SyncWorker.runNow(context, wifiOnly)
+            // The same run the MediaStore content trigger queues: no battery condition, and never
+            // waiting behind a run that is.
+            SyncWorker.queueTriggeredRun(context)
         } catch (_: Throwable) {
             // Losing one kick is harmless — the next MediaStore change or the periodic
             // fallback will pick the photos up.
@@ -531,9 +548,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> =
         kotlinx.coroutines.flow.combine(deviceMedia.shared, removedUris) { scan, removed ->
             if (removed.isEmpty()) return@combine scan.items
-            val now = android.os.SystemClock.elapsedRealtime()
-            val listed = removed.keys.filterTo(HashSet()) { uri -> scan.items.any { it.uri == uri } }
-            val held = removed.filter { (uri, at) -> uri in listed && now - at < REMOVED_HOLD_MS }
+            val held = heldRemovals(scan.items, removed, android.os.SystemClock.elapsedRealtime(), REMOVED_HOLD_MS)
             if (held.size != removed.size) removedUris.update { current -> current.filterKeys { it in held } }
             if (held.isEmpty()) scan.items else scan.items.filterNot { it.uri in held }
         }.distinctUntilChanged()
@@ -693,20 +708,12 @@ class LocalMediaRepositoryImpl @Inject constructor(
         else withContext(Dispatchers.IO) { confirmGone(uris.toList()).toHashSet() }
 
     override suspend fun sha1(uri: String): String? = withContext(Dispatchers.IO) {
-        val digest = java.security.MessageDigest.getInstance("SHA-1")
         try {
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
-                val buffer = ByteArray(8192)
-                var read: Int
-                while (stream.read(buffer).also { read = it } != -1) {
-                    digest.update(buffer, 0, read)
-                }
-            } ?: return@withContext null
+            eu.akoos.photos.data.localcrypto.PlainContent.sha1Hex(context, uri)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            return@withContext null
+            null
         }
-        digest.digest().toLowerHex()
     }
 
     override suspend fun queryByUri(uri: String): LocalMediaItem? = withContext(Dispatchers.IO) {
@@ -729,7 +736,8 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 // ends up with.
                 displayName = HiddenCaptureTime.strip(file.name),
                 mimeType    = mime,
-                sizeBytes   = file.length(),
+                // The photo's own size: an encrypted vault file is larger by its header and tags.
+                sizeBytes   = eu.akoos.photos.data.localcrypto.VaultFiles.plainLength(file),
                 bucketName  = "Hidden",
                 width       = 0,
                 height      = 0,
@@ -761,6 +769,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
             null
         }
     }
+
+    override suspend fun fileStamp(uri: String): eu.akoos.photos.domain.entity.DeviceFileStamp? =
+        withContext(Dispatchers.IO) { DeviceFileStamps.read(context, uri) }
 
     override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
         withContext(Dispatchers.IO) {

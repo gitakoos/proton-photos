@@ -89,7 +89,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -103,6 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -183,7 +183,7 @@ fun MetadataEditorScreen(
         appLock.runWhenOpen { writeConsentLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
     }
 
-    val screenContext = LocalContext.current
+    val screenResources = LocalResources.current
     val savedMessage = stringResource(R.string.metadata_editor_saved)
     val failedMessage = stringResource(R.string.metadata_editor_write_failed)
     LaunchedEffect(Unit) {
@@ -191,7 +191,7 @@ fun MetadataEditorScreen(
             when (event) {
                 MetadataEditorEvent.Saved -> snackbarHostState.showSnackbar(savedMessage)
                 is MetadataEditorEvent.PartlySaved -> snackbarHostState.showSnackbar(
-                    screenContext.getString(
+                    screenResources.getString(
                         R.string.metadata_editor_saved_partial, event.saved, event.failed,
                     ),
                 )
@@ -975,20 +975,6 @@ private fun formatDateTime(ms: Long): String = formatDateTimeMinute(ms)
 internal fun toUtcMidnight(ms: Long): Long {
     val localDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
     return localDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-}
-
-/** The calendar rule a date shift needs: no day later than the one [maxEarliestMs] falls on, so the
- *  chosen day alone can never put the newest photo of the selection in the future. A Material calendar
- *  reads its own values as UTC midnights, so the ceiling is compared on that basis. */
-@OptIn(ExperimentalMaterial3Api::class)
-internal fun daysUpTo(maxEarliestMs: Long): SelectableDates {
-    val lastDayUtcMs = toUtcMidnight(maxEarliestMs)
-    val lastYear = Instant.ofEpochMilli(maxEarliestMs).atZone(ZoneId.systemDefault()).year
-    return object : SelectableDates {
-        override fun isSelectableDate(utcTimeMillis: Long): Boolean = utcTimeMillis <= lastDayUtcMs
-
-        override fun isSelectableYear(year: Int): Boolean = year <= lastYear
-    }
 }
 
 /** Combines a picker day (UTC midnight) with a wall-clock [hour]/[minute] in the device zone. Reading

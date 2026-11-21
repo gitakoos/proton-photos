@@ -70,6 +70,7 @@ internal class ReconcileReferencePass(
         }
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
+        val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
 
         val scanStartMs = System.currentTimeMillis()
         val scan = localRepo.freshScan()
@@ -116,13 +117,14 @@ internal class ReconcileReferencePass(
         val cloudByNameAndDate = cloudItems
             .filter { it.captureTime > 0 }
             .associateBy { it.displayName to it.captureTime }
-        val cloudByNameSize = cloudItems.associateBy { it.displayName to it.sizeBytes }
+        val cloudByNameSize = cloudItems.filter { it.captureTime <= 0 }.associateBy { it.displayName to it.sizeBytes }
         Log.d(TAG, "reconcile: ${localItems.size} local, ${cloudItems.size} cloud " +
             "(${cloudByHash.size} with hash, ${cloudByNameAndDate.size} with captureTime)")
 
         val newStates = mutableListOf<SyncState>()
         val freshAutoFolderUris = mutableListOf<String>()
         val pairedSyncedUris = mutableListOf<String>()
+        val falseNameLinks = mutableListOf<SyncState>()
 
         val existingByUri = syncStateRepo.observeAll(userId).first().associateBy { it.localUri }
         val claimedCloudIds: Set<String> = existingByUri.values.asSequence()
@@ -168,32 +170,47 @@ internal class ReconcileReferencePass(
 
             val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
             var recomputedHash: String? = null
+            // A row its cloud id pairs and stamps never adopts the file's own hash.
+            val hashDecides = byId == null || existingSync?.backedUpAtMs == null
             val localHashHex: String? = storedHash
-                ?: if (initialListingComplete && cloudByHash.isNotEmpty())
+                ?: if (hashDecides && initialListingComplete && cloudByHash.isNotEmpty())
                     localRepo.sha1(local.uri).also { recomputedHash = it } else null
-            val byContentHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            val localDriveHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }
+            val byContentHash = localDriveHash?.let { cloudByHash[it] }
+            // A name link the bytes disprove, on a file that no longer agrees on name and second, is dropped.
+            val falseNameLink = byId != null && existingSync != null &&
+                existingSync.status == SyncStatus.SYNCED &&
+                existingSync.linkBasis == eu.akoos.photos.domain.entity.LinkBasis.NAME &&
+                hashDecides && localDriveHash != null && localDriveHash.isNotEmpty() &&
+                !byId.contentHash.isNullOrEmpty() && localDriveHash != byId.contentHash &&
+                !(local.dateTaken / 1000L == byId.captureTime && local.displayName == byId.displayName)
+            if (falseNameLink) falseNameLinks += existingSync!!
+            val linkedById = if (falseNameLink) null else byId
+            val falseLinkId = if (falseNameLink) byId!!.linkId else null
 
             val localCaptureTimeSec = local.dateTaken / 1000L
             val nameDateTwin = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
+                ?.takeIf { it.linkId != falseLinkId }
             val nameCandidate = nameDateTwin
-                ?: cloudByNameSize[local.displayName to local.sizeBytes]?.takeIf { it.sizeBytes > 0 }
+                ?: cloudByNameSize[local.displayName to local.sizeBytes]
+                    ?.takeIf { it.sizeBytes > 0 && it.linkId != falseLinkId }
             val byNameUnverifiable = nameCandidate?.takeIf {
                 it.contentHash.isNullOrEmpty() || stripOnUpload || compressOnUpload
             }
             val byNameDateRepair = repairTwinLinkId(
-                strong = byId != null || byContentHash != null,
+                strong = linkedById != null || byContentHash != null,
                 hasLegacyNameMatch = byNameUnverifiable != null,
                 nameDateTwinLinkId = nameDateTwin?.linkId,
                 claimedTwinLinkIds = claimedCloudIds,
             )?.let { cloudByLinkId[it] }
-            val matchedCloud = byId ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
+            val matchedCloud = linkedById ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
             if (matchedCloud == null) {
                 Log.d(TAG, "LOCAL_ONLY: ${local.displayName} (size=${local.sizeBytes}, " +
                     "captureSec=$localCaptureTimeSec, existingCloudId=${existingSync?.cloudFileId})")
             }
 
             val status = if (matchedCloud != null) SyncStatus.SYNCED else SyncStatus.LOCAL_ONLY
-            val contentCertain = byContentHash != null || (byId != null && storedHash == null)
+            val contentCertain = byContentHash != null || (linkedById != null && storedHash == null)
             newStates += SyncState(
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
@@ -205,6 +222,14 @@ internal class ReconcileReferencePass(
                 backedUpAtMs = if (deviceChanged) null
                     else existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
                 sizeBytes = if (keepStoredSize && existingSync != null) existingSync.sizeBytes else local.sizeBytes,
+                linkBasis = linkBasisOf(
+                    matchedLinkId = matchedCloud?.linkId,
+                    byIdLinkId = linkedById?.linkId,
+                    byContentHashLinkId = byContentHash?.linkId,
+                    byNameUnverifiable = byNameUnverifiable != null,
+                    rewritesBytes = uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload),
+                    existingBasis = if (falseNameLink) null else existingSync?.linkBasis,
+                ),
             )
             if (status == SyncStatus.LOCAL_ONLY) {
                 val src = existingSync?.queueSource
@@ -248,6 +273,7 @@ internal class ReconcileReferencePass(
         val (guardedDemotions, rest) = newStates.partition {
             it.status == SyncStatus.LOCAL_ONLY && existingByUri.containsKey(it.localUri)
         }
+        for (state in falseNameLinks) syncStateRepo.unlinkNameLink(userId, state.localUri, state.cloudFileId!!)
         syncStateRepo.upsertAll(rest, userId)
         val skippedDemotionUris = mutableSetOf<String>()
         for (state in guardedDemotions) {

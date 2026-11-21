@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Photos for Proton
+  ~ Copyright (C) 2026 Akoos <https://akoos.eu>
+  ~
+  ~ Source:  https://github.com/gitakoos/proton-photos
+  ~ Website: https://www.photosforproton.eu
+  ~
+  ~ This file is part of Photos for Proton.
+  ~
+  ~ Photos for Proton is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU General Public License version 3 as
+  ~ published by the Free Software Foundation.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  ~ GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License
+  ~ along with this program. If not, see <https://www.gnu.org/licenses/>.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+  <group android:scaleX="0.78"
+      android:scaleY="0.78"
+      android:translateX="21.97"
+      android:translateY="22.42">
+    <path
+        android:pathData="m110.89,35.22c24.77,-6.33 32.28,32.74 7.21,36.57 -23.03,3.51 -29.83,-30.8 -7.21,-36.57zM97.25,115.37c2.93,-0.37 4.38,-3.61 6.04,-5.84 4.01,-5.39 7.92,-12.08 15.46,-12.45 4.5,-0.22 9.44,2.24 11.93,5.98 4.24,6.39 7.67,13.4 11.48,20.05 2.88,5.03 6.27,9.98 8.75,15.22 1.86,3.94 1.66,8.68 -0.31,12.52 -4.56,8.92 -15.57,7.04 -23.85,7.03 -20.67,0 -41.33,0.05 -62,-0.02 -8.16,-0.03 -18.56,1.85 -23.61,-6.23 -4.09,-6.54 -1.05,-12.33 1.64,-18.56 3.55,-8.24 7.39,-16.33 10.95,-24.57 2.31,-5.34 4.27,-11.25 7.25,-16.26 2.55,-4.29 7.63,-7.37 12.77,-6.8 10.59,1.17 13.97,12.81 18.05,20.98 1.35,2.72 2.65,7.52 5.45,8.95z"
+        android:fillColor="@color/ic_mark_ruby"
+        android:fillType="evenOdd"/>
+  </group>
+</vector>

@@ -99,6 +99,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -185,6 +186,7 @@ import eu.akoos.photos.presentation.theme.StatusPending
 import eu.akoos.photos.presentation.theme.StatusSynced
 import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.presentation.util.formatBytes
+import kotlinx.coroutines.launch
 
 private val cardShape = RoundedCornerShape(12.dp)
 
@@ -1215,6 +1217,7 @@ fun FaceRecognitionScreen(
     val faceMlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
     val faceGroups by viewModel.faceGroups.collectAsStateWithLifecycle()
     val faceCount by viewModel.faceCount.collectAsStateWithLifecycle()
+    val faceNamesNeedScan by viewModel.faceNamesNeedScan.collectAsStateWithLifecycle()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
@@ -1229,7 +1232,7 @@ fun FaceRecognitionScreen(
         // place, and a switched-on feature whose model is gone says so rather than looking as if it works.
         SettingsCard {
             ToggleRow(
-                label = stringResource(R.string.settings_ai_face_toggle),
+                label = stringResource(R.string.settings_face_scan_here),
                 description = when {
                     state.faceModelDownloading ->
                         stringResource(R.string.settings_ai_face_downloading)
@@ -1237,7 +1240,7 @@ fun FaceRecognitionScreen(
                         stringResource(R.string.settings_ai_face_download_failed)
                     state.faceEnabled && !state.faceRecognitionAvailable ->
                         stringResource(R.string.settings_ai_face_model_missing)
-                    else -> stringResource(R.string.settings_ai_face_desc)
+                    else -> stringResource(R.string.settings_face_scan_here_desc)
                 },
                 checked = state.faceEnabled,
                 onCheckedChange = viewModel::setFaceEnabled,
@@ -1282,13 +1285,22 @@ fun FaceRecognitionScreen(
             }
         }
 
-        // Status, maintenance, transfer and excluded faces only make sense once the scan is switched on,
-        // so they stay hidden while face recognition is off.
-        if (state.faceEnabled) {
+        // The people card shows whenever people exist, also with the scan off, since another device's
+        // people come through the shared backup. When only their names came over, the line below says why
+        // no face carries them yet.
+        if (faceNamesNeedScan) {
+            Text(
+                text = stringResource(R.string.settings_face_names_need_scan),
+                color = colors.fgMute,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
+            )
+        }
+        if (state.faceEnabled || faceGroups.isNotEmpty()) {
             Spacer(Modifier.height(20.dp))
             FaceStatusCard(
                 ui = faceUi,
-                paused = faceScanPausedRow(facePauseSwitch, faceUi.state),
+                paused = state.faceEnabled && faceScanPausedRow(facePauseSwitch, faceUi.state),
                 groups = faceGroups,
                 faceCount = faceCount,
                 // Running state but the semantic walk holds the shared model gate = standing by behind it.
@@ -1298,6 +1310,11 @@ fun FaceRecognitionScreen(
                 onResume = viewModel::resumeFaceIndexing,
                 onOpenPerson = onOpenPerson,
             )
+        }
+
+        // Maintenance, transfer and excluded faces only make sense once the scan is switched on, so they
+        // stay hidden while face recognition is off.
+        if (state.faceEnabled) {
             Spacer(Modifier.height(20.dp))
             SettingsCard {
                 ToggleRow(
@@ -1689,7 +1706,7 @@ fun SemanticSearchScreen(
     SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic_page_title), onBack = onBack) {
         SettingsCard {
             ToggleRow(
-                label = stringResource(R.string.settings_ai_semantic),
+                label = stringResource(R.string.settings_semantic_index_here),
                 // While the models fetch the row reads as busy, and a failed fetch is stated in place so
                 // the switch staying off is explained rather than looking stuck.
                 description = when {
@@ -1697,7 +1714,7 @@ fun SemanticSearchScreen(
                         stringResource(R.string.settings_ai_semantic_downloading)
                     state.semanticModelDownloadFailed ->
                         stringResource(R.string.settings_ai_semantic_download_failed)
-                    else -> stringResource(R.string.settings_ai_semantic_desc)
+                    else -> stringResource(R.string.settings_semantic_index_here_desc)
                 },
                 checked = state.semanticEnabled,
                 onCheckedChange = viewModel::setSemanticEnabled,
@@ -1707,7 +1724,7 @@ fun SemanticSearchScreen(
             // so far against the total, so a slow link reads as progress rather than a stall; a failed
             // fetch adds a line saying the switch itself is the retry.
             if (state.semanticModelDownloading) {
-                val semanticTotalBytes = SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+                val semanticTotalBytes = state.semanticModelDownloadBytes
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1779,7 +1796,7 @@ fun SemanticSearchScreen(
                     } else {
                         R.string.settings_ai_semantic_download_message_metered
                     },
-                    formatBytes(SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    formatBytes(state.semanticModelDownloadBytes),
                 ),
                 confirmLabel = stringResource(R.string.settings_ai_semantic_download_confirm),
                 dismissLabel = stringResource(R.string.cancel),
@@ -2288,6 +2305,17 @@ fun BackupProcessingScreen(
                 }
             }
         }
+        // Compression on with the phone copy left full quality: once that copy is removed (free up space,
+        // delete after backup), Drive holds only the compressed version, so say it where the choice is made.
+        if ((state.compressOnUpload || state.compressVideosOnUpload) && !state.mirrorCompressToLocal) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.settings_compress_original_note),
+                color = colors.fgMute,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
     }
 }
 
@@ -2438,6 +2466,7 @@ fun PrivacySecuritySettingsScreen(
             var externalPicker by remember {
                 mutableStateOf(eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(pickerContext))
             }
+            val pickerScope = rememberCoroutineScope()
             ToggleRow(
                 label = stringResource(R.string.settings_external_picker),
                 description = stringResource(R.string.settings_external_picker_desc),
@@ -2445,6 +2474,11 @@ fun PrivacySecuritySettingsScreen(
                 onCheckedChange = { on ->
                     eu.akoos.photos.presentation.picker.ExternalPicker.setEnabled(pickerContext, on)
                     externalPicker = eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(pickerContext)
+                    // A choice made here wins over the state a disguise icon remembers for the picker.
+                    pickerScope.launch {
+                        eu.akoos.photos.presentation.settings.appicon.DisguiseEntrySettings(pickerContext)
+                            .setSavedPicker(null)
+                    }
                 },
             )
             // Offline photos and the telemetry mirror are both Proton-account concepts, so the whole
@@ -2477,6 +2511,10 @@ fun PrivacySecuritySettingsScreen(
         Spacer(Modifier.height(20.dp))
 
         // ── Security ─────────────────────────────────────────────────────────
+        var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
+        val localEncryptionViewModel: LocalEncryptionViewModel = hiltViewModel()
+        val localEncryptionState by localEncryptionViewModel.state.collectAsStateWithLifecycle()
+        var localEncryptionSheet by remember { mutableStateOf(false) }
         SectionLabel(stringResource(R.string.settings_security))
         Spacer(Modifier.height(8.dp))
         SettingsCard {
@@ -2500,11 +2538,25 @@ fun PrivacySecuritySettingsScreen(
                     },
                 )
             }
+            if (localEncryptionState.available) {
+                RowDivider()
+                LocalEncryptionRow(localEncryptionState, onClick = { localEncryptionSheet = true })
+            }
+        }
+        if (localEncryptionSheet) {
+            LocalEncryptionSheet(
+                state = localEncryptionState,
+                onSetPassword = {
+                    localEncryptionSheet = false
+                    vaultPasswordStep = VaultPasswordStep.Set
+                },
+                onUnlock = localEncryptionViewModel::unlock,
+                onDismiss = { localEncryptionSheet = false },
+            )
         }
 
         Spacer(Modifier.height(20.dp))
         // Hidden vault, a lock/biometric-gated photo collection, so it belongs with the app lock.
-        var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
         val vaultPasswordViewModel: VaultPasswordViewModel = hiltViewModel()
         val vaultPasswordSet by vaultPasswordViewModel.isSet.collectAsStateWithLifecycle()
         SettingsCard {

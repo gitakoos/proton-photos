@@ -134,6 +134,8 @@ class FaceDataWipeTest {
 
     @After
     fun tearDown() {
+        // The scheduler's own jobs stop before the settings double and the database go.
+        runBlocking { scheduler.stopForTest() }
         InMemoryPreferencesDataStore.uninstall()
         db.close()
     }

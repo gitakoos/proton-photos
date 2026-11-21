@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import eu.akoos.photos.util.safeFileId
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -46,6 +47,10 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.sdk.SdkListingException
+import eu.akoos.photos.data.sdk.SdkListingOps
+import eu.akoos.photos.data.sdk.SdkRoute
+import eu.akoos.photos.data.sdk.SdkRouting
 import eu.akoos.photos.util.DeviceHealthPolicy
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -53,6 +58,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
+import me.proton.drive.sdk.entity.ThumbnailType
 
 private const val TAG = "ThumbDecryptSched"
 
@@ -114,6 +120,8 @@ class ThumbnailDecryptScheduler @Inject constructor(
     private val thumbnailUrlStore: ThumbnailUrlStore,
     @ApplicationContext private val context: Context,
     private val deviceHealth: DeviceHealthPolicy,
+    private val sdkRouting: SdkRouting,
+    private val sdkListingOps: SdkListingOps,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -270,7 +278,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
      * sorts ahead of older work; if the linkId is already queued at [Band.PREFETCH] it is
      * promoted to VISIBLE in place. Returns immediately — the actual work runs on a worker
      * and surfaces to the UI through the existing Flow on [PhotoListingDao.observeAll] /
-     * [PhotoListingDao.observeByLinkIds].
+     * [PhotoListingDao.observeDisplayRowsByLinkIds].
      */
     fun request(userId: UserId, photo: PhotoListingEntity) {
         bumpGeneration()
@@ -415,14 +423,13 @@ class ThumbnailDecryptScheduler @Inject constructor(
         // re-point the row at the cached file — a cheap DB write, no JNI — so the cell binds.
         cachedThumbnailUrl(linkId)?.let { url ->
             // Paint the cell now: the timeline projection no longer carries thumbnailUrl, so the store
-            // is what repaints this tile; the DB write is for persistence + next-launch seeding.
-            thumbnailUrlStore.put(linkId, url)
+            // is what repaints this tile; the batched DB write is for next-launch seeding.
+            thumbnailUrlStore.persist(linkId, url)
             scope.launch {
-                runCatching { photoListingDao.updateThumbnailUrl(linkId, url) }
                 // Touch so a re-viewed thumbnail counts as young and survives LRU eviction —
                 // otherwise the warm-up's decrypt order, not actual use, decides what gets dropped.
                 runCatching {
-                    File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+                    File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
                         .setLastModified(System.currentTimeMillis())
                 }
             }
@@ -596,7 +603,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
      *  on disk, or null when no decrypt has produced it yet. Mirrors the cache path + URL
      *  shape [ThumbnailHelpers.downloadAndDecryptBinary] writes. */
     private fun cachedThumbnailUrl(linkId: String): String? {
-        val f = File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+        val f = File(File(context.cacheDir, "thumbnails"), "thumb_${safeFileId(linkId)}.jpg")
         return if (f.exists() && f.length() > 0) "file://${f.absolutePath}" else null
     }
 
@@ -656,6 +663,8 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 }
             }
             if (evicted.isNotEmpty()) {
+                // A queued write must not put an evicted file's URL back after the rows are nulled.
+                thumbnailUrlStore.forgetPending(evicted)
                 runCatching { evicted.chunked(500).forEach { photoListingDao.clearThumbnailUrlsByLinkIds(it) } }
                     .onFailure { Log.w(TAG, "trim: clearing ${evicted.size} rows failed: ${it.message}") }
                 // Drop the evicted URLs from the store too so their cells stop pointing at deleted files
@@ -732,26 +741,44 @@ class ThumbnailDecryptScheduler @Inject constructor(
      *  cache isn't re-trimmed on every subsequent decrypt once it first reaches the cap. */
     private fun trimTargetBytes(): Long = (maxThumbCacheBytes() / 10) * 9
 
+    /**
+     * A grid thumbnail comes from the row's stored CDN url, or with [SdkRoute.THUMBNAILS] on from the Drive
+     * SDK's Type 1 thumbnail, written to the same `thumb_<linkId>.jpg` file. The SDK answers only for a photo
+     * on this user's own photos volume that no album holds: an album's loader may store the HD Type 2 url on
+     * its photos' rows, which the SDK's Type 1 would not match, and a shared album's photos live on another
+     * volume. A row the app's own path would skip is skipped the same way. Any SDK failure, including a photo
+     * without a Type 1 thumbnail, decrypts from the stored url instead.
+     */
     private suspend fun decryptOne(userId: UserId, photo: PhotoListingEntity, background: Boolean) {
         val linkId = photo.linkId
-        val fileUrl = decryptThumbnailToFile(
+        val serverUrl = photo.serverThumbnailUrl ?: return
+        val contentKeyPacket = photo.contentKeyPacket ?: return
+        val encNodeKey = photo.encNodeKey ?: return
+        val encNodePass = photo.encNodePassphrase ?: return
+        val parentLinkId = photo.parentLinkId ?: return
+        val sdkAnswers = sdkRouting.isOn(SdkRoute.THUMBNAILS) &&
+            photo.volumeId == shareService.volumeId() &&
+            !albumPhotoMembershipDao.isInAnyAlbum(linkId)
+        val fileUrl = sdkRouting.run(
+            SdkRoute.THUMBNAILS,
+            viaSdk = { thumbnailViaSdk(userId, photo.volumeId, linkId, ThumbnailType.THUMBNAIL, "thumb_${safeFileId(linkId)}.jpg") },
+            on = sdkAnswers,
+        ) { null } ?: decryptThumbnailToFile(
             userId = userId,
             linkId = linkId,
             volumeId = photo.volumeId,
-            serverUrl = photo.serverThumbnailUrl ?: return,
+            serverUrl = serverUrl,
             serverToken = photo.serverThumbnailToken,
-            contentKeyPacketBase64 = photo.contentKeyPacket ?: return,
-            encNodeKey = photo.encNodeKey ?: return,
-            encNodePass = photo.encNodePassphrase ?: return,
-            parentLinkId = photo.parentLinkId ?: return,
+            contentKeyPacketBase64 = contentKeyPacket,
+            encNodeKey = encNodeKey,
+            encNodePass = encNodePass,
+            parentLinkId = parentLinkId,
             background = background,
         ) ?: return
-        // Repaint just this cell through the in-memory store (the timeline projection no longer
-        // carries thumbnailUrl, so a per-row DB write no longer re-emits the whole library). The DB
-        // write persists the URL for next-launch seeding.
-        thumbnailUrlStore.put(linkId, fileUrl)
-        runCatching { photoListingDao.updateThumbnailUrl(linkId, fileUrl) }
-            .onFailure { Log.w(TAG, "decryptOne $linkId: DB update failed: ${it.message}") }
+        // Repaint just this cell through the in-memory store. The store queues the URL for a batched
+        // DB write (a per-row write would make Room re-read the whole timeline), which seeds the next
+        // launch.
+        thumbnailUrlStore.persist(linkId, fileUrl)
     }
 
     /**
@@ -886,6 +913,14 @@ class ThumbnailDecryptScheduler @Inject constructor(
         encNodePass: String,
         parentLinkId: String,
     ): String? = semaphore.withPermit {
+        // With [SdkRoute.THUMBNAILS] on, a photo on this user's own photos volume takes the SDK's HD (Type 2)
+        // thumbnail into the same file; any SDK failure, including a photo without one, takes the path below.
+        if (volumeId == shareService.volumeId() && sdkRouting.isOn(SdkRoute.THUMBNAILS)) {
+            sdkRouting.run(
+                SdkRoute.THUMBNAILS,
+                viaSdk = { thumbnailViaSdk(userId, volumeId, linkId, ThumbnailType.PREVIEW, "thumb_hd_${safeFileId(linkId)}.jpg") },
+            ) { null }?.let { return@withPermit it }
+        }
         val cacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
         val hdInfo = runCatching { fetchFreshThumbnailInfo(userId, linkId, volumeId, preferType = 2) }
             .getOrNull() ?: return@withPermit null
@@ -906,8 +941,24 @@ class ThumbnailDecryptScheduler @Inject constructor(
             sessionKey = sessionKey,
             linkId = linkId,
             cacheDir = cacheDir,
-            fileName = "thumb_hd_$linkId.jpg",
+            fileName = "thumb_hd_${safeFileId(linkId)}.jpg",
         )
+    }
+
+    /**
+     * The decrypted [type] thumbnail of [linkId] through the Drive SDK, written to [fileName] in the thumbnail
+     * cache through a work temp, as a file:// url. A file already there answers without asking the SDK, as
+     * it does on the app's own path.
+     */
+    private suspend fun thumbnailViaSdk(
+        userId: UserId,
+        volumeId: String,
+        linkId: String,
+        type: ThumbnailType,
+        fileName: String,
+    ): String {
+        val cacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
+        return cachedThumbnailFile(cacheDir, fileName, linkId) { sdkListingOps.thumbnail(userId, volumeId, linkId, type) }
     }
 
     /**
@@ -1056,3 +1107,21 @@ internal fun <T> evictionOrder(
     linkIdOf: (T) -> String,
     mtimeOf: (T) -> Long,
 ): List<T> = entries.filter { linkIdOf(it) !in pinned }.sortedBy(mtimeOf)
+
+/**
+ * The file:// url of [fileName] in [cacheDir], fetching its bytes with [fetch] only when the file is missing
+ * or empty. The bytes are written encrypted through a `thumb_dec_` work temp, which the temp sweep covers, so a
+ * reader never sees a half-written thumbnail.
+ */
+internal suspend fun cachedThumbnailFile(cacheDir: File, fileName: String, linkId: String, fetch: suspend () -> ByteArray): String {
+    val target = File(cacheDir, fileName)
+    if (target.exists() && target.length() > 0) return "file://${target.absolutePath}"
+    val bytes = fetch()
+    try {
+        eu.akoos.photos.data.localcrypto.CacheFiles.write(target, bytes, tempPrefix = "thumb_dec_${safeFileId(linkId)}_")
+    } catch (e: java.io.IOException) {
+        // Another writer of the same thumbnail may have published it first.
+        if (!(target.exists() && target.length() > 0)) throw SdkListingException("the thumbnail could not be written")
+    }
+    return "file://${target.absolutePath}"
+}

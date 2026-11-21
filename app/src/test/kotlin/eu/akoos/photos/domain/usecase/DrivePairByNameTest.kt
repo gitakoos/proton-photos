@@ -28,8 +28,8 @@ import org.junit.Test
 
 /**
  * Pins [pairByUniqueName], the name-only pairing that finds the Drive photo of a device file the backup state does
- * not pair, the same rule the timeline uses to show it with a green cloud: one Drive photo of that name pairs, two
- * or more refuse to guess, and a Drive photo two device files would claim pairs with neither.
+ * not pair, for keeping a folder's Drive album in step: one Drive photo of that name pairs, two or more refuse to
+ * guess, and a Drive photo two device files would claim pairs with neither.
  */
 class DrivePairByNameTest {
 

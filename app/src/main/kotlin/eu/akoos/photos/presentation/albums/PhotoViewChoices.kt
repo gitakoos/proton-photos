@@ -66,9 +66,13 @@ data class PhotoViewChoices(
     val folderSortDefault: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
     val folderGrouping: Set<String> = emptySet(),
     val folderGroupingDefault: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
+    /** Each album's own photo order as the album-order store keeps it, which outranks the older per-album entry. */
+    val albumModes: Map<String, AlbumPhotoSortMode> = emptyMap(),
 ) {
     fun sortOfAlbum(albumLinkId: String): AlbumPhotoSortMode =
-        PerItemChoice.of(albumSort, albumLinkId)?.let { AlbumPhotoSortMode.fromOrdinal(it) } ?: albumSortDefault
+        albumModes[albumLinkId]
+            ?: PerItemChoice.of(albumSort, albumLinkId)?.let { AlbumPhotoSortMode.fromOrdinal(it) }
+            ?: albumSortDefault
 
     fun groupingOfAlbum(albumLinkId: String): AlbumPhotoGrouping =
         PerItemChoice.of(albumGrouping, albumLinkId)?.let { AlbumPhotoGrouping.fromOrdinal(it) } ?: albumGroupingDefault

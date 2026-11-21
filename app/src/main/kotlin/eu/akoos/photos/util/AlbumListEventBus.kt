@@ -66,4 +66,17 @@ class AlbumListEventBus @Inject constructor() {
     fun notifyCoverChanged(albumLinkId: String, coverThumbnailUrl: String?) {
         _coverChanges.tryEmit(albumLinkId to coverThumbnailUrl)
     }
+
+    // Targeted rename, for the same reason as [coverChanges]: the album grid patches the one card's
+    // name in place, and the open album keeps its grid. Pair = (albumLinkId, newName).
+    private val _renames = MutableSharedFlow<Pair<String, String>>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val renames: SharedFlow<Pair<String, String>> = _renames.asSharedFlow()
+
+    fun notifyRenamed(albumLinkId: String, name: String) {
+        _renames.tryEmit(albumLinkId to name)
+    }
 }

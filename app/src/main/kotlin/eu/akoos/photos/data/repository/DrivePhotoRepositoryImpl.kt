@@ -39,7 +39,8 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
-import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.PhotoListingDisplayRow
+import eu.akoos.photos.data.db.entity.sentCopiesBesideOriginals
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.AlbumService
@@ -64,6 +65,7 @@ import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.VaultWipe
 import eu.akoos.photos.util.combineSqlChunks
+import eu.akoos.photos.util.flatMapSqlChunks
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -95,6 +97,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val semanticIndexingScheduler: eu.akoos.photos.data.semantic.SemanticIndexingScheduler,
+    private val firstScanGate: dagger.Lazy<eu.akoos.photos.data.sharedbackup.FirstScanDriveGate>,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
     private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
@@ -103,6 +106,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val personNameDao: eu.akoos.photos.data.db.dao.PersonNameDao,
+    private val personHiddenDao: eu.akoos.photos.data.db.dao.PersonHiddenDao,
+    private val albumOrderDao: eu.akoos.photos.data.db.dao.AlbumOrderDao,
     private val faceCurationTimeDao: eu.akoos.photos.data.db.dao.FaceCurationTimeDao,
     private val photoLabels: eu.akoos.photos.data.label.PhotoLabelRepository,
     private val photoListingDao: PhotoListingDao,
@@ -116,11 +121,14 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val sdkDriveClientProvider: eu.akoos.photos.data.sdk.SdkDriveClientProvider,
     private val widgetSignOut: eu.akoos.photos.widget.PhotoWidgetSignOut,
     private val mlSyncSignOut: eu.akoos.photos.data.mlsync.MlSyncSignOut,
+    private val driveFolderMemory: eu.akoos.photos.data.mlsync.DriveFolderMemory,
     private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
     private val importStagedDao: eu.akoos.photos.data.db.dao.ImportStagedDao,
     private val importHistoryDao: eu.akoos.photos.data.db.dao.ImportHistoryDao,
     private val importUploadedDao: eu.akoos.photos.data.db.dao.ImportUploadedDao,
     private val importAlbumMemberDao: eu.akoos.photos.data.db.dao.ImportAlbumMemberDao,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
+    private val ownerAlbumKeyCache: eu.akoos.photos.data.repository.drive.OwnerAlbumKeyCache,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -268,7 +276,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = downloadService.downloadFullResPhoto(
+    ): eu.akoos.photos.data.localcrypto.CachedOriginal = downloadService.downloadFullResPhoto(
         userId, photo, preResolvedLinkDetail, onProgress,
     )
 
@@ -304,6 +312,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata,
         mainPhotoLinkId = mainPhotoLinkId, extraTags = extraTags, onProgress = onProgress,
     )
+
+    override fun discardPartialDownload(photo: CloudPhoto) =
+        downloadService.discardPartialDownload(photo.linkId, photo.mimeType)
 
     override suspend fun retryPendingOrphanDeletes(userId: UserId) =
         uploadService.retryPendingOrphanDeletes(userId)
@@ -490,9 +501,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override fun observeSharedByMePhotos(linkIds: List<String>): Flow<List<SharedPhoto>> =
         // Chunked: the shared-by-me feed grows with how much the user has shared. The comparator
-        // restates observeByLinkIds' ORDER BY, though the feed order below is what actually ships.
-        linkIds.combineSqlChunks(compareByDescending<PhotoListingEntity> { it.captureTime }) { chunk ->
-            photoListingDao.observeByLinkIds(chunk)
+        // restates observeDisplayRowsByLinkIds' ORDER BY, though the feed order below is what actually ships.
+        linkIds.combineSqlChunks(compareByDescending<PhotoListingDisplayRow> { it.captureTime }) { chunk ->
+            photoListingDao.observeDisplayRowsByLinkIds(chunk)
         }.map { rows ->
             val byId = rows.associateBy { it.linkId }
             // Preserve the caller's order (the feed order) and drop rows the DB doesn't have yet.
@@ -529,6 +540,15 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun acceptInvitation(userId: UserId, invitationId: String) =
         albumSharingService.acceptInvitation(userId, invitationId)
 
+    /** Sends the corrected copies of edits still queued, whose originals are still on Drive, to the trash. */
+    private suspend fun trashSentEditCopies(userId: UserId) {
+        val rows = pendingMetadataEditDao.getAll().filter { it.userId == userId.id && it.newLinkId != null }
+        if (rows.isEmpty()) return
+        val listed = rows.map { it.linkId }.flatMapSqlChunks { photoListingDao.listedLinkIds(userId.id, it) }.toSet()
+        val copies = sentCopiesBesideOriginals(rows, userId.id, listed)
+        if (copies.isNotEmpty()) deleteFiles(userId, copies)
+    }
+
     override suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe) {
         // FIRST, and awaited, on every sign-out route: an ML sync save or restore calls into this
         // account's Drive SDK client and writes its face data, both of which go below. Its client is
@@ -562,11 +582,16 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { clusterSummaryDao.clearForUser(userId.id) }
         runCatching { personNameDao.clearStates(userId.id) }
         runCatching { personNameDao.clearChanges(userId.id) }
+        runCatching { personHiddenDao.clearForUser(userId.id) }
+        runCatching { albumOrderDao.deleteForUser(userId.id) }
         runCatching { faceCurationTimeDao.clearForUser(userId.id) }
         // The account's photo labels are its own private notes about its photos and leave with it.
         runCatching { photoLabels.clearForUser(userId) }
+        // Where the account's Drive data folders were found leaves with it too.
+        runCatching { driveFolderMemory.clearUser(userId.id) }
         // What the account queued and imported is free text and coordinates (descriptions, places, file
         // and album names) about a library the next person on this phone does not own.
+        runCatching { trashSentEditCopies(userId) }
         runCatching { pendingMetadataEditDao.clear() }
         runCatching { importStagedDao.deleteAll() }
         runCatching { importHistoryDao.deleteAll() }
@@ -589,6 +614,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // Singleton that nothing else empties, so without this they outlive the session that could
         // read them, in a process that can keep running long after the account is gone.
         sharedAlbumKeyStore.clear()
+        // The account's own album keys the location and declared-size readers decrypted, held the same way.
+        ownerAlbumKeyCache.clear()
         // Cancel any in-flight Save-to-my-library copy and reset its state to Idle so a
         // re-login by a different user doesn't pick up a stale Running banner against the
         // old account's album linkId. The Job is rooted in a Singleton-scoped SupervisorJob
@@ -604,6 +631,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { listingSweepSnapshotDao.clearForUser(userId.id) }
         runCatching { syncStateDao.deleteAll(userId.id) }
         runCatching { dayMetaDao.deleteAll(userId.id) }
+        // Where the account's photos were taken, Drive copies and device files alike, keyed by this account.
+        // A guest's fixes are stored under their own partition and stay.
+        runCatching { photoLocationDao.deleteForUser(userId.id) }
         // Drop the cached cloud album list so the next signed-in user doesn't see the previous
         // account's albums. Awaited now (the method is suspend) so the wipe completes before the
         // account is disabled.
@@ -613,15 +643,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // keyed by volume-unique linkId (not user-partitioned), so this clears every pin's bytes;
         // a still-signed-in account simply re-downloads its pins on demand.
         runCatching { offlineStore.clearAllAndUnpin() }
-        // Empty the Hidden vault as far as the caller decided. A deliberate sign-out has confirmed it
-        // and takes everything; an involuntary one has first taken the photos with no Drive copy back to
-        // the gallery and spares only what could not be moved, since a vault file is the only copy a
-        // device-only photo has.
+        // Empty the Hidden vault as far as the caller decided, file by named file. A vault file is the
+        // only copy a device-only photo has, so only the files the caller has dealt with go: a file it
+        // never looked at, such as one a hide was still moving, stays.
         runCatching {
             when (vault) {
-                VaultWipe.All -> hiddenStore.clearVault()
                 VaultWipe.None -> Unit
-                is VaultWipe.Except -> hiddenStore.clearVault(keep = vault.uris)
+                is VaultWipe.Only -> hiddenStore.deleteVaultFiles(vault.uris)
             }
         }
         // Drop the cached perceptual fingerprints so one account's near-duplicate prints don't
@@ -665,7 +693,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {
-            val entities = runCatching { photoListingDao.getByLinkIds(linkIds) }.getOrElse { emptyList() }
+            val entities = runCatching { linkIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) } }
+                .getOrElse { emptyList() }
             if (entities.isNotEmpty()) thumbnailScheduler.prefetch(userId, entities)
         }
     }
@@ -673,7 +702,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {
-            val entities = runCatching { photoListingDao.getByLinkIds(linkIds) }.getOrElse { emptyList() }
+            // Sliced: an import run's detail warms the whole run, which can pass SQLite's host-variable cap.
+            val entities = runCatching { linkIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) } }
+                .getOrElse { emptyList() }
             entities.forEach { thumbnailScheduler.request(userId, it) }
         }
     }
@@ -695,10 +726,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     }
 
     override suspend fun backfillFaces(userId: UserId?) {
+        // A first scan waiting for the faces other devices saved starts the walk itself once they are in.
+        if (firstScanGate.get().holds(eu.akoos.photos.data.mlsync.MlDriveFileKind.FACES)) return
         faceIndexingScheduler.indexAll(userId)
     }
 
     override suspend fun backfillSemantic(userId: UserId?) {
+        if (firstScanGate.get().holds(eu.akoos.photos.data.mlsync.MlDriveFileKind.SEARCH)) return
         semanticIndexingScheduler.indexAll(userId)
     }
 }
