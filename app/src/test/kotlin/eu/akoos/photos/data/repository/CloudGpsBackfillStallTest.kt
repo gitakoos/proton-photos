@@ -75,7 +75,10 @@ class CloudGpsBackfillStallTest {
         val health = mockk<DeviceHealthPolicy>(relaxed = true)
         val captured = slot<List<String>>()
         coEvery { listing.markGpsChecked(capture(captured)) } answers { marked += captured.captured.toList() }
-        scheduler = CloudGpsBackfillScheduler(listing, mockk<PhotoLocationDao>(relaxed = true), helpers, mockk(relaxed = true), albums, shares, health, mockk(relaxed = true))
+        val resolver = mockk<PhotoLocationResolver> {
+            coEvery { placeOf(any(), any(), any()) } returns PhotoLocationResolver.XAttrPlace.NoLocation
+        }
+        scheduler = CloudGpsBackfillScheduler(listing, mockk<PhotoLocationDao>(relaxed = true), helpers, resolver, albums, shares, health, mockk(relaxed = true))
     }
 
     @Test

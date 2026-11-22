@@ -85,7 +85,9 @@ import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -110,19 +112,20 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
-import androidx.core.graphics.drawable.toBitmap
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.map.MapFocus
 import eu.akoos.photos.presentation.map.MapViewModel
-import eu.akoos.photos.presentation.map.ThumbnailPin
-import eu.akoos.photos.presentation.map.pinsInView
 import eu.akoos.photos.presentation.map.MapPin
-import eu.akoos.photos.presentation.map.PIN_THUMB_PX
+import eu.akoos.photos.presentation.map.PIN_CELL_DP
+import eu.akoos.photos.presentation.map.PinCountBadge
+import eu.akoos.photos.presentation.map.REGROUP_AFTER_MS
+import eu.akoos.photos.presentation.map.ThumbnailPin
+import eu.akoos.photos.presentation.map.globeWorldSize
+import eu.akoos.photos.presentation.map.gridPins
+import eu.akoos.photos.presentation.map.loadPinBitmap
+import eu.akoos.photos.presentation.map.unrequestedCloudCovers
+import eu.akoos.photos.presentation.map.PIN_THUMB_CACHE_ENTRIES
 import eu.akoos.photos.presentation.places.PlaceSearchSheet
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
@@ -141,13 +144,14 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 // A self-contained vector globe: it draws public-domain Natural Earth country outlines on a rotating
 // orthographic sphere (see GlobeProjection + WorldMapData), then surfaces only WHERE THE ACCOUNT HAS
-// BEEN — visited countries filled and outlined, a thumbnail pin plus label for each visited city. It
+// BEEN: visited countries filled and outlined, thumbnail pins for the located photos. It
 // renders everything itself, with no map tiles.
 
 // The zoom a globe opened on one place starts at: the place's region, roughly a thousand kilometres across
@@ -177,19 +181,25 @@ private const val ANCHOR_REACH = 0.8
 // How far from a city's dot a tap still counts as that city.
 private const val DOT_HIT_DP = 16f
 
+// The pins are grouped again when the view turns to another band of this many degrees of latitude.
+private const val LATITUDE_BAND_DEG = 5f
+
 /**
  * A rotating vector globe that surfaces the account's own places. The whole world is drawn as a light
- * base map; the countries with photos are washed in the accent and given a thicker outline, and each
- * city with photos gets a rounded thumbnail of a photo taken there plus its name. Drag spins the globe
- * with a bit of glide, pinch zooms, a tap on a city thumbnail opens its photos and a tap on a highlighted
- * country opens its cities. Reached from the existing map and fully removable with it. Opened with a
- * [focus], the globe starts turned to that place and zoomed in to its region, with an accent dot on it.
+ * base map; the countries with photos are washed in the accent and given a thicker outline, and the
+ * located photos stand on it as rounded thumbnail pins, grouped like the OSM map's by a grid over the world
+ * at the zoom in view ([gridPins]), so a place shows the same pins on either. Drag spins the globe with a bit
+ * of glide, pinch zooms, a tap on a pin opens that pin's photos ([onPinClick]) and a tap on a highlighted
+ * country opens its cities; a place picked in the search opens its page ([onCityClick]). Reached from the
+ * existing map and fully removable with it. Opened with a [focus], the globe starts turned to that place and
+ * zoomed in to its region, with an accent dot on it.
  */
 @Composable
 fun CustomMapScreen(
     onBack: () -> Unit,
     onCountryClick: (countryCode: String) -> Unit,
     onCityClick: (latitude: Double, longitude: Double) -> Unit,
+    onPinClick: (MapPin) -> Unit = {},
     onSwitchStyle: () -> Unit = {},
     focus: MapFocus? = null,
     vm: MapViewModel = hiltViewModel(),
@@ -201,7 +211,8 @@ fun CustomMapScreen(
     val countries = mapPlaces.countries
     val cities = mapPlaces.cities
     val placesLoaded = mapPlaces.loaded
-    val pins by vm.pins.collectAsStateWithLifecycle()
+    val points by vm.points.collectAsStateWithLifecycle()
+    val thumbnailUrls by vm.thumbnailUrls.collectAsStateWithLifecycle()
 
     // Permission gate: ACCESS_MEDIA_LOCATION only exists on Android 10+. On older OS versions
     // EXIF GPS is readable without it, so we treat the grant as implicitly present and go
@@ -242,13 +253,13 @@ fun CustomMapScreen(
     // has no provinces for is tinted as a whole.
     val provinceLocator = remember(world) { world?.let { LazyProvinceLocator(it) } }
     var visitedProvinces by remember { mutableStateOf(BooleanArray(0)) }
-    LaunchedEffect(world, pins) {
+    LaunchedEffect(world, points) {
         visitedProvinces = withContext(Dispatchers.Default) {
             val locator = provinceLocator ?: return@withContext BooleanArray(0)
             val seen = HashMap<Long, Pair<Float, Float>>()
-            for (pin in pins) {
-                val key = Math.round((pin.latitude + 100.0) * 50.0) * 100_000L + Math.round((pin.longitude + 200.0) * 50.0)
-                if (key !in seen) seen[key] = pin.latitude.toFloat() to pin.longitude.toFloat()
+            for (point in points.orEmpty()) {
+                val key = Math.round((point.latitude + 100.0) * 50.0) * 100_000L + Math.round((point.longitude + 200.0) * 50.0)
+                if (key !in seen) seen[key] = point.latitude.toFloat() to point.longitude.toFloat()
             }
             locator.locator.visited(seen.values)
         }
@@ -331,36 +342,60 @@ fun CustomMapScreen(
     // The base picture is drawn off the main thread into a bitmap and the screen shows the latest one, shifted and
     // scaled to the current view until the next is ready, so moving the globe never waits for the outlines.
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    // The globe plots the same pins as the OSM map: one per city, the same cap over the cities in view, the same pin
-    // and thumbnail. A pin shows the neutral tile until its thumbnail decodes.
-    val shownPins by remember(pins) {
+    // The OSM map's grid, regrouped once a zoom or a turn to another latitude band (a cell's width) has settled.
+    val cellPx = (PIN_CELL_DP * density).toDouble()
+    var groupedPins by remember { mutableStateOf<List<MapPin>>(emptyList()) }
+    LaunchedEffect(points, canvasSize, cellPx) {
+        val located = points.orEmpty()
+        if (canvasSize.width == 0 || canvasSize.height == 0) return@LaunchedEffect
+        var first = true
+        snapshotFlow {
+            val radius = globeRadius(canvasSize.width.toFloat(), canvasSize.height.toFloat(), zoom).toDouble()
+            globeWorldSize(radius, (centerLat / LATITUDE_BAND_DEG).roundToInt() * LATITUDE_BAND_DEG.toDouble())
+        }
+            .distinctUntilChanged()
+            .collectLatest { worldPx ->
+                if (!first) delay(REGROUP_AFTER_MS)
+                first = false
+                groupedPins = withContext(Dispatchers.Default) { gridPins(located, worldPx, cellPx) }
+            }
+    }
+    // The pins that fall on the visible face of the globe and on screen; only these get a decoded thumbnail.
+    val shownPins by remember {
         derivedStateOf {
             val w = canvasSize.width.toFloat()
             val h = canvasSize.height.toFloat()
             if (w == 0f || h == 0f) {
-                pinsInView(pins) { true }
+                emptyList()
             } else {
-                val radius = (min(w, h) / 2f * 0.92f * zoom).toDouble()
+                val radius = globeRadius(w, h, zoom).toDouble()
                 val cLat = centerLat.toDouble()
                 val cLng = centerLng.toDouble()
-                pinsInView(pins) { pin -> pinSpot(pin, w, h, radius, cLat, cLng) != null }
+                groupedPins.filter { pin -> pinSpot(pin, w, h, radius, cLat, cLng) != null }
             }
         }
     }
     // The tap below reads the pins through this, so a pin entering the view never restarts a gesture under way.
     val currentShownPins by rememberUpdatedState(shownPins)
+    val currentOnPinClick by rememberUpdatedState(onPinClick)
+    // The decoded pin thumbnails by cover photo. A state map, so a thumbnail that lands redraws the canvas.
     val pinThumbs = remember { mutableStateMapOf<String, ImageBitmap>() }
     val placeholderPin = remember(density) { ThumbnailPin.placeholder(density).asImageBitmap() }
-    LaunchedEffect(shownPins) {
+    val badgeTextPx = with(LocalDensity.current) { 12.sp.toPx() }
+    val pinBadge = remember(density, badgeTextPx, colors.accent) { PinCountBadge(density, badgeTextPx, colors.accent.toArgb()) }
+    val askedCovers = remember { HashSet<String>() }
+    LaunchedEffect(shownPins, thumbnailUrls) {
+        vm.requestCoverThumbnails(unrequestedCloudCovers(shownPins.filter { it.cover.id !in pinThumbs }, thumbnailUrls, askedCovers))
         for (pin in shownPins) {
-            if (pinThumbs.containsKey(pin.id)) continue
-            val imageData = pin.item?.let { photoCellInputsFor(it).imageData } ?: continue
-            val source = runCatching {
-                context.imageLoader.execute(
-                    ImageRequest.Builder(context).data(imageData).size(PIN_THUMB_PX).allowHardware(false).build(),
-                )
-            }.getOrNull()?.let { (it as? SuccessResult)?.drawable?.toBitmap() } ?: continue
-            pinThumbs[pin.id] = ThumbnailPin.build(source, density).asImageBitmap()
+            if (pinThumbs.containsKey(pin.cover.id)) continue
+            val bitmap = loadPinBitmap(context, pin.cover.item, thumbnailUrls, density) ?: continue
+            pinThumbs[pin.cover.id] = bitmap.asImageBitmap()
+            // Bounded: past the limit, the thumbnails of pins no longer on screen go first.
+            val excess = pinThumbs.size - PIN_THUMB_CACHE_ENTRIES
+            if (excess > 0) {
+                val onScreen = shownPins.mapTo(HashSet()) { it.cover.id }
+                pinThumbs.keys.filter { it !in onScreen }.take(excess).forEach { pinThumbs.remove(it) }
+            }
         }
     }
 
@@ -453,13 +488,12 @@ fun CustomMapScreen(
                                 val radius = min(size.width, size.height) / 2f * 0.92f * zoom
                                 val cLat = centerLat.toDouble()
                                 val cLng = centerLng.toDouble()
+                                // The pin drawn last is on top, so it takes the tap.
                                 val tapped = placePins(
                                     currentShownPins, size.width.toFloat(), size.height.toFloat(), radius.toDouble(), cLat, cLng,
-                                    placeholderPin.width, placeholderPin.height,
-                                ).sortedByDescending { it.asPin }
-                                    .firstOrNull { it.hit(downPos.x, downPos.y, density, placeholderPin.width, placeholderPin.height) }
+                                ).lastOrNull { it.hit(downPos.x, downPos.y, placeholderPin.width, placeholderPin.height) }
                                 if (tapped != null) {
-                                    onCityClick(tapped.pin.latitude, tapped.pin.longitude)
+                                    currentOnPinClick(tapped.pin)
                                 } else {
                                     val w = world
                                     val hit = if (w != null) countryAtDetail(downPos.x, downPos.y, cx, cy, radius, cLat, cLng, w, hotOwner) else null
@@ -531,18 +565,15 @@ fun CustomMapScreen(
                     drawIntoCanvas { it.nativeCanvas.drawText(label, cx + gp.x, cy + gp.y, countryPaint) }
                 }
 
-                // The same pins as the OSM map: a pin where it has room, none until a zoom gives it space. The
-                // pins earlier in the list claim their room first.
-                val placements = placePins(shownPins, size.width, size.height, radius, cLat, cLng, placeholderPin.width, placeholderPin.height)
+                // The same pins as the OSM map, one per grid cell.
+                val placements = placePins(shownPins, size.width, size.height, radius, cLat, cLng)
 
                 // Names of populated places, biggest first, each only where it fits clear of the names and pins
                 // already placed. More of them appear as the globe is zoomed in.
                 val labelZoom = labelZoomFor(radius, density)
                 val footprints = ArrayList<PinFootprint>()
                 for (place in placements) {
-                    if (place.asPin) {
-                        footprints += PinFootprint(place.x, place.y, placeholderPin.width / 2f, placeholderPin.height.toFloat(), 0f)
-                    }
+                    footprints += PinFootprint(place.x, place.y, placeholderPin.width / 2f, placeholderPin.height.toFloat(), 0f)
                 }
                 val pinFootprintCount = footprints.size
                 val shown = ArrayList<PlaceLabelSpot>()
@@ -587,14 +618,16 @@ fun CustomMapScreen(
                 }
 
                 for (place in placements) {
-                    if (!place.asPin) continue
-                    val image = pinThumbs[place.pin.id] ?: placeholderPin
+                    val image = pinThumbs[place.pin.cover.id] ?: placeholderPin
                     // The bottom of the pin (its pointer tip) sits on the spot, as on the OSM map.
-                    drawImage(image, Offset(place.x - image.width / 2f, place.y - image.height), alpha = fade)
+                    val left = place.x - image.width / 2f
+                    val top = place.y - image.height
+                    drawImage(image, Offset(left, top), alpha = fade)
+                    if (fade > 0.999f) drawIntoCanvas { pinBadge.draw(it.nativeCanvas, left, top, place.pin.count) }
                 }
 
                 // The place the globe was opened on: an accent dot in a white ring inside a faint accent halo,
-                // drawn last so it sits over the city pins, and kept compact so the name under a pin's tip
+                // drawn last so it sits over the photo pins, and kept compact so the name under a pin's tip
                 // stays mostly readable.
                 if (focus != null) {
                     val gp = GlobeProjection.project(focus.latitude, focus.longitude, cLat, cLng, radius)
@@ -673,13 +706,11 @@ fun CustomMapScreen(
     }
 }
 
-/** A pin placed on screen: [asPin] is true where it is drawn in full, false where it waits for room. */
-private class PinPlacement(val pin: MapPin, val x: Float, val y: Float, val asPin: Boolean) {
-    /** Whether a tap at ([tapX], [tapY]) lands on this pin, or on its dot. */
-    fun hit(tapX: Float, tapY: Float, density: Float, pinWidth: Int, pinHeight: Int): Boolean {
-        if (!asPin) return false
-        return tapX in (x - pinWidth / 2f)..(x + pinWidth / 2f) && tapY in (y - pinHeight)..(y + 8f)
-    }
+/** A pin placed on screen, its pointer tip at ([x], [y]). */
+private class PinPlacement(val pin: MapPin, val x: Float, val y: Float) {
+    /** Whether a tap at ([tapX], [tapY]) lands on this pin. */
+    fun hit(tapX: Float, tapY: Float, pinWidth: Int, pinHeight: Int): Boolean =
+        tapX in (x - pinWidth / 2f)..(x + pinWidth / 2f) && tapY in (y - pinHeight)..(y + 8f)
 }
 
 /** Where [pin] sits on a [width] by [height] canvas, or null when it is on the far side of the globe or off the screen. */
@@ -693,8 +724,7 @@ internal fun pinSpot(pin: MapPin, width: Float, height: Float, radius: Double, c
 }
 
 /**
- * The pins on the visible face of the globe that fall on screen, each as a full pin where the ones ahead of it
- * leave room and not at all where they do not, by the same rule the OSM map uses. Both the drawing and the tap use
+ * The pins on the visible face of the globe that fall on screen, where they sit. Both the drawing and the tap use
  * this, so a tap always meets what is shown.
  */
 private fun placePins(
@@ -704,20 +734,8 @@ private fun placePins(
     radius: Double,
     cLat: Double,
     cLng: Double,
-    pinWidth: Int,
-    pinHeight: Int,
-): List<PinPlacement> {
-    val onScreen = ArrayList<MapPin>()
-    val spots = ArrayList<Offset>()
-    val footprints = ArrayList<PinFootprint>()
-    for (pin in pins) {
-        val spot = pinSpot(pin, width, height, radius, cLat, cLng) ?: continue
-        onScreen += pin
-        spots += spot
-        footprints += PinFootprint(x = spot.x, y = spot.y, halfWidth = pinWidth / 2f, above = pinHeight.toFloat(), below = 0f)
-    }
-    val kept = keptPins(footprints)
-    return onScreen.indices.map { i -> PinPlacement(onScreen[i], spots[i].x, spots[i].y, kept[i]) }
+): List<PinPlacement> = pins.mapNotNull { pin ->
+    pinSpot(pin, width, height, radius, cLat, cLng)?.let { PinPlacement(pin, it.x, it.y) }
 }
 
 /** Append one country's fill rings to [path], clamping far-side vertices to the limb so a country larger

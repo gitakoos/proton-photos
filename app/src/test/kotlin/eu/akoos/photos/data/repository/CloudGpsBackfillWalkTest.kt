@@ -57,6 +57,7 @@ class CloudGpsBackfillWalkTest {
     private lateinit var helpers: LinkDetailHelpers
     private lateinit var health: DeviceHealthPolicy
     private lateinit var content: CloudContentGpsBackfill
+    private lateinit var resolver: PhotoLocationResolver
     private val hidden = MutableStateFlow<Set<String>>(emptySet())
 
     private fun row(linkId: String) = PhotoListingEntity(
@@ -70,6 +71,8 @@ class CloudGpsBackfillWalkTest {
         helpers = mockk()
         health = mockk(relaxed = true)
         content = mockk(relaxed = true)
+        resolver = mockk()
+        coEvery { resolver.placeOf(any(), any(), any()) } returns PhotoLocationResolver.XAttrPlace.NoLocation
         coEvery { listing.gpsSkippedHiddenLinkIds("u") } returns emptyList()
         coEvery { helpers.fetchRevisionXAttrOrThrow(any(), any(), any(), any(), any()) } returns null
     }
@@ -78,7 +81,7 @@ class CloudGpsBackfillWalkTest {
         val shares = mockk<PhotosShareService> { coEvery { getVolumeId(userId) } returns "v" }
         val albums = mockk<AlbumService> { every { observeHiddenAlbumMemberLinkIds() } returns hidden }
         return CloudGpsBackfillScheduler(
-            listing, mockk<PhotoLocationDao>(relaxed = true), helpers, mockk(relaxed = true), albums, shares, health, content,
+            listing, mockk<PhotoLocationDao>(relaxed = true), helpers, resolver, albums, shares, health, content,
         )
     }
 
@@ -102,6 +105,48 @@ class CloudGpsBackfillWalkTest {
         scheduler().backfillAll(userId)
 
         coVerify { listing.setGpsCheck(listOf("shown"), GpsCheck.UNCHECKED) }
+    }
+
+    @Test
+    fun `a photo whose key does not decrypt is kept for the next walk, not marked as read`() = runTest {
+        coEvery { listing.getUngeocoded("u", "v", any()) } returnsMany listOf(listOf(row("k1"), row("p1")), emptyList())
+        coEvery { resolver.placeOf(userId, match { it.linkId == "k1" }, any()) } returns PhotoLocationResolver.XAttrPlace.KeyMissing
+
+        scheduler().backfillAll(userId)
+
+        coVerify { listing.setGpsCheck(listOf("k1"), GpsCheck.KEY_PENDING) }
+        coVerify { listing.markGpsChecked(listOf("p1")) }
+    }
+
+    @Test
+    fun `a photo whose decrypt throws is kept for the next walk`() = runTest {
+        coEvery { listing.getUngeocoded("u", "v", any()) } returnsMany listOf(listOf(row("k1")), emptyList())
+        coEvery { resolver.placeOf(any(), any(), any()) } throws IllegalStateException("bad key")
+
+        scheduler().backfillAll(userId)
+
+        coVerify { listing.setGpsCheck(listOf("k1"), GpsCheck.KEY_PENDING) }
+        coVerify(exactly = 0) { listing.markGpsChecked(any()) }
+    }
+
+    @Test
+    fun `the first walk after the app starts gives the photos with a pending key one more try`() = runTest {
+        coEvery { listing.getUngeocoded("u", "v", any()) } returns emptyList()
+
+        scheduler().backfillAll(userId)
+
+        coVerify { listing.releaseGpsKeyPending("u") }
+    }
+
+    @Test
+    fun `later walks of the same app start leave the photos with a pending key alone`() = runTest {
+        coEvery { listing.getUngeocoded("u", "v", any()) } returns emptyList()
+        val walk = scheduler()
+
+        walk.backfillAll(userId)
+        walk.backfillAll(userId)
+
+        coVerify(exactly = 1) { listing.releaseGpsKeyPending("u") }
     }
 
     @Test

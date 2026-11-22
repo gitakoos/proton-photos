@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.map
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -29,6 +30,13 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.util.LruCache
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 
 /**
  * Renders the Google-Photos-style map marker: a rounded-rectangle thumbnail with a white border, a
@@ -54,6 +62,12 @@ internal object ThumbnailPin {
     private const val DOT_TOUCH_DP = 28f
     private const val DOT_RING_DP = 5f
     private const val DOT_CORE_DP = 3.4f
+
+    /** The right edge of the visible pin body, in pixels from the bitmap's left edge. */
+    fun bodyRight(density: Float): Float = (MARGIN_DP + BODY_DP) * density
+
+    /** The top edge of the visible pin body, in pixels from the bitmap's top edge. */
+    fun bodyTop(density: Float): Float = MARGIN_DP * density
 
     /** Photo pin: the [thumb] cover-cropped into the rounded body. */
     fun build(thumb: Bitmap, density: Float): Bitmap =
@@ -186,22 +200,96 @@ internal object ThumbnailPin {
     }
 }
 
+/** How many decoded pin thumbnails a map keeps, by cover: a screen holds a few dozen pins, so a pan back finds its own. */
+internal const val PIN_THUMB_CACHE_ENTRIES = 128
+
+// Coil decode target for the pin thumbnail: small, since the visible body is ~52dp. Cover-crop
+// happens when the bitmap is composited into the rounded body.
+private const val PIN_THUMB_PX = 120
+
+/** The decoded pin thumbnails of one map, keyed by the cover photo's id, bounded to [PIN_THUMB_CACHE_ENTRIES]. */
+internal fun pinThumbnailCache(): LruCache<String, Bitmap> = LruCache(PIN_THUMB_CACHE_ENTRIES)
+
 /**
- * A pin bitmap drawn at [scale] of its size, so the OSM map can size every pin to the zoom without building new
- * bitmaps. The marker lays it out from the intrinsic size, which carries the scale.
+ * The finished pin bitmap for [item]: its thumbnail, from the same source the gallery cell uses (a local
+ * content uri, or a cloud thumbnail with the store's freshly decrypted URL out of [thumbnailUrls]), decoded
+ * through Coil and framed by [ThumbnailPin.build]. Null when there is no source yet or the decode fails.
  */
-internal class ScaledPinDrawable(
-    private val bitmap: android.graphics.Bitmap,
-    private val scale: Float,
+internal suspend fun loadPinBitmap(
+    context: Context,
+    item: GalleryItem,
+    thumbnailUrls: Map<String, String>,
+    density: Float,
+): Bitmap? {
+    val storeUrl = (item as? GalleryItem.CloudOnly)?.let { thumbnailUrls[it.cloud.linkId] }
+    val imageData = photoCellInputsFor(item, cloudThumbnailUrl = storeUrl).imageData ?: return null
+    return runCatching {
+        val request = ImageRequest.Builder(context)
+            .data(imageData)
+            .size(PIN_THUMB_PX)
+            // Software bitmap so it can be composited onto the pin Canvas.
+            .allowHardware(false)
+            .build()
+        // Not recycled: Coil may hand back a memory-cache-owned bitmap, and the composite reads from it.
+        val source = (context.imageLoader.execute(request) as? SuccessResult)?.drawable?.toBitmap()
+            ?: return@runCatching null
+        ThumbnailPin.build(source, density)
+    }.getOrNull()
+}
+
+/**
+ * The photo count over the top-right corner of a pin, as the desktop map draws it: an accent capsule with the
+ * number in white, 22dp tall, reaching 7dp past the corner of the pin body.
+ */
+internal class PinCountBadge(private val density: Float, textSizePx: Float, accent: Int) {
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = accent
+        setShadowLayer(4f * density, 0f, 1f * density, Color.argb(102, 0, 0, 0))
+    }
+    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = textSizePx
+        textAlign = Paint.Align.CENTER
+        typeface = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 600, false)
+        } else {
+            android.graphics.Typeface.DEFAULT_BOLD
+        }
+    }
+    private val box = RectF()
+
+    /** Draws [count]'s badge on a pin bitmap whose top-left corner is at ([pinLeft], [pinTop]); one photo draws nothing. */
+    fun draw(canvas: Canvas, pinLeft: Float, pinTop: Float, count: Int) {
+        val label = pinCountLabel(count) ?: return
+        val height = 22f * density
+        val width = maxOf(height, text.measureText(label) + 12f * density)
+        val right = pinLeft + ThumbnailPin.bodyRight(density) + 7f * density
+        val top = pinTop + ThumbnailPin.bodyTop(density) - 7f * density
+        box.set(right - width, top, right, top + height)
+        canvas.drawRoundRect(box, height / 2f, height / 2f, fill)
+        val baseline = box.centerY() - (text.descent() + text.ascent()) / 2f
+        canvas.drawText(label, box.centerX(), baseline, text)
+    }
+}
+
+/**
+ * A pin bitmap with the [count] badge of its photos over it, for an OSM marker. The badge reaches past the
+ * bitmap's corner; the marker does not clip its icon, so it shows whole.
+ */
+internal class CountedPinDrawable(
+    private val bitmap: Bitmap,
+    private val count: Int,
+    private val badge: PinCountBadge,
 ) : android.graphics.drawable.Drawable() {
-    private val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
-    override fun getIntrinsicWidth(): Int = kotlin.math.max(1, kotlin.math.round(bitmap.width * scale).toInt())
+    override fun getIntrinsicWidth(): Int = bitmap.width
 
-    override fun getIntrinsicHeight(): Int = kotlin.math.max(1, kotlin.math.round(bitmap.height * scale).toInt())
+    override fun getIntrinsicHeight(): Int = bitmap.height
 
-    override fun draw(canvas: android.graphics.Canvas) {
+    override fun draw(canvas: Canvas) {
         canvas.drawBitmap(bitmap, null, bounds, paint)
+        badge.draw(canvas, bounds.left.toFloat(), bounds.top.toFloat(), count)
     }
 
     override fun setAlpha(alpha: Int) {

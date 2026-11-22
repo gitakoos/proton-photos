@@ -28,44 +28,29 @@ import org.junit.Test
 
 /**
  * Pins which photos the place page gathers: a photo belongs when its coordinates geocode to the page's
- * city in the page's country. The two parts compare as they are, the way the Places list groups a city,
- * so the page holds the photos its Places card counts.
+ * dataset city, the key the Places list groups a city by, so the page holds the photos its Places card
+ * counts and two cities of one name in one country keep apart.
  */
 class LocationPlaceMatchTest {
 
     @Test
-    fun `the same city in the same country belongs`() {
-        assertTrue(isPhotoInPlace("Budapest", "HU", photoCity = "Budapest", photoCountryCode = "HU"))
+    fun `a photo of the same dataset city belongs`() {
+        assertTrue(isPhotoInPlace(placeCityId = 4021, photoCityId = 4021))
     }
 
     @Test
-    fun `a town of the same name in another country does not`() {
-        assertFalse(isPhotoInPlace("Paris", "FR", photoCity = "Paris", photoCountryCode = "US"))
+    fun `a city of the same name in the same country does not`() {
+        assertFalse(isPhotoInPlace(placeCityId = 4021, photoCityId = 9377))
     }
 
     @Test
-    fun `another city in the same country does not`() {
-        assertFalse(isPhotoInPlace("Budapest", "HU", photoCity = "Debrecen", photoCountryCode = "HU"))
+    fun `an unknown city matches nothing`() {
+        assertFalse(isPhotoInPlace(placeCityId = -1, photoCityId = -1))
+        assertFalse(isPhotoInPlace(placeCityId = -1, photoCityId = 4021))
     }
 
     @Test
-    fun `a blank part is no wildcard`() {
-        assertFalse(isPhotoInPlace("Budapest", "HU", photoCity = "", photoCountryCode = "HU"))
-        assertFalse(isPhotoInPlace("", "HU", photoCity = "Budapest", photoCountryCode = "HU"))
-        assertFalse(isPhotoInPlace("Budapest", "HU", photoCity = "Budapest", photoCountryCode = ""))
-        assertFalse(isPhotoInPlace("Budapest", "", photoCity = "Budapest", photoCountryCode = "HU"))
-    }
-
-    @Test
-    fun `blank parts match the same blank parts`() {
-        assertTrue(isPhotoInPlace("", "HU", photoCity = "", photoCountryCode = "HU"))
-        assertTrue(isPhotoInPlace("Budapest", "", photoCity = "Budapest", photoCountryCode = ""))
-        assertTrue(isPhotoInPlace("", "", photoCity = "", photoCountryCode = ""))
-    }
-
-    @Test
-    fun `the parts compare exactly`() {
-        assertFalse(isPhotoInPlace("Budapest", "HU", photoCity = "budapest", photoCountryCode = "HU"))
-        assertFalse(isPhotoInPlace("Budapest", "HU", photoCity = "Budapest", photoCountryCode = "hu"))
+    fun `the first dataset row matches itself`() {
+        assertTrue(isPhotoInPlace(placeCityId = 0, photoCityId = 0))
     }
 }

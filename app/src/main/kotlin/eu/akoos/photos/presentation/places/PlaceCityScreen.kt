@@ -29,12 +29,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.LocatedItem
 import eu.akoos.photos.presentation.location.LocationDetailViewModel
 import eu.akoos.photos.presentation.location.LocationPhotosContent
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
- * Full-screen page for one place: every photo taken in a city, reached by a coordinate. Opens like
+ * Full-screen page for one place: every photo taken in a city, reached by a coordinate, or the given
+ * [photos] (one map pin's) when there are any, named after the place they share. Opens like
  * the person and memory detail pages rather than as a bottom sheet, and shows no map. The photo grid,
  * hero header and selection come from the shared [LocationPhotosContent], which also carries the back
  * button and, once the hero has scrolled away, the floating header with the resolved place name. A
@@ -44,6 +46,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 fun PlaceCityScreen(
     latitude: Double,
     longitude: Double,
+    photos: List<LocatedItem>? = null,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     onBack: () -> Unit,
     /** Opens the date + place editor for the current selection, matching the timeline's entry. */
@@ -52,9 +55,9 @@ fun PlaceCityScreen(
 ) {
     // Resolve the coordinate to its place and photos on entry; keyed on the coords so a fresh place
     // reloads cleanly, matching the sheet host.
-    LaunchedEffect(latitude, longitude) {
+    LaunchedEffect(latitude, longitude, photos) {
         viewModel.clearSelection()
-        viewModel.load(latitude, longitude)
+        if (photos.isNullOrEmpty()) viewModel.load(latitude, longitude) else viewModel.loadPhotos(photos)
     }
 
     val appColors = AppColors.current

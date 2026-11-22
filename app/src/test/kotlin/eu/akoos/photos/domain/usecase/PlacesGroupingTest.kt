@@ -95,6 +95,24 @@ class PlacesGroupingTest {
     }
 
     @Test
+    fun `two dataset cities of one name in one country stay apart`() {
+        val items = listOf(
+            located("island", 38.91, 1.43, 100),
+            located("madrid", 40.42, -3.67, 200),
+        )
+        val labels = mapOf(
+            "island" to PlaceLabelParts("Ibiza", "ES", "Spain", cityId = 4021),
+            "madrid" to PlaceLabelParts("Ibiza", "ES", "Spain", cityId = 9377),
+        )
+
+        val result = groupPlaces(items) { labels[it.id] }
+
+        assertEquals(2, result.cities.size)
+        assertEquals(listOf(38.91, 40.42), result.cities.map { it.latitude }.sorted())
+        assertEquals(2, result.countries.single().count)
+    }
+
+    @Test
     fun `an unplaceable item is dropped`() {
         val items = listOf(located("a", 47.5, 19.0, 100), located("nowhere", 0.0, 0.0, 100))
         val labels = mapOf("a" to parts("Budapest", "HU", "Hungary"))

@@ -52,6 +52,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -94,6 +95,7 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.usecase.LocatedItem
 import androidx.compose.runtime.mutableIntStateOf
 import eu.akoos.photos.presentation.albums.AlbumDetailScreen
 import eu.akoos.photos.presentation.albums.AlbumOpenAction
@@ -293,6 +295,11 @@ sealed class Screen(val route: String) {
      *  as string path segments (a coordinate's toString never contains a slash). */
     data object PlaceCity : Screen("place_city/{lat}/{lon}") {
         fun create(lat: Double, lon: Double) = "place_city/$lat/$lon"
+    }
+
+    /** The photos of one map pin on the place page; the pin's point is its fallback when the photos are gone. */
+    data object MapPinPhotos : Screen("map_pin_photos/{lat}/{lon}") {
+        fun create(lat: Double, lon: Double) = "map_pin_photos/$lat/$lon"
     }
 
     /** Top of the Places browser: a grid of the countries with located photos. */
@@ -517,6 +524,8 @@ fun NavGraph(
     // The photos handed to the collage editor, in nav scope because a GalleryItem list can't be a
     // nav argument (same hand-off the metadata editor uses).
     var collageItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
+    // The photos of the map pin last tapped, in nav scope for the same reason.
+    var mapPinPhotos by remember { mutableStateOf<List<LocatedItem>>(emptyList()) }
     // Photos the in-app picker returned to add to the open collage.
     var collagePicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
     // The labels the photo picker opened from the Labels settings adds the picked photos to.
@@ -2206,6 +2215,10 @@ fun NavGraph(
             MapScreen(
                 onBack = { navController.popBackStack() },
                 onOpenPlace = { lat, lon -> navController.navigate(Screen.PlaceCity.create(lat, lon)) },
+                onOpenPin = { pin ->
+                    mapPinPhotos = pin.photos
+                    navController.navigate(Screen.MapPinPhotos.create(pin.latitude, pin.longitude))
+                },
                 onSwitchStyle = {
                     mapStyleSwitchFrom = Screen.Map.PATTERN
                     mapStyleFocus = focus
@@ -2243,6 +2256,10 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onCountryClick = { code -> navController.navigate(Screen.PlaceCountry.create(code)) },
                 onCityClick = { lat, lon -> navController.navigate(Screen.PlaceCity.create(lat, lon)) },
+                onPinClick = { pin ->
+                    mapPinPhotos = pin.photos
+                    navController.navigate(Screen.MapPinPhotos.create(pin.latitude, pin.longitude))
+                },
                 onSwitchStyle = {
                     mapStyleSwitchFrom = Screen.CustomMap.PATTERN
                     mapStyleFocus = focus
@@ -2252,8 +2269,9 @@ fun NavGraph(
             )
         }
 
-        composable(
-            Screen.PlaceCity.route,
+        // The place page opens on a coordinate, or on one map pin's photos named after where they were taken.
+        fun NavGraphBuilder.placePage(route: String, photos: () -> List<LocatedItem>?) = composable(
+            route,
             arguments = listOf(
                 navArgument("lat") { type = NavType.StringType },
                 navArgument("lon") { type = NavType.StringType },
@@ -2264,6 +2282,7 @@ fun NavGraph(
             PlaceCityScreen(
                 latitude = lat,
                 longitude = lon,
+                photos = photos(),
                 onBack = { navController.popBackStack() },
                 onPhotoClick = { items, index ->
                     selectedViewerItems = items
@@ -2281,6 +2300,9 @@ fun NavGraph(
                 },
             )
         }
+        placePage(Screen.PlaceCity.route) { null }
+        // Empty after the process was reclaimed: the page then falls back to the place at the pin's point.
+        placePage(Screen.MapPinPhotos.route) { mapPinPhotos.takeIf { it.isNotEmpty() } }
 
         composable(Screen.Places.route) {
             PlacesScreen(

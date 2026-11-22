@@ -49,6 +49,8 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.LocatedItem
+import eu.akoos.photos.domain.usecase.PlaceLabelParts
 import eu.akoos.photos.presentation.common.GalleryItemSelectionController
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.addToAlbumOutcome
@@ -84,7 +86,7 @@ data class LocationDetailUiState(
  * Backs the place page ([LocationPhotosContent] in [PlaceCityScreen]): an album-style view of every
  * geotagged photo taken in one place (city). The coordinates resolve to a city and its country via
  * [OfflineGeocoder]; the screen then shows every located photo whose own coordinates geocode to the
- * SAME city and country ([isPhotoInPlace]), resolved to its [GalleryItem] from the shared library merge
+ * SAME dataset city ([isPhotoInPlace]), resolved to its [GalleryItem] from the shared library merge
  * so each cell opens the viewer with the correct synced / cloud state. The screen names the place in
  * the app language. "Save as album" creates a real Drive album under the name the screen shows and adds
  * those photos (uploading any local-only ones first), reusing the same album-create + add-to-album path
@@ -142,21 +144,7 @@ class LocationDetailViewModel @Inject constructor(
                     it.copy(city = target.city, countryCode = target.countryCode, countryName = target.countryName)
                 }
 
-                // The merged library is the single source the gallery / search / calendar open the
-                // viewer with, so a resolved item carries the right synced / cloud state.
-                val libraryItems = (if (userId == null) getGalleryItems.invokeLocalOnly()
-                    else getGalleryItems.invoke(userId)).first()
-                val itemByKey = HashMap<String, GalleryItem>(libraryItems.size * 2)
-                for (item in libraryItems) {
-                    when (item) {
-                        is GalleryItem.LocalOnly -> itemByKey[item.local.uri] = item
-                        is GalleryItem.Synced -> {
-                            itemByKey[item.local.uri] = item
-                            itemByKey[item.cloud.linkId] = item
-                        }
-                        is GalleryItem.CloudOnly -> itemByKey[item.cloud.linkId] = item
-                    }
-                }
+                val itemByKey = libraryByKey(userId)
 
                 // Geocode every located row off the main thread; OfflineGeocoder caches its dataset so
                 // this is a sub-millisecond scan per row. Keep those matching the tapped place and map
@@ -170,7 +158,7 @@ class LocationDetailViewModel @Inject constructor(
                     for (loc in located) {
                         val geo = OfflineGeocoder.reverseGeocodeDetailed(context, loc.latitude, loc.longitude)
                             ?: continue
-                        if (!isPhotoInPlace(target.city, target.countryCode, geo.city, geo.countryCode)) continue
+                        if (!isPhotoInPlace(target.cityId, geo.cityId)) continue
                         val item = itemByKey[loc.id] ?: continue
                         // De-dup: a Synced item is reachable by both its uri and its linkId.
                         if (!seen.add(item.stableId)) continue
@@ -189,7 +177,64 @@ class LocationDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Show exactly [photos] (one map pin's), newest first, named after the place they share: their city when
+     * every placed photo is in one, else their country, else the map's own name. Like [load], read once, and
+     * resolved against the current library, so a photo deleted or hidden since the map was drawn is left out.
+     */
+    fun loadPhotos(photos: List<LocatedItem>) {
+        loadJob?.cancel()
+        _uiState.update { it.copy(isLoading = true, error = null) }
+        loadJob = viewModelScope.launch {
+            val itemByKey = libraryByKey(accountManager.getPrimaryUserId().first())
+            val current = photos.filter { it.id in itemByKey }
+            // A geocode that fails (the dataset unreadable) only costs the title, never the photos.
+            val labels = try {
+                withContext(Dispatchers.Default) {
+                    current.mapNotNull { OfflineGeocoder.reverseGeocodeDetailed(context, it.latitude, it.longitude) }
+                        .map { PlaceLabelParts(it.city, it.countryCode, it.countryName, it.cityId) }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                emptyList()
+            }
+            val place = sharedPlace(labels) ?: PlaceLabelParts(context.getString(R.string.map_title), "", "")
+            val items = current.mapNotNull { itemByKey[it.id] }.distinctBy { it.stableId }.sortedByDescending { it.captureTimeMs }
+            _uiState.update {
+                it.copy(
+                    city = place.city,
+                    countryCode = place.countryCode,
+                    countryName = place.countryName,
+                    isLoading = false,
+                    items = items,
+                )
+            }
+        }
+    }
+
     fun clearError() = _uiState.update { it.copy(error = null) }
+
+    /**
+     * The merged library indexed by the keys a `photo_location` id can carry (a local content uri and a cloud
+     * linkId). It is the single source the gallery, search and calendar open the viewer with, so a resolved
+     * item carries the right synced / cloud state.
+     */
+    private suspend fun libraryByKey(userId: UserId?): Map<String, GalleryItem> {
+        val libraryItems = (if (userId == null) getGalleryItems.invokeLocalOnly()
+            else getGalleryItems.invoke(userId)).first()
+        val itemByKey = HashMap<String, GalleryItem>(libraryItems.size * 2)
+        for (item in libraryItems) {
+            when (item) {
+                is GalleryItem.LocalOnly -> itemByKey[item.local.uri] = item
+                is GalleryItem.Synced -> {
+                    itemByKey[item.local.uri] = item
+                    itemByKey[item.cloud.linkId] = item
+                }
+                is GalleryItem.CloudOnly -> itemByKey[item.cloud.linkId] = item
+            }
+        }
+        return itemByKey
+    }
 
     // ── Multi-select ──────────────────────────────────────────────────────────────────────────────
     //
@@ -374,14 +419,18 @@ class LocationDetailViewModel @Inject constructor(
 }
 
 /**
- * Whether a photo whose coordinates geocode to [photoCity] in [photoCountryCode] belongs on the page of
- * [placeCity] in [placeCountryCode]: the same city in the same country, the pair the Places list groups
- * a city by. The country's name plays no part, so the match holds whatever language names it. Parts
- * compare exactly, so a blank one matches only a blank one.
+ * Whether a photo whose coordinates geocode to the dataset city [photoCityId] belongs on the page of the city
+ * [placeCityId]: the same dataset row, the key the Places list groups a city by, so two cities of one name in
+ * one country keep apart.
  */
-internal fun isPhotoInPlace(
-    placeCity: String,
-    placeCountryCode: String,
-    photoCity: String,
-    photoCountryCode: String,
-): Boolean = photoCity == placeCity && photoCountryCode == placeCountryCode
+internal fun isPhotoInPlace(placeCityId: Int, photoCityId: Int): Boolean = placeCityId >= 0 && photoCityId == placeCityId
+
+/**
+ * The place a set of photos placed at [labels] shares: the city when they are all in one, the country alone
+ * (a blank city) when they are all in one country, or null when they span countries or none is placed.
+ */
+internal fun sharedPlace(labels: List<PlaceLabelParts>): PlaceLabelParts? {
+    val first = labels.firstOrNull() ?: return null
+    if (labels.any { it.countryCode != first.countryCode }) return null
+    return if (labels.all { it.city == first.city }) first else first.copy(city = "")
+}

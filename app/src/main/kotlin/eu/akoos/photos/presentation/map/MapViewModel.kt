@@ -33,13 +33,13 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
+import eu.akoos.photos.domain.usecase.LocatedItem
 import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.domain.usecase.PlaceCountry
 import eu.akoos.photos.domain.usecase.PlacesData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -52,8 +52,9 @@ import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
 /**
- * Backs the map page. Groups the located photos into cities, one pin per city, and kicks the
- * one-shot GPS backfill once the permission is in hand (see [startLocalBackfill]).
+ * Backs the map page. Hands both maps every located photo as a point to group into pins, the places for the
+ * search and the globe's countries, and kicks the one-shot GPS backfill once the permission is in hand (see
+ * [startLocalBackfill]).
  */
 @HiltViewModel
 class MapViewModel @Inject constructor(
@@ -61,7 +62,7 @@ class MapViewModel @Inject constructor(
     private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val drivePhotoRepository: DrivePhotoRepository,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val thumbnailUrlStore: ThumbnailUrlStore,
+    thumbnailUrlStore: ThumbnailUrlStore,
     observePlaces: ObservePlacesUseCase,
 ) : ViewModel() {
 
@@ -69,24 +70,19 @@ class MapViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 
     /**
-     * One pin per city the account's located photos were taken in, the newest photo taken there as its
-     * thumbnail, busiest city first. A tap opens that place. The thumbnail is built imperatively (outside any
-     * Compose cell), so the LocalThumbnailUrls CompositionLocal can't reach it: the store's map is folded into
-     * the flow, and each cloud cover gets its freshly-decrypted URL stamped on, so a cloud-only cover has a
-     * source again and a decrypt that lands later repaints the pin.
+     * Every located photo of the account, one point each, null until the first result. Both maps group them
+     * into pins for the zoom in view ([gridPins]); fixes at 0, 0 and rows with no library item are left out,
+     * as for the places.
      */
-    val pins: StateFlow<List<MapPin>> = combine(places, thumbnailUrlStore.urls) { data, urls ->
-        data?.cities.orEmpty().map { city ->
-            MapPin(
-                id = "city:${city.countryCode}:${city.city}",
-                latitude = city.latitude,
-                longitude = city.longitude,
-                item = city.cover?.let { resolveThumbnail(it, urls) },
-            )
-        }
-    }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val points: StateFlow<List<LocatedItem>?> = observePlaces.located()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
+
+    /**
+     * The store's freshly decrypted cloud thumbnail URLs. A pin's thumbnail is built outside any Compose cell,
+     * where the LocalThumbnailUrls CompositionLocal can't reach, so the maps read the store here and a decrypt
+     * that lands later repaints the pin.
+     */
+    val thumbnailUrls: StateFlow<Map<String, String>> = thumbnailUrlStore.urls
 
     /**
      * The places the globe reads, taken from ONE emission so "loaded" and the city and country lists always agree.
@@ -104,12 +100,6 @@ class MapViewModel @Inject constructor(
     val cities: StateFlow<List<PlaceCity>> = places
         .map { it?.cities.orEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
-
-    /** True once the places query has produced its first result, so the map can hold its reveal until
-     *  the camera is centred on real data and open already framed instead of jumping from the world view. */
-    val placesLoaded: StateFlow<Boolean> = places
-        .map { it != null }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     /** The distinct countries the account's located photos were taken in, highlighted on the globe. */
     val countries: StateFlow<List<PlaceCountry>> = places
@@ -145,6 +135,19 @@ class MapViewModel @Inject constructor(
     }
 
     /**
+     * Decrypts the cloud thumbnails of pin covers that have none yet, at viewport priority: a cover outside the
+     * warmed part of a large library is never shown by a grid, so nothing else would ask for it. The store's
+     * next publish repaints those pins. A guest has no cloud photos, so nothing to ask for.
+     */
+    fun requestCoverThumbnails(linkIds: List<String>) {
+        if (linkIds.isEmpty()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            drivePhotoRepository.requestThumbnailDecrypt(userId, linkIds)
+        }
+    }
+
+    /**
      * On-device EXIF backfill — reads GPS from local photos, which needs the ACCESS_MEDIA_LOCATION
      * grant, so the screen calls this only once the permission is in hand. Writes `photo_location`
      * keyed by content URI; self-collapsing across overlapping calls. The same walk also corrects a
@@ -176,18 +179,6 @@ class MapViewModel @Inject constructor(
             drivePhotoRepository.startCloudGpsBackfill(userId, respectHealthGate = false)
         }
     }
-
-    /** Overlay the store's freshly-decrypted thumbnail URL onto a cloud-only item so its pin has an
-     *  image source (the lite feed no longer carries the URL). A Local/Synced fix already paints from
-     *  its local uri, so it is returned untouched. */
-    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
-        if (item is GalleryItem.CloudOnly) {
-            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
-            if (url == item.cloud.thumbnailUrl) item
-            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
-        } else {
-            item
-        }
 }
 
 /** The places grouping as the globe consumes it: [loaded] is false until the first result, when the lists are empty. */

@@ -139,6 +139,9 @@ object GpsCheck {
 
     /** The file read failed three times; not tried again until a new revision rebuilds the row. */
     const val CONTENT_GAVE_UP = 7
+
+    /** The XAttr was read but the photo's key could not be decrypted; set back to [UNCHECKED] by the first walk after the app starts. */
+    const val KEY_PENDING = 8
 }
 
 /** How many of a user's cloud photos the map can plot, for the diagnostics report. */

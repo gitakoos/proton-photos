@@ -127,6 +127,9 @@ class CloudGpsBackfillScheduler @Inject constructor(
     /** One walk at a time — a second trigger while one is running is a no-op, not a double pass. */
     private val backfilling = AtomicBoolean(false)
 
+    /** The accounts whose key-pending photos this process already gave their one more try. */
+    private val keyPendingReleasedFor = ConcurrentHashMap.newKeySet<String>()
+
     /**
      * Decrypt + persist the GPS fix for every cloud photo not yet checked for [userId]. Walks the
      * un-geocoded XAttr rows in bounded pages until none remain, fetches paced by [fetchSemaphore]
@@ -156,6 +159,7 @@ class CloudGpsBackfillScheduler @Inject constructor(
             // member set once so the walk stays consistent across its pages.
             val hiddenLinkIds = albumService.observeHiddenAlbumMemberLinkIds().first()
             releaseShownAgain(userId, hiddenLinkIds)
+            releaseKeyPending(userId)
             // A fix at exactly 0, 0 is a photo with no GPS; one stored before that was recognised goes here.
             try {
                 photoLocationDao.deleteNoFixRows()
@@ -217,6 +221,21 @@ class CloudGpsBackfillScheduler @Inject constructor(
         }
     }
 
+    /**
+     * Set the photos whose key did not decrypt on an earlier walk back to unchecked, once per app start, so they get
+     * one more try without a key that never decrypts being fetched and tried again on every sync.
+     */
+    private suspend fun releaseKeyPending(userId: UserId) {
+        if (!keyPendingReleasedFor.add(userId.id)) return
+        try {
+            photoListingDao.releaseGpsKeyPending(userId.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "releasing photos with a pending key failed: ${e.message}")
+        }
+    }
+
     /** The XAttr leg: every unchecked own-volume row, page by page, until none remain or a page makes no progress. */
     private suspend fun walkXAttrs(userId: UserId, ownVolumeId: String, hiddenLinkIds: Set<String>) {
         while (true) {
@@ -248,6 +267,7 @@ class CloudGpsBackfillScheduler @Inject constructor(
             }
 
             val located = ConcurrentHashMap.newKeySet<PhotoLocationEntity>()
+            val keyMissing = ConcurrentHashMap.newKeySet<String>()
             coroutineScope {
                 geocodable.forEach { row ->
                     if (row.linkId !in resolved.ids) return@forEach
@@ -256,14 +276,20 @@ class CloudGpsBackfillScheduler @Inject constructor(
                             semaphore.withPermit {
                                 // Background GPS backfill yields the process-global crypto gate to
                                 // interactive decrypts; the on-demand export path stays foreground.
-                                withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
-                                    photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
-                                }?.let { located.add(it) }
+                                val place = withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+                                    photoLocationResolver.placeOf(userId, row, resolved.byLinkId[row.linkId])
+                                }
+                                when (place) {
+                                    is PhotoLocationResolver.XAttrPlace.Located -> located.add(place.fix)
+                                    PhotoLocationResolver.XAttrPlace.KeyMissing -> keyMissing.add(row.linkId)
+                                    PhotoLocationResolver.XAttrPlace.NoLocation -> Unit
+                                }
                             }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
                             Log.w(TAG, "gps decrypt ${row.linkId} failed: ${e.message}")
+                            keyMissing.add(row.linkId)
                         }
                     }
                 }
@@ -287,9 +313,12 @@ class CloudGpsBackfillScheduler @Inject constructor(
             if (resolved.goneForGood.isNotEmpty()) {
                 eu.akoos.photos.util.SyncDiagnostics.log("map: ${resolved.goneForGood.size} photo(s) with an unreadable revision set aside")
             }
-            val toMark = resolved.ids.toList() + resolved.goneForGood
+            // A row whose key did not decrypt is set apart from the read ones, so the next walk tries it again
+            // instead of leaving it off the map for good, and this walk still moves past it.
+            val toMark = resolved.ids.filterNot { it in keyMissing } + resolved.goneForGood
             runCatching {
                 if (toMark.isNotEmpty()) photoListingDao.markGpsChecked(toMark)
+                if (keyMissing.isNotEmpty()) photoListingDao.setGpsCheck(keyMissing.toList(), GpsCheck.KEY_PENDING)
                 if (hidden.isNotEmpty()) photoListingDao.setGpsCheck(hidden.map { it.linkId }, GpsCheck.SKIPPED_HIDDEN)
             }.onFailure {
                 if (it is CancellationException) throw it

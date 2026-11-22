@@ -54,8 +54,9 @@ object OfflineGeocoder {
     data class GeoCountry(val code: String, val displayName: String)
 
     /** A reverse-geocode split into its parts, so a caller can group by country as well as show the
-     *  "City, Country" label. */
-    data class GeoLabel(val city: String, val countryCode: String, val countryName: String) {
+     *  "City, Country" label. [cityId] is the dataset row, which tells apart two cities of one name in one
+     *  country; -1 when the label was not read from the dataset. */
+    data class GeoLabel(val city: String, val countryCode: String, val countryName: String, val cityId: Int = -1) {
         val label: String get() = "$city, $countryName"
     }
 
@@ -180,8 +181,10 @@ object OfflineGeocoder {
     suspend fun reverseGeocodeDetailed(context: Context, latitude: Double, longitude: Double): GeoLabel? =
         withContext(Dispatchers.Default) {
             val d = ensureLoaded(context.applicationContext) ?: return@withContext null
-            val row = nearestRow(d, latitude, longitude) ?: return@withContext null
-            GeoLabel(row.name, row.countryCode, countryDisplayName(row.countryCode))
+            val index = d.nearest.nearest(latitude, longitude)
+            if (index < 0) return@withContext null
+            val row = d.rows[index]
+            GeoLabel(row.name, row.countryCode, countryDisplayName(row.countryCode), cityId = index)
         }
 
     /**

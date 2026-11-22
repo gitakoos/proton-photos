@@ -58,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,34 +72,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
 import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
-import eu.akoos.photos.presentation.map.vector.PinFootprint
-import eu.akoos.photos.presentation.map.vector.keptPins
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.places.PlaceSearchSheet
 import eu.akoos.photos.presentation.theme.AppColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.TileSystem
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
@@ -111,18 +108,11 @@ private const val LOCATED_ZOOM = 5.0
 // view allows, so the place reads with its surroundings.
 private const val FOCUS_ZOOM = 13.0
 
-// The deepest zoom: street level, where the street a photo was taken in can be read.
-private const val MAX_ZOOM = 18.0
+// The deepest zoom, the tile source's own last level: street level, where the street a photo was taken in can be read.
+private const val MAX_ZOOM = 19.0
 
 // How far past the screen edges the pins are picked, as a scale of the view, so a pin is in place as it slides in.
 private const val VIEW_MARGIN_SCALE = 1.4f
-
-// How long the pins wait for the map to stop moving before they are picked again.
-private const val MOVE_SETTLE_MS = 120L
-
-// Coil decode target for the pin thumbnail — small, since the visible body is ~52dp. Cover-crop
-// happens when the bitmap is composited into the rounded body.
-internal const val PIN_THUMB_PX = 120
 
 /**
  * Map page. Plots every geotagged photo for the account on an OpenStreetMap canvas. A plain
@@ -134,11 +124,12 @@ internal const val PIN_THUMB_PX = 120
  * it isn't already held, and — once granted or already present — kicks the one-shot GPS
  * backfill so the location table fills in while the user looks at the map.
  *
- * Each city is plotted as one rounded-rectangle thumbnail pin (Google-Photos style). A placeholder
- * pin drops immediately; the thumbnail is loaded off-thread through Coil and swapped in once
- * decoded. Tapping a pin opens the full-screen place page ([onOpenPlace]) for the pin's
- * coordinates, the same located-photos view the world map and the Places browser open, so a place
- * opens one way everywhere. A pin that would overlap an earlier one shrinks to a small dot until a zoom gives it room.
+ * The located photos are grouped into pins by a grid over the map at the current zoom ([gridPins]), the way the
+ * desktop map groups them: one rounded-rectangle thumbnail pin per cell, on the mean of its photos, wearing the
+ * newest one and a count badge when it holds more than one. Zooming in splits a pin into the cells its photos
+ * fall in. A placeholder pin drops immediately; the thumbnail is loaded off-thread through Coil and swapped in
+ * once decoded. Tapping a pin opens exactly that pin's photos ([onOpenPin]); a place picked in the search opens
+ * the place page ([onOpenPlace]).
  *
  * Opened with a [focus], the map starts centred on that place at city level with an accent marker on the
  * point, and the located photos plot around it without moving the camera.
@@ -148,6 +139,7 @@ internal const val PIN_THUMB_PX = 120
 fun MapScreen(
     onBack: () -> Unit,
     onOpenPlace: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
+    onOpenPin: (MapPin) -> Unit = {},
     onSwitchStyle: () -> Unit = {},
     focus: MapFocus? = null,
     vm: MapViewModel = hiltViewModel(),
@@ -155,9 +147,12 @@ fun MapScreen(
     val colors = AppColors.current
     val isDark = !colors.isLight
     val context = LocalContext.current
-    val pins by vm.pins.collectAsStateWithLifecycle()
-    val placesLoaded by vm.placesLoaded.collectAsStateWithLifecycle()
+    val points by vm.points.collectAsStateWithLifecycle()
+    val thumbnailUrls by vm.thumbnailUrls.collectAsStateWithLifecycle()
+    val currentThumbnailUrls by rememberUpdatedState(thumbnailUrls)
+    val currentOnOpenPin by rememberUpdatedState(onOpenPin)
     val density = LocalDensity.current.density
+    val badgeTextPx = with(LocalDensity.current) { 12.sp.toPx() }
 
     // Bottom place search: a tap on the search bar raises the shared places drawer over the map.
     var showSearch by remember { mutableStateOf(false) }
@@ -167,8 +162,8 @@ fun MapScreen(
     // from it, so the one-time re-centre happens behind the spinner instead of as a visible jump.
     var centered by remember { mutableStateOf(false) }
 
-    // Set once the camera has been placed on the focus or on the located photos. A later pins emission (a
-    // thumbnail decrypt, a backfill write) then re-plots the markers without pulling the camera back from
+    // Set once the camera has been placed on the focus or on the located photos. A later points emission (a
+    // backfill write) then re-plots the markers without pulling the camera back from
     // wherever the user has moved it. The world-view fallback leaves it unset, so fixes a backfill finds
     // afterwards still get framed once.
     var framed by remember { mutableStateOf(false) }
@@ -273,14 +268,20 @@ fun MapScreen(
         }
     }
 
-    // Re-plot whenever the located set changes. Placeholder pins are added synchronously at the top
-    // of this effect (before the first suspension point) so the map populates on the next frame;
-    // the thumbnails then load off-thread and swap their icon in. Driving this from a LaunchedEffect
-    // means a new `locations` emission cancels the previous run's in-flight loaders rather than
-    // leaving them to repaint markers that were already cleared. The camera is placed once per visit:
-    // on the focus when there is one, otherwise on the average of the points so the first frame frames
-    // the user's photos, with a world view when nothing is located.
-    LaunchedEffect(mapView, pins, placesLoaded, focusMarker) {
+    // The decoded pin thumbnails, by cover photo, kept across re-plots so a new emission never decodes them again.
+    val pinThumbs = remember { pinThumbnailCache() }
+    val askedCovers = remember { HashSet<String>() }
+    // Moves, resizes and newly decrypted thumbnails ask for a re-plot; asks close together are answered once.
+    val replot = remember { Channel<Unit>(Channel.CONFLATED) }
+    LaunchedEffect(thumbnailUrls) { replot.trySend(Unit) }
+    val accent = colors.accent.toArgb()
+
+    // Re-plot whenever the located set changes. Placeholder pins are added at once and the thumbnails then load
+    // off-thread and swap their icon in. Driving this from a LaunchedEffect means a new emission cancels the
+    // previous run's in-flight loaders rather than leaving them to repaint markers that were already cleared.
+    // The camera is placed once per visit: on the focus when there is one, otherwise on the average of the
+    // points so the first frame frames the user's photos, with a world view when nothing is located.
+    LaunchedEffect(mapView, points, focusMarker, accent, badgeTextPx) {
         mapView.overlays.clear()
         // A map opened on one place is framed on it from the start, so it reveals at once rather than
         // waiting on the located photos, which then plot around it.
@@ -290,12 +291,13 @@ fun MapScreen(
             framed = true
             centered = true
         }
-        if (pins.isEmpty()) {
+        val located = points.orEmpty()
+        if (located.isEmpty()) {
             focusMarker?.let { mapView.overlays.add(it) }
             // Nothing located yet and the query has not produced its first result: keep the cover's
             // spinner up and leave the camera alone, so the world view is never shown only to jump to
             // the fixes a moment later.
-            if (!placesLoaded) {
+            if (points == null) {
                 mapView.invalidate()
                 return@LaunchedEffect
             }
@@ -310,136 +312,112 @@ fun MapScreen(
             return@LaunchedEffect
         }
 
-        // The pins are the busiest cities inside the view, up to the marker cap, picked again whenever the map moves,
-        // so a smaller city shows once the view narrows to its area. Each pin is a decoded thumbnail, kept by city
-        // for the rest of the visit, and every pin follows the zoom in size.
+        // Only the pins in view (plus a margin) get a marker and a decoded thumbnail, so thousands of photos stay cheap.
         val placeholderBitmap = ThumbnailPin.placeholder(density)
-        val thumbs = HashMap<String, android.graphics.Bitmap>()
-        val markers = LinkedHashMap<String, Marker>()
-        var shown: List<MapPin> = emptyList()
-        var scale = pinScaleForZoom(mapView.zoomLevelDouble)
-        fun iconFor(id: String) = ScaledPinDrawable(thumbs[id] ?: placeholderBitmap, scale)
-
-        // Every pin keeps one size at a given zoom. Where two would overlap, the busier city, earlier in the list,
-        // keeps its pin and the other is left off the map until a zoom gives it room.
-        val screenPoint = android.graphics.Point()
-        fun declutterPins() {
-            if (mapView.width == 0 || mapView.height == 0) return
-            val projection = mapView.projection
-            val halfWidth = placeholderBitmap.width * scale / 2f
-            val rise = placeholderBitmap.height * scale
-            val shownMarkers = shown.mapNotNull { markers[it.id] }
-            val footprints = shownMarkers.map { marker ->
-                projection.toPixels(marker.position, screenPoint)
-                PinFootprint(screenPoint.x.toFloat(), screenPoint.y.toFloat(), halfWidth, rise, 0f)
-            }
-            val kept = keptPins(footprints)
-            shownMarkers.forEachIndexed { index, marker -> marker.isEnabled = kept[index] }
-            mapView.invalidate()
-        }
+        val badge = PinCountBadge(density, badgeTextPx, accent)
+        val cellPx = PIN_CELL_DP * density.toDouble()
+        var grid: List<MapPin> = emptyList()
+        var groupedZoom = Double.NaN
+        // Keyed by cover and count, not by cell, so a group a zoom leaves whole keeps its marker and just moves.
+        fun markerKey(pin: MapPin) = pin.cover.id + "|" + pin.count
+        val markers = HashMap<String, Marker>()
+        val shown = HashMap<String, MapPin>()
+        fun iconFor(pin: MapPin) = CountedPinDrawable(pinThumbs[pin.cover.id] ?: placeholderBitmap, pin.count, badge)
 
         fun pinsNowInView(): List<MapPin> {
-            if (mapView.width == 0 || mapView.height == 0) return pinsInView(pins) { true }
+            if (mapView.width == 0 || mapView.height == 0) return grid
             // A margin around the screen, so a pin at the edge is already there as it slides in.
             val box = mapView.boundingBox.increaseByScale(VIEW_MARGIN_SCALE)
-            return pinsInView(pins) { box.contains(it.latitude, it.longitude) }
+            return grid.filter { box.contains(it.latitude, it.longitude) }
         }
 
         var loader: kotlinx.coroutines.Job? = null
-        fun syncPins() {
+        suspend fun syncPins() {
+            val zoom = mapView.zoomLevelDouble
+            if (zoom != groupedZoom) {
+                grid = withContext(Dispatchers.Default) {
+                    gridPins(located, TileSystem.MapSize(zoom), cellPx)
+                }
+                groupedZoom = zoom
+            }
             val next = pinsNowInView()
-            val nextIds = next.mapTo(HashSet()) { it.id }
-            val gone = markers.keys.filter { it !in nextIds }
-            for (id in gone) markers.remove(id)?.let { mapView.overlays.remove(it) }
+            val nextByKey = next.associateBy(::markerKey)
+            val gone = markers.keys.filter { it !in nextByKey }
+            for (key in gone) markers.remove(key)?.let { mapView.overlays.remove(it) }
+            shown.clear()
+            shown.putAll(nextByKey)
             focusMarker?.let { mapView.overlays.remove(it) }
-            for (pin in next) {
-                if (markers.containsKey(pin.id)) continue
-                markers[pin.id] = Marker(mapView).apply {
+            for ((key, pin) in nextByKey) {
+                val have = markers[key]
+                if (have != null) {
+                    if (have.position.latitude != pin.latitude || have.position.longitude != pin.longitude) {
+                        have.position = GeoPoint(pin.latitude, pin.longitude)
+                    }
+                    continue
+                }
+                markers[key] = Marker(mapView).apply {
                     position = GeoPoint(pin.latitude, pin.longitude)
                     // Anchor at the pointer tip (centre-x, bottom) so the wedge points at the fix.
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    icon = iconFor(pin.id)
+                    icon = iconFor(pin)
                     setOnMarkerClickListener { _, _ ->
-                        onOpenPlace(pin.latitude, pin.longitude)
+                        shown[key]?.let { currentOnOpenPin(it) }
                         true
                     }
                 }.also { mapView.overlays.add(it) }
             }
             // Last, so the place the map was opened on draws over the photo pins.
             focusMarker?.let { mapView.overlays.add(it) }
-            shown = next
-            declutterPins()
+            mapView.invalidate()
 
-            // Thumbnails for the pins that have none yet. Each pin's resolved library item supplies the same image
-            // source the gallery cell uses, a local content uri or a cloud thumbnail, both decoded through Coil.
-            // An unresolved pin (no library item yet) keeps the placeholder.
-            val missing = next.filter { it.id !in thumbs }
+            // Thumbnails for the pins that have none yet; one with no image source yet keeps the placeholder.
+            val missing = next.filter { pinThumbs[it.cover.id] == null }
             loader?.cancel()
             if (missing.isEmpty()) return
+            val urls = currentThumbnailUrls
+            vm.requestCoverThumbnails(unrequestedCloudCovers(missing, urls, askedCovers))
             loader = launch {
                 for (pin in missing) {
-                    val imageData = pin.item?.let { photoCellInputsFor(it).imageData } ?: continue
-                    val pinBitmap = runCatching {
-                        val req = ImageRequest.Builder(context)
-                            .data(imageData)
-                            .size(PIN_THUMB_PX)
-                            // Software bitmap so it can be composited onto the pin Canvas.
-                            .allowHardware(false)
-                            .build()
-                        val result = context.imageLoader.execute(req)
-                        // Not recycled: Coil may hand back a memory-cache-owned bitmap, and the composite
-                        // reads from it. The pin is a fresh bitmap of its own.
-                        val source = (result as? SuccessResult)?.drawable?.toBitmap()
-                            ?: return@runCatching null
-                        ThumbnailPin.build(source, density)
-                    }.getOrNull() ?: continue
-                    thumbs[pin.id] = pinBitmap
-                    markers[pin.id]?.icon = iconFor(pin.id)
+                    val pinBitmap = loadPinBitmap(context, pin.cover.item, urls, density) ?: continue
+                    pinThumbs.put(pin.cover.id, pinBitmap)
+                    markers[markerKey(pin)]?.icon = iconFor(pin)
                     mapView.invalidate()
                 }
             }
         }
 
-        // A move asks for the pins again; asks that arrive while the map is still moving are answered once.
-        val moved = Channel<Unit>(Channel.CONFLATED)
         val mapListener = object : MapListener {
             override fun onScroll(event: ScrollEvent?): Boolean {
-                moved.trySend(Unit)
+                replot.trySend(Unit)
                 return false
             }
             override fun onZoom(event: ZoomEvent?): Boolean {
-                val next = pinScaleForZoom(mapView.zoomLevelDouble)
-                if (next != scale) {
-                    scale = next
-                    for ((id, marker) in markers) marker.icon = iconFor(id)
-                }
-                declutterPins()
-                moved.trySend(Unit)
+                replot.trySend(Unit)
                 return false
             }
         }
         val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) moved.trySend(Unit)
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) replot.trySend(Unit)
         }
         mapView.addMapListener(mapListener)
         mapView.addOnLayoutChangeListener(layoutListener)
         try {
             if (!framed) {
-                val avgLat = pins.sumOf { it.latitude } / pins.size
-                val avgLon = pins.sumOf { it.longitude } / pins.size
+                val avgLat = located.sumOf { it.latitude } / located.size
+                val avgLon = located.sumOf { it.longitude } / located.size
                 mapView.controller.setZoom(LOCATED_ZOOM)
                 mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
                 framed = true
             }
-            scale = pinScaleForZoom(mapView.zoomLevelDouble)
             syncPins()
             // Camera now frames the located photos (or the focus); drop the cover so the map is revealed
             // already centred, ahead of the thumbnails that swap in.
             centered = true
+            // Regrouped once the map settles, not at each pinch step; between, the pins ride the map as they are.
             while (true) {
-                moved.receive()
-                delay(MOVE_SETTLE_MS)
-                moved.tryReceive()
+                replot.receive()
+                delay(REGROUP_AFTER_MS)
+                replot.tryReceive()
                 syncPins()
             }
         } finally {

@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import me.proton.core.accountmanager.domain.AccountManager
 import java.util.Locale
@@ -76,35 +77,48 @@ class ObservePlacesUseCase @Inject constructor(
 
     operator fun invoke(): Flow<PlacesData> = shared
 
+    /**
+     * Every located photo of the library, one row per photo, before any grouping: the map plots each of
+     * them, including the ones the geocoder cannot place in a city. A fix at 0, 0 and a row with no library
+     * item are left out, as for the places.
+     */
+    fun located(): Flow<List<LocatedItem>> = sharedLocated
+
     // Dropped a few seconds after the last screen leaves, and nothing replayed after that, so a later
-    // open (or another account) groups the current rows; the labels stay in [labelCache].
-    private val shared: Flow<PlacesData> = accountManager.getPrimaryUserId()
+    // open (or another account) reads the current rows; the labels stay in [labelCache].
+    private val sharedLocated: Flow<List<LocatedItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             // Read the local partition when signed out, so a guest's places populate too.
             val locationFlow = photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
             else getGalleryItems.invoke(userId)
             combine(locationFlow, libraryFlow) { locations, library ->
-                val locale = Locale.getDefault()
-                if (labelLocale != locale) {
-                    labelCache.clear()
-                    labelLocale = locale
-                }
                 val itemByKey = itemsByKey(library)
-                val located = onePerPhoto(
+                onePerPhoto(
                     locations.filterNot { it.isNullIsland() }.mapNotNull { loc ->
                         itemByKey[loc.id]?.let { LocatedItem(loc.id, loc.latitude, loc.longitude, it) }
                     },
                 )
-                val labels = HashMap<String, PlaceLabelParts?>(located.size)
-                for (item in located) labels[item.id] = labelFor(item)
-                groupPlaces(located) { labels[it.id] }
             }
-                // The store's URLs go onto the covers only, one per city and country, after the grouping: a
-                // thumbnail that lands no longer regroups every located photo of the library. A cover is
-                // picked by capture time, which a URL does not change, so the result is the same.
-                .combine(thumbnailUrlStore.urls) { grouped, urls -> grouped.withCoverUrls(urls) }
         }
+        .flowOn(Dispatchers.Default)
+        .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
+
+    private val shared: Flow<PlacesData> = sharedLocated
+        .map { located ->
+            val locale = Locale.getDefault()
+            if (labelLocale != locale) {
+                labelCache.clear()
+                labelLocale = locale
+            }
+            val labels = HashMap<String, PlaceLabelParts?>(located.size)
+            for (item in located) labels[item.id] = labelFor(item)
+            groupPlaces(located) { labels[it.id] }
+        }
+        // The store's URLs go onto the covers only, one per city and country, after the grouping: a
+        // thumbnail that lands no longer regroups every located photo of the library. A cover is
+        // picked by capture time, which a URL does not change, so the result is the same.
+        .combine(thumbnailUrlStore.urls) { grouped, urls -> grouped.withCoverUrls(urls) }
         .flowOn(Dispatchers.Default)
         .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
 
@@ -112,7 +126,7 @@ class ObservePlacesUseCase @Inject constructor(
         labelCache[item.id]?.let { return it }
         val geo = OfflineGeocoder.reverseGeocodeDetailed(context, item.latitude, item.longitude)
             ?: return null
-        return PlaceLabelParts(geo.city, geo.countryCode, geo.countryName).also { labelCache[item.id] = it }
+        return PlaceLabelParts(geo.city, geo.countryCode, geo.countryName, geo.cityId).also { labelCache[item.id] = it }
     }
 
     /** Index the merged library by the keys a `photo_location` id can carry (a local content uri and a

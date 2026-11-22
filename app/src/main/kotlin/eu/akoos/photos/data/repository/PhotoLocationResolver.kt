@@ -81,6 +81,28 @@ class PhotoLocationResolver @Inject constructor(
         return PhotoLocationEntity(id = row.linkId, userId = userId.id, latitude = lat, longitude = lon)
     }
 
+    /** What one row's XAttr told the map: a fix, no fix in it, or nothing yet because the key could not be decrypted. */
+    sealed interface XAttrPlace {
+        data class Located(val fix: PhotoLocationEntity) : XAttrPlace
+        data object NoLocation : XAttrPlace
+        data object KeyMissing : XAttrPlace
+    }
+
+    /** [locate] that tells a photo with no location in its XAttr apart from one whose key could not be decrypted. */
+    suspend fun placeOf(userId: UserId, row: PhotoListingEntity, armoredXAttr: String?): XAttrPlace {
+        armoredXAttr ?: return XAttrPlace.NoLocation
+        val json = try {
+            decryptXAttr(userId, row, armoredXAttr)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "placeOf: decrypt ${row.linkId} failed: ${e.message}")
+            null
+        } ?: return XAttrPlace.KeyMissing
+        val (lat, lon) = parsePhotoLocation(json) ?: return XAttrPlace.NoLocation
+        return XAttrPlace.Located(PhotoLocationEntity(id = row.linkId, userId = userId.id, latitude = lat, longitude = lon))
+    }
+
     /** One [row]'s XAttr decrypted to its JSON, or null when its key material can't be resolved. */
     suspend fun decryptXAttr(userId: UserId, row: PhotoListingEntity, armoredXAttr: String): String? {
         val encNodeKey = row.encNodeKey ?: return null

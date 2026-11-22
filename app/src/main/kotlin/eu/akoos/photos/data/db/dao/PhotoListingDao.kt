@@ -430,6 +430,10 @@ interface PhotoListingDao {
     @Query("UPDATE photo_listing SET gpsChecked = :state WHERE linkId IN (:linkIds)")
     suspend fun setGpsCheck(linkIds: List<String>, state: Int)
 
+    /** Sets the user's rows whose key could not be decrypted (state 8) back to unchecked, for one more try. */
+    @Query("UPDATE photo_listing SET gpsChecked = 0 WHERE userId = :userId AND gpsChecked = 8")
+    suspend fun releaseGpsKeyPending(userId: String)
+
     /** The user's rows the GPS backfill passed over while they were hidden (state 3). */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND gpsChecked = 3")
     suspend fun gpsSkippedHiddenLinkIds(userId: String): List<String>
