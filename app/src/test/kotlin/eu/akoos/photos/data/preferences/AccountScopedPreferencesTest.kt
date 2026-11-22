@@ -57,7 +57,7 @@ class AccountScopedPreferencesTest {
     fun `the records of the files the sign-out kept stay and every other goes`() {
         val prefs = vaultPrefs()
 
-        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = setOf(kept), keepFavorites = false, isVaultUri = isVault)
+        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = setOf(kept), hadNoSession = false, isVaultUri = isVault)
 
         assertEquals(setOf(kept), prefs[SettingsKeys.HIDDEN_PHOTO_URIS])
         assertEquals(setOf("$kept|DCIM/Trip"), prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP])
@@ -74,7 +74,7 @@ class AccountScopedPreferencesTest {
     fun `a vault emptied whole leaves no vault record behind`() {
         val prefs = vaultPrefs()
 
-        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = emptySet(), keepFavorites = false, isVaultUri = isVault)
+        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = emptySet(), hadNoSession = false, isVaultUri = isVault)
 
         assertNull(prefs[SettingsKeys.HIDDEN_PHOTO_URIS])
         assertNull(prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP])
@@ -87,7 +87,7 @@ class AccountScopedPreferencesTest {
     fun `a vault left alone keeps every vault record`() {
         val prefs = vaultPrefs()
 
-        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = null, keepFavorites = false, isVaultUri = isVault)
+        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = null, hadNoSession = false, isVaultUri = isVault)
 
         assertEquals(setOf(kept, gone, "cloud-filtered"), prefs[SettingsKeys.HIDDEN_PHOTO_URIS])
         assertEquals(setOf("$gone|L-1"), prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP])
@@ -99,7 +99,7 @@ class AccountScopedPreferencesTest {
     fun `a guest whose sign-in gave up keeps its vault index, its hidden folders and its favourites`() {
         val prefs = vaultPrefs()
 
-        AccountScopedPreferences.clearIn(prefs, UserId("u-unfinished"), keptVaultUris = null, keepFavorites = true, isVaultUri = isVault)
+        AccountScopedPreferences.clearIn(prefs, UserId("u-unfinished"), keptVaultUris = null, hadNoSession = true, isVaultUri = isVault)
 
         assertEquals(setOf(kept, gone, "cloud-filtered"), prefs[SettingsKeys.HIDDEN_PHOTO_URIS])
         assertEquals(setOf("$kept|DCIM/Trip", "$gone|Pictures/Other"), prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP])
@@ -117,7 +117,7 @@ class AccountScopedPreferencesTest {
             SettingsKeys.DELETE_AFTER_WHOLE_BACKUP_URIS to setOf("content://media/1"),
         )
 
-        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = emptySet(), keepFavorites = false, isVaultUri = isVault)
+        AccountScopedPreferences.clearIn(prefs, UserId("u1"), keptVaultUris = emptySet(), hadNoSession = false, isVaultUri = isVault)
 
         assertEquals(setOf("L-1"), prefs[SettingsKeys.SHORT_CLOUD_COPY_IDS])
         assertEquals(setOf("L-2"), prefs[SettingsKeys.UNVERIFIABLE_CLOUD_COPY_IDS])

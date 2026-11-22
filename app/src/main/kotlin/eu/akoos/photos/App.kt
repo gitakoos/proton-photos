@@ -107,6 +107,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     private val sharedBackupScheduler: eu.akoos.photos.data.sharedbackup.SharedBackupScheduler get() = sharedBackupSchedulerLazy.get()
 
     @Inject
+    lateinit var accountChoiceRestoreLazy: dagger.Lazy<eu.akoos.photos.data.preferences.AccountChoiceRestore>
+
+    @Inject
     lateinit var localEncryptionLazy: dagger.Lazy<eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator>
     private val localEncryption: eu.akoos.photos.data.localcrypto.LocalEncryptionCoordinator get() = localEncryptionLazy.get()
 
@@ -164,6 +167,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         autoSaveCoordinator.start()
         // Watches the data the shared backup keeps on Drive and runs a round at start while it is on.
         sharedBackupScheduler.start()
+        // An account signing back in gets the folder, album and view choices its sign-out set aside.
+        accountChoiceRestoreLazy.get().start()
         // Drop crash records left over from a version this build replaced, so a diagnostics bundle copied
         // after an update carries only this build's crashes rather than a prior version's history. Keeps
         // this version's own blocks, so a real crash from an earlier session on this build survives.

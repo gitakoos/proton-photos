@@ -43,6 +43,9 @@ import me.proton.core.domain.entity.UserId
  * UI preferences (theme, palette, language) and machine-level flags (onboarding done, app lock, the
  * update throttle) are deliberately kept: they describe the phone and the person holding it, not the
  * account, and clearing them would reset the app around a user who only switched login.
+ *
+ * The account's folder, album and view choices are set aside under its id before they go
+ * ([AccountChoiceStash]), so the same account signing in again finds them.
  */
 object AccountScopedPreferences {
 
@@ -53,21 +56,22 @@ object AccountScopedPreferences {
      * four per-photo maps, a pending hide, a heart given in the vault, the hidden folder they came from)
      * stay, so the Hidden screen goes on showing them under their names: the file is the only copy of
      * its photo and the records are how the user reaches it. Null means the vault was left alone, and
-     * then every vault record stays. [keepFavorites] keeps the whole favourite set, for an account that
-     * never had a session, whose favourites are not its own but those of whoever is still using the app.
+     * then every vault record stays. [hadNoSession] is an account that never had a session: the
+     * favourites and the folder, album and view choices are not its own but those of whoever is still
+     * using the app, so they stay, and nothing is set aside under its id.
      */
     suspend fun clear(
         context: Context,
         userId: UserId,
         keptVaultUris: Set<String>? = emptySet(),
-        keepFavorites: Boolean = false,
+        hadNoSession: Boolean = false,
     ) {
         // Read only when a favourite has to be told apart; a context with no files directory names no vault.
         val vaultPrefix by lazy {
             runCatching { android.net.Uri.fromFile(java.io.File(context.filesDir, "hidden")).toString() + "/" }.getOrNull()
         }
         context.settingsDataStoreStrict.edit { prefs ->
-            clearIn(prefs, userId, keptVaultUris, keepFavorites) { uri -> vaultPrefix?.let { uri.startsWith(it) } == true }
+            clearIn(prefs, userId, keptVaultUris, hadNoSession) { uri -> vaultPrefix?.let { uri.startsWith(it) } == true }
         }
     }
 
@@ -76,10 +80,12 @@ object AccountScopedPreferences {
         prefs: MutablePreferences,
         userId: UserId,
         keptVaultUris: Set<String>?,
-        keepFavorites: Boolean,
+        hadNoSession: Boolean,
         isVaultUri: (String) -> Boolean,
     ) {
-        clearVaultRecords(prefs, keptVaultUris, keepFavorites, isVaultUri)
+        clearVaultRecords(prefs, keptVaultUris, keepFavorites = hadNoSession, isVaultUri)
+        if (!hadNoSession) AccountChoiceStash.setAsideIn(prefs, userId)
+        val stays = if (hadNoSession) AccountChoiceStash.keys else emptySet()
         val accountTied = setOf<androidx.datastore.preferences.core.Preferences.Key<*>>(
             SettingsKeys.LAST_SYNC_MS,
             SettingsKeys.SYNC_FOLDER_NAMES,
@@ -153,7 +159,7 @@ object AccountScopedPreferences {
             // each delete against a share their session cannot reach.
             SettingsKeys.PENDING_ORPHAN_DELETES,
         )
-        accountTied.forEach { prefs.remove(it) }
+        accountTied.forEach { if (it !in stays) prefs.remove(it) }
         // Per-user dynamic keys (one per volume): the events anchor + the photo
         // listing resume cursor/complete flag. A stale events anchor surviving
         // sign-out is what returned a 404 on the next login until the cache was

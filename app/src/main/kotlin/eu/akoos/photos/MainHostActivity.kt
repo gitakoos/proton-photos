@@ -244,7 +244,7 @@ class MainHostActivity : AppCompatActivity() {
                 val kept = if (vault is eu.akoos.photos.domain.repository.VaultWipe.None) null
                 else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { hiddenStorage.vaultBlobUris() }
                 eu.akoos.photos.data.preferences.AccountScopedPreferences.clear(
-                    app, userId, keptVaultUris = kept, keepFavorites = !persist,
+                    app, userId, keptVaultUris = kept, hadNoSession = !persist,
                 )
             }
             signOutStep {
