@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -43,6 +42,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,6 +51,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,6 +68,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.tallSheetHeight
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.domain.usecase.samePersonName
@@ -116,6 +118,9 @@ fun PersonPickerSheet(
     val namedAlready = remember(people, q) { PersonPickerSearch.personNamed(people, q) }
     var ticked by remember { mutableStateOf(emptySet<Long>()) }
     val chosen = remember(people, ticked) { PersonPickerSearch.chosen(people, ticked) }
+    // Left alone, the grid keeps its first person in place and hides people a shorter search adds above them.
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(q) { gridState.scrollToItem(0) }
     val commitTyped: () -> Unit = {
         if (q.isNotEmpty()) {
             when {
@@ -139,7 +144,7 @@ fun PersonPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .tallSheetHeight(0.92f)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(top = 4.dp, bottom = 16.dp),
@@ -207,6 +212,7 @@ fun PersonPickerSheet(
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(72.dp),
+                    state = gridState,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth().weight(1f),

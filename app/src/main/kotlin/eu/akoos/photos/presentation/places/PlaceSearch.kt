@@ -27,7 +27,6 @@ package eu.akoos.photos.presentation.places
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -53,6 +52,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.AppSearchField
+import eu.akoos.photos.presentation.common.tallSheetHeight
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.theme.AppColors
@@ -150,7 +150,7 @@ internal fun PlaceSearchSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .tallSheetHeight(0.92f)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(top = 4.dp, bottom = 16.dp),
