@@ -292,9 +292,41 @@ class StageImportResumeTest {
         val result = stage(zip)
 
         assertTrue(result.endedEarly)
+        assertFalse("damage in the middle is not a file cut short", result.cutShort)
         assertEquals("the two photos before the damage are staged", 2, staged.size)
         assertTrue(result.readPercent in 0..99)
         assertFalse(cache().exists(zipId))
         assertTrue(ImportEventLog.text(context.filesDir).contains("endedEarly=true"))
+    }
+
+    @Test
+    fun `a zip whose end is missing keeps its readable part and says it is cut short`() {
+        val whole = zipOf(4)
+        val header = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+        var third = -1
+        var found = 0
+        for (i in 0..whole.size - 4) {
+            if (header.indices.all { whole[i + it] == header[it] } && ++found == 3) {
+                third = i
+                break
+            }
+        }
+        assertTrue(third > 0)
+        val cut = whole.copyOf(third + 5_000)
+
+        val result = stage(cut)
+
+        assertTrue(result.endedEarly)
+        assertTrue(result.cutShort)
+        assertEquals("the two photos before the cut are staged", 2, staged.size)
+        assertTrue(ImportEventLog.text(context.filesDir).contains("cutShort=true"))
+    }
+
+    @Test
+    fun `a whole zip is neither ended early nor cut short`() {
+        val result = stage(zipOf(3))
+
+        assertFalse(result.endedEarly)
+        assertFalse(result.cutShort)
     }
 }

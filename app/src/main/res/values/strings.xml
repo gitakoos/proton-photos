@@ -1300,6 +1300,7 @@
     <string name="import_failed_hint_resume">Pick the zip or folder again. It continues where it stopped.</string>
     <string name="import_failed_hint_archive">Try downloading that part of the export again.</string>
     <string name="import_review_partial">%1$s Only part of the export is listed below. Import these, then pick the zip or folder again to add the rest.</string>
+    <string name="import_review_cut_short">This zip is cut short: its end is missing, so not every photo is in it. Download it again to get the rest.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">%1$d photo or video in the export could not be read and is left out.</item>
         <item quantity="other">%1$d photos or videos in the export could not be read and are left out.</item>

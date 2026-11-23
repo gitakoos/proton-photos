@@ -1237,6 +1237,7 @@
     <string name="import_failed_hint_resume">Zip dosyasını ya da klasörü yeniden seç. Kaldığı yerden devam eder.</string>
     <string name="import_failed_hint_archive">Dışa aktarımın o parçasını yeniden indirmeyi dene.</string>
     <string name="import_review_partial">%1$s Dışa aktarımın yalnızca bir kısmı aşağıda listeleniyor. Bunları içe aktar, kalanını eklemek için zip dosyasını ya da klasörü yeniden seç.</string>
+    <string name="import_review_cut_short">Bu zip eksik: sonu yok, bu yüzden tüm fotoğraflar içinde değil. Kalanını almak için yeniden indir.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">Dışa aktarımdaki %1$d fotoğraf veya video okunamadı ve atlandı.</item>
         <item quantity="other">Dışa aktarımdaki %1$d fotoğraf veya video okunamadı ve atlandı.</item>

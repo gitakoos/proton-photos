@@ -848,6 +848,7 @@
     <string name="import_failed_hint_resume">Znova izberite zip ali mapo. Uvoz se nadaljuje tam, kjer se je ustavil.</string>
     <string name="import_failed_hint_archive">Poskusite znova prenesti ta del izvoza.</string>
     <string name="import_review_partial">%1$s Spodaj je prikazan le del izvoza. Uvozite te elemente in nato znova izberite zip ali mapo, da dodate preostanek.</string>
+    <string name="import_review_cut_short">Ta zip je okrnjen: manjka mu konec, zato v njem niso vse fotografije. Prenesite ga znova, da dobite preostanek.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">%1$d fotografije ali videa v izvozu ni bilo mogoče prebrati, zato je izpuščen.</item>
         <item quantity="two">%1$d fotografij ali videov v izvozu ni bilo mogoče prebrati, zato sta izpuščena.</item>

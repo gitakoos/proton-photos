@@ -37,9 +37,10 @@ import java.util.zip.ZipException
  * How a walk over the zip ended. A walk front to back cannot step past an entry whose end it cannot find
  * (cut off, or deflated data that does not inflate), nor go on where no entry header follows, so it stops
  * there: [endedEarly] is true and [endedBy] is the fault, with everything before that point already handed
- * to the caller. [damagedEntries]
- * counts the entries that were skipped without ending the walk. [bytesRead] is how far into the file the
- * walk got.
+ * to the caller. [cutShort] tells the file simply ending (inside an entry or where the next header should
+ * start, with no end record of a central directory at its end, as a download cut short leaves it) from
+ * damage further in. [damagedEntries] counts the entries that were skipped without ending the walk.
+ * [bytesRead] is how far into the file the walk got.
  */
 data class WalkResult(
     val damagedEntries: Int = 0,
@@ -47,6 +48,7 @@ data class WalkResult(
     val endedBy: Throwable? = null,
     val bytesRead: Long = 0L,
     val entries: Int = 0,
+    val cutShort: Boolean = false,
 ) {
     /**
      * True when the walk stopped cleanly, but well short of the file's end ([fileBytes] long): what looked
@@ -213,7 +215,8 @@ class TakeoutZipReader(
     private fun walkStream(onBytes: ((Long) -> Unit)?, onEntry: (MediaEntry, InputStream) -> Unit): WalkResult {
         // Counted after the buffer, so the figure is what the walk has consumed, not what the buffer has
         // pulled in advance.
-        val source = WalkSource(BufferedInputStream(SourceStream(openStream()), READ_BUFFER))
+        val tail = TailStream(SourceStream(openStream()))
+        val source = WalkSource(BufferedInputStream(tail, READ_BUFFER))
         var damaged = 0
         var entries = 0
         var endedBy: Throwable? = null
@@ -247,7 +250,8 @@ class TakeoutZipReader(
                 }
             }
         }
-        return WalkResult(damaged, endedBy != null, endedBy, source.consumed, entries)
+        val cutShort = endedBy is ZipCutShortException && !tail.endsWithDirectoryRecord()
+        return WalkResult(damaged, endedBy != null, endedBy, source.consumed, entries, cutShort)
     }
 
     /**
@@ -301,6 +305,64 @@ class TakeoutZipReader(
         }
     }
 
+    /**
+     * Keeps the last bytes read from the file, so a walk that ran into the file's end can tell whether the
+     * file closes with the end record of a central directory, which a download cut short never has.
+     */
+    private class TailStream(delegate: InputStream) : FilterInputStream(delegate) {
+        private val ring = ByteArray(TAIL_BYTES)
+        private var total = 0L
+
+        override fun read(): Int = super.read().also {
+            if (it >= 0) {
+                ring[(total % TAIL_BYTES).toInt()] = it.toByte()
+                total++
+            }
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) keep(b, off, it) }
+
+        // Skipped bytes would be missing from the tail, so they are read instead.
+        override fun skip(n: Long): Long {
+            val sink = ByteArray(minOf(n, 8_192L).toInt().coerceAtLeast(1))
+            var left = n
+            while (left > 0) {
+                val got = read(sink, 0, minOf(left, sink.size.toLong()).toInt())
+                if (got < 0) break
+                left -= got
+            }
+            return n - left
+        }
+
+        private fun keep(b: ByteArray, off: Int, len: Int) {
+            var from = off + maxOf(0, len - TAIL_BYTES)
+            var at = ((total + (from - off)) % TAIL_BYTES).toInt()
+            var left = off + len - from
+            while (left > 0) {
+                val n = minOf(left, TAIL_BYTES - at)
+                System.arraycopy(b, from, ring, at, n)
+                from += n
+                left -= n
+                at = 0
+            }
+            total += len
+        }
+
+        /** True when the bytes read so far end with an end-of-central-directory record and its comment. */
+        fun endsWithDirectoryRecord(): Boolean {
+            val size = minOf(total, TAIL_BYTES.toLong()).toInt()
+            val tail = ByteArray(size) { ring[((total - size + it) % TAIL_BYTES).toInt()] }
+            for (at in size - END_RECORD_SIZE downTo 0) {
+                if (ZipCentralDirectory.u32(tail, at) == END_RECORD_SIGNATURE &&
+                    ZipCentralDirectory.u16(tail, at + 20) == size - at - END_RECORD_SIZE
+                ) {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
     /** Counts the bytes taken from the file itself (compressed, before inflating), which is what a
      *  percentage of the file's size needs; bytes put back are taken off again. */
     private class WalkSource(delegate: InputStream) : PushbackInputStream(delegate, LocalHeaderReader.SOURCE_PUSHBACK) {
@@ -343,6 +405,12 @@ class TakeoutZipReader(
         private const val DOS_EPOCH_END_MS = 315_619_200_000L
 
         private const val READ_BUFFER = 64 * 1024
+
+        private const val END_RECORD_SIGNATURE = 0x06054b50L
+        private const val END_RECORD_SIZE = 22
+
+        /** The end record plus the longest comment it can carry. */
+        private const val TAIL_BYTES = END_RECORD_SIZE + 0xFFFF
 
         internal fun baseName(path: String): String = ImportEntries.baseName(path)
 

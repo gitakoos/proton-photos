@@ -126,6 +126,7 @@ class StageImportWorker @AssistedInject constructor(
                     KEY_RESULT_ENDED_EARLY to result.endedEarly,
                     KEY_RESULT_READ_PERCENT to result.readPercent,
                     KEY_RESULT_UNREADABLE to result.unreadable,
+                    KEY_RESULT_CUT_SHORT to result.cutShort,
                 ),
             )
         } catch (e: CancellationException) {
@@ -271,6 +272,9 @@ class StageImportWorker @AssistedInject constructor(
 
         /** Output: how many photos and videos of the archive could not be read and were left out. */
         const val KEY_RESULT_UNREADABLE = "resultUnreadable"
+
+        /** Output: true when the read ended early because the file itself ends there (a download cut short). */
+        const val KEY_RESULT_CUT_SHORT = "resultCutShort"
 
         /** Output on failure: the [ImportFailureKind] name, so the screen can say what went wrong. */
         const val KEY_FAILURE_KIND = "failureKind"

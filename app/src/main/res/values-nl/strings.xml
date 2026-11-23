@@ -685,6 +685,7 @@
     <string name="import_failed_hint_resume">Kies de zip of map opnieuw. Het gaat verder waar het gebleven was.</string>
     <string name="import_failed_hint_archive">Probeer dat deel van de export opnieuw te downloaden.</string>
     <string name="import_review_partial">%1$s Hieronder staat maar een deel van de export. Importeer deze foto\'s en kies de zip of map daarna opnieuw om de rest toe te voegen.</string>
+    <string name="import_review_cut_short">Deze zip is afgebroken: het einde ontbreekt, dus niet alle foto\'s zitten erin. Download hem opnieuw om de rest te krijgen.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">%1$d foto of video in de export kon niet worden gelezen en wordt overgeslagen.</item>
         <item quantity="other">%1$d foto\'s of video\'s in de export konden niet worden gelezen en worden overgeslagen.</item>

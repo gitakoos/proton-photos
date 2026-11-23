@@ -33,6 +33,9 @@ import java.util.zip.DataFormatException
 import java.util.zip.Inflater
 import java.util.zip.ZipException
 
+/** The file ends where the walk needs more of it: inside an entry, or where the next header should start. */
+internal class ZipCutShortException(message: String) : ZipException(message)
+
 /** One entry met walking the local headers: its bytes, read once, and the way past it. */
 internal abstract class LocalEntry(val name: String, val modifiedMs: Long?) : InputStream() {
 
@@ -52,7 +55,8 @@ internal abstract class LocalEntry(val name: String, val modifiedMs: Long?) : In
  * any of its four layouts), or, when it is stored, encrypted or in an unknown method, at the next header
  * signature whose preceding descriptor records exactly the distance back to the data start. An encrypted
  * entry or one in an unknown method is stepped past without being read. The entries end at the central
- * directory; anything else where a header should be is a fault. Bytes read past an entry go back into
+ * directory; anything else where a header should be is a fault, and the file ending first raises
+ * [ZipCutShortException]. Bytes read past an entry go back into
  * [source] (which needs [SOURCE_PUSHBACK] of room), so at most one read chunk is held at a time.
  */
 internal class LocalHeaderReader(private val source: PushbackInputStream) : Closeable {
@@ -67,14 +71,16 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         if (got < fixed.size || u32(fixed, 0) != LOCAL_SIGNATURE) {
             if (got > 0) source.unread(fixed, 0, got)
             if (got >= 4 && u32(fixed, 0) in DIRECTORY_SIGNATURES) return null
-            throw ZipException(if (got == 0) "entries end without the central directory" else "no local header where an entry starts")
+            if (got == 0) throw ZipCutShortException("entries end without the central directory")
+            if (got < fixed.size && (got < 4 || u32(fixed, 0) == LOCAL_SIGNATURE)) throw ZipCutShortException("the file ends inside an entry header")
+            throw ZipException("no local header where an entry starts")
         }
         val flags = u16(fixed, 6)
         val method = u16(fixed, 8)
         val nameLength = u16(fixed, 26)
         val extraLength = u16(fixed, 28)
         val rest = ByteArray(nameLength + extraLength)
-        if (readUpTo(rest, rest.size) < rest.size) throw ZipException("unexpected end of the file")
+        if (readUpTo(rest, rest.size) < rest.size) throw ZipCutShortException("unexpected end of the file")
         var compressed = u32(fixed, 18)
         var size = u32(fixed, 22)
         var modifiedMs: Long? = null
@@ -133,7 +139,7 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         private fun readStored(b: ByteArray, off: Int, len: Int): Int {
             if (remaining == 0L) return -1
             val n = source.read(b, off, minOf(len.toLong(), remaining).toInt())
-            if (n < 0) throw ZipException("zip entry cut off")
+            if (n < 0) throw ZipCutShortException("zip entry cut off")
             remaining -= n
             return n
         }
@@ -141,14 +147,14 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         // A raw deflate stream may need one byte past its end before the inflater reports it finished.
         private fun feed() {
             if (remaining == 0L) {
-                if (padded) throw ZipException("zip entry cut off")
+                if (padded) throw ZipException("deflate data runs past the entry")
                 padded = true
                 scratch[0] = 0
                 inflater.setInput(scratch, 0, 1)
                 return
             }
             val n = source.read(scratch, 0, minOf(scratch.size.toLong(), remaining).toInt())
-            if (n < 0) throw ZipException("zip entry cut off")
+            if (n < 0) throw ZipCutShortException("zip entry cut off")
             remaining -= n
             inflater.setInput(scratch, 0, n)
         }
@@ -166,7 +172,7 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         private var checked = false
         private var fed = 0
         private var recordedCrc: Long? = null
-        private var lost: String? = null
+        private var lost: ZipException? = null
 
         init {
             inflater.reset()
@@ -192,33 +198,35 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         }
 
         private fun inflateOrLose(b: ByteArray, off: Int, len: Int): Int {
-            lost?.let { throw ZipException(it) }
+            lost?.let { throw it }
             if (recordedCrc != null) return -1
             return try {
                 inflate(b, off, len, ::feed)
             } catch (e: ZipException) {
-                lost = e.message
+                lost = e
                 throw e
             }
         }
 
         private fun feed() {
             fed = source.read(scratch, 0, scratch.size)
-            if (fed < 0) throw ZipException("zip entry cut off")
+            if (fed < 0) throw ZipCutShortException("zip entry cut off")
             inflater.setInput(scratch, 0, fed)
         }
 
         /** The descriptor's CRC, once the bytes the inflater did not use are back in the source. */
         private fun findEnd(): Long {
             recordedCrc?.let { return it }
-            lost?.let { throw ZipException(it) }
+            lost?.let { throw it }
             val left = inflater.remaining
             if (left > 0) source.unread(scratch, fed - left, left)
-            val found = descriptorAt(inflater.bytesRead, inflater.bytesWritten)
-            if (found == null) {
-                lost = "no data descriptor matches the entry"
-                throw ZipException(lost)
+            val found = try {
+                descriptorAt(inflater.bytesRead, inflater.bytesWritten)
+            } catch (e: ZipException) {
+                lost = e
+                throw e
             }
+            if (found == null) throw ZipException("no data descriptor matches the entry").also { lost = it }
             recordedCrc = found
             return found
         }
@@ -272,7 +280,7 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
 
         private fun fill() {
             if (sourceEnded) {
-                if (!descriptorEndsAt(filled)) throw ZipException("zip entry cut off")
+                if (!descriptorEndsAt(filled)) throw ZipCutShortException("zip entry cut off")
                 return
             }
             compact()
@@ -336,6 +344,8 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
     /**
      * The CRC of the descriptor that follows a deflated entry, whose sizes match the data's, in any of its four
      * layouts; one followed by a header wins a tie. What follows the descriptor goes back into the source.
+     * Raises [ZipCutShortException] when none matches and the file ends before a whole descriptor of every
+     * layout could be read.
      */
     private fun descriptorAt(compressed: Long, uncompressed: Long): Long? {
         val bytes = ByteArray(LONGEST_DESCRIPTOR + 4)
@@ -358,6 +368,7 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         }
         val length = match?.second ?: 0
         if (got > length) source.unread(bytes, length, got - length)
+        if (match == null && got < at + 20) throw ZipCutShortException("the file ends inside a data descriptor")
         return match?.first
     }
 
@@ -369,7 +380,7 @@ internal class LocalHeaderReader(private val source: PushbackInputStream) : Clos
         var left = count
         while (left > 0) {
             val n = source.read(scratch, 0, minOf(scratch.size.toLong(), left).toInt())
-            if (n < 0) throw ZipException("zip entry cut off")
+            if (n < 0) throw ZipCutShortException("zip entry cut off")
             left -= n
         }
     }

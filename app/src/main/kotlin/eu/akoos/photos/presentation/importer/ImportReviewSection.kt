@@ -297,6 +297,16 @@ fun ImportReviewSection(
                     )
                 }
             }
+            if (state.cutShort) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "cutShort") {
+                    Text(
+                        text = stringResource(R.string.import_review_cut_short),
+                        color = colors.fgDim,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
+            }
             if (state.unreadable > 0) {
                 item(span = { GridItemSpan(maxLineSpan) }, key = "unreadable") {
                     Text(

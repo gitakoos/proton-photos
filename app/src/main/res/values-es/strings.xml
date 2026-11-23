@@ -643,6 +643,7 @@
     <string name="import_failed_hint_resume">Elige el zip o la carpeta de nuevo. Continúa donde se quedó.</string>
     <string name="import_failed_hint_archive">Prueba a descargar de nuevo esa parte de la exportación.</string>
     <string name="import_review_partial">%1$s Abajo solo aparece una parte de la exportación. Importa estas fotos y vuelve a elegir el zip o la carpeta para añadir el resto.</string>
+    <string name="import_review_cut_short">Este zip está incompleto: le falta el final, así que no están todas las fotos. Descárgalo de nuevo para obtener el resto.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">No se pudo leer %1$d foto o vídeo de la exportación y se omite.</item>
         <item quantity="other">No se pudieron leer %1$d fotos o vídeos de la exportación y se omiten.</item>

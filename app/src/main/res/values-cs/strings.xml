@@ -847,6 +847,7 @@
     <string name="import_failed_hint_resume">Vyberte zip nebo složku znovu. Import naváže tam, kde skončil.</string>
     <string name="import_failed_hint_archive">Zkuste tuto část exportu stáhnout znovu.</string>
     <string name="import_review_partial">%1$s Níže je uvedena jen část exportu. Importujte tyto položky a pak vyberte zip nebo složku znovu, aby se přidal zbytek.</string>
+    <string name="import_review_cut_short">Tento zip je neúplný: chybí mu konec, takže v něm nejsou všechny fotky. Stáhněte ho znovu, abyste získali zbytek.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">%1$d fotku nebo video v exportu nešlo přečíst, a proto je vynecháno.</item>
         <item quantity="few">%1$d fotky nebo videa v exportu nešlo přečíst, a proto jsou vynechány.</item>

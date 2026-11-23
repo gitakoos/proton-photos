@@ -847,6 +847,7 @@
     <string name="import_failed_hint_resume">Wybierz plik zip lub folder ponownie. Import wznowi się od miejsca, w którym się zatrzymał.</string>
     <string name="import_failed_hint_archive">Spróbuj pobrać tę część eksportu ponownie.</string>
     <string name="import_review_partial">%1$s Poniżej widać tylko część eksportu. Zaimportuj te zdjęcia, a potem wybierz plik zip lub folder ponownie, aby dodać resztę.</string>
+    <string name="import_review_cut_short">Ten plik zip jest niekompletny: brakuje jego końca, więc nie ma w nim wszystkich zdjęć. Pobierz go ponownie, aby uzyskać resztę.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">Nie udało się odczytać %1$d zdjęcia lub filmu z eksportu, więc zostało pominięte.</item>
         <item quantity="few">Nie udało się odczytać %1$d zdjęć lub filmów z eksportu, więc zostały pominięte.</item>

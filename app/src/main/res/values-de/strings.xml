@@ -638,6 +638,7 @@
     <string name="import_failed_hint_resume">Wähle die ZIP-Datei oder den Ordner erneut aus. Es geht dort weiter, wo es aufgehört hat.</string>
     <string name="import_failed_hint_archive">Versuche, diesen Teil des Exports erneut herunterzuladen.</string>
     <string name="import_review_partial">%1$s Unten ist nur ein Teil des Exports aufgelistet. Importiere diese und wähle die ZIP-Datei oder den Ordner dann erneut aus, um den Rest hinzuzufügen.</string>
+    <string name="import_review_cut_short">Diese ZIP-Datei ist unvollständig: Ihr Ende fehlt, daher sind nicht alle Fotos enthalten. Lade sie erneut herunter, um den Rest zu erhalten.</string>
     <plurals name="import_review_unreadable">
         <item quantity="one">%1$d Foto oder Video im Export konnte nicht gelesen werden und wird ausgelassen.</item>
         <item quantity="other">%1$d Fotos oder Videos im Export konnten nicht gelesen werden und werden ausgelassen.</item>

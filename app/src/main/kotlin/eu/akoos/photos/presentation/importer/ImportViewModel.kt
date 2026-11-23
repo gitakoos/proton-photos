@@ -104,6 +104,7 @@ sealed interface ImportUiState {
         val includedCount: Int,
         val incomplete: ImportFailureKind? = null,
         val unreadable: Int = 0,
+        val cutShort: Boolean = false,
     ) : ImportUiState
 
     /** The confirmed set is uploading. Driven by the upload worker's live progress; the shape mirrors
@@ -600,17 +601,19 @@ class ImportViewModel @Inject constructor(
         val lastStage = stageInfos.lastOrNull()
         if (rows.isNotEmpty()) {
             // A stage that did not read the whole archive still leaves what it staged to review; the
-            // review says it is partial and why, so a short list is not mistaken for the whole export.
+            // review says it is partial and why, so a short list is not mistaken for the whole export. A zip
+            // that is itself cut short has nothing more to give on a second pick, so it says that instead.
+            val succeeded = lastStage?.takeIf { it.state == WorkInfo.State.SUCCEEDED }?.outputData
+            val cutShort = succeeded?.getBoolean(StageImportWorker.KEY_RESULT_CUT_SHORT, false) == true
             val incomplete = when {
                 lastStage?.state == WorkInfo.State.FAILED -> failureKindOf(lastStage?.outputData)
-                lastStage?.state == WorkInfo.State.SUCCEEDED &&
-                    lastStage?.outputData?.getBoolean(StageImportWorker.KEY_RESULT_ENDED_EARLY, false) == true ->
+                cutShort -> null
+                succeeded?.getBoolean(StageImportWorker.KEY_RESULT_ENDED_EARLY, false) == true ->
                     ImportFailureKind.ARCHIVE_DAMAGED
                 else -> null
             }
-            val unreadable = lastStage?.takeIf { it.state == WorkInfo.State.SUCCEEDED }
-                ?.outputData?.getInt(StageImportWorker.KEY_RESULT_UNREADABLE, 0) ?: 0
-            return ImportUiState.Review(zipId, rows, included, incomplete, unreadable)
+            val unreadable = succeeded?.getInt(StageImportWorker.KEY_RESULT_UNREADABLE, 0) ?: 0
+            return ImportUiState.Review(zipId, rows, included, incomplete, unreadable, cutShort)
         }
         return when (lastStage?.state) {
             WorkInfo.State.FAILED -> ImportUiState.Failed(failureKindOf(lastStage?.outputData))

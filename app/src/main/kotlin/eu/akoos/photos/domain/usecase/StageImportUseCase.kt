@@ -80,9 +80,16 @@ data class StageProgress(
 )
 
 /** What a staging pass produced: the rows now staged, whether the archive stopped being readable partway
- *  ([endedEarly], with [readPercent] of the file reached), the rest being a normal completion, and how many
- *  photos and videos of it could not be read and were left out ([unreadable]). */
-data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent: Int, val unreadable: Int = 0)
+ *  ([endedEarly], with [readPercent] of the file reached, and [cutShort] when that is because the file itself
+ *  ends early rather than damage in it), the rest being a normal completion, and how many photos and videos
+ *  of it could not be read and were left out ([unreadable]). */
+data class StageResult(
+    val staged: Int,
+    val endedEarly: Boolean,
+    val readPercent: Int,
+    val unreadable: Int = 0,
+    val cutShort: Boolean = false,
+)
 
 /**
  * The staging pass of the import review flow: it walks a picked Takeout/Ente `.zip` or folder once for the
@@ -148,6 +155,7 @@ class StageImportUseCase @Inject constructor(
 
         var phase = "open"
         var scanEndedEarly = false
+        var scanCutShort = false
         try {
             val alreadyStaged: Set<String>
             if (resumed) {
@@ -193,6 +201,7 @@ class StageImportUseCase @Inject constructor(
                     }
                 }
                 scanEndedEarly = fresh.walk.endedEarly || fresh.walk.endedShort(zipBytes)
+                scanCutShort = fresh.walk.cutShort
                 ImportEventLog.record(
                     filesDir,
                     "scan done media=${fresh.mediaCount} sidecars=${fresh.sidecars.size} " +
@@ -365,6 +374,8 @@ class StageImportUseCase @Inject constructor(
             val staged = importStagedDao.countForZip(zipId)
             val walkEndedEarly = walk.endedEarly || walk.endedShort(zipBytes)
             val endedEarly = scanEndedEarly || walkEndedEarly
+            // Cut short only when each walk that stopped early stopped at the file's end: damage outranks it.
+            val cutShort = endedEarly && (!scanEndedEarly || scanCutShort) && (!walkEndedEarly || walk.cutShort)
             val readPercent = when {
                 !endedEarly -> 100
                 zipBytes > 0 -> (walk.bytesRead * 100 / zipBytes).toInt().coerceIn(0, 99)
@@ -373,7 +384,7 @@ class StageImportUseCase @Inject constructor(
             ImportEventLog.record(
                 filesDir,
                 "stage done staged=$staged failedEntries=$failedEntries damaged=${walk.damagedEntries} " +
-                    "endedEarly=$endedEarly" +
+                    "endedEarly=$endedEarly cutShort=$cutShort" +
                     (if (walkEndedEarly) " atMb=${walk.bytesRead / MB}" else "") +
                     (walk.endedBy?.let { " by=${ImportFailure.describe(it)}" } ?: ""),
             )
@@ -384,6 +395,7 @@ class StageImportUseCase @Inject constructor(
                 endedEarly = endedEarly,
                 readPercent = readPercent,
                 unreadable = failedEntries + walk.damagedEntries,
+                cutShort = cutShort,
             )
         } catch (e: CancellationException) {
             ImportEventLog.record(filesDir, "stage interrupted phase=$phase")
