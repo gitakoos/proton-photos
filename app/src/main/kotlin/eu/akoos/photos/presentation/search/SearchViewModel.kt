@@ -289,7 +289,7 @@ class SearchViewModel @Inject constructor(
             }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
      *  per-item filter only needs to run once typing settles. Debouncing the query feed into
@@ -537,14 +537,14 @@ class SearchViewModel @Inject constructor(
             }
         }
             .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SemanticFeed(false, emptyList()))
+            .stateIn(viewModelScope, SharingStarted.Lazily, SemanticFeed(false, emptyList()))
 
     /** True while a content search for the current query is still running, so the grid can show a
      *  placeholder instead of an empty "no results" flash the matches then pop into. */
     val semanticSearching: StateFlow<Boolean> = semanticFeed
         .map { it.loading }
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+        .stateIn(viewModelScope, SharingStarted.Lazily, false)
 
     /**
      * The grid's photos: the keyword + metadata matches first, in their existing order, then any
@@ -565,7 +565,8 @@ class SearchViewModel @Inject constructor(
         if (scoped == null) merged else merged.filter(scoped::accepts)
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        // Kept running behind the viewer: a restart re-runs the content model and redraws the grid.
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /** All NAMED people for the People rail (the filter chip + face bar in the shared category rail),
      *  independent of the query. Gated on the AI + face flags, so an ML-off session shows no chip; a
@@ -598,7 +599,8 @@ class SearchViewModel @Inject constructor(
 
     /** What both album surfaces are drawn from, read once and shared between them. */
     private val albumSource: StateFlow<SearchAlbums.Source> = albumBrowseSource.source
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchAlbums.Source())
+        // A restart starts with no device folders, which would drop a matched folder row for a moment.
+        .stateIn(viewModelScope, SharingStarted.Lazily, SearchAlbums.Source())
 
     /** The idle page's Albums row: the Albums tab's cards in its order, by [SearchAlbums.row]. */
     val albumRow: StateFlow<List<SearchAlbum>> = albumSource

@@ -210,9 +210,11 @@ class PersonDetailViewModel @Inject constructor(
      * manually attached photos, each resolved to a [GalleryItem] newest-first. Keyed on the person id
      * so re-entering a different person reloads cleanly. The person's own row is followed too, so a
      * name given while the page is open (the name-or-merge sheet over it, or a rename) retitles the
-     * page and re-reads the photos attached under that name.
+     * page and re-reads the photos attached under that name. Coming back to the page while it still
+     * follows the same person keeps what it shows instead of reading the library again.
      */
     fun load(personId: Long) {
+        if (!reloadsPersonPage(_uiState.value.personId, personId, loadJob?.isActive == true)) return
         loadJob?.cancel()
         _uiState.update { it.copy(personId = personId, isLoading = true) }
         loadJob = viewModelScope.launch {
@@ -750,6 +752,14 @@ internal fun looksForSuggestionOnNaming(wasNamed: Boolean?, isNamed: Boolean): B
  * longer exists.
  */
 internal fun dropsHeldSuggestion(candidateRow: PersonEntity?): Boolean = candidateRow == null
+
+/**
+ * Whether opening the page for [requested] reads the person again: not while the page still follows that
+ * same person ([followedPersonId], with its read running in [following]), as when the page comes back from
+ * the viewer. A read that ended, by a failure or with the people surfaces off, is started again.
+ */
+internal fun reloadsPersonPage(followedPersonId: Long?, requested: Long, following: Boolean): Boolean =
+    !(following && followedPersonId == requested)
 
 /** What a person page shows for its person: the visible name, whether it is the Unsorted bucket, and whether
  *  the person is gone while the page is open. */

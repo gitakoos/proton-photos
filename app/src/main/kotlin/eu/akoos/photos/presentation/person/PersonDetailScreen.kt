@@ -99,6 +99,7 @@ import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.SelectionShareState
@@ -384,7 +385,7 @@ fun PersonDetailScreen(
         when {
             // An action taking the page away empties the grid before the page leaves; until then it
             // reads as working rather than as a person with no photos.
-            state.isLoading || (leaving && state.items.isEmpty()) -> CircularProgressIndicator(
+            showsPersonSpinner(state.isLoading, state.items.isEmpty(), leaving) -> CircularProgressIndicator(
                 color = Accent,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -406,6 +407,15 @@ fun PersonDetailScreen(
                 }
                 val idToIndex = remember(selectableIds) { selectableIds.withIndex().associate { (i, id) -> id to i } }
                 eu.akoos.photos.presentation.gallery.RequestVisibleThumbnails(gridState, state.items) { it.stableId }
+                val returnGroups = remember(gridRows) { photosByMonth(gridRows) }
+                ReturnToViewerPhoto(
+                    gridState = gridState,
+                    groups = returnGroups,
+                    headerPerGroup = true,
+                    leadingSlots = (if (state.isOther && !selecting) 1 else 0) +
+                        (if (mergeSuggestion != null && !selecting) 1 else 0),
+                    keyOf = { it.stableId },
+                )
                 // Armed at the long-press anchor so the cell's release-tap does not toggle it straight back off.
                 val tapGuard = remember { mutableStateOf(false) }
                 val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
@@ -1152,6 +1162,24 @@ internal fun leavesEmptiedPage(
     leaving: Boolean,
     sheetOpen: Boolean,
 ): Boolean = isEmpty && hadPhotos && !isLoading && !leaving && !sheetOpen
+
+/**
+ * Whether the page shows its spinner in place of the grid: only while it has no photos to show, during the
+ * first read ([isLoading]) or while an action takes the emptied page away ([leaving]). Photos already shown
+ * stay on screen through a later read, as an album's do.
+ */
+internal fun showsPersonSpinner(isLoading: Boolean, isEmpty: Boolean, leaving: Boolean): Boolean =
+    isEmpty && (isLoading || leaving)
+
+/** The grid's photos in the runs it draws them, one per month header, for landing back on a photo. */
+internal fun photosByMonth(rows: List<LocationGridRow>): List<List<GalleryItem>> {
+    val runs = ArrayList<MutableList<GalleryItem>>()
+    for (row in rows) when (row) {
+        is LocationGridRow.Header -> runs += ArrayList<GalleryItem>()
+        is LocationGridRow.Photo -> runs.lastOrNull()?.add(row.item)
+    }
+    return runs
+}
 
 /**
  * The person whose page replaces this one once the name-or-merge sheet has placed the page's group
