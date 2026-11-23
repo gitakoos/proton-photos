@@ -297,6 +297,16 @@ fun ImportReviewSection(
                     )
                 }
             }
+            if (state.unreadable > 0) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "unreadable") {
+                    Text(
+                        text = pluralStringResource(R.plurals.import_review_unreadable, state.unreadable, state.unreadable),
+                        color = colors.fgDim,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
+            }
             items(rows, key = { it.entryName }) { row ->
                 ImportReviewCell(
                     row = row,

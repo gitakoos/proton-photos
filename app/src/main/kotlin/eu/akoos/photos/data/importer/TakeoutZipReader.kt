@@ -92,6 +92,11 @@ data class TakeoutScan(
  * `ContentResolver`/`Uri`, and each pass calls [openStream] for a fresh stream, wraps it in a
  * [ZipInputStream] and closes it. The caller wires it as `TakeoutZipReader { resolver.openInputStream(uri) }`.
  *
+ * When [openRandomAccess] gives a file that can be read at any position, each pass reads the zip through its
+ * central directory instead ([ZipCentralDirectory]): a zip written with data descriptors, zip64 fields or
+ * an odd entry name then reads in full, and an entry that cannot be read is skipped alone. The stream walk
+ * stays for a source with no random access and for a file with no readable directory (cut short).
+ *
  * Pass 1 ([scan]) walks the whole zip once and builds a small in-memory index of the tiny sidecar JSONs
  * while counting the media entries. Pass 2 ([forEachMedia]) walks the whole zip again and hands each
  * media entry to the caller one at a time; the caller copies that single entry to a temp file before the
@@ -103,7 +108,13 @@ data class TakeoutScan(
  * where, rather than throwing away everything read so far. Any other failure (the place the zip is read
  * from stops answering) is rethrown for the caller to retry.
  */
-class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSourceReader {
+class TakeoutZipReader(
+    private val openRandomAccess: (() -> ZipRandomSource?)?,
+    private val openStream: () -> InputStream,
+) : ImportSourceReader {
+
+    /** A reader that only ever walks [openStream] front to back. */
+    constructor(openStream: () -> InputStream) : this(null, openStream)
 
     /**
      * Pass 1: the sidecar metadata index plus the media count, both from the same walk. The index is
@@ -116,9 +127,9 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
      */
     override fun scan(onBytes: ((Long) -> Unit)?): TakeoutScan {
         val index = SidecarIndexBuilder()
-        val walk = walk(onBytes) { entry, zip ->
+        val walk = walk(onBytes) { entry, input ->
             val name = entry.name
-            if (isJson(name)) index.offerSidecar(name, zip) else if (isMedia(name)) index.countMedia()
+            if (isJson(name)) index.offerSidecar(name, input) else if (isMedia(name)) index.countMedia()
         }
         return index.build(walk)
     }
@@ -137,8 +148,8 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
     override fun forEachMediaEntry(
         onBytes: ((Long) -> Unit)?,
         onMedia: (entry: MediaEntry, input: InputStream) -> Unit,
-    ): WalkResult = walk(onBytes) { entry, zip ->
-        if (isMedia(entry.name)) onMedia(MediaEntry(entry.name, modifiedMsOf(entry)), zip)
+    ): WalkResult = walk(onBytes) { entry, input ->
+        if (isMedia(entry.name)) onMedia(entry, input)
     }
 
     /**
@@ -147,7 +158,56 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
      * that entry, or ends the walk when the stream cannot be advanced past it; anything else, including
      * cancellation, propagates.
      */
-    private fun walk(onBytes: ((Long) -> Unit)?, onEntry: (ZipEntry, InputStream) -> Unit): WalkResult {
+    private fun walk(onBytes: ((Long) -> Unit)?, onEntry: (MediaEntry, InputStream) -> Unit): WalkResult {
+        openRandomAccessOrNull()?.use { source ->
+            val directory = try {
+                ZipCentralDirectory.read(source)
+            } catch (e: ZipException) {
+                null
+            }
+            if (directory != null) return walkDirectory(directory, onBytes, onEntry)
+        }
+        return walkStream(onBytes, onEntry)
+    }
+
+    private fun openRandomAccessOrNull(): ZipRandomSource? = try {
+        openRandomAccess?.invoke()
+    } catch (e: IOException) {
+        null
+    } catch (e: SecurityException) {
+        null
+    }
+
+    /**
+     * A walk over the central directory: every entry is reached by its own offset, so one whose bytes are
+     * unusable is counted in [WalkResult.damagedEntries] and the walk goes on to the next.
+     */
+    private fun walkDirectory(
+        directory: ZipCentralDirectory,
+        onBytes: ((Long) -> Unit)?,
+        onEntry: (MediaEntry, InputStream) -> Unit,
+    ): WalkResult {
+        var damaged = 0
+        var reached = 0L
+        for (entry in directory.entries) {
+            if (!entry.isDirectory && !ZipEntryNames.climbsOut(entry.name)) {
+                val input = LazyEntryStream { directory.open(entry) }
+                try {
+                    onEntry(MediaEntry(entry.name, modifiedMsOf(entry.modifiedMs)), input)
+                } catch (e: Exception) {
+                    if (e is CancellationException || !ImportFailure.isArchiveFault(e)) throw e
+                    damaged++
+                } finally {
+                    input.release()
+                }
+            }
+            reached = maxOf(reached, entry.endOffset)
+            onBytes?.invoke(reached)
+        }
+        return WalkResult(damaged, endedEarly = false, endedBy = null, bytesRead = directory.fileSize, entries = directory.entries.size)
+    }
+
+    private fun walkStream(onBytes: ((Long) -> Unit)?, onEntry: (MediaEntry, InputStream) -> Unit): WalkResult {
         // Counted after the buffer, so the figure is what the zip stream has consumed (within its own small
         // read-ahead), not what the buffer has pulled in advance.
         val counting = CountingInputStream(BufferedInputStream(SourceStream(openStream()), READ_BUFFER))
@@ -168,7 +228,9 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
                     if (entry == null) break
                     entries++
                     try {
-                        if (!entry.isDirectory && !ZipEntryNames.climbsOut(entry.name)) onEntry(entry, guard)
+                        if (!entry.isDirectory && !ZipEntryNames.climbsOut(entry.name)) {
+                            onEntry(MediaEntry(entry.name, modifiedMsOf(entry)), guard)
+                        }
                     } catch (e: Exception) {
                         if (e is CancellationException || !ImportFailure.isArchiveFault(e)) throw e
                         damaged++
@@ -213,6 +275,31 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
         }
     }
 
+    /**
+     * An entry opened on its first read, so an entry the callback never reads (one it only counts) is never
+     * decoded and its damage never counted. [close] is a no-op: the walk calls [release] once the callback
+     * returns.
+     */
+    private class LazyEntryStream(private val open: () -> InputStream) : InputStream() {
+        private var opened: InputStream? = null
+
+        private fun input(): InputStream = opened ?: open().also { opened = it }
+
+        override fun read(): Int = input().read()
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int = input().read(b, off, len)
+
+        override fun skip(n: Long): Long = input().skip(n)
+
+        override fun close() {
+            // Intentionally left blank: the walk releases the entry once the callback returns.
+        }
+
+        fun release() {
+            opened?.close()
+        }
+    }
+
     /** Counts the bytes taken from the file itself (compressed, before inflating), which is what a
      *  percentage of the file's size needs. */
     private class CountingInputStream(delegate: InputStream) : FilterInputStream(delegate) {
@@ -239,7 +326,9 @@ class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSource
 
         /** An entry's modified time, or null when it carries none. A zip stores DOS times, whose earliest
          *  value (1 January 1980) is what a writer leaves when it has no time, so that day counts as none. */
-        internal fun modifiedMsOf(entry: ZipEntry): Long? = entry.time.takeIf { it > DOS_EPOCH_END_MS }
+        internal fun modifiedMsOf(entry: ZipEntry): Long? = modifiedMsOf(entry.time)
+
+        private fun modifiedMsOf(ms: Long?): Long? = ms?.takeIf { it > DOS_EPOCH_END_MS }
 
         /** 1980-01-02T00:00:00Z, past 1 January 1980 at local midnight in every zone. */
         private const val DOS_EPOCH_END_MS = 315_619_200_000L

@@ -103,6 +103,7 @@ sealed interface ImportUiState {
         val rows: List<ImportStagedEntity>,
         val includedCount: Int,
         val incomplete: ImportFailureKind? = null,
+        val unreadable: Int = 0,
     ) : ImportUiState
 
     /** The confirmed set is uploading. Driven by the upload worker's live progress; the shape mirrors
@@ -607,7 +608,9 @@ class ImportViewModel @Inject constructor(
                     ImportFailureKind.ARCHIVE_DAMAGED
                 else -> null
             }
-            return ImportUiState.Review(zipId, rows, included, incomplete)
+            val unreadable = lastStage?.takeIf { it.state == WorkInfo.State.SUCCEEDED }
+                ?.outputData?.getInt(StageImportWorker.KEY_RESULT_UNREADABLE, 0) ?: 0
+            return ImportUiState.Review(zipId, rows, included, incomplete, unreadable)
         }
         return when (lastStage?.state) {
             WorkInfo.State.FAILED -> ImportUiState.Failed(failureKindOf(lastStage?.outputData))

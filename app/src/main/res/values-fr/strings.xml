@@ -639,6 +639,10 @@
     <string name="import_failed_hint_resume">Sélectionnez de nouveau le zip ou le dossier. L\'import reprend là où il s\'était arrêté.</string>
     <string name="import_failed_hint_archive">Essayez de télécharger à nouveau cette partie de l\'export.</string>
     <string name="import_review_partial">%1$s Seule une partie de l\'export est listée ci-dessous. Importez ces éléments, puis sélectionnez de nouveau le zip ou le dossier pour ajouter le reste.</string>
+    <plurals name="import_review_unreadable">
+        <item quantity="one">%1$d photo ou vidéo de l\'export n\'a pas pu être lue et est ignorée.</item>
+        <item quantity="other">%1$d photos ou vidéos de l\'export n\'ont pas pu être lues et sont ignorées.</item>
+    </plurals>
     <string name="import_scan_bytes">Lecture de l\'export : %1$s sur %2$s</string>
     <string name="import_scan_notification">Lecture de l\'export : %1$d %%</string>
     <string name="import_resuming">Reprise là où l\'import s\'était arrêté</string>

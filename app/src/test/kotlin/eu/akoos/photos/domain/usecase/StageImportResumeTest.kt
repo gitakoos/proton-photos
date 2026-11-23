@@ -27,7 +27,9 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.ByteArrayZipSource
 import eu.akoos.photos.data.importer.FolderTestTrees
+import eu.akoos.photos.data.importer.HandBuiltZip
 import eu.akoos.photos.data.importer.ImportDriveMatcher
 import eu.akoos.photos.data.importer.ImportSource
 import eu.akoos.photos.data.importer.TakeoutZipReader
@@ -252,6 +254,24 @@ class StageImportResumeTest {
         val log = ImportEventLog.text(context.filesDir)
         assertTrue(log, log.contains("stage failed phase=scan SourceReadException"))
         assertFalse("the message never reaches the log", log.contains("connection reset"))
+    }
+
+    @Test
+    fun `an entry that cannot be read is left out and counted while the rest is staged`() {
+        val zip = HandBuiltZip()
+            .add("Kamera-Uploads/a.jpg", ByteArray(20_000).also { Random(1).nextBytes(it) })
+            .add("Kamera-Uploads/b.jpg", ByteArray(20_000).also { Random(2).nextBytes(it) }, corruptPayload = true)
+            .add("Kamera-Uploads/c.jpg", ByteArray(20_000).also { Random(3).nextBytes(it) })
+            .build()
+        val reader = TakeoutZipReader({ ByteArrayZipSource(zip) }) { ByteArrayInputStream(zip) }
+
+        val result = runBlocking {
+            useCase.stage(user, zipId, ImportSource(reader, "export.zip") { zip.size.toLong() }) {}
+        }
+
+        assertEquals(listOf("Kamera-Uploads/a.jpg", "Kamera-Uploads/c.jpg"), staged.map { it.entryName })
+        assertEquals(1, result.unreadable)
+        assertFalse(result.endedEarly)
     }
 
     @Test

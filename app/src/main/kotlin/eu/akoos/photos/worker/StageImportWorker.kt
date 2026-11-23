@@ -125,6 +125,7 @@ class StageImportWorker @AssistedInject constructor(
                     KEY_RESULT_STAGED to result.staged,
                     KEY_RESULT_ENDED_EARLY to result.endedEarly,
                     KEY_RESULT_READ_PERCENT to result.readPercent,
+                    KEY_RESULT_UNREADABLE to result.unreadable,
                 ),
             )
         } catch (e: CancellationException) {
@@ -267,6 +268,9 @@ class StageImportWorker @AssistedInject constructor(
 
         /** Output: how far into the archive the read got, in percent, when it ended early. */
         const val KEY_RESULT_READ_PERCENT = "resultReadPercent"
+
+        /** Output: how many photos and videos of the archive could not be read and were left out. */
+        const val KEY_RESULT_UNREADABLE = "resultUnreadable"
 
         /** Output on failure: the [ImportFailureKind] name, so the screen can say what went wrong. */
         const val KEY_FAILURE_KIND = "failureKind"

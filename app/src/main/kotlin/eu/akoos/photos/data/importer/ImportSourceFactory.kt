@@ -24,6 +24,7 @@ package eu.akoos.photos.data.importer
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -46,10 +47,24 @@ class ImportSourceFactory @Inject constructor(@ApplicationContext private val co
             val reader = FolderImportReader(lister::list, lister::open, lister::rootReachable)
             return ImportSource(reader, displayName(uri)) { reader.totalBytes() }
         }
-        val reader = TakeoutZipReader {
-            resolver.openInputStream(uri) ?: throw IOException("cannot open zip input stream")
-        }
+        val reader = TakeoutZipReader(
+            openStream = { resolver.openInputStream(uri) ?: throw IOException("cannot open zip input stream") },
+            openRandomAccess = { openSeekable(uri) },
+        )
         return ImportSource(reader, displayName(uri)) { zipSize(uri) }
+    }
+
+    /** The zip as a file readable at any position, or null when its provider hands out only a stream (a pipe). */
+    private fun openSeekable(uri: Uri): ZipRandomSource? {
+        val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+        val input = ParcelFileDescriptor.AutoCloseInputStream(descriptor)
+        return try {
+            val source = ChannelZipSource(input.channel, input)
+            if (source.size > 0 && source.readAt(0, ByteArray(1), 0, 1) == 1) source else null.also { input.close() }
+        } catch (e: IOException) {
+            input.close()
+            null
+        }
     }
 
     /**

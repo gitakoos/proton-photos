@@ -847,6 +847,12 @@
     <string name="import_failed_hint_resume">Wybierz plik zip lub folder ponownie. Import wznowi się od miejsca, w którym się zatrzymał.</string>
     <string name="import_failed_hint_archive">Spróbuj pobrać tę część eksportu ponownie.</string>
     <string name="import_review_partial">%1$s Poniżej widać tylko część eksportu. Zaimportuj te zdjęcia, a potem wybierz plik zip lub folder ponownie, aby dodać resztę.</string>
+    <plurals name="import_review_unreadable">
+        <item quantity="one">Nie udało się odczytać %1$d zdjęcia lub filmu z eksportu, więc zostało pominięte.</item>
+        <item quantity="few">Nie udało się odczytać %1$d zdjęć lub filmów z eksportu, więc zostały pominięte.</item>
+        <item quantity="many">Nie udało się odczytać %1$d zdjęć lub filmów z eksportu, więc zostały pominięte.</item>
+        <item quantity="other">Nie udało się odczytać %1$d zdjęcia lub filmu z eksportu, więc zostały pominięte.</item>
+    </plurals>
     <string name="import_scan_bytes">Odczytywanie eksportu: %1$s z %2$s</string>
     <string name="import_scan_notification">Odczytywanie eksportu: %1$d%%</string>
     <string name="import_resuming">Wznawianie od miejsca zatrzymania</string>

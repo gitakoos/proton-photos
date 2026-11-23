@@ -1237,6 +1237,10 @@
     <string name="import_failed_hint_resume">Zip dosyasını ya da klasörü yeniden seç. Kaldığı yerden devam eder.</string>
     <string name="import_failed_hint_archive">Dışa aktarımın o parçasını yeniden indirmeyi dene.</string>
     <string name="import_review_partial">%1$s Dışa aktarımın yalnızca bir kısmı aşağıda listeleniyor. Bunları içe aktar, kalanını eklemek için zip dosyasını ya da klasörü yeniden seç.</string>
+    <plurals name="import_review_unreadable">
+        <item quantity="one">Dışa aktarımdaki %1$d fotoğraf veya video okunamadı ve atlandı.</item>
+        <item quantity="other">Dışa aktarımdaki %1$d fotoğraf veya video okunamadı ve atlandı.</item>
+    </plurals>
     <string name="import_scan_bytes">Dışa aktarım okunuyor: %1$s / %2$s</string>
     <string name="import_scan_notification">Dışa aktarım okunuyor: %%%1$d</string>
     <string name="import_resuming">Kaldığı yerden devam ediliyor</string>

@@ -661,6 +661,10 @@
     <string name="import_failed_hint_resume">Válaszd ki újra a zipet vagy a mappát. Ott folytatódik, ahol megállt.</string>
     <string name="import_failed_hint_archive">Próbáld meg újra letölteni az export ezen részét.</string>
     <string name="import_review_partial">%1$s Lent az exportnak csak egy része látható. Importáld ezeket, majd válaszd ki újra a zipet vagy a mappát a többi hozzáadásához.</string>
+    <plurals name="import_review_unreadable">
+        <item quantity="one">Az exportban %1$d fotót vagy videót nem sikerült beolvasni, ez kimarad.</item>
+        <item quantity="other">Az exportban %1$d fotót vagy videót nem sikerült beolvasni, ezek kimaradnak.</item>
+    </plurals>
     <string name="import_scan_bytes">Export beolvasása: %1$s / %2$s</string>
     <string name="import_scan_notification">Export beolvasása: %1$d%%</string>
     <string name="import_resuming">Folytatás ott, ahol megállt</string>

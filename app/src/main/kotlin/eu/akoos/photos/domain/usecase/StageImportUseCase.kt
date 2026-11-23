@@ -80,8 +80,9 @@ data class StageProgress(
 )
 
 /** What a staging pass produced: the rows now staged, whether the archive stopped being readable partway
- *  ([endedEarly], with [readPercent] of the file reached), the rest being a normal completion. */
-data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent: Int)
+ *  ([endedEarly], with [readPercent] of the file reached), the rest being a normal completion, and how many
+ *  photos and videos of it could not be read and were left out ([unreadable]). */
+data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent: Int, val unreadable: Int = 0)
 
 /**
  * The staging pass of the import review flow: it walks a picked Takeout/Ente `.zip` or folder once for the
@@ -378,7 +379,12 @@ class StageImportUseCase @Inject constructor(
             )
             scanCache.delete(zipId)
             ImportDiagnostics.recordStage(staged)
-            return StageResult(staged = staged, endedEarly = endedEarly, readPercent = readPercent)
+            return StageResult(
+                staged = staged,
+                endedEarly = endedEarly,
+                readPercent = readPercent,
+                unreadable = failedEntries + walk.damagedEntries,
+            )
         } catch (e: CancellationException) {
             ImportEventLog.record(filesDir, "stage interrupted phase=$phase")
             throw e

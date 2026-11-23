@@ -643,6 +643,10 @@
     <string name="import_failed_hint_resume">Scegli di nuovo lo zip o la cartella. L\'importazione riprende da dove si era fermata.</string>
     <string name="import_failed_hint_archive">Prova a scaricare di nuovo quella parte dell\'esportazione.</string>
     <string name="import_review_partial">%1$s Qui sotto è elencata solo una parte dell\'esportazione. Importa queste foto, poi scegli di nuovo lo zip o la cartella per aggiungere il resto.</string>
+    <plurals name="import_review_unreadable">
+        <item quantity="one">%1$d foto o video dell\'esportazione non è leggibile e viene saltato.</item>
+        <item quantity="other">%1$d foto o video dell\'esportazione non sono leggibili e vengono saltati.</item>
+    </plurals>
     <string name="import_scan_bytes">Lettura dell\'esportazione: %1$s di %2$s</string>
     <string name="import_scan_notification">Lettura dell\'esportazione: %1$d%%</string>
     <string name="import_resuming">Si riprende da dove ci si era fermati</string>
