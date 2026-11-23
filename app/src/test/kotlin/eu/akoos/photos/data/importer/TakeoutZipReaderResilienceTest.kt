@@ -129,13 +129,11 @@ class TakeoutZipReaderResilienceTest {
         }
 
         assertEquals(listOf("a.jpg", "b.jpg"), delivered)
-        // The stream reads a bad header as "no more entries", so the walk itself ends without a fault; the
-        // file going on far past where the entries stopped is what gives the damage away.
-        assertTrue(walk.endedShort(bytes.size.toLong()))
+        assertTrue(walk.endedEarly)
 
         val scan = reader(bytes).scan()
         assertEquals("the first pass counts what was readable", 2, scan.mediaCount)
-        assertTrue(scan.walk.endedShort(bytes.size.toLong()))
+        assertTrue(scan.walk.endedEarly)
         assertFalse("an intact archive is not flagged", reader(threePhotos()).scan().walk.endedShort(threePhotos().size.toLong()))
     }
 

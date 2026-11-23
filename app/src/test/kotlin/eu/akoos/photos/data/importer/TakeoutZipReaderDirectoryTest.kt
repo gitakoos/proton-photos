@@ -36,10 +36,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * The reader on a zip it can read at any position: it goes through the central directory, so the layouts a
- * front-to-back zip stream stops at (a stored entry with a data descriptor, a zip64 descriptor on a small
- * entry, a name that is not UTF-8) read in full, and an entry whose own bytes are unusable is skipped alone
- * while the entries after it still arrive.
+ * The reader on a zip it can read at any position: it goes through the central directory, so every entry is
+ * found by its own offset, and an entry whose own bytes are unusable is skipped alone while the entries after
+ * it still arrive.
  */
 class TakeoutZipReaderDirectoryTest {
 
@@ -81,7 +80,7 @@ class TakeoutZipReaderDirectoryTest {
     }
 
     @Test
-    fun `the same zip read front to back stops after the first entry`() {
+    fun `the same zip read front to back reads every entry`() {
         val bytes = HandBuiltZip()
             .add("a.jpg", one)
             .add("b.jpg", two, method = HandBuiltZip.STORED, descriptor = Descriptor.SIZES_32)
@@ -90,8 +89,11 @@ class TakeoutZipReaderDirectoryTest {
 
         val (seen, walk) = delivered(streamOnlyReader(bytes))
 
-        assertEquals(listOf("a.jpg"), seen.keys.toList())
-        assertEquals(true, walk.endedEarly)
+        assertEquals(listOf("a.jpg", "b.jpg", "c.jpg"), seen.keys.toList())
+        assertArrayEquals(two, seen["b.jpg"])
+        assertEquals(0, walk.damagedEntries)
+        assertFalse(walk.endedEarly)
+        assertFalse(walk.endedShort(bytes.size.toLong()))
     }
 
     @Test

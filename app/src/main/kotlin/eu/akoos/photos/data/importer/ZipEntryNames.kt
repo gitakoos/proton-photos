@@ -22,58 +22,13 @@
 
 package eu.akoos.photos.data.importer
 
-import androidx.annotation.RequiresApi
-import dalvik.system.ZipPathValidator
-import java.io.File
-import java.util.zip.ZipException
-
 /**
- * The entry names an import walk accepts. From Android 14 the zip stream refuses, for the whole process, any
- * name that starts with `/` or steps up with `..`, and a Dropbox download carries a `/` entry of its own, so
- * such a zip would read as damaged at its first entry. An import never writes an entry under its own name
- * (staging uses fresh temp files), so a walk marked [lenient] reads every name and skips the `..` ones
- * itself; every other zip read in the process keeps the platform's rule.
+ * The entry names an import walk skips. An import never writes an entry under its own name (staging uses
+ * fresh temp files), so every name is read, a leading `/` included (a Dropbox download carries a `/` entry
+ * of its own); only a name that steps up with `..` is skipped.
  */
 internal object ZipEntryNames {
 
-    private val lenientThread = ThreadLocal<Boolean>()
-
-    fun <T> lenient(block: () -> T): T {
-        val outer = lenientThread.get()
-        lenientThread.set(true)
-        try {
-            return block()
-        } finally {
-            if (outer == null) lenientThread.remove() else lenientThread.set(outer)
-        }
-    }
-
     /** True for a name with a `..` step, which an import skips rather than reads. */
     fun climbsOut(name: String): Boolean = name.replace('\\', '/').split('/').any { it == ".." }
-
-    /** The platform's rule: a name that starts with `/` or has a `..` step is refused. */
-    internal fun refusedByPlatformRule(name: String): Boolean {
-        if (name.startsWith("/")) return true
-        if (!name.contains("..")) return false
-        var file: File? = File(name)
-        while (file != null) {
-            if (file.name == "..") return true
-            file = file.parentFile
-        }
-        return false
-    }
-
-    internal fun refuses(name: String, lenient: Boolean = lenientThread.get() == true): Boolean =
-        !lenient && refusedByPlatformRule(name)
-
-    @RequiresApi(34)
-    fun install() {
-        ZipPathValidator.setCallback(
-            object : ZipPathValidator.Callback {
-                override fun onZipEntryAccess(path: String) {
-                    if (refuses(path)) throw ZipException("Invalid zip entry path")
-                }
-            },
-        )
-    }
 }

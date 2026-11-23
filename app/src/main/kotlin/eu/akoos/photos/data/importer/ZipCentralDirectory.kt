@@ -248,7 +248,7 @@ class ZipCentralDirectory private constructor(
             }
         }
 
-        private fun dosToMillis(date: Int, time: Int): Long? = try {
+        internal fun dosToMillis(date: Int, time: Int): Long? = try {
             LocalDateTime.of(
                 ((date shr 9) and 0x7F) + 1980,
                 (date shr 5) and 0x0F,
@@ -279,11 +279,11 @@ class ZipCentralDirectory private constructor(
                 throw SourceReadException(e)
             }
 
-        private fun u16(b: ByteArray, at: Int): Int = (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8)
+        internal fun u16(b: ByteArray, at: Int): Int = (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8)
 
-        private fun u32(b: ByteArray, at: Int): Long = u16(b, at).toLong() or (u16(b, at + 2).toLong() shl 16)
+        internal fun u32(b: ByteArray, at: Int): Long = u16(b, at).toLong() or (u16(b, at + 2).toLong() shl 16)
 
-        private fun u64(b: ByteArray, at: Int): Long = u32(b, at) or (u32(b, at + 4) shl 32)
+        internal fun u64(b: ByteArray, at: Int): Long = u32(b, at) or (u32(b, at + 4) shl 32)
     }
 
     /** [length] bytes of [source] from [start]. */

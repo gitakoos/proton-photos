@@ -29,7 +29,8 @@ import java.util.zip.Deflater
 /**
  * Writes zips byte by byte, for the layouts `ZipOutputStream` never produces: a stored entry with a data
  * descriptor, a zip64 descriptor on a small entry, a name that is not UTF-8, a compression method the reader
- * does not support, a zip64 end record. Each entry is one call to [add]; [build] writes the central directory.
+ * does not support, an entry marked encrypted, a zip64 end record. Each entry is one call to [add]; [build]
+ * writes the central directory.
  */
 class HandBuiltZip(private val zip64End: Boolean = false) {
 
@@ -59,12 +60,15 @@ class HandBuiltZip(private val zip64End: Boolean = false) {
         recordedCrc: Long? = null,
         corruptPayload: Boolean = false,
         mtimeSeconds: Long? = null,
+        descriptorSignature: Boolean = true,
+        encrypted: Boolean = false,
     ): HandBuiltZip {
         val payload = (if (method == STORED) data.copyOf() else deflate(data)).also {
             if (corruptPayload) for (i in 2 until minOf(it.size, 40)) it[i] = 0xFF.toByte()
         }
         val crc = recordedCrc ?: CRC32().apply { update(data) }.value
-        val flags = (if (descriptor != Descriptor.NONE) 0x8 else 0) or (if (utf8Flag) 0x800 else 0)
+        val flags = (if (descriptor != Descriptor.NONE) 0x8 else 0) or (if (utf8Flag) 0x800 else 0) or
+            (if (encrypted) 0x1 else 0)
         val offset = out.size().toLong()
         val extra = mtimeSeconds?.let { timestampExtra(it) } ?: ByteArray(0)
         u32(0x04034b50); u16(if (descriptor == Descriptor.SIZES_64) 45 else 20); u16(flags); u16(method)
@@ -77,7 +81,8 @@ class HandBuiltZip(private val zip64End: Boolean = false) {
         u16(rawName.size); u16(extra.size); out.write(rawName); out.write(extra)
         out.write(payload)
         if (descriptor != Descriptor.NONE) {
-            u32(0x08074b50); u32(crc)
+            if (descriptorSignature) u32(0x08074b50)
+            u32(crc)
             if (descriptor == Descriptor.SIZES_64) {
                 u64(payload.size.toLong()); u64(data.size.toLong())
             } else {

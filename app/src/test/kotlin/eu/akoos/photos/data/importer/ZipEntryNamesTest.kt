@@ -28,35 +28,6 @@ import org.junit.Test
 
 class ZipEntryNamesTest {
 
-    @Test fun `outside an import walk a leading slash is refused, as the platform does`() {
-        assertTrue(ZipEntryNames.refuses("/", lenient = false))
-        assertTrue(ZipEntryNames.refuses("/IMG_1.jpg", lenient = false))
-    }
-
-    @Test fun `outside an import walk a dot-dot step is refused, but dots inside a name are not`() {
-        assertTrue(ZipEntryNames.refuses("a/../b.jpg", lenient = false))
-        assertTrue(ZipEntryNames.refuses("../b.jpg", lenient = false))
-        assertFalse(ZipEntryNames.refuses("a..b.jpg", lenient = false))
-        assertFalse(ZipEntryNames.refuses("Trip/IMG_1.jpg", lenient = false))
-    }
-
-    @Test fun `inside an import walk every name is read`() {
-        assertFalse(ZipEntryNames.refuses("/", lenient = true))
-        assertFalse(ZipEntryNames.refuses("../b.jpg", lenient = true))
-    }
-
-    @Test fun `the walk marks only its own thread and only while it runs`() {
-        val during = ZipEntryNames.lenient { ZipEntryNames.refuses("/") }
-        var otherThread = false
-        ZipEntryNames.lenient {
-            Thread { otherThread = ZipEntryNames.refuses("/") }.apply { start(); join() }
-        }
-
-        assertFalse(during)
-        assertTrue(otherThread)
-        assertTrue(ZipEntryNames.refuses("/"))
-    }
-
     @Test fun `a dot-dot step is what an import skips, a dotted name is not`() {
         assertTrue(ZipEntryNames.climbsOut("../x.jpg"))
         assertTrue(ZipEntryNames.climbsOut("a\\..\\x.jpg"))
