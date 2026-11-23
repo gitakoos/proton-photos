@@ -151,7 +151,7 @@
     <string name="editor_save_overwrite">Zastąp oryginał</string>
     <string name="editor_save_overwrite_subtitle_device">Zastępuje oryginał w galerii.</string>
     <string name="editor_saving">Zapisywanie…</string>
-    <string name="editor_please_wait">Proszę czekać…</string>
+    <string name="editor_please_wait">Poczekaj…</string>
     <!-- Editor save / load failure messages surfaced in the editor UI. -->
     <string name="editor_save_cancelled">Anulowano zapis</string>
     <string name="editor_no_permission">Brak uprawnień do zapisu</string>
@@ -1168,7 +1168,7 @@
         <item quantity="one">%1$d rok temu</item>
         <item quantity="few">%1$d lata temu</item>
         <item quantity="many">%1$d lat temu</item>
-        <item quantity="other">%1$d lat temu</item>
+        <item quantity="other">%1$d roku temu</item>
     </plurals>
 
     <!-- Memories screen -->
@@ -2068,8 +2068,8 @@
     <string name="gallery_add_to_person">Dodaj do osoby</string>
     <string name="people_search_hint">Szukaj osób</string>
     <string name="person_set_cover">Ustaw jako okładkę</string>
-    <string name="person_set_cover_confirm_title">Set as cover?</string>
-    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
+    <string name="person_set_cover_confirm_title">Ustawić jako okładkę?</string>
+    <string name="person_set_cover_confirm_body">Użyć tego zdjęcia jako okładki tej osoby.</string>
     <string name="person_cover_no_face">Na tym zdjęciu nie wykryto twarzy.</string>
     <string name="person_msg_moved">Przeniesiono do innej osoby</string>
     <string name="person_msg_removed">Usunięto z osoby</string>

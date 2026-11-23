@@ -2003,8 +2003,8 @@
     <string name="gallery_add_to_person">Aggiungi a persona</string>
     <string name="people_search_hint">Cerca persone</string>
     <string name="person_set_cover">Imposta come copertina</string>
-    <string name="person_set_cover_confirm_title">Set as cover?</string>
-    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
+    <string name="person_set_cover_confirm_title">Impostare come copertina?</string>
+    <string name="person_set_cover_confirm_body">Usare questa foto come copertina di questa persona.</string>
     <string name="person_cover_no_face">Nessun volto rilevato in quella foto.</string>
     <string name="person_msg_moved">Spostato su un\'altra persona</string>
     <string name="person_msg_removed">Rimosso dalla persona</string>

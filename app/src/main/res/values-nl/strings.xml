@@ -1991,8 +1991,8 @@
     <string name="gallery_add_to_person">Aan persoon toevoegen</string>
     <string name="people_search_hint">Personen zoeken</string>
     <string name="person_set_cover">Als omslag instellen</string>
-    <string name="person_set_cover_confirm_title">Set as cover?</string>
-    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
+    <string name="person_set_cover_confirm_title">Als omslag instellen?</string>
+    <string name="person_set_cover_confirm_body">Deze foto gebruiken als omslag voor deze persoon.</string>
     <string name="person_cover_no_face">Geen gezicht gedetecteerd in die foto.</string>
     <string name="person_msg_moved">Verplaatst naar een andere persoon</string>
     <string name="person_msg_removed">Van persoon verwijderd</string>

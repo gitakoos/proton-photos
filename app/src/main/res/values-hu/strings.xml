@@ -318,8 +318,8 @@
     <string name="album_mirror_custom_dialog_title">Mappanév hozzáadása</string>
     <string name="album_mirror_custom_dialog_hint">Mappa neve (pl. Olaszország 2026)</string>
     <string name="settings_recently_deleted">Nemrég törölt</string>
-    <string name="settings_recently_deleted_subtitle">%1$d kép · 30 napon belül törölt</string>
-    <string name="settings_recently_deleted_subtitle_singular">1 kép · 30 napon belül törölt</string>
+    <string name="settings_recently_deleted_subtitle">%1$d fotó · 30 napon belül törölt</string>
+    <string name="settings_recently_deleted_subtitle_singular">1 fotó · 30 napon belül törölt</string>
     <string name="settings_recently_deleted_empty">Üres</string>
     <!-- Cloud trash -->
     <string name="trash_section_device">Ezen az eszközön</string>
@@ -329,13 +329,13 @@
     <string name="trash_cloud_retry">Újra</string>
     <string name="trash_cloud_empty_confirm_title">Ürítsük a felhő kukát?</string>
     <plurals name="trash_cloud_empty_confirm_message">
-        <item quantity="one">%1$d kép véglegesen törlődik a Proton Drive-ról. Nem visszavonható.</item>
-        <item quantity="other">%1$d kép véglegesen törlődik a Proton Drive-ról. Nem visszavonható.</item>
+        <item quantity="one">%1$d fotó véglegesen törlődik a Proton Drive-ról. Nem visszavonható.</item>
+        <item quantity="other">%1$d fotó véglegesen törlődik a Proton Drive-ról. Nem visszavonható.</item>
     </plurals>
     <string name="trash_cloud_empty_confirm_action">Ürítés</string>
     <plurals name="trash_cloud_restore_done">
-        <item quantity="one">%1$d kép visszaállítva</item>
-        <item quantity="other">%1$d kép visszaállítva</item>
+        <item quantity="one">%1$d fotó visszaállítva</item>
+        <item quantity="other">%1$d fotó visszaállítva</item>
     </plurals>
     <plurals name="trash_deletes_in_days">
         <item quantity="one">Törlés %1$d nap múlva</item>
@@ -481,15 +481,15 @@
     <string name="cd_select_day">Nap kijelölése</string>
     <string name="cd_select_month">Hónap kijelölése</string>
     <string name="cd_select_year">Év kijelölése</string>
-    <string name="editor_error_load_local">Nem sikerült betölteni a képet</string>
+    <string name="editor_error_load_local">Nem sikerült betölteni a fotót</string>
     <string name="editor_saved_as_copy">Egy másolat elmentve a Photos for Proton mappába</string>
     <string name="editor_external_load_error">A fájl megnyitása sikertelen</string>
     <string name="editor_saved_as_copy_toast">Az eredeti csak olvasható, másolatként mentve a galériába</string>
     <string name="editor_overwrite_coerced_to_copy">Ez a fájlformátum nem írható felül a helyén. Az eredeti megmaradt, a szerkesztés pedig új JPEG-másolatként lett elmentve.</string>
     <string name="editor_overwrite_motion_coerced_to_copy">Egy mozgókép nem írható felül helyben a videója elvesztése nélkül. Az eredeti megmaradt, a szerkesztés új JPEG-másolatként lett elmentve.</string>
     <string name="editor_error_not_signed_in">Nem vagy bejelentkezve</string>
-    <string name="editor_error_download_failed">Nem sikerült letölteni a képet</string>
-    <string name="editor_error_decode_failed">Nem sikerült dekódolni a képet</string>
+    <string name="editor_error_download_failed">Nem sikerült letölteni a fotót</string>
+    <string name="editor_error_decode_failed">Nem sikerült dekódolni a fotót</string>
     <string name="editor_error_low_memory">Nincs elég memória a feldolgozáshoz. Zárj be más alkalmazásokat, vagy használj kisebb fájlt.</string>
     <string name="editor_auto_fix">Automatikus javítás</string>
     <!-- Editor — adjust panel pill labels. -->
@@ -826,7 +826,7 @@
     <string name="shared_empty_by_me_body">Ossz meg egy albumot vagy egy fotót, és itt látni fogod.</string>
     <string name="shared_by_email">%1$s által</string>
     <string name="shared_by_email_full">Megosztotta: %1$s</string>
-    <string name="shared_photo_count">%1$d kép</string>
+    <string name="shared_photo_count">%1$d fotó</string>
     <string name="shared_by_me_photos_section">Megosztott fotók</string>
 
     <!-- Értesítés engedély hiba -->
@@ -888,8 +888,8 @@
     <string name="widget_interval_1day">1 nap</string>
     <string name="widget_add_button">Widget hozzáadása</string>
     <plurals name="widget_photos_selected">
-        <item quantity="one">%d fotó kiválasztva</item>
-        <item quantity="other">%d fotó kiválasztva</item>
+        <item quantity="one">%d fotó kijelölve</item>
+        <item quantity="other">%d fotó kijelölve</item>
     </plurals>
     <string name="widget_no_photos">Nincs fotó</string>
 
@@ -903,8 +903,8 @@
     </plurals>
 
     <plurals name="count_photos_plural">
-        <item quantity="one">1 kép</item>
-        <item quantity="other">%d kép</item>
+        <item quantity="one">1 fotó</item>
+        <item quantity="other">%d fotó</item>
     </plurals>
     <plurals name="offline_batch_result">
         <item quantity="one">%d fotó offline elérhető</item>
@@ -1118,8 +1118,8 @@
     <string name="cd_status_cloud_only">Csak a Proton Drive-on</string>
     <string name="cd_status_hidden_local">Elrejtve ezen az eszközön</string>
     <string name="cd_status_backed_up">Mentve</string>
-    <string name="cd_status_all_selected_in_album">Minden kijelölt kép ebben az albumban van</string>
-    <string name="cd_status_some_selected_in_album">%2$d kijelölt képből %1$d ebben az albumban van</string>
+    <string name="cd_status_all_selected_in_album">Minden kijelölt fotó ebben az albumban van</string>
+    <string name="cd_status_some_selected_in_album">%2$d kijelölt fotóból %1$d ebben az albumban van</string>
     <string name="cd_status_excluded">Kizárva</string>
     <string name="cd_status_selected">Kijelölve</string>
     <string name="cd_favorite_add">Hozzáadás a kedvencekhez</string>
@@ -1133,8 +1133,8 @@
     <string name="cd_clear_search">Keresés törlése</string>
 
     <string name="shared_save_to_library">Mentés a könyvtáramba</string>
-    <string name="shared_save_success_fmt">%1$d kép mentve a könyvtáradba</string>
-    <string name="shared_save_partial_fmt">%1$d/%2$d kép mentve a könyvtáradba</string>
+    <string name="shared_save_success_fmt">%1$d fotó mentve a könyvtáradba</string>
+    <string name="shared_save_partial_fmt">%1$d/%2$d fotó mentve a könyvtáradba</string>
     <string name="shared_save_progress_fmt">%1$d / %2$d mentése a könyvtáradba…</string>
     <string name="op_backing_up_fmt">Mentés %1$d / %2$d</string>
     <string name="op_sharing_fmt">Megosztás %1$d / %2$d</string>
@@ -1661,10 +1661,10 @@
     <string name="duplicates_confirm_message_synced">A kipipált példányok törlődnek az eszközről és a felhőből is. A többi marad.</string>
     <string name="duplicates_confirm_delete">Törlés</string>
     <string name="duplicates_delete_failed">Nem sikerült törölni a Drive-ról. Próbáld újra.</string>
-    <string name="duplicates_section_similar">Hasonló képek</string>
-    <string name="duplicates_scanning">Hasonló képek keresése…</string>
+    <string name="duplicates_section_similar">Hasonló fotók</string>
+    <string name="duplicates_scanning">Hasonló fotók keresése…</string>
     <string name="duplicates_similar_hint">Ezek hasonlítanak, de a fájl vagy a metaadat eltérhet</string>
-    <string name="duplicates_similar_count">%1$d hasonló kép</string>
+    <string name="duplicates_similar_count">%1$d hasonló fotó</string>
     <string name="offline_remove">Eltávolítás offline-ból</string>
     <string name="whats_new_title">Újdonságok</string>
     <string name="whats_new_done">Értem</string>
@@ -1681,9 +1681,9 @@
     <string name="whats_new_album_guard_title">Ellenőrzés az album törlése előtt</string>
     <string name="whats_new_album_guard_body">Ha egy album az egyetlen hely, ahol néhány fotója meg van őrizve, a törlés előbb rákérdez.</string>
     <string name="whats_new_dup_title">Duplikált fotók keresése</string>
-    <string name="whats_new_dup_body">Megtalálja a pontos másolatokat és a vizuálisan hasonló képeket, majd egyet biztonságosan megtarthatsz, a többit törölheted.</string>
+    <string name="whats_new_dup_body">Megtalálja a pontos másolatokat és a vizuálisan hasonló fotókat, majd egyet biztonságosan megtarthatsz, a többit törölheted.</string>
     <string name="whats_new_offline_title">Offline elérhető</string>
-    <string name="whats_new_offline_body">Tűzz ki felhős képeket, hogy teljes minőségben a készülékeden maradjanak és internet nélkül is megnyíljanak.</string>
+    <string name="whats_new_offline_body">Tűzz ki felhős fotókat, hogy teljes minőségben a készülékeden maradjanak és internet nélkül is megnyíljanak.</string>
     <string name="whats_new_activity_title">Tevékenység nézet</string>
     <string name="whats_new_activity_body">A feltöltések, letöltések és offline mentések egy helyen, azzal együtt, hogy mi történt korábban.</string>
     <string name="whats_new_motion_title">Mozgóképek</string>
@@ -1967,7 +1967,7 @@
     <string name="people_search_hint">Emberek keresése</string>
     <string name="person_set_cover">Beállítás borítóként</string>
     <string name="person_set_cover_confirm_title">Beállítod borítónak?</string>
-    <string name="person_set_cover_confirm_body">Ez a kép legyen a személy borítója.</string>
+    <string name="person_set_cover_confirm_body">Ez a fotó legyen a személy borítója.</string>
     <string name="person_cover_no_face">Azon a fotón nincs észlelt arc.</string>
     <string name="person_msg_moved">Áthelyezve másik személyhez</string>
     <string name="person_msg_removed">Eltávolítva az embertől</string>
@@ -2408,7 +2408,7 @@
     <string name="person_detail_unnamed">Névtelen</string>
     <string name="person_add_name">Név hozzáadása</string>
     <string name="person_unsorted">Rendezetlen</string>
-    <string name="person_unsorted_hint">Arcok, amelyeket nem sikerült biztosan senkihez kötni. Jelölj ki képeket, hogy kihúzz egy valódi embert, a többit pedig jelöld meg mint nem ember.</string>
+    <string name="person_unsorted_hint">Arcok, amelyeket nem sikerült biztosan senkihez kötni. Jelölj ki fotókat, hogy kihúzz egy valódi embert, a többit pedig jelöld meg mint nem ember.</string>
     <string name="person_unsorted_caption">Megmaradt arcok, amelyeket nem sikerült hozzárendelni. Nyisd meg a rendezésükhöz.</string>
     <string name="person_rename_title">Átnevezés</string>
     <string name="person_remove_name">Név eltávolítása</string>
@@ -2515,7 +2515,7 @@
     <string name="filter_labels_any">Bármelyik</string>
     <string name="filter_labels_all">Mindegyik</string>
     <string name="filter_labels_search">Címkék keresése</string>
-    <string name="filter_labels_show_all">Az összes kép mutatása</string>
+    <string name="filter_labels_show_all">Az összes fotó mutatása</string>
     <plurals name="filter_labels_show">
         <item quantity="one">%d címke mutatása</item>
         <item quantity="other">%d címke mutatása</item>
@@ -2902,7 +2902,7 @@
     <string name="whats_new_260_highlights_body">A Csúcsfények csúszka jobbra húzva a fotó világos részeit világosítja, ahelyett, hogy sötétítené a fotót.</string>
     <string name="whats_new_260_viewerdelete_title">A törlés befejeződik</string>
     <string name="whats_new_260_viewerdelete_body">A nézegetőben indított törlés akkor is befejeződik, ha azonnal bezárod a nézegetőt. Ha a nézegető utolsó fotóját törlöd, a Visszavonás sáv megmarad azon a képernyőn, ahová visszatérsz.</string>
-    <string name="whats_new_260_widgetupright_title">Álló képek a widgetben</string>
+    <string name="whats_new_260_widgetupright_title">Álló fotók a widgetben</string>
     <string name="whats_new_260_widgetupright_body">A kezdőképernyő widgetje a telefon fotóit állva mutatja, nem oldalra fordítva.</string>
     <string name="whats_new_260_albumnames_title">Albumnevek két sorban</string>
     <string name="whats_new_260_albumnames_body">A hosszú albumnevek két sorba tördelődnek az albumrácsban, és a borítók egy vonalban maradnak.</string>

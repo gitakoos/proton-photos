@@ -2004,8 +2004,8 @@
     <string name="gallery_add_to_person">Añadir a persona</string>
     <string name="people_search_hint">Buscar personas</string>
     <string name="person_set_cover">Establecer como portada</string>
-    <string name="person_set_cover_confirm_title">Set as cover?</string>
-    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
+    <string name="person_set_cover_confirm_title">¿Establecer como portada?</string>
+    <string name="person_set_cover_confirm_body">Usar esta foto como portada de esta persona.</string>
     <string name="person_cover_no_face">No se detectó ninguna cara en esa foto.</string>
     <string name="person_msg_moved">Movido a otra persona</string>
     <string name="person_msg_removed">Quitado de la persona</string>

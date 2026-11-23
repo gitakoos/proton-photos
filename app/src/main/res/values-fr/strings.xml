@@ -1089,7 +1089,7 @@
     <string name="update_no_update">Vous avez la dernière version.</string>
     <string name="update_check_failed">Impossible de vérifier les mises à jour. Réessayez plus tard.</string>
     <string name="update_permission_required">Autorisez l\'installation d\'applications inconnues dans les paramètres système.</string>
-    <string name="update_verification_failed">La mise à jour n\'a pas pu être vérifiée et n\'a pas été installée. Réessaie.</string>
+    <string name="update_verification_failed">La mise à jour n\'a pas pu être vérifiée et n\'a pas été installée. Réessayez.</string>
     <string name="network_error_offline">Vous êtes hors ligne. Réessayez une fois reconnecté.</string>
     <string name="network_error_transient">Échec de la connexion. Réessayez plus tard.</string>
     <string name="cd_status_backed_up_device">Proton Drive et appareil</string>
@@ -1437,7 +1437,7 @@
     <string name="album_add_count">Ajouter (%1$d)</string>
     <string name="picker_done">Terminé</string>
     <string name="picker_nothing_selected">Aucune photo sélectionnée</string>
-    <string name="picker_selection_limit">Tu peux en sélectionner jusqu\'à %1$d à la fois</string>
+    <string name="picker_selection_limit">Vous pouvez en sélectionner jusqu\'à %1$d à la fois</string>
     <string name="album_picker_empty">Aucune photo à ajouter.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
@@ -1966,14 +1966,14 @@
     <string name="settings_ai_clear">Effacer les données de visages</string>
     <string name="settings_ai_clear_confirm_title">Effacer les données de visages ?</string>
     <string name="settings_ai_clear_confirm_msg">Cela supprime toutes les personnes trouvées et toutes les données de visages. Vos photos ne sont pas affectées. Les visages sont de nouveau détectés au prochain indexage.</string>
-    <string name="settings_ai_clear_where_msg">Tes données de visages sont aussi sauvegardées sur Proton Drive.\n\nSur ce téléphone uniquement : elles sont supprimées ici et reviennent aussitôt depuis Drive.\n\nPartout : elles sont supprimées ici, sur Proton Drive et sur tes autres appareils, et la reconnaissance des visages se désactive sur chacun. Tes photos ne sont pas touchées.</string>
+    <string name="settings_ai_clear_where_msg">Vos données de visages sont aussi sauvegardées sur Proton Drive.\n\nSur ce téléphone uniquement : elles sont supprimées ici et reviennent aussitôt depuis Drive.\n\nPartout : elles sont supprimées ici, sur Proton Drive et sur vos autres appareils, et la reconnaissance des visages se désactive sur chacun. Vos photos ne sont pas touchées.</string>
     <string name="settings_ai_clear_here">Sur ce téléphone uniquement</string>
     <string name="settings_ai_clear_everywhere">Partout</string>
     <string name="gallery_add_to_person">Ajouter à une personne</string>
     <string name="people_search_hint">Rechercher des personnes</string>
     <string name="person_set_cover">Définir comme couverture</string>
-    <string name="person_set_cover_confirm_title">Set as cover?</string>
-    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
+    <string name="person_set_cover_confirm_title">Définir comme couverture ?</string>
+    <string name="person_set_cover_confirm_body">Utiliser cette photo comme couverture pour cette personne.</string>
     <string name="person_cover_no_face">Aucun visage détecté sur cette photo.</string>
     <string name="person_msg_moved">Déplacé vers une autre personne</string>
     <string name="person_msg_removed">Retiré de la personne</string>
@@ -2411,7 +2411,7 @@
     <string name="person_detail_unnamed">Sans nom</string>
     <string name="person_add_name">Ajouter un nom</string>
     <string name="person_unsorted">Non triés</string>
-    <string name="person_unsorted_hint">Des visages sans correspondance certaine avec une personne. Sélectionne des photos pour en sortir une vraie personne, ou marque le reste comme « pas une personne ».</string>
+    <string name="person_unsorted_hint">Des visages sans correspondance certaine avec une personne. Sélectionnez des photos pour en sortir une vraie personne, ou marquez le reste comme « pas une personne ».</string>
     <string name="person_unsorted_caption">Visages restants qui n\'ont pas pu être associés. Ouvrez pour les trier.</string>
     <string name="person_rename_title">Renommer</string>
     <string name="person_remove_name">Retirer le nom</string>
@@ -2419,7 +2419,7 @@
     <string name="person_remove_name_confirm_body">Les photos restent. Le groupe revient dans les visages à vérifier et quitte Personnes s\'il ne compte qu\'une photo.</string>
     <string name="person_rename_hint">Nom</string>
     <string name="permissions_default_gallery_title">Définir comme galerie par défaut</string>
-    <string name="permissions_default_gallery_why">Ouvre les paramètres système pour définir cette application par défaut pour ouvrir les photos et les vidéos.</string>
+    <string name="permissions_default_gallery_why">Ouvrez les paramètres système pour définir cette application par défaut pour ouvrir les photos et les vidéos.</string>
     <string name="permissions_action_open">Ouvrir</string>
     <string name="sign_in_continue_without_account">Continuer sans compte</string>
     <string name="move_to_folder">Déplacer vers un dossier</string>

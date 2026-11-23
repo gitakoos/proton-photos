@@ -1762,7 +1762,7 @@
     <string name="picker_filter_device">Gerät</string>
     <string name="picker_filter_unfiled">Nur Fotos, die in keinem Album sind</string>
     <string name="sync_open_settings">Backup-Einstellungen</string>
-    <string name="sync_open_settings_desc">Legen Sie fest, was und wie gesichert wird und welches Netzwerk verwendet wird.</string>
+    <string name="sync_open_settings_desc">Lege fest, was und wie gesichert wird und welches Netzwerk verwendet wird.</string>
     <string name="settings_privacy">Privatsphäre</string>
     <string name="settings_privacy_desc">Cache, Offline-Fotos und Telemetrie</string>
     <string name="settings_metadata">Upload-Verarbeitung</string>
@@ -1852,7 +1852,7 @@
     <string name="settings_ai_ocr_download_message">Text kopieren benötigt einen Modell-Download von %1$s. Es funktioniert über jede Verbindung, WLAN wird jedoch empfohlen.</string>
     <string name="settings_ai_ocr_download_confirm">Herunterladen</string>
     <string name="settings_ai_ocr_remove_title">Heruntergeladenes Modell entfernen?</string>
-    <string name="settings_ai_ocr_remove_message">Das gibt etwa %1$s frei. Sie können es später erneut herunterladen.</string>
+    <string name="settings_ai_ocr_remove_message">Das gibt etwa %1$s frei. Du kannst es später erneut herunterladen.</string>
     <string name="settings_ai_ocr_remove_confirm">Entfernen</string>
     <string name="settings_ai_ocr_remove_keep">Behalten</string>
     <string name="settings_ai_face_toggle">Gesichtserkennung</string>
@@ -1888,7 +1888,7 @@
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Herunterladen</string>
     <string name="settings_ai_semantic_remove_title">Heruntergeladene Modelle entfernen?</string>
-    <string name="settings_ai_semantic_remove_message">Das gibt etwa %1$s frei. Sie können sie später erneut herunterladen.</string>
+    <string name="settings_ai_semantic_remove_message">Das gibt etwa %1$s frei. Du kannst sie später erneut herunterladen.</string>
     <string name="settings_ai_semantic_remove_confirm">Entfernen</string>
     <string name="settings_ai_semantic_remove_keep">Behalten</string>
     <string name="settings_ai_semantic_indexing_waiting">Warten auf die Suchmodelle</string>
@@ -1967,8 +1967,8 @@
     <string name="gallery_add_to_person">Zu Person hinzufügen</string>
     <string name="people_search_hint">Personen suchen</string>
     <string name="person_set_cover">Als Titelbild festlegen</string>
-    <string name="person_set_cover_confirm_title">Set as cover?</string>
-    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
+    <string name="person_set_cover_confirm_title">Als Titelbild festlegen?</string>
+    <string name="person_set_cover_confirm_body">Dieses Foto als Titelbild für diese Person verwenden.</string>
     <string name="person_cover_no_face">Auf diesem Foto wurde kein Gesicht erkannt.</string>
     <string name="person_msg_moved">Zu einer anderen Person verschoben</string>
     <string name="person_msg_removed">Von Person entfernt</string>
@@ -2044,7 +2044,7 @@
     <string name="settings_face_file_msg">Version 2.5.0 und älter haben Gesichter mit „Gesichtsindex exportieren“ in einer Datei namens photosforproton-faces.ppfi gespeichert. Wenn du diese Datei hast, wähle sie hier aus, dann kommen ihre Gesichter und Namen zurück. Deine aktuellen Gesichter bleiben erhalten. Neuere Sicherungen liegen in Drive, unter „Von Drive wiederherstellen“.</string>
     <string name="settings_ai_import_choose">Auswählen</string>
     <string name="settings_ai_import_done">%1$d Gesichter, %2$d Personen importiert.</string>
-    <string name="settings_ai_import_reattach">Dieser Index nutzte ein anderes Modell. Seine %1$d Namen kehren zu Ihren Fotos zurück, sobald sie erneut durchsucht werden.</string>
+    <string name="settings_ai_import_reattach">Dieser Index nutzte ein anderes Modell. Seine %1$d Namen kehren zu deinen Fotos zurück, sobald sie erneut durchsucht werden.</string>
     <string name="settings_ai_import_wrong_account">Dieser Gesichtsindex gehört zu einem anderen Konto und kann hier nicht geöffnet werden.</string>
     <string name="settings_ai_transfer_failed">Übertragung des Gesichtsindex fehlgeschlagen.</string>
     <string name="settings_ai_transfer_working">Wird ausgeführt…</string>
