@@ -668,14 +668,18 @@ fun NavGraph(
     // timeline and only the second return to the caller. Nothing further is needed to get there:
     // the activity declares no launchMode, so it runs inside the calling task, and emptying our own
     // stack is the whole of it. Branch:
-    //   - ACTION_VIEW (system "Open with" chooser, file managers, gallery apps) → push
-    //     the photo viewer with a synthetic single-item list wrapping the foreign URI.
+    //   - ACTION_VIEW (system "Open with" chooser, file managers, gallery apps) or a camera's
+    //     review of its last shot → push the photo viewer with a synthetic single-item list
+    //     wrapping the foreign URI.
     //   - ACTION_EDIT ("Edit with" chooser, edit affordances in other apps) → push the
     //     editor, which handles the foreign URI and saves any edits as a new copy.
     val startupRouteForExternal by navViewModel.startupRoute.collectAsStateWithLifecycle()
     LaunchedEffect(pendingExternalEdit, startupRouteForExternal) {
         val req = pendingExternalEdit ?: return@LaunchedEffect
-        if (startupRouteForExternal != StartupRoute.Ready) return@LaunchedEffect
+        // A guest opens it too: the viewer and the editor read and save the foreign URI on the device.
+        if (startupRouteForExternal != StartupRoute.Ready && startupRouteForExternal != StartupRoute.LocalOnly) {
+            return@LaunchedEffect
+        }
         if (req.isViewOnly) {
             // Synthesise a one-item LocalOnly GalleryItem from the foreign URI so the
             // viewer can render it through its existing local-uri path. The dateTaken

@@ -84,8 +84,8 @@
             android:windowSoftInputMode="adjustResize">
             <!--
                 The real main screen. It carries no LAUNCHER entry and is never disabled: the home-screen
-                icon is whichever of the launcher aliases below is enabled, and the widget, the EDIT and
-                VIEW filters and the gallery filter all stay on this class, whatever icon is chosen.
+                icon is whichever of the launcher aliases below is enabled, and the widget, the EDIT, VIEW
+                and review filters and the gallery filter all stay on this class, whatever icon is chosen.
             -->
             <!--
                 Surfaces the app in Android's "Open with" / "Edit with" choosers when
@@ -122,6 +122,34 @@
                 <data android:scheme="content" />
                 <data android:mimeType="image/*" />
                 <data android:mimeType="video/*" />
+            </intent-filter>
+            <!--
+                A camera's "review the shot I just took" (its thumbnail), sent to the default gallery.
+                Handled like VIEW: a content:// photo or video opens in the viewer, anything else
+                opens the gallery. The three filters match a review with a URI and a type, with a
+                type only, and with neither. The type-only filter also matches a file:// URI with a
+                type, which the parser refuses. The lock-screen camera's REVIEW_SECURE is left out
+                on purpose, so the app never opens over the lock screen.
+            -->
+            <intent-filter>
+                <action android:name="android.provider.action.REVIEW" />
+                <action android:name="com.android.camera.action.REVIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.provider.action.REVIEW" />
+                <action android:name="com.android.camera.action.REVIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.provider.action.REVIEW" />
+                <action android:name="com.android.camera.action.REVIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <!--
                 Registers the app as a gallery so a camera or system "open gallery"

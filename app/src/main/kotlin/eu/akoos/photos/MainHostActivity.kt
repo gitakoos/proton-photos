@@ -158,6 +158,45 @@ internal fun isAcceptableExternalEditUri(scheme: String?, authority: String?, ow
         !authority.isNullOrBlank() &&
         !isOwnProviderAuthority(authority, ownPackage)
 
+/** MediaStore.ACTION_REVIEW, spelled out because the constant only exists from Android 10. */
+internal const val ACTION_REVIEW = "android.provider.action.REVIEW"
+internal const val ACTION_REVIEW_LEGACY = "com.android.camera.action.REVIEW"
+
+/**
+ * True for the actions that open the photo in the viewer: VIEW and a camera's review of its last shot.
+ * The lock-screen camera's REVIEW_SECURE is not one of them, so the app never opens over the lock screen.
+ */
+internal fun opensInViewer(action: String?): Boolean =
+    action == Intent.ACTION_VIEW || action == ACTION_REVIEW || action == ACTION_REVIEW_LEGACY
+
+/**
+ * The photo or video another app hands over with VIEW, EDIT or a camera's review, or null when the
+ * intent carries no acceptable content:// URI of an image or video. [typeOf] is asked only when the
+ * intent names no type, since some apps omit it.
+ */
+internal fun externalEditRequestOf(
+    intent: Intent,
+    ownPackage: String,
+    typeOf: (Uri) -> String?,
+    displayNameOf: (Uri, Boolean) -> String,
+): ExternalEditRequest? {
+    val isViewOnly = opensInViewer(intent.action)
+    if (!isViewOnly && intent.action != Intent.ACTION_EDIT) return null
+    val uri = intent.data ?: return null
+    if (!isAcceptableExternalEditUri(uri.scheme, uri.authority, ownPackage)) return null
+    val mimeType = intent.type ?: typeOf(uri) ?: return null
+    val isImage = mimeType.startsWith("image/")
+    val isVideo = mimeType.startsWith("video/")
+    if (!isImage && !isVideo) return null
+    return ExternalEditRequest(
+        uri = uri.toString(),
+        displayName = displayNameOf(uri, isVideo),
+        mimeType = mimeType,
+        isVideo = isVideo,
+        isViewOnly = isViewOnly,
+    )
+}
+
 @AndroidEntryPoint
 class MainHostActivity : AppCompatActivity() {
 
@@ -833,31 +872,14 @@ class MainHostActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Parses an ACTION_EDIT / ACTION_VIEW intent carrying an image/video URI into an
-     * [ExternalEditRequest], or null for non-matching intents. The isViewOnly flag splits the
-     * downstream route (VIEW → viewer, EDIT → editor).
-     */
+    /** See [externalEditRequestOf]; the isViewOnly flag splits the route (viewer or editor). */
     private fun parseExternalEditRequest(intent: Intent?): ExternalEditRequest? {
         intent ?: return null
-        val action = intent.action ?: return null
-        if (action != Intent.ACTION_EDIT && action != Intent.ACTION_VIEW) return null
-        val uri = intent.data ?: return null
-        if (!isAcceptableExternalEditUri(uri.scheme, uri.authority, packageName)) return null
-        // Prefer the intent's type; fall back to the ContentResolver (some apps omit it).
-        val mimeType = intent.type
-            ?: runCatching { contentResolver.getType(uri) }.getOrNull()
-            ?: return null
-        val isImage = mimeType.startsWith("image/")
-        val isVideo = mimeType.startsWith("video/")
-        if (!isImage && !isVideo) return null
-        val displayName = queryDisplayName(uri, isVideo)
-        return ExternalEditRequest(
-            uri = uri.toString(),
-            displayName = displayName,
-            mimeType = mimeType,
-            isVideo = isVideo,
-            isViewOnly = action == Intent.ACTION_VIEW,
+        return externalEditRequestOf(
+            intent = intent,
+            ownPackage = packageName,
+            typeOf = { uri -> runCatching { contentResolver.getType(uri) }.getOrNull() },
+            displayNameOf = ::queryDisplayName,
         )
     }
 
