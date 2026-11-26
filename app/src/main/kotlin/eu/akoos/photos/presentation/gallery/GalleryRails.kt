@@ -1229,28 +1229,14 @@ private const val FACE_TILE_PX = 320
  *  crisp as the uncropped Season card (a cloud cover is still capped by its thumbnail's own size). */
 private const val FACE_CARD_PX = 1024
 
-/**
- * Crops a Coil-decoded cover thumbnail to a square around the stored face box (given as fractions of
- * the image, so it is correct at any decode resolution), with a little padding, so a tile reads as a
- * face portrait rather than the whole photo. The output square is clipped to a circle by the tile.
- */
+/** Crops a Coil-decoded cover to the [faceSquare] of the stored face box (fractions, so any decode size works). */
 internal class FaceCropTransformation(private val box: FaceBox) : Transformation {
     override val cacheKey: String = "face:${box.left},${box.top},${box.right},${box.bottom}"
 
     override suspend fun transform(input: Bitmap, size: coil.size.Size): Bitmap {
-        val w = input.width
-        val h = input.height
-        if (w <= 0 || h <= 0) return input
-        val faceW = (box.right - box.left) * w
-        val faceH = (box.bottom - box.top) * h
-        val cx = ((box.left + box.right) / 2f) * w
-        val cy = ((box.top + box.bottom) / 2f) * h
-        val side = (maxOf(faceW, faceH) * 1.4f).coerceIn(1f, minOf(w, h).toFloat())
-        val half = side / 2f
-        val left = (cx - half).roundToInt().coerceIn(0, w - 1)
-        val top = (cy - half).roundToInt().coerceIn(0, h - 1)
-        val s = side.roundToInt().coerceIn(1, minOf(w - left, h - top))
-        return Bitmap.createBitmap(input, left, top, s, s)
+        if (input.width <= 0 || input.height <= 0) return input
+        val square = faceSquare(box, input.width, input.height)
+        return Bitmap.createBitmap(input, square.left, square.top, square.size, square.size)
     }
 
     override fun equals(other: Any?): Boolean = other is FaceCropTransformation && other.box == box
