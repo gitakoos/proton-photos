@@ -1352,6 +1352,42 @@ class PhotoUploadService @Inject constructor(
         return SdkUploadedPhoto(result.linkId, result.revisionId, thumbnails[me.proton.drive.sdk.entity.ThumbnailType.THUMBNAIL])
     }
 
+    /**
+     * A live photo of the library named exactly [name] whose bytes have SHA-1 [sha1Hex]: one listing lookup by
+     * name and [driveContentHash] (Drive's form of the SHA-1, null when it cannot be made), then, with the SDK
+     * upload route on, Drive's own duplicate lookup, which also finds a photo the listing has not caught up
+     * with. Null when neither finds one or a lookup fails.
+     */
+    suspend fun findUploadedPhoto(userId: UserId, name: String, sha1Hex: String, driveContentHash: String?): String? {
+        if (name.isEmpty() || sha1Hex.isEmpty()) return null
+        if (driveContentHash != null) {
+            try {
+                photoListingDao.ownStreamLinkByNameAndHash(userId.id, name, driveContentHash)?.let { return it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w(TAG, "findUploadedPhoto: listing lookup failed: ${e.message}")
+            }
+        }
+        if (!sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.UPLOAD)) return null
+        val sha1 = runCatching { eu.akoos.photos.data.sdk.hexToBytes(sha1Hex) }.getOrNull() ?: return null
+        return findUploadedOrNull(userId, name, sha1)?.firstOrNull()?.linkId
+    }
+
+    /**
+     * What an upload carries to its Drive photo, for device file [item] linked to photo [linkId] already on
+     * Drive instead: the heart it had on the device, when the photo is listed, and its labels. Never throws.
+     */
+    suspend fun carryToExistingPhoto(userId: UserId, item: LocalMediaItem, linkId: String) = withContext(NonCancellable) {
+        val listed = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull()
+        if (listed != null) {
+            carryFavoriteToCloud(userId, item.uri, item, linkId, listed.shareId, listed.volumeId, listed.revisionId)
+        }
+        runCatching { photoLabels.rekeyFor(userId, item.uri, linkId) }
+            .onFailure { Log.w(TAG, "carryToExistingPhoto: moving labels to fileId=$linkId failed: ${it.message}") }
+        Unit
+    }
+
     private suspend fun findUploadedOrNull(userId: UserId, name: String, sha1: ByteArray) = try {
         sdkPhotoUploadOps.findUploaded(userId, name, sha1)
     } catch (e: CancellationException) {

@@ -883,6 +883,35 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /**
+     * The Drive photo that already holds [localUri]'s file as it is, by its exact [name] and SHA-1 [sha1], as
+     * another app's backup leaves it; null when there is none or the lookup fails, and for a copy recorded as
+     * short, one a backed-up device file is already linked to, or one a vaulted photo holds. The file then
+     * uploads as before.
+     */
+    private suspend fun driveCopyOf(userId: UserId, localUri: String, name: String, sha1: String): String? {
+        val linkId = try {
+            cloudRepo.findUploadedPhoto(userId, name, sha1)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(UPLOAD_TAG, "Already-on-Drive lookup failed, uploading: ${e::class.simpleName}")
+            null
+        }?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            when {
+                shortCopyReplacer?.isShortCopy(localUri, linkId) == true -> null
+                syncStateRepo.syncedCloudIdsAmong(userId, listOf(linkId)).isNotEmpty() -> null
+                syncStateRepo.getVaulted(userId).any { it.cloudFileId == linkId } -> null
+                else -> linkId
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * Upload a single pending photo. Extracted from [invoke] so each upload worker (see
      * [runUploadWorkers]) can call it once per row. Per-photo errors are caught here so one
      * failure doesn't tear down the other workers via structured concurrency.
@@ -1074,30 +1103,46 @@ class UploadPendingUseCase @Inject constructor(
             val readsRewritten = uploadRewritesBytes(
                 localItem.mimeType, stripOnUpload, compression.photos, compression.videos,
             )
-            val sourceHash: String? = if (readsRewritten) {
+            val sha1StartMs = System.currentTimeMillis()
+            val deviceSha1: String? = if (readsRewritten) {
                 withContext(Dispatchers.IO) { deviceFiles.computeSha1(state.localUri) }
             } else {
-                null
+                deviceFiles.computeSha1(state.localUri)
             }
+            var sha1Ms = System.currentTimeMillis() - sha1StartMs
+            val sourceHash: String? = if (readsRewritten) deviceSha1 else null
 
-            val strippedUploadUri: String = bytePreparer.strip(
-                userId, state, localItem, stripOnUpload, stripConfig, mirrorStripToLocal, compression, temps,
-            )
+            // Another app's backup (or an earlier upload whose row was lost) may already hold this file on
+            // Drive under its own name and bytes: the file is linked to that photo instead of sent again.
+            val driveCopy: String? = deviceSha1?.let { driveCopyOf(userId, state.localUri, rawLocalItem.displayName, it) }
+            if (driveCopy != null) mirrorRenameTarget = null
 
-            val prepared = bytePreparer.compress(
-                state, localItem, stripOnUpload, stripConfig, compression, strippedUploadUri, temps,
-                totalCount, finishedCount, uploadSlot,
-            ) { _progress.tryEmit(it) }
-            val finalUploadUri = prepared.finalUploadUri
-            val compressIsMotionPhoto = prepared.compressIsMotionPhoto
+            val prepared = if (driveCopy != null) {
+                null
+            } else {
+                val strippedUploadUri: String = bytePreparer.strip(
+                    userId, state, localItem, stripOnUpload, stripConfig, mirrorStripToLocal, compression, temps,
+                )
+                bytePreparer.compress(
+                    state, localItem, stripOnUpload, stripConfig, compression, strippedUploadUri, temps,
+                    totalCount, finishedCount, uploadSlot,
+                ) { _progress.tryEmit(it) }
+            }
+            val finalUploadUri = prepared?.finalUploadUri ?: state.localUri
+            val compressIsMotionPhoto = prepared?.compressIsMotionPhoto ?: false
 
-            val sha1StartMs = System.currentTimeMillis()
-            val hash = deviceFiles.computeSha1(finalUploadUri)
+            // The device file read above is the upload's bytes when nothing was rewritten.
+            val hash = if (finalUploadUri == state.localUri && !temps.deviceRewritten && deviceSha1 != null) {
+                deviceSha1
+            } else {
+                val rereadStartMs = System.currentTimeMillis()
+                deviceFiles.computeSha1(finalUploadUri).also { sha1Ms += System.currentTimeMillis() - rereadStartMs }
+            }
             // Privacy: never log the file name (mirror PhotoUploadService.logRef) — a non-reversible
             // URI-derived ref keeps the per-file lines correlatable without revealing the file.
             val logRef = eu.akoos.photos.util.uploadLogRef(localItem.uri)
             eu.akoos.photos.util.SyncDiagnostics.log(
-                "upload $logRef: sha1 in ${System.currentTimeMillis() - sha1StartMs}ms"
+                "upload $logRef: sha1 in ${sha1Ms}ms"
             )
             if (hash == null || (readsRewritten && sourceHash == null)) {
                 // The content could not be read this pass. Never upload with a bogus/empty hash (it
@@ -1194,30 +1239,35 @@ class UploadPendingUseCase @Inject constructor(
             // source's. Probe the compressed temp once (a video compressedFile is set only on the
             // video-compress path) so a 4K source transcoded to 1080p carries 1920x1080, matching the
             // bytes actually uploaded. Rotation is unchanged (Drive reads it from the container).
-            val videoDimsOverride: Pair<Int, Int>? =
-                if (temps.compressedFile != null && localItem.mimeType.startsWith("video/")) {
-                    xAttrBuilder.probeVideoDimensions(temps.compressedFile!!)
-                } else {
-                    null
-                }
-            // Resolve Camera/Location + rotation-corrected dimensions from the ORIGINAL source
-            // (pre-strip), gated against the strip config so the xAttr never re-leaks a field the
-            // file had erased. uploadItem.dateTaken is already floored when timestamps are stripped.
-            val xAttrMetadata = xAttrBuilder.buildXAttrMetadata(
-                sourceUri = state.localUri,
-                item = uploadItem,
-                stripOnUpload = stripOnUpload,
-                stripConfig = stripConfig,
-                videoDimsOverride = videoDimsOverride,
-            )
-            val cloudId = cloudRepo.uploadFile(
-                userId, uploadItem, hash, finalUploadUri, xAttrMetadata, onProgressForFile,
-            )
+            val cloudId = driveCopy ?: run {
+                val videoDimsOverride: Pair<Int, Int>? =
+                    if (temps.compressedFile != null && localItem.mimeType.startsWith("video/")) {
+                        xAttrBuilder.probeVideoDimensions(temps.compressedFile!!)
+                    } else {
+                        null
+                    }
+                // Resolve Camera/Location + rotation-corrected dimensions from the ORIGINAL source
+                // (pre-strip), gated against the strip config so the xAttr never re-leaks a field the
+                // file had erased. uploadItem.dateTaken is already floored when timestamps are stripped.
+                val xAttrMetadata = xAttrBuilder.buildXAttrMetadata(
+                    sourceUri = state.localUri,
+                    item = uploadItem,
+                    stripOnUpload = stripOnUpload,
+                    stripConfig = stripConfig,
+                    videoDimsOverride = videoDimsOverride,
+                )
+                cloudRepo.uploadFile(
+                    userId, uploadItem, hash, finalUploadUri, xAttrMetadata, onProgressForFile,
+                )
+            }
+            if (driveCopy != null) Log.d(UPLOAD_TAG, "Already on Drive, linked instead of uploaded: $logRef")
 
-            bytePreparer.mirrorCompressAfterUpload(
-                state, localItem, stripOnUpload, mirrorStripToLocal, mirrorCompressToLocal, compression,
-                compressIsMotionPhoto, temps,
-            )
+            if (driveCopy == null) {
+                bytePreparer.mirrorCompressAfterUpload(
+                    state, localItem, stripOnUpload, mirrorStripToLocal, mirrorCompressToLocal, compression,
+                    compressIsMotionPhoto, temps,
+                )
+            }
 
             temps.strippedFile?.delete()
             temps.strippedFile = null
@@ -1267,6 +1317,7 @@ class UploadPendingUseCase @Inject constructor(
                 // the queue columns, so this separate DAO write is what actually clears them.
                 syncStateRepo.clearQueuedForSynced(state.localUri)
             }
+            if (driveCopy != null) cloudRepo.carryToExistingPhoto(userId, rawLocalItem, driveCopy)
 
             // uploadFile read and hashed every byte of the file before its commit, so this copy is whole: a
             // short Drive copy it replaces moves to Drive's trash, after the whole one joins its albums. A

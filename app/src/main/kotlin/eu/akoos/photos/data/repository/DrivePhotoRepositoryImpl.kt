@@ -303,6 +303,12 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata, onProgress = onProgress,
     )
 
+    override suspend fun findUploadedPhoto(userId: UserId, name: String, sha1Hex: String): String? =
+        uploadService.findUploadedPhoto(userId, name, sha1Hex, cloudContentHash(sha1Hex))
+
+    override suspend fun carryToExistingPhoto(userId: UserId, item: LocalMediaItem, linkId: String) =
+        uploadService.carryToExistingPhoto(userId, item, linkId)
+
     override suspend fun uploadFileLinked(
         userId: UserId,
         item: LocalMediaItem,

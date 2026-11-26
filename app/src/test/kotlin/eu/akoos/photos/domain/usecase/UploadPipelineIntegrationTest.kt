@@ -285,6 +285,93 @@ class UploadPipelineIntegrationTest {
         assertEquals("the upload itself lands", 1, cloud.photos.value.size)
     }
 
+    // ── A photo already on Drive under its own name and bytes is linked, not sent again ───────────
+
+    /** A Drive photo another app's backup left for [item], found by its exact name and SHA-1. */
+    private fun putOnDriveAlready(item: LocalMediaItem, linkId: String) {
+        cloud.add(
+            eu.akoos.photos.domain.entity.CloudPhoto(
+                linkId = linkId, shareId = "share", volumeId = volumeId, captureTime = item.dateTaken / 1000L,
+                displayName = item.displayName, mimeType = item.mimeType, sizeBytes = item.sizeBytes,
+                thumbnailUrl = null, revisionId = "rev-$linkId", contentHash = "drive-$linkId",
+            ),
+        )
+        cloud.alreadyOnDrive[item.displayName to sha1Of(item.uri.toByteArray())] = linkId
+    }
+
+    @Test
+    fun `a photo another app already backed up is linked to its Drive copy instead of uploaded`() = runTest {
+        val uri = "content://media/60"
+        val item = localItem(uri)
+        local.add(item)
+        putOnDriveAlready(item, "official-1")
+
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        val result = uploadUseCase(userId)
+
+        assertTrue("nothing is sent", "UPLOAD" !in cloud.callLog)
+        assertEquals("no second Drive copy", 1, cloud.photos.value.size)
+        assertEquals("counted like a finished upload", 1, result.successCount)
+        assertEquals("the heart and labels follow it", listOf(uri to "official-1"), cloud.carriedToExisting)
+        row(uri)!!.let {
+            assertEquals(SyncStatus.SYNCED, it.status)
+            assertEquals("official-1", it.cloudFileId)
+            assertEquals(eu.akoos.photos.domain.entity.LinkBasis.PROVEN, it.linkBasis)
+            assertEquals(sha1Of(uri.toByteArray()), it.localHash)
+            assertEquals(sha1Of(uri.toByteArray()), it.originalHash)
+            assertNotNull(it.backedUpAtMs)
+            assertTrue("off the queue", !it.queued)
+        }
+    }
+
+    @Test
+    fun `a same-named Drive photo with other bytes does not stop the upload`() = runTest {
+        val uri = "content://media/61"
+        val item = localItem(uri)
+        local.add(item)
+        cloud.alreadyOnDrive[item.displayName to sha1Of("other bytes".toByteArray())] = "other-1"
+
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        assertEquals(listOf("UPLOAD"), cloud.callLog)
+        assertEquals(cloud.uploadedLinkIds.single(), row(uri)!!.cloudFileId)
+    }
+
+    @Test
+    fun `a failed already-on-Drive lookup uploads as before`() = runTest {
+        val uri = "content://media/62"
+        local.add(localItem(uri))
+        cloud.findUploadedError = IllegalStateException("lookup failed")
+
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        assertEquals(listOf("UPLOAD"), cloud.callLog)
+        assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
+    }
+
+    @Test
+    fun `a Drive copy another device file is already linked to is not taken`() = runTest {
+        val uri = "content://media/63"
+        val item = localItem(uri)
+        local.add(item)
+        putOnDriveAlready(item, "taken-1")
+        syncRepo.upsert(
+            SyncState(
+                localUri = "content://media/elsewhere", cloudFileId = "taken-1", localHash = "", cloudHash = null,
+                status = SyncStatus.SYNCED, lastSyncAttemptMs = 0L, lastSyncSuccessMs = 0L, backedUpAtMs = 0L, sizeBytes = 1024L,
+            ),
+            userId,
+        )
+
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        assertEquals(listOf("UPLOAD"), cloud.callLog)
+        assertEquals(cloud.uploadedLinkIds.single(), row(uri)!!.cloudFileId)
+    }
+
     @Test
     fun `delete after backup removes a device file that still holds the bytes the upload read`() = runTest {
         val uri = "content://media/40"

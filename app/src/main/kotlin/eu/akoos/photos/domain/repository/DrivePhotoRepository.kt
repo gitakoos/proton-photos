@@ -190,6 +190,17 @@ interface DrivePhotoRepository {
     ): String
 
     /**
+     * The link of a live photo of [userId]'s library named exactly [name] whose bytes have SHA-1 [sha1Hex], as
+     * another app's backup or an earlier upload left it, or null when there is none or it cannot be told.
+     * One lookup per call, never a walk of the library.
+     */
+    suspend fun findUploadedPhoto(userId: UserId, name: String, sha1Hex: String): String? = null
+
+    /** Carries what an upload would (the device heart and labels) from [item] to [linkId], a photo
+     *  [findUploadedPhoto] found already on Drive. Never throws. */
+    suspend fun carryToExistingPhoto(userId: UserId, item: LocalMediaItem, linkId: String) {}
+
+    /**
      * Uploads one half of a Live Photo. The still is sent with [extraTags] holding the Live Photo tag; the
      * video is sent with [mainPhotoLinkId] set to the link the still ended up under, so Drive keeps the pair
      * as one photo with a related video. Everything else is as [uploadFile].

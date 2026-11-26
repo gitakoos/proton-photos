@@ -354,6 +354,14 @@ interface PhotoListingDao {
     )
     suspend fun ownStreamByLowerNames(userId: String, lowerNames: List<String>): List<LinkIdName>
 
+    /** One own-stream photo of this user named exactly [name] whose Drive content hash is [contentHash], or
+     *  null. A single lookup that returns at most one link, never the listing itself. */
+    @Query(
+        "SELECT linkId FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0 " +
+            "AND displayName = :name AND contentHash = :contentHash LIMIT 1",
+    )
+    suspend fun ownStreamLinkByNameAndHash(userId: String, name: String, contentHash: String): String?
+
     /** Whether this user's library holds a row for [linkId]. */
     @Query("SELECT EXISTS(SELECT 1 FROM photo_listing WHERE userId = :userId AND linkId = :linkId)")
     suspend fun hasLink(userId: String, linkId: String): Boolean

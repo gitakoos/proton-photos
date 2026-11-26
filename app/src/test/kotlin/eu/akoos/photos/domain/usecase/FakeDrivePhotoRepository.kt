@@ -137,6 +137,24 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         photos.value = photos.value + photo
     }
 
+    /** Photos already on Drive by (exact name, SHA-1), as [findUploadedPhoto] finds them; empty unless set. */
+    val alreadyOnDrive = mutableMapOf<Pair<String, String>, String>()
+
+    /** When non-null, every [findUploadedPhoto] throws it. */
+    var findUploadedError: Throwable? = null
+
+    override suspend fun findUploadedPhoto(userId: UserId, name: String, sha1Hex: String): String? {
+        findUploadedError?.let { throw it }
+        return alreadyOnDrive[name to sha1Hex]
+    }
+
+    /** (device uri, link) of each [carryToExistingPhoto] call. */
+    val carriedToExisting = mutableListOf<Pair<String, String>>()
+
+    override suspend fun carryToExistingPhoto(userId: UserId, item: LocalMediaItem, linkId: String) {
+        carriedToExisting += item.uri to linkId
+    }
+
     fun removeByLinkId(linkId: String) {
         photos.value = photos.value.filterNot { it.linkId == linkId }
     }
