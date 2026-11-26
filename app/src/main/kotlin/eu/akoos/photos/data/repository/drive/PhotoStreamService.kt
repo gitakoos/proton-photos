@@ -458,6 +458,13 @@ internal fun MutablePreferences.markListingEverComplete(key: Preferences.Key<Boo
     return first
 }
 
+/**
+ * Whether a complete listing queues the one-off display pair repair: the first complete listing, or any
+ * complete listing in an app version ([versionCode]) the repair has not started in yet, as after an update.
+ */
+internal fun Preferences.pairRepairDue(firstComplete: Boolean, versionCode: Int): Boolean =
+    firstComplete || this[SettingsKeys.PAIR_REPAIR_RAN_FOR_VERSION] != versionCode
+
 internal fun refreshPassOutcome(paginationComplete: Boolean, failedBatches: Int) = RefreshPassOutcome(
     paginationComplete = paginationComplete,
     detailComplete = paginationComplete && failedBatches == 0,
@@ -1544,7 +1551,7 @@ class PhotoStreamService @Inject constructor(
             // stub row in the dedup index, so a pass with a failed detail batch still can't cause a
             // re-upload (the backfill fills the row, the next fresh walk completes it).
             if (outcome.paginationComplete) {
-                var firstComplete = false
+                var repairDue = false
                 context.settingsDataStore.edit {
                     // The stored flag promises the DB holds the whole library, which a failed detail
                     // batch breaks, so this one keeps the batch condition. Left false, the next pass
@@ -1553,12 +1560,14 @@ class PhotoStreamService @Inject constructor(
                     // Sticky "listed at least once" marker — keyed on pagination success (not
                     // failedBatches) so a transient 429 on a detail batch can't strand the upload on
                     // "Preparing backup"; never cleared at a later walk start (only on sign-out).
-                    firstComplete = it.markListingEverComplete(everCompleteKey)
+                    val firstComplete = it.markListingEverComplete(everCompleteKey)
+                    repairDue = it.pairRepairDue(firstComplete, eu.akoos.photos.BuildConfig.VERSION_CODE)
                     it.remove(cursorKey)
                 }
-                // The first complete listing, as after a reinstall: pair the device files with the
-                // Drive photos now rather than at the next periodic repair, up to 30 minutes away.
-                if (firstComplete) {
+                // The first complete listing, as after a reinstall, or the first in a new app version: pair
+                // the device files with the Drive photos now rather than at the next periodic repair, up to
+                // 30 minutes away. One unique job, so repeated listings never stack runs.
+                if (repairDue) {
                     runCatching { eu.akoos.photos.worker.DisplayPairRepairWorker.enqueueOnce(WorkManager.getInstance(context)) }
                         .onFailure { e -> Log.w(TAG, "refreshCloudPhotos: pair repair not queued: ${e.message}") }
                 }

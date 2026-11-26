@@ -366,6 +366,31 @@ class GetGalleryItemsUseCaseTest {
         assertTrue("claimed cloud video must not resurface as CloudOnly", result.none { it is GalleryItem.CloudOnly })
     }
 
+    @Test
+    fun `a device file saved over from a Drive photo shows as one item for both`() {
+        val local = listOf(localItem("uri://saved", dateTaken = 1_700_000_002_000L))
+        val cloud = listOf(cloudPhoto("link-x", captureTime = 1_700_000_002L))
+
+        val result = useCase.merge(local, cloud, listOf(syncState("uri://saved", "link-x")))
+
+        assertEquals(listOf("link-x"), result.map { it.stableId })
+        assertEquals("uri://saved", (result.single() as GalleryItem.Synced).local.uri)
+    }
+
+    @Test
+    fun `two device files linked to one Drive photo leave one item with its link`() {
+        val local = listOf(
+            localItem("uri://first", dateTaken = 1_700_000_002_000L),
+            localItem("uri://second", dateTaken = 1_700_000_001_000L),
+        )
+        val cloud = listOf(cloudPhoto("link-x", captureTime = 1_700_000_002L))
+        val rows = listOf(syncState("uri://first", "link-x"), syncState("uri://second", "link-x"))
+
+        val result = useCase.merge(local, cloud, rows)
+
+        assertEquals(listOf("link-x", "uri://second"), result.map { it.stableId })
+    }
+
     // ─── a link reconcile made by name ─────────────────────────────────────────
     // Such a row pairs for display while the file still agrees with the Drive photo on the exact name and
     // capture second. Drive's listing reports no size, so the size is never weighed.

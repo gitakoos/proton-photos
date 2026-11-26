@@ -26,6 +26,7 @@ import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.LinkBasis
@@ -84,8 +85,8 @@ class PrefsPairRepairMisses @Inject constructor(@ApplicationContext context: Con
 
 /**
  * A device file and the Drive photo it may hold, before the bytes are read: the one Drive photo of its
- * name for a file with no sync row, or the photo its row links by name alone ([upgrade]). [nameAndSecond]
- * marks a file with no row whose exact name and capture second are the photo's.
+ * name for an unpaired file (see [isUnpairedIdle]), or the photo its row links by name alone ([upgrade]).
+ * [nameAndSecond] marks an unpaired file whose exact name and capture second are the photo's.
  */
 internal data class PairRepairCandidate(
     val file: LocalMediaItem,
@@ -111,14 +112,16 @@ internal data class PairRepairCandidate(
  * bytes prove the link.
  *
  * Runs in the background ([eu.akoos.photos.worker.CachePruneWorker]), never on the gallery path, and
- * weighs a device file whose SYNCED row links a Drive photo by name alone, or one that has no row yet
- * and whose name, case aside, is the name of exactly one Drive photo of the library that no row claims,
- * and of no other device file. Each run reads at most
+ * weighs a device file whose SYNCED row links a Drive photo by name alone, or an unpaired one (no row, or
+ * a LOCAL_ONLY row with no cloud id that is not queued for upload, as an update leaves from an earlier
+ * version) whose name, case aside, is the name of exactly one Drive photo of the library that no row
+ * claims, and of no other device file. A file already linked by proof is never read. Each run reads at most
  * [PAIR_REPAIR_MAX_FILES] files and [PAIR_REPAIR_MAX_BYTES], newest first, and remembers the files that
  * did not match, so a file is read once until it or its photo changes. It waits for a complete listing of
- * the library, so a photo not listed yet is never taken for a miss. A new row is written only where no
- * row exists, so one an upload, a download or reconcile wrote is never replaced; a name link is marked
- * proven only while its row still links that photo.
+ * the library, so a photo not listed yet is never taken for a miss. A link is written only where no row
+ * exists or the row is still unpaired and idle ([SyncStateRepository.linkIfUnpaired]), so one an upload,
+ * a download or reconcile wrote is never replaced; a name link is marked proven only while its row still
+ * links that photo.
  *
  * A file whose bytes this app changed as it saved it (a date, a place or a video creation time stamped
  * in) no longer hashes to the Drive photo and stays apart. A name link whose file holds other bytes and
@@ -186,7 +189,7 @@ class DisplayPairRepair internal constructor(
         // Name links first: they cost no read, so every one is written in this run.
         val candidates = found.map { candidate ->
             if (!candidate.nameAndSecond) return@map candidate
-            if (syncStateRepo.insertIfAbsent(nameLinkRow(candidate), userId)) linked += candidate.file.uri
+            if (syncStateRepo.linkIfUnpaired(nameLinkRow(candidate), userId)) linked += candidate.file.uri
             candidate.copy(upgrade = true)
         }.filter { misses.fingerprintOf(it.file.uri) != it.fingerprint }
         var files = 0
@@ -256,7 +259,7 @@ class DisplayPairRepair internal constructor(
         // Written like a download's row: the link is proven, the backup stamp lets free-up check the file,
         // and the recorded bytes are what free-up compares it with. The empty row hash keeps the automatic
         // sweep off it, as off any copy put on the device from Drive.
-        val written = syncStateRepo.insertIfAbsent(
+        val written = syncStateRepo.linkIfUnpaired(
             SyncState(
                 localUri = candidate.file.uri,
                 cloudFileId = linkId,
@@ -276,8 +279,8 @@ class DisplayPairRepair internal constructor(
     }
 
     /**
-     * The files of [device] whose SYNCED row in [rows] links a Drive photo by name alone, and those with no
-     * row and one Drive photo of their name that no row claims, a name no other device file carries; newest
+     * The files of [device] whose SYNCED row in [rows] links a Drive photo by name alone, and the unpaired
+     * ones with one Drive photo of their name that no row claims, a name no other device file carries; newest
      * first. [run] leaves out the ones already weighed as they are now.
      */
     internal suspend fun candidates(
@@ -292,16 +295,18 @@ class DisplayPairRepair internal constructor(
                 ?.let { PairRepairCandidate(file, it, upgrade = true) }
         }
         val deviceNames = device.groupingBy { it.displayName.lowercase() }.eachCount()
-        val unrowed = device.filter { it.uri !in rows.byUri && deviceNames[it.displayName.lowercase()] == 1 }
-        if (unrowed.isEmpty() && nameLinked.isEmpty()) return emptyList()
+        val unpaired = device.filter { file ->
+            deviceNames[file.displayName.lowercase()] == 1 && rows.byUri[file.uri].let { it == null || it.isUnpairedIdle() }
+        }
+        if (unpaired.isEmpty() && nameLinked.isEmpty()) return emptyList()
         val claimed = rows.rows.mapNotNullTo(HashSet()) { it.cloudFileId }
-        val listed = unrowed.map { it.displayName.lowercase() }.distinct()
+        val listed = unpaired.map { it.displayName.lowercase() }.distinct()
             .chunked(PAIR_REPAIR_NAME_CHUNK)
             .flatMap { photoListingDao.ownStreamByLowerNames(userId.id, it) }
         val onlyPhotoOfName = listed.groupBy { it.displayName.lowercase() }
             .filterValues { it.size == 1 }
             .mapValues { it.value.single() }
-        val named = unrowed.mapNotNull { file ->
+        val named = unpaired.mapNotNull { file ->
             onlyPhotoOfName[file.displayName.lowercase()]
                 ?.takeIf { it.linkId !in claimed }
                 ?.let { photo ->
@@ -312,3 +317,7 @@ class DisplayPairRepair internal constructor(
         return (nameLinked + named).sortedByDescending { it.file.dateTaken }
     }
 }
+
+/** A row that pairs its file with nothing and that no upload is about to take: the repair may link it. */
+internal fun SyncStateLite.isUnpairedIdle(): Boolean =
+    status == SyncStatus.LOCAL_ONLY && cloudFileId.isNullOrEmpty() && !queued

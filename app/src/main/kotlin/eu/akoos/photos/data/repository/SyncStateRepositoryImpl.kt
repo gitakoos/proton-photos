@@ -63,6 +63,22 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun insertIfAbsent(state: SyncState, userId: UserId): Boolean =
         dao.insertIgnore(state.toEntity(userId.id)) != -1L
 
+    override suspend fun linkIfUnpaired(state: SyncState, userId: UserId): Boolean {
+        if (dao.insertIgnore(state.toEntity(userId.id)) != -1L) return true
+        val cloudFileId = state.cloudFileId?.takeIf { it.isNotEmpty() } ?: return false
+        return dao.linkUnpaired(
+            userId = userId.id,
+            localUri = state.localUri,
+            cloudFileId = cloudFileId,
+            localHash = state.localHash,
+            cloudHash = state.cloudHash,
+            backedUpAtMs = state.backedUpAtMs,
+            sizeBytes = state.sizeBytes,
+            linkBasis = state.linkBasis,
+            now = state.lastSyncSuccessMs ?: state.lastSyncAttemptMs,
+        ) > 0
+    }
+
     override suspend fun upsertAll(states: List<SyncState>, userId: UserId) {
         dao.upsertAll(states.map { it.toEntity(userId.id) })
     }

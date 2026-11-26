@@ -113,13 +113,16 @@ class DisplayPairRepairTest {
                 val ids = firstArg<List<String>>().toSet()
                 flowOf(drivePhotos.filter { it.linkId in ids })
             }
-            coEvery { snapshot.current(user) } returns SyncStateSnapshot.Rows(rows)
+            // Rows the run writes join the snapshot, as the shared snapshot re-reads after a write.
+            coEvery { snapshot.current(user) } answers {
+                SyncStateSnapshot.Rows(rows + written.map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, false, it.linkBasis) })
+            }
             coEvery { listing.ownStreamByLowerNames("user1", any()) } answers {
                 val names = secondArg<List<String>>().toSet()
                 drivePhotos.filter { it.displayName.lowercase() in names }
                     .map { LinkIdName(it.linkId, it.displayName, it.captureTime) }
             }
-            coEvery { syncRepo.insertIfAbsent(any(), user) } answers {
+            coEvery { syncRepo.linkIfUnpaired(any(), user) } answers {
                 written += firstArg<SyncState>()
                 true
             }
@@ -278,8 +281,8 @@ class DisplayPairRepairTest {
     }
 
     @Test
-    fun `a file with a row, or a Drive photo a row claims, is left alone`() {
-        val rowed = SyncStateLite(localUri = "uri://rowed", cloudFileId = null, localHash = "", status = SyncStatus.LOCAL_ONLY, queued = false)
+    fun `a file queued for upload, or a Drive photo a row claims, is left alone`() {
+        val rowed = SyncStateLite(localUri = "uri://rowed", cloudFileId = null, localHash = "", status = SyncStatus.LOCAL_ONLY, queued = true)
         val claim = SyncStateLite(localUri = "uri://elsewhere", cloudFileId = "link-2", localHash = "", status = SyncStatus.SYNCED, queued = false)
         val h = Harness(
             listOf(device("uri://rowed", "IMG_0001.jpg"), device("uri://free", "IMG_0002.jpg")),
@@ -368,7 +371,7 @@ class DisplayPairRepairTest {
     fun `a row written meanwhile by another path is kept`() {
         val file = device("uri://dl", "IMG_0001.jpg", dateTaken = otherSecond)
         val h = Harness(listOf(file), listOf(drive("link-1", "IMG_0001.jpg", "hmac-sha-same")), mapOf("uri://dl" to "sha-same"))
-        coEvery { h.syncRepo.insertIfAbsent(any(), user) } returns false
+        coEvery { h.syncRepo.linkIfUnpaired(any(), user) } returns false
 
         assertEquals(0, h.run())
         coVerify(exactly = 0) { h.syncRepo.setOriginalHash(any(), any()) }
@@ -481,5 +484,81 @@ class DisplayPairRepairTest {
         )
 
         assertEquals(1, runBlocking { h.repair.runWhenReady(user) })
+    }
+
+    // ── a row an earlier version left unpaired, as an update keeps it ──────────────────
+
+    private fun unpairedRow(uri: String, queued: Boolean = false) = SyncStateLite(
+        localUri = uri, cloudFileId = null, localHash = "", status = SyncStatus.LOCAL_ONLY, queued = queued,
+    )
+
+    @Test
+    fun `after an update a device file with an unpaired row is linked once its bytes are Drive's`() {
+        val file = device("uri://old", "IMG_0005.jpg", dateTaken = otherSecond)
+        val photo = drive("link-5", "IMG_0005.jpg", contentHash = "hmac-sha-5")
+        val row = unpairedRow("uri://old")
+        val h = Harness(listOf(file), listOf(photo), mapOf("uri://old" to "sha-5"), rows = listOf(row))
+        assertEquals(2, merger().merge(listOf(file), listOf(photo), listOf(row.full())).size)
+
+        assertEquals(1, h.run())
+
+        val written = h.written.single()
+        assertEquals("link-5", written.cloudFileId)
+        assertEquals(LinkBasis.PROVEN, written.linkBasis)
+        assertEquals(SyncStatus.SYNCED, written.status)
+        coVerify { h.syncRepo.setOriginalHash("uri://old", "sha-5") }
+        assertEquals(1, merger().merge(listOf(file), listOf(photo), h.written).size)
+    }
+
+    @Test
+    fun `after an update an unpaired row on the photo's name and second is linked by name, then proven`() {
+        val h = Harness(
+            listOf(device("uri://old", "IMG_0006.jpg")),
+            listOf(drive("link-6", "IMG_0006.jpg", "hmac-sha-6")),
+            mapOf("uri://old" to "sha-6"),
+            rows = listOf(unpairedRow("uri://old")),
+        )
+
+        assertEquals(1, h.run())
+
+        assertEquals(LinkBasis.NAME, h.written.single().linkBasis)
+        assertEquals(listOf("uri://old" to "link-6"), h.proven)
+    }
+
+    @Test
+    fun `files already paired are skipped without reading them`() {
+        val names = listOf("proven", "kept", "claimed", "vault", "queued")
+        val files = names.map { device("uri://$it", "IMG_$it.jpg") }
+        val photos = names.map { drive("link-$it", "IMG_$it.jpg", "hmac-sha-$it") }
+        val rows = listOf(
+            nameRow("uri://proven", "link-proven", LinkBasis.PROVEN),
+            SyncStateLite("uri://kept", "link-other", "", SyncStatus.LOCAL_ONLY, false),
+            SyncStateLite("uri://claimed", null, "", SyncStatus.UPLOADING, false),
+            SyncStateLite("uri://vault", null, "", SyncStatus.HIDDEN, false),
+            unpairedRow("uri://queued", queued = true),
+        )
+        val h = Harness(files, photos, names.associate { "uri://$it" to "sha-$it" }, rows = rows)
+
+        assertEquals(0, h.run())
+
+        assertTrue(h.hashed.isEmpty())
+        assertTrue(h.written.isEmpty())
+        assertTrue(h.proven.isEmpty())
+    }
+
+    @Test
+    fun `unpaired rows past the file budget wait for the next run`() {
+        val files = (0 until PAIR_REPAIR_MAX_FILES + 3).map { i ->
+            device("uri://$i", "IMG_$i.jpg", size = 1_000L, dateTaken = 1_000_000L + i)
+        }
+        val photos = files.map { drive("link-${it.uri}", it.displayName, "hmac-sha-${it.uri}") }
+        val h = Harness(files, photos, files.associate { it.uri to "sha-${it.uri}" }, rows = files.map { unpairedRow(it.uri) })
+
+        assertEquals(PAIR_REPAIR_MAX_FILES, h.run())
+        assertEquals(PAIR_REPAIR_MAX_FILES, h.hashed.size)
+
+        assertEquals("the rest is linked by the next run", 3, h.run())
+        assertEquals("a linked file is not read again", PAIR_REPAIR_MAX_FILES + 3, h.hashed.size)
+        assertEquals(setOf("uri://0", "uri://1", "uri://2"), h.hashed.drop(PAIR_REPAIR_MAX_FILES).toSet())
     }
 }

@@ -25,6 +25,8 @@ package eu.akoos.photos.worker
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
 import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
@@ -35,6 +37,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import eu.akoos.photos.BuildConfig
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.DisplayPairRepair
 import eu.akoos.photos.domain.usecase.PAIR_REPAIR_TIME_LIMIT_MS
 import kotlinx.coroutines.withTimeoutOrNull
@@ -42,11 +47,12 @@ import java.util.concurrent.TimeUnit
 
 /**
  * One run of [DisplayPairRepair], queued the moment an account's Drive listing completes for the first
- * time, as after a reinstall or a new sign-in. The device files a reinstall left unlinked then pair with
- * their Drive photos within the minute the listing lands instead of at the next [CachePruneWorker] pass,
- * up to 30 minutes later. The periodic pass carries on with whatever this run's budget left. A run that
- * could not start, because the first device scan of the install is not written yet, is tried again a
- * few times over the next minutes.
+ * time, as after a reinstall or a new sign-in, and at the first complete listing in each new app version,
+ * as after an update (see [eu.akoos.photos.data.repository.drive.pairRepairDue]). The device files left
+ * unlinked then pair with their Drive photos within the minute the listing lands instead of at the next
+ * [CachePruneWorker] pass, up to 30 minutes later. A run that started records the version it ran in. The
+ * periodic pass carries on with whatever this run's budget left. A run that could not start, because the
+ * first device scan of the install is not written yet, is tried again a few times over the next minutes.
  */
 @HiltWorker
 class DisplayPairRepairWorker @AssistedInject constructor(
@@ -63,6 +69,10 @@ class DisplayPairRepairWorker @AssistedInject constructor(
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "display pair repair failed: ${e.message}")
+        }
+        if (started) {
+            runCatching { applicationContext.settingsDataStore.edit { it.markPairRepairRan(BuildConfig.VERSION_CODE) } }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
         }
         return resultFor(started, runAttemptCount)
     }
@@ -91,4 +101,9 @@ class DisplayPairRepairWorker @AssistedInject constructor(
             workManager.enqueueUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.KEEP, request())
         }
     }
+}
+
+/** Records that the repair started in app version [versionCode], so later listings in it queue no run. */
+internal fun MutablePreferences.markPairRepairRan(versionCode: Int) {
+    this[SettingsKeys.PAIR_REPAIR_RAN_FOR_VERSION] = versionCode
 }

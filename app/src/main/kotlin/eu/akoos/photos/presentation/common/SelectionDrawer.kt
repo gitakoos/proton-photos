@@ -1099,11 +1099,13 @@ fun SelectedPhotosStrip(
     cacheThumbnails: Boolean = true,
 ) {
     val colors = AppColors.current
+    // A pick held over a photo that turned from Drive-only into paired shares its key with the new pick.
+    val picked = remember(items) { items.distinctBy { it.stableId } }
     val stripState = rememberLazyListState()
-    var lastCount by remember { mutableIntStateOf(items.size) }
-    LaunchedEffect(items.size) {
-        if (items.size > lastCount) stripState.animateScrollToItem(items.lastIndex)
-        lastCount = items.size
+    var lastCount by remember { mutableIntStateOf(picked.size) }
+    LaunchedEffect(picked.size) {
+        if (picked.size > lastCount) stripState.animateScrollToItem(picked.lastIndex)
+        lastCount = picked.size
     }
     Column(modifier = modifier.fillMaxWidth()) {
         AnimatedVisibility(
@@ -1112,7 +1114,7 @@ fun SelectedPhotosStrip(
             exit = shrinkVertically(tween(200)) + fadeOut(tween(150)),
         ) {
             Crossfade(
-                targetState = items.isEmpty(),
+                targetState = picked.isEmpty(),
                 animationSpec = tween(160),
                 label = "selectedPhotosStrip",
                 modifier = Modifier.fillMaxWidth().height(PICKED_STRIP_HEIGHT),
@@ -1129,7 +1131,7 @@ fun SelectedPhotosStrip(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        items(items, key = { it.stableId }) { item ->
+                        items(picked, key = { it.stableId }) { item ->
                             val inputs = remember(item) { photoCellInputsFor(item) }
                             SelectionThumb(
                                 cacheThumbnails = cacheThumbnails,

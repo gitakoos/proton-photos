@@ -117,6 +117,19 @@ class ReconcileReplacedPhotoTest {
     }
 
     @Test
+    fun `a Drive photo saved over its unpaired device twin leaves one page for it`() {
+        val uri = "content://media/external/images/media/9"
+        val deviceTwin = GalleryItem.LocalOnly(local(uri))
+        val driveCopy = GalleryItem.CloudOnly(cloud("x"))
+        val neighbour = GalleryItem.CloudOnly(cloud("other"))
+        val paired = GalleryItem.Synced(cloud("x"), local(uri))
+
+        val after = reconcileViewerItems(listOf(deviceTwin, driveCopy, neighbour), listOf(paired, neighbour))
+
+        assertEquals(listOf(paired, neighbour), after)
+    }
+
+    @Test
     fun `nothing replaced keeps the same list instance`() {
         val item = GalleryItem.CloudOnly(cloud("x"))
         val snapshot = listOf(item)

@@ -446,6 +446,64 @@ class SyncStateDaoTest {
         assertEquals("a backup stamp already there stays", 7L, dao.getByUri("uri://4")!!.backedUpAtMs)
     }
 
+    // ── linkIfUnpaired: the display pair repair only links a row that pairs nothing ──
+
+    private fun proofLink(uri: String, linkId: String) = eu.akoos.photos.domain.entity.SyncState(
+        localUri = uri, cloudFileId = linkId, localHash = "", cloudHash = "drive-hash", status = SyncStatus.SYNCED,
+        lastSyncAttemptMs = 50L, lastSyncSuccessMs = 50L, backedUpAtMs = 50L, sizeBytes = 2048L, linkBasis = 0,
+    )
+
+    private val user1 = me.proton.core.domain.entity.UserId("user1")
+
+    @Test
+    fun `an unpaired idle row an update left behind is linked`() = runTest {
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+        dao.upsert(entity("uri://old").copy(localHash = "stale", queueSource = "CANCELLED"))
+
+        assertTrue(repo.linkIfUnpaired(proofLink("uri://old", "link-1"), user1))
+
+        val row = dao.getByUri("uri://old")!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals("link-1", row.cloudFileId)
+        assertEquals("drive-hash", row.cloudHash)
+        assertEquals(50L, row.backedUpAtMs)
+        assertEquals(0, row.linkBasis)
+        assertEquals(2048L, row.sizeBytes)
+        assertEquals("the queue marks stay", "CANCELLED", row.queueSource)
+    }
+
+    @Test
+    fun `a file with no row is linked with a new one`() = runTest {
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+
+        assertTrue(repo.linkIfUnpaired(proofLink("uri://new", "link-1"), user1))
+
+        assertEquals("link-1", dao.getByUri("uri://new")!!.cloudFileId)
+    }
+
+    @Test
+    fun `a paired, claimed, queued, vaulted or foreign row is never linked`() = runTest {
+        val repo = eu.akoos.photos.data.repository.SyncStateRepositoryImpl(dao)
+        dao.upsert(entity("uri://proven", status = SyncStatus.SYNCED, cloudFileId = "c-proven"))
+        dao.upsert(entity("uri://kept", status = SyncStatus.LOCAL_ONLY, cloudFileId = "c-kept"))
+        dao.upsert(entity("uri://claimed", status = SyncStatus.UPLOADING))
+        dao.upsert(entity("uri://queued"))
+        dao.markQueued("uri://queued", "AUTO_FOLDER", 1L)
+        dao.upsert(entity("uri://vault", status = SyncStatus.HIDDEN))
+        dao.upsert(entity("uri://foreign", userId = "user2"))
+
+        for (uri in listOf("uri://proven", "uri://kept", "uri://claimed", "uri://queued", "uri://vault", "uri://foreign")) {
+            assertEquals(uri, false, repo.linkIfUnpaired(proofLink(uri, "link-new"), user1))
+        }
+
+        assertEquals("c-proven", dao.getByUri("uri://proven")!!.cloudFileId)
+        assertEquals("c-kept", dao.getByUri("uri://kept")!!.cloudFileId)
+        assertEquals(SyncStatus.UPLOADING, dao.getByUri("uri://claimed")!!.status)
+        assertEquals(SyncStatus.LOCAL_ONLY, dao.getByUri("uri://queued")!!.status)
+        assertEquals(SyncStatus.HIDDEN, dao.getByUri("uri://vault")!!.status)
+        assertNull(dao.getByUri("uri://foreign")!!.cloudFileId)
+    }
+
     @Test
     fun `the synced pairs of a cloud id list every device file that holds it`() = runTest {
         dao.upsert(entity("uri://a", status = SyncStatus.SYNCED, cloudFileId = "c1"))

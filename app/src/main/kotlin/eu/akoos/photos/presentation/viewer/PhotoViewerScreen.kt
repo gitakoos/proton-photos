@@ -254,7 +254,7 @@ internal fun reconcileViewerItems(
     live: List<GalleryItem>,
     replaced: Map<String, String> = emptyMap(),
 ): List<GalleryItem> {
-    if (live.isEmpty() || snapshot.isEmpty()) return snapshot
+    if (live.isEmpty() || snapshot.isEmpty()) return distinctViewerItems(snapshot)
     val byStableId = live.associateBy { it.stableId }
     val byLocalUri = live.asSequence()
         .mapNotNull { item -> item.localUriOrNull()?.let { it to item } }
@@ -275,7 +275,8 @@ internal fun reconcileViewerItems(
             ?: copyOf(item.stableId)
             ?: item
 
-    val resolved = snapshot.map(::resolve)
+    // A device file and a Drive photo the snapshot held apart both resolve to the pair once linked.
+    val resolved = distinctViewerItems(snapshot.map(::resolve))
     // Keep a STABLE list identity across no-op re-emits. The timeline feed backing the
     // gallery viewer re-emits many times a second during the cold listing / thumbnail
     // decrypt burst, yet those ticks rarely change any item the viewer is currently showing.
@@ -284,6 +285,49 @@ internal fun reconcileViewerItems(
     // the original instance when reconciliation changed nothing.
     return if (resolved == snapshot) snapshot else resolved
 }
+
+/** [items] with one page per photo (pager and filmstrip throw on a repeated key), the paired item kept over its halves. */
+internal fun distinctViewerItems(items: List<GalleryItem>): List<GalleryItem> {
+    if (items.size < 2) return items
+    val claimed = HashSet<String>(items.size * 2)
+    if (items.all { claimed.claimPhoto(it) }) return items
+    claimed.clear()
+    val kept = BooleanArray(items.size)
+    for (pairedFirst in booleanArrayOf(true, false)) {
+        items.forEachIndexed { i, item ->
+            if ((item is GalleryItem.Synced) == pairedFirst) kept[i] = claimed.claimPhoto(item)
+        }
+    }
+    return items.filterIndexed { i, _ -> kept[i] }
+}
+
+/** Claims [item]'s stable id and device file, false when either is taken; a device-only id is its file. */
+private fun HashSet<String>.claimPhoto(item: GalleryItem): Boolean {
+    val uri = item.localUriOrNull()
+    if (item.stableId in this || (uri != null && uri in this)) return false
+    add(item.stableId)
+    if (uri != null) add(uri)
+    return true
+}
+
+/** The page of [after] showing the photo on [page] of [before], or [page] when it is gone (its slot goes to the next one). */
+internal fun pageOfSamePhoto(before: List<GalleryItem>, page: Int, after: List<GalleryItem>): Int {
+    if (after.isEmpty()) return 0
+    val fallback = page.coerceIn(0, after.lastIndex)
+    val current = before.getOrNull(page) ?: return fallback
+    if (after.getOrNull(page)?.let { isSamePhoto(it, current.stableId) } == true) return page
+    val byId = after.indexOfFirst { it.stableId == current.stableId }
+    if (byId >= 0) return byId
+    val uri = current.localUriOrNull() ?: return fallback
+    return after.indexOfFirst { it.localUriOrNull() == uri }.takeIf { it >= 0 } ?: fallback
+}
+
+/** Whether [item] is the photo [key] names, by stable id or by the device file a device-only key is. */
+private fun isSamePhoto(item: GalleryItem, key: String): Boolean =
+    item.stableId == key || item.localUriOrNull() == key
+
+/** The list the pager last laid out, held without being read by composition. */
+private class LastPagedItems(var items: List<GalleryItem>)
 
 /**
  * [items] with every vaulted photo the vault has [moves]d pointed at the file's new path, under the
@@ -472,15 +516,20 @@ fun PhotoViewerScreen(
     // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
     // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
     // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
-    var matched by remember(items) { mutableStateOf(items) }
-    var insertedCopies by remember(items) { mutableIntStateOf(0) }
-    LaunchedEffect(items, liveItems, cloudReplacements, savedEditCopies) {
-        val (list, inserted) = withContext(Dispatchers.Default) {
-            val withCopies = insertSavedCopies(items, savedEditCopies, liveItems)
-            reconcileViewerItems(withCopies, liveItems, cloudReplacements) to (withCopies.size - items.size)
+    val openingItems = remember(items) { distinctViewerItems(items) }
+    val openingIndex = remember(items, initialIndex) { pageOfSamePhoto(items, initialIndex, openingItems) }
+    var matched by remember(openingItems) { mutableStateOf(openingItems) }
+    var insertedCopies by remember(openingItems) { mutableIntStateOf(0) }
+    // Twins reconciliation folded into one page, which shifts the photos after them like a removal.
+    var foldedTwins by remember(openingItems) { mutableIntStateOf(0) }
+    LaunchedEffect(openingItems, liveItems, cloudReplacements, savedEditCopies) {
+        val (list, withCopiesSize) = withContext(Dispatchers.Default) {
+            val withCopies = insertSavedCopies(openingItems, savedEditCopies, liveItems)
+            reconcileViewerItems(withCopies, liveItems, cloudReplacements) to withCopies.size
         }
         matched = list
-        insertedCopies = inserted
+        insertedCopies = withCopiesSize - openingItems.size
+        foldedTwins = withCopiesSize - list.size
     }
     // The vault's moves are applied on the spot, not with the matching: a moved file's page effects start in the
     // composition that sees the move, and they must find the new path in the list they read.
@@ -508,7 +557,7 @@ fun PhotoViewerScreen(
     // its own. So on their own neither changes anything those effects can see, and the viewer would
     // keep the state it built for a file that is no longer there: the photo would be drawn, but never
     // loaded at full resolution, never zoomable, and a video would never start.
-    val pageGeneration = removedIds.size + vaultMoves.size + insertedCopies
+    val pageGeneration = removedIds.size + vaultMoves.size + insertedCopies + foldedTwins
     // An undone delete or album removal puts its photo back where it was. Drop exactly the ids that
     // undo restored, so a photo deleted earlier in this session, whose own undo window has since
     // been taken over, stays gone.
@@ -525,8 +574,18 @@ fun PhotoViewerScreen(
         }
     }
 
-    val clampedInitial = initialIndex.coerceIn(0, items.lastIndex)
+    val clampedInitial = openingIndex.coerceIn(0, items.lastIndex)
     val pagerState = rememberPagerState(initialPage = clampedInitial) { items.size }
+    // Keeps the user on their photo in the same frame a list change moves it to another page.
+    val lastPaged = remember { LastPagedItems(items) }
+    SideEffect {
+        val before = lastPaged.items
+        if (before === items) return@SideEffect
+        lastPaged.items = items
+        if (pagerState.isScrollInProgress) return@SideEffect
+        val page = pageOfSamePhoto(before, pagerState.currentPage, items)
+        if (page != pagerState.currentPage) pagerState.requestScrollToPage(page)
+    }
     // Identity of the page the user is settled on, remembered so that — should a future live
     // change ever alter the list length — we can re-find the photo by key and keep the user on it.
     // With the in-place swap the index is stable, so the scroll-back below is normally inert; the
@@ -546,8 +605,8 @@ fun PhotoViewerScreen(
         if (pagerState.isScrollInProgress) return@LaunchedEffect
         val key = anchorKey ?: return@LaunchedEffect
         // The usual case, the photo still on its page, needs no walk of the whole list.
-        if (items.getOrNull(pagerState.currentPage)?.stableId == key) return@LaunchedEffect
-        val newIndex = items.indexOfFirst { it.stableId == key }
+        if (items.getOrNull(pagerState.currentPage)?.let { isSamePhoto(it, key) } == true) return@LaunchedEffect
+        val newIndex = items.indexOfFirst { isSamePhoto(it, key) }
         if (newIndex >= 0 && newIndex != pagerState.currentPage) {
             pagerState.scrollToPage(newIndex)
         }
@@ -833,8 +892,8 @@ fun PhotoViewerScreen(
     // Per-page full-res image cache: keeps the last loaded image so non-settled pages
     // don't visually drop quality to thumbnail while the exit animation is still playing.
     val pageImageCache = remember { mutableMapOf<Int, Any>() }
-    // An inserted copy moves every later photo one page on, so the cached images no longer match their pages.
-    LaunchedEffect(insertedCopies) { pageImageCache.clear() }
+    // An inserted copy or a folded twin moves later photos to another page, so the cached images no longer match their pages.
+    LaunchedEffect(insertedCopies, foldedTwins) { pageImageCache.clear() }
     // When the editor pops back after a save, drop everything we cached for the touched
     // page — otherwise the bitmap held in this map is the stale one rendered by Coil
     // BEFORE the cache wipe and the user sees the pre-edit version until they page away.

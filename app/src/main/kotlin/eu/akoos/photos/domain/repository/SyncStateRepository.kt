@@ -47,6 +47,16 @@ interface SyncStateRepository {
         return true
     }
 
+    /** Writes [state], a SYNCED link, when no row holds its uri yet, or over an unpaired LOCAL_ONLY row that is
+     *  not queued for upload; true when it was written. A row with a cloud id, an upload's claim and a queued
+     *  row are never touched. */
+    suspend fun linkIfUnpaired(state: SyncState, userId: UserId): Boolean {
+        val row = getByUri(state.localUri)
+        if (row != null && (row.status != SyncStatus.LOCAL_ONLY || !row.cloudFileId.isNullOrEmpty() || row.queued)) return false
+        upsert(state, userId)
+        return true
+    }
+
     /** Device uris of [userId]'s SYNCED rows, by the cloud id of [cloudFileIds] each is paired to. */
     suspend fun syncedUrisByCloudId(userId: UserId, cloudFileIds: Collection<String>): Map<String, List<String>> =
         observeAll(userId).first()

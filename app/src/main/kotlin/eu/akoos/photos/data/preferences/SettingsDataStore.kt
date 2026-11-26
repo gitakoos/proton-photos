@@ -579,6 +579,10 @@ object SettingsKeys {
      *  upload path can tell "the whole cloud library has been listed at least once" from "a refresh
      *  is mid-walk". The bulk upload waits on this after a reinstall so photos already on Drive —
      *  whose listing rows haven't been re-fetched yet — aren't re-uploaded as duplicates. */
+    /** The app version code the one-off display pair repair last started in, see
+     *  [eu.akoos.photos.worker.DisplayPairRepairWorker]. */
+    val PAIR_REPAIR_RAN_FOR_VERSION = intPreferencesKey("display_pair_repair_ran_for_version")
+
     fun photoListingEverCompleteKey(userId: String, volumeId: String) =
         booleanPreferencesKey("photo_listing_ever_complete_${userId}_$volumeId")
 

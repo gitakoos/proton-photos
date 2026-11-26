@@ -31,7 +31,9 @@ import androidx.work.ListenableWorker
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
+import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.repository.drive.markListingEverComplete
+import eu.akoos.photos.data.repository.drive.pairRepairDue
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
@@ -40,7 +42,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The pair repair queued once, the moment an account's Drive listing completes for the first time. */
+/** The pair repair queued once when an account's Drive listing completes for the first time, and once per app version. */
 class DisplayPairRepairWorkerTest {
 
     private val key = booleanPreferencesKey("photo_listing_ever_complete_user_vol")
@@ -93,5 +95,36 @@ class DisplayPairRepairWorkerTest {
     fun `a run that started is done whatever it linked`() {
         assertEquals(ListenableWorker.Result.success(), DisplayPairRepairWorker.resultFor(true, 0))
         assertEquals(ListenableWorker.Result.success(), DisplayPairRepairWorker.resultFor(true, 3))
+    }
+
+    @Test
+    fun `the first complete listing queues the repair`() {
+        val prefs = mutablePreferencesOf()
+        prefs.markPairRepairRan(300)
+
+        assertTrue(prefs.pairRepairDue(firstComplete = true, versionCode = 300))
+    }
+
+    @Test
+    fun `a listing in a version the repair has not started in queues it, as after an update`() {
+        val prefs = mutablePreferencesOf()
+        prefs.markPairRepairRan(279)
+
+        assertTrue(prefs.pairRepairDue(firstComplete = false, versionCode = 285))
+    }
+
+    @Test
+    fun `an install that never ran the repair queues it at its next complete listing`() {
+        assertTrue(mutablePreferencesOf().pairRepairDue(firstComplete = false, versionCode = 285))
+    }
+
+    @Test
+    fun `once a run started in this version later listings queue nothing`() {
+        val prefs = mutablePreferencesOf()
+
+        prefs.markPairRepairRan(285)
+
+        assertEquals(285, prefs[SettingsKeys.PAIR_REPAIR_RAN_FOR_VERSION])
+        assertFalse(prefs.pairRepairDue(firstComplete = false, versionCode = 285))
     }
 }

@@ -557,6 +557,28 @@ interface SyncStateDao {
             "AND status = 'SYNCED' AND linkBasis = 1"
     )
     suspend fun unlinkNameLink(userId: String, localUri: String, cloudFileId: String): Int
+
+    /** Links a device file's row to Drive photo [cloudFileId] only while the row is an unpaired LOCAL_ONLY row
+     *  not queued for upload: no cloud id, so no link of any basis, and never an UPLOADING claim. The queue
+     *  marks stay. See [eu.akoos.photos.domain.repository.SyncStateRepository.linkIfUnpaired]. */
+    @Query(
+        "UPDATE sync_state SET cloudFileId = :cloudFileId, localHash = :localHash, cloudHash = :cloudHash, " +
+            "status = 'SYNCED', lastSyncAttemptMs = :now, lastSyncSuccessMs = :now, backedUpAtMs = :backedUpAtMs, " +
+            "sizeBytes = :sizeBytes, linkBasis = :linkBasis, originalHash = NULL " +
+            "WHERE userId = :userId AND localUri = :localUri AND status = 'LOCAL_ONLY' " +
+            "AND (cloudFileId IS NULL OR cloudFileId = '') AND queued = 0"
+    )
+    suspend fun linkUnpaired(
+        userId: String,
+        localUri: String,
+        cloudFileId: String,
+        localHash: String,
+        cloudHash: String?,
+        backedUpAtMs: Long?,
+        sizeBytes: Long,
+        linkBasis: Int,
+        now: Long,
+    ): Int
 }
 
 /** A row of a [SyncStateDao.pageByStatus] page and its rowid, the key the next page starts after. */
